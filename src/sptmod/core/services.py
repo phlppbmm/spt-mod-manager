@@ -23,6 +23,7 @@ from sptmod.core.errors import (
     DirtyTreeError,
     GitError,
     ModNotFoundError,
+    ProfileResidueError,
 )
 from sptmod.core.forge.catalog import Catalog, CatalogEntry, SyncResult
 from sptmod.core.forge.client import ForgeClient
@@ -34,6 +35,7 @@ from sptmod.core.game_dir import (
     validate_game_dir,
 )
 from sptmod.core.models import (
+    ACTIVE_STATES,
     MOD_STATES,
     MOD_TYPES,
     TRAILER_MOD,
@@ -45,6 +47,7 @@ from sptmod.core.models import (
     ModFile,
     ModInfo,
     ModState,
+    ProfileResidue,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -56,12 +59,17 @@ from sptmod.core.modmeta import (
     mod_info_from_commit,
     read_package_json,
 )
+from sptmod.core.profile import (
+    CheckResult,
+    check_all,
+    collect_mod_ids,
+    find_residues,
+    profile_paths,
+)
 from sptmod.core.repo import Repo
 
 SPT_VERSION_TRAILER: Final = "Spt-Version"
 UNKNOWN_SPT_VERSION: Final = "unknown"
-
-ACTIVE_STATES: Final[tuple[ModState, ...]] = ("installed", "updated", "enabled")
 
 type InstallStep = Literal[
     "check",
@@ -129,11 +137,16 @@ class InstallResult:
 
 @dataclass(frozen=True)
 class RemoveResult:
-    """Outcome of :func:`remove_mod`."""
+    """Outcome of :func:`remove_mod`.
+
+    ``warnings`` holds db file read/parse errors from ID collection, each
+    naming the file and the error.
+    """
 
     name: str
     commit: str
     files: list[Path] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def init_game_dir(path: Path) -> InitResult:
@@ -340,7 +353,7 @@ def remove_mod(path: Path, name: str, force: bool = False) -> RemoveResult:
 
     active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
     mod = _resolve(active, name)
-    _check_profile_residue(repo, mod, force)
+    warnings = _check_profile_residue(repo, mod, force)
 
     try:
         commit_hash = repo.revert(
@@ -354,7 +367,20 @@ def remove_mod(path: Path, name: str, force: bool = False) -> RemoveResult:
         name=mod.name,
         commit=commit_hash,
         files=[mod_file.path for mod_file in repo.show_files(commit_hash)],
+        warnings=warnings,
     )
+
+
+def check_profiles(path: Path) -> CheckResult:
+    """Report which active mods the player profiles at ``path`` still reference.
+
+    Reads only: neither the repository nor the profiles are changed, so
+    residues are reported and never block.
+
+    Raises:
+        GitError: git failed.
+    """
+    return check_all(Repo(path), path)
 
 
 def history(path: Path, name: str | None = None) -> list[CommitInfo]:
@@ -526,13 +552,33 @@ def _blocked_message(name: str, blocking: Sequence[Conflict]) -> str:
 
 
 def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
-    """Seam for the profile residue check of ``core.profile``.
+    """Search every profile for content IDs of ``mod``.
 
-    Returns the warnings to hand to the caller and raises
+    Returns the collection warnings of ``collect_mod_ids`` and raises
     ``ProfileResidueError`` when a profile still references content of ``mod``
     unless ``force`` is set.
     """
-    return []
+    ids = collect_mod_ids(repo, mod.commit)
+    residues = [
+        residue
+        for profile in profile_paths(repo.path)
+        for residue in find_residues(profile, ids)
+    ]
+    if residues and not force:
+        raise ProfileResidueError(_residue_message(mod.name, residues))
+    return ids.warnings
+
+
+def _residue_message(name: str, residues: Sequence[ProfileResidue]) -> str:
+    details = "; ".join(
+        f"profile {residue.profile}: {residue.count} {residue.category} "
+        f"({', '.join(residue.ids)})"
+        for residue in residues
+    )
+    return (
+        f"cannot remove {name}, player profiles still reference it: {details} "
+        f"(use --force to remove anyway)"
+    )
 
 
 def _report(

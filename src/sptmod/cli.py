@@ -1,6 +1,6 @@
 """Command-line interface for sptmod."""
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Final
@@ -32,6 +32,7 @@ from sptmod.core.models import (
     CommitInfo,
     ModFile,
     ModInfo,
+    ProfileResidue,
 )
 from sptmod.core.modmeta import InvalidMetadataError
 
@@ -129,6 +130,22 @@ def _browse_filter(
     if available:
         return "available"
     return "all"
+
+
+def _residue_table(residues: Mapping[str, Sequence[ProfileResidue]]) -> Table:
+    table = Table()
+    for column in ("Mod", "Profile", "Category", "Count", "IDs"):
+        table.add_column(column)
+    for mod, found in residues.items():
+        for residue in found:
+            table.add_row(
+                mod,
+                residue.profile,
+                residue.category,
+                str(residue.count),
+                ", ".join(residue.ids),
+            )
+    return table
 
 
 def _history_table(commits: Sequence[CommitInfo]) -> Table:
@@ -247,11 +264,26 @@ def remove(
     """Remove an installed mod."""
     with _handled():
         result = services.remove_mod(Path.cwd(), name, force=force)
+        for warning in result.warnings:
+            console.print(f"warning: {warning}", markup=False)
         console.print(
             f"removed {result.name} ({len(result.files)} files) "
             f"as {result.commit[:_SHORT_HASH_LENGTH]}",
             markup=False,
         )
+
+
+@app.command()
+def check() -> None:
+    """Report mod content the player profiles still reference."""
+    with _handled():
+        result = services.check_profiles(Path.cwd())
+        for warning in result.warnings:
+            console.print(f"warning: {warning}", markup=False)
+        if not result.residues:
+            console.print("no profile residue found", markup=False)
+            return
+        console.print(_residue_table(result.residues))
 
 
 @app.command()

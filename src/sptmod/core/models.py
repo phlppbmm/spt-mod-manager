@@ -17,6 +17,7 @@ MOD_STATES: Final[tuple[ModState, ...]] = (
     "enabled",
     "removed",
 )
+ACTIVE_STATES: Final[tuple[ModState, ...]] = ("installed", "updated", "enabled")
 
 TRAILER_MOD: Final = "Mod"
 TRAILER_MOD_VERSION: Final = "Mod-Version"
@@ -174,3 +175,28 @@ class InstallPlan:
 
     entries: list[PlanEntry]
     spt_version: str
+
+
+type ResidueCategory = Literal["item", "trader", "quest", "string"]
+
+
+@dataclass(frozen=True)
+class ProfileResidue:
+    """IDs of one mod that one player profile still references.
+
+    Attributes:
+        profile: The profile the IDs were found in, named by the stem of its
+            profile file.
+        category: Where in the profile the IDs were found: ``'item'`` for
+            inventory item templates, ``'trader'`` for trader entries,
+            ``'quest'`` for quest entries, ``'string'`` for the conservative
+            fallback that only found the ID somewhere in the profile text.
+        ids: The distinct IDs found, sorted.
+        count: How often the IDs occur in that category, so an item template
+            used by five inventory items counts five.
+    """
+
+    profile: str
+    category: ResidueCategory
+    ids: list[str]
+    count: int

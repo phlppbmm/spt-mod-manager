@@ -11,7 +11,7 @@ import httpx
 
 from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
 
-DEFAULT_BASE_URL: Final = "https://forge.sp-tarkov.com/api/v0"
+DEFAULT_BASE_URL: Final = "https://sp-mod.com/api/v0"
 BASE_URL_ENV_VAR: Final = "SPTMOD_FORGE_URL"
 MAX_PER_PAGE: Final = 50
 DEFAULT_RATE_PER_MINUTE: Final = 200

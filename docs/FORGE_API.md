@@ -1,10 +1,11 @@
 # Forge API v0 — verified reference
 
+The canonical base URL is `https://sp-mod.com/api/v0`; the Forge moved there and
+`forge.sp-tarkov.com` is its defunct predecessor.
+
 Verified 2026-09-02 from the API's generating source (github.com/sp-tarkov/forge, main branch:
-routes/api_v0.php, app/Http/Controllers/Api/V0/*, config/api.php). The live docs at
-forge.sp-tarkov.com/docs were down (HTTP 525) at verification time. This file supersedes the
-provisional endpoint/field names in docs/HANDOFF.md §3a. Re-verify against the live docs when
-they come back.
+routes/api_v0.php, app/Http/Controllers/Api/V0/*, config/api.php) and against the live API.
+This file supersedes the provisional endpoint/field names in docs/HANDOFF.md §3a.
 
 ## Key deviations from HANDOFF §3a
 
@@ -16,7 +17,7 @@ they come back.
   still throttle client-side conservatively and back off on 429.
 - Mod detail is singular: `/mod/{modId}`, not `/mods/{modId}`.
 
-## Endpoints (all GET, base `https://forge.sp-tarkov.com/api/v0`)
+## Endpoints (all GET, base `https://sp-mod.com/api/v0`)
 
 - `/ping`
 - `/mods` — catalog listing (paginated, searchable)
@@ -41,7 +42,7 @@ they come back.
 - `query` — Meilisearch full-text (name/slug/description)
 - `fields` — sparse fieldset (comma-separated)
 - `include` — `versions` (latest 6 only: `{id,version,spt_version_constraint,downloads,published_at}`),
-  `license` (`{id,name,short_name}`), `category` (`{id,name,slug,color_class}`), `source_code_links`.
+  `license` (`{id,name,link}`), `category` (`{id,hub_id,title,slug,description}`), `source_code_links`.
   `owner` and `additional_authors` are always included.
 - Filters: `filter[id]`, `filter[hub_id]`, `filter[guid]`, `filter[name]`, `filter[slug]`,
   `filter[teaser]`, `filter[featured]`, `filter[contains_ads]`, `filter[contains_ai_content]`,
@@ -56,6 +57,7 @@ they come back.
 ## Mod object
 
 `id`, `hub_id`, `guid`, `name`, `slug`, `teaser`, `thumbnail`, `downloads`, `favourites_count`,
+`endorsements_count`, `category_id`, `cheat_notice`,
 `owner {id,name,profile_photo_url,cover_photo_url}`, `additional_authors` (same shape),
 `source_code_links [{url,label}]`, `detail_url`, `fika_compatibility` (bool),
 `featured`, `contains_ads`, `contains_ai_content`, `shows_profile_binding_notice`,
@@ -71,7 +73,8 @@ Params: `fields`, `sort`, `page`, `per_page`, `include` = `dependencies` | `viru
 filters: `id`, `hub_id`, `version` (SemVer constraint), `description`, `published_between`,
 `created_between`, `updated_between`, `spt_version`, `fika_compatibility`.
 Embedded dependency: `{id, mod_id, mod_guid, mod_name, version_constraint, is_optional}`
-(immediate deps only).
+(immediate deps only); with `include=dependencies` each entry embeds the full mod object.
+sptmod does not use it and resolves through `/mods/dependencies` instead.
 
 ## GET /mods/updates and /mods/dependencies
 

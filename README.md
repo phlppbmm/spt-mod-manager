@@ -105,7 +105,7 @@ Metadata comes from `package.json` where the mod has one; otherwise pass `--name
 
 ## Forge
 
-The [Forge](https://forge.sp-tarkov.com) API v0 is **public and read-only** — no account, no
+The [Forge](https://sp-mod.com) API v0 is **public and read-only** — no account, no
 login, no token. sptmod only reads from it: catalog listings, versions, dependencies and mod
 downloads. Requests are throttled client-side and back off on HTTP 429.
 

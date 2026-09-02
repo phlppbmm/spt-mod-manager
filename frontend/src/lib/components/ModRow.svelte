@@ -152,6 +152,9 @@
 	</div>
 	<div>{entry.installed_version ?? '—'}</div>
 	<div>{entry.latest_version?.version ?? '—'}</div>
+	<div>{entry.latest_version?.spt_version_constraint || '—'}</div>
+	<div>{entry.mod.downloads.toLocaleString()}</div>
+	<div>{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
 	<div>{installed?.mod_type ?? '—'}</div>
 	<div><span class="chip {modState}">{STATE_LABELS[modState]}</span></div>
 	<div class="actions">

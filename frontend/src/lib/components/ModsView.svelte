@@ -123,6 +123,9 @@
 			<div>Mod</div>
 			<div>Installed</div>
 			<div>Latest</div>
+			<div>SPT</div>
+			<div>Downloads</div>
+			<div>Updated</div>
 			<div>Type</div>
 			<div>State</div>
 			<div></div>
@@ -190,7 +193,7 @@
 	}
 
 	.list {
-		--mods-grid: minmax(12rem, 3fr) 6rem 6rem 6rem 9rem minmax(12rem, auto);
+		--mods-grid: minmax(12rem, 3fr) 6rem 6rem 6rem 6rem 7rem 6rem 9rem minmax(12rem, auto);
 		border: 1px solid #2c3138;
 		border-radius: 4px;
 	}

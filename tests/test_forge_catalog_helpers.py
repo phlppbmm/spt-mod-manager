@@ -24,7 +24,11 @@ from sptmod.core.forge.catalog import (
         # the whole 3.x range up to (but excluding) 4.0.0.
         ("^3.8.0", "3.9.0", True),
         ("^3.8.0", "4.0.0", False),
-        ("", "3.8.5", True),
+        # An absent constraint means "unknown", not "works with everything":
+        # old hub imports ship versions without one and must not pass a
+        # compatibility filter.
+        ("", "3.8.5", False),
+        ("   ", "3.8.5", False),
     ],
 )
 def test_is_compatible_matches_semver_constraint(

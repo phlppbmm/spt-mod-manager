@@ -166,7 +166,11 @@ def is_compatible(spt_version_constraint: str, spt_version: str) -> bool:
 
     Constraints the semver matcher does not understand count as incompatible
     rather than raising, so a single odd catalog entry cannot break a search.
+    An empty constraint means the compatibility is unknown and counts as
+    incompatible too (old hub imports ship versions without one).
     """
+    if not spt_version_constraint.strip():
+        return False
     try:
         return version_matches(spt_version, spt_version_constraint)
     except UnsupportedRangeError:

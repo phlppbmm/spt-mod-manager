@@ -16,6 +16,7 @@ from sptmod.core.errors import (
     ConflictError,
     DependencyError,
     DirtyTreeError,
+    ForgeUnavailableError,
     GameRunningError,
     GitError,
     ModNotFoundError,
@@ -23,6 +24,7 @@ from sptmod.core.errors import (
     ProfileResidueError,
     SptmodError,
 )
+from sptmod.core.forge.catalog import CatalogEntry
 from sptmod.core.models import (
     TRAILER_MOD,
     TRAILER_MOD_STATE,
@@ -53,6 +55,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     ModNotFoundError: 11,
     AmbiguousModError: 12,
     InvalidMetadataError: 13,
+    ForgeUnavailableError: 14,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"
@@ -97,6 +100,35 @@ def _file_table(files: Sequence[ModFile]) -> Table:
     for mod_file in files:
         table.add_row(mod_file.path.as_posix(), mod_file.change)
     return table
+
+
+def _catalog_table(entries: Sequence[CatalogEntry]) -> Table:
+    table = Table()
+    for column in ("Name", "Author", "Installed", "Latest", "State"):
+        table.add_column(column)
+    for entry in entries:
+        table.add_row(
+            entry.mod.name,
+            entry.mod.author,
+            entry.installed_version or "",
+            "" if entry.latest_version is None else entry.latest_version.version,
+            entry.state,
+        )
+    return table
+
+
+def _browse_filter(
+    installed: bool, available: bool, all_: bool
+) -> services.BrowseFilter:
+    if sum((installed, available, all_)) > 1:
+        raise typer.BadParameter(
+            "--installed, --available and --all are mutually exclusive"
+        )
+    if installed:
+        return "installed"
+    if available:
+        return "available"
+    return "all"
 
 
 def _history_table(commits: Sequence[CommitInfo]) -> Table:
@@ -231,6 +263,70 @@ def history(
     """Show the commit history of the game directory."""
     with _handled():
         console.print(_history_table(services.history(Path.cwd(), name)))
+
+
+@app.command()
+def sync(
+    full: Annotated[
+        bool, typer.Option("--full", help="Fetch the whole catalog, not just changes.")
+    ] = False,
+) -> None:
+    """Refresh the local Forge catalog cache."""
+    with _handled():
+        result = services.sync_catalog(Path.cwd(), full=full, progress=_report_progress)
+        console.print(
+            f"{'full' if result.full else 'delta'} sync over {result.pages} pages: "
+            f"{result.new_mods} new and {result.updated_mods} updated mods, "
+            f"{result.new_versions} new and "
+            f"{result.updated_versions} updated versions",
+            markup=False,
+        )
+
+
+@app.command()
+def search(
+    query: Annotated[str, typer.Argument(help="Substring of the mod name or author.")],
+    compatible: Annotated[
+        bool,
+        typer.Option("--compatible", help="Only mods compatible with the SPT version."),
+    ] = False,
+) -> None:
+    """Search the cached Forge catalog."""
+    with _handled():
+        console.print(
+            _catalog_table(
+                services.search_catalog(Path.cwd(), query, compatible_only=compatible)
+            )
+        )
+
+
+@app.command()
+def browse(
+    installed: Annotated[
+        bool, typer.Option("--installed", help="Only mods installed in this game dir.")
+    ] = False,
+    available: Annotated[
+        bool, typer.Option("--available", help="Only mods that are not installed.")
+    ] = False,
+    all_: Annotated[
+        bool, typer.Option("--all", help="Every cached mod (default).")
+    ] = False,
+    compatible: Annotated[
+        bool,
+        typer.Option("--compatible", help="Only mods compatible with the SPT version."),
+    ] = False,
+) -> None:
+    """List the cached Forge catalog with the installed state."""
+    with _handled():
+        console.print(
+            _catalog_table(
+                services.browse_catalog(
+                    Path.cwd(),
+                    _browse_filter(installed, available, all_),
+                    compatible_only=compatible,
+                )
+            )
+        )
 
 
 def main() -> None:

@@ -24,6 +24,8 @@ from sptmod.core.errors import (
     GitError,
     ModNotFoundError,
 )
+from sptmod.core.forge.catalog import Catalog, CatalogEntry, SyncResult
+from sptmod.core.forge.client import ForgeClient
 from sptmod.core.game_dir import (
     MODS_DIR,
     PLUGINS_DIR,
@@ -90,6 +92,8 @@ _STEP_PERCENT: Final[dict[InstallStep, int]] = {
     "copy": 75,
     "commit": 90,
 }
+
+type BrowseFilter = Literal["all", "installed", "available"]
 
 _DEPENDENCY_KINDS: Final[tuple[ConflictKind, ...]] = (
     "missing-dependency",
@@ -370,6 +374,120 @@ def history(path: Path, name: str | None = None) -> list[CommitInfo]:
         return repo.log()
     mod = _resolve(_current_mods(repo), name)
     return repo.log(trailer_filter={TRAILER_MOD: mod.name})
+
+
+def sync_catalog(
+    path: Path,
+    full: bool = False,
+    progress: Progress | None = None,
+    *,
+    db_path: Path | None = None,
+    client: ForgeClient | None = None,
+) -> SyncResult:
+    """Refresh the local Forge catalog cache of the game directory at ``path``.
+
+    Delegates to :meth:`Catalog.sync`; ``full`` forces a full pagination
+    instead of a delta sync and ``progress`` is reported once per fetched page.
+    The game directory is only used to locate the installation the cache serves;
+    the cache itself never lives inside it.
+
+    Args:
+        path: The tracked game directory.
+        full: Force a full sync.
+        progress: Optional per-page progress callback.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+        client: Forge API client; a default one is built when omitted.
+
+    Returns:
+        The counts of inserted and updated mods and versions.
+
+    Raises:
+        ForgeUnavailableError: The API is unreachable; the cache keeps its
+            previous contents.
+        ForgeApiError: The API answered with an error envelope.
+    """
+    if client is not None:
+        with Catalog(db_path) as catalog:
+            return catalog.sync(client, full=full, progress=progress)
+    with ForgeClient() as owned, Catalog(db_path) as catalog:
+        return catalog.sync(owned, full=full, progress=progress)
+
+
+def search_catalog(
+    path: Path,
+    query: str,
+    compatible_only: bool = False,
+    *,
+    db_path: Path | None = None,
+) -> list[CatalogEntry]:
+    """Search the cached catalog and join the result with the installed mods.
+
+    Matches ``query`` case-insensitively against mod name and author and
+    classifies every hit against the active mods of the repository at ``path``,
+    so callers see whether a mod is installed, outdated or merely available.
+
+    Args:
+        path: The tracked game directory.
+        query: Substring matched against name and author; empty matches all.
+        compatible_only: Keep only mods with a version compatible with the SPT
+            version of the game directory.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+
+    Returns:
+        The matching entries ordered by mod name.
+
+    Raises:
+        GitError: git failed.
+    """
+    installed = list_mods(path)
+    compatible_with = _compatible_with(path, compatible_only)
+    with Catalog(db_path) as catalog:
+        matched = {
+            mod.id for mod in catalog.search(query, compatible_with=compatible_with)
+        }
+        entries = catalog.classify(installed, compatible_with=compatible_with)
+    return [entry for entry in entries if entry.mod.id in matched]
+
+
+def browse_catalog(
+    path: Path,
+    filter: BrowseFilter = "all",
+    compatible_only: bool = False,
+    *,
+    db_path: Path | None = None,
+) -> list[CatalogEntry]:
+    """Return the cached catalog joined with the installed mods of ``path``.
+
+    ``filter`` selects one of the three frontend lists: ``installed`` keeps the
+    entries matching an active mod, including the ones with an update
+    available, ``available`` keeps the rest, and ``all`` keeps everything.
+
+    Args:
+        path: The tracked game directory.
+        filter: Which of the three lists to return.
+        compatible_only: Keep only mods with a version compatible with the SPT
+            version of the game directory.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+
+    Returns:
+        The selected entries ordered by mod name.
+
+    Raises:
+        GitError: git failed.
+    """
+    installed = list_mods(path)
+    with Catalog(db_path) as catalog:
+        entries = catalog.classify(
+            installed, compatible_with=_compatible_with(path, compatible_only)
+        )
+    if filter == "all":
+        return entries
+    wanted = filter == "installed"
+    return [entry for entry in entries if (entry.state != "available") == wanted]
+
+
+def _compatible_with(path: Path, compatible_only: bool) -> str | None:
+    return spt_version(path) if compatible_only else None
 
 
 def _check_install_conflicts(

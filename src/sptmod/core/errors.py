@@ -106,3 +106,21 @@ class AmbiguousModError(SptmodError):
         )
         self.name = name
         self.candidates: list[str] = list(candidates)
+
+
+class UnresolvableDependencyError(DependencyError):
+    """A dependency of a requested mod cannot be resolved for an install plan.
+
+    Raised when Forge reports a version conflict for the dependency, publishes
+    no compatible version for the queried SPT release, or when the dependency
+    graph contains a cycle.
+
+    Attributes:
+        dependency: The name of the dependency the failure is about.
+        reason: The human-readable cause, already part of the message.
+    """
+
+    def __init__(self, dependency: str, reason: str) -> None:
+        super().__init__(f"dependency {dependency!r} cannot be resolved: {reason}")
+        self.dependency = dependency
+        self.reason = reason

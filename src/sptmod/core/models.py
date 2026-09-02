@@ -132,3 +132,45 @@ class Progress(Protocol):
     """
 
     def __call__(self, step: str, percent: int, message: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class PlanEntry:
+    """One mod to install as part of an :class:`InstallPlan`.
+
+    Attributes:
+        mod_id: The numeric Forge mod ID.
+        name: The mod name as known to Forge.
+        guid: The mod GUID, or None if Forge knows none.
+        version: The version string to install.
+        version_id: The numeric Forge version ID.
+        link: The download URL, or None if Forge published none.
+        content_length: The archive size in bytes, or None if Forge does not
+            report one.
+        is_dependency: True when the entry was pulled in as a dependency
+            rather than requested by the user.
+    """
+
+    mod_id: int
+    name: str
+    guid: str | None
+    version: str
+    version_id: int
+    link: str | None
+    content_length: int | None
+    is_dependency: bool
+
+
+@dataclass(frozen=True)
+class InstallPlan:
+    """What an install would download and install, in install order.
+
+    Attributes:
+        entries: The mods to install, dependencies before the mods that need
+            them and the requested mod last. Already satisfied dependencies
+            are absent.
+        spt_version: The SPT version the plan was resolved for.
+    """
+
+    entries: list[PlanEntry]
+    spt_version: str

@@ -1122,10 +1122,11 @@ class ForgeClient:
 
         Returns:
             A dict keyed by each queried 'identifier:version' pair (verbatim),
-            with lists of DependencyNode trees as values. Unresolvable pairs
-            are omitted. The root of each tree is the queried mod, and children
-            are its dependencies, recursively. The conflict field is True when
-            no single version satisfies all constraints across queried mods.
+            whose value is the list of that mod's direct dependencies (empty
+            when it has none); each node carries its own dependencies
+            recursively. Unresolvable pairs are omitted entirely, which is
+            distinct from an empty list. The conflict field is True when no
+            single version satisfies all constraints across queried mods.
 
         Raises:
             ForgeUnavailableError: On network error or 5xx responses.

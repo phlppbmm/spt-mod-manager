@@ -7,6 +7,7 @@ export type ModInfo = Schemas['ModInfo'];
 export type ModFile = Schemas['ModFile'];
 export type CommitInfo = Schemas['CommitInfo'];
 export type Conflict = Schemas['Conflict'];
+export type ProfileResidue = Schemas['ProfileResidue'];
 export type CheckResult = Schemas['CheckResult'];
 export type InitResult = Schemas['InitResult'];
 export type RemoveResult = Schemas['RemoveResult'];
@@ -23,6 +24,15 @@ export type CatalogVersion = Schemas['CatalogVersion'];
 export type SyncCatalogResponse = Schemas['SyncCatalogResponse'];
 export type BrowseFilter = Schemas['BrowseFilter'];
 export type ExportFormat = Schemas['ExportFormat'];
+
+export type InstallModResponse = Schemas['InstallModResponse'];
+export type UpdateModResponse = Schemas['UpdateModResponse'];
+export type InstallPlan = Schemas['InstallPlan'];
+export type PlanEntry = Schemas['PlanEntry'];
+export type UpdatesReport = Schemas['UpdatesReport'];
+export type UpdateCandidate = Schemas['UpdateCandidate'];
+export type BlockedUpdate = Schemas['BlockedUpdate'];
+export type ClearCacheResult = Schemas['ClearCacheResult'];
 
 export function initGameDir(path: string, adopt: boolean | string[] = false): Promise<InitResult> {
 	return call<InitResult>('init_game_dir', {
@@ -126,14 +136,68 @@ export function exportMods(
 	} satisfies Schemas['ExportModsRequest']);
 }
 
+export function planModInstall(
+	path: string,
+	modIdOrName: number | string,
+	version: string | null = null
+): Promise<InstallPlan> {
+	return call<InstallPlan>('plan_mod_install', {
+		path,
+		mod_id_or_name: modIdOrName,
+		version
+	} satisfies Schemas['PlanModInstallRequest']);
+}
+
+export function installMod(
+	path: string,
+	modIdOrName: number | string,
+	version: string | null = null,
+	force: boolean = false,
+	operationId: string | null = null
+): Promise<InstallModResponse> {
+	return call<InstallModResponse>('install_mod', {
+		path,
+		mod_id_or_name: modIdOrName,
+		version,
+		force,
+		operation_id: operationId
+	} satisfies Schemas['InstallModRequest']);
+}
+
+export function updateMod(
+	path: string,
+	name: string,
+	force: boolean = false,
+	operationId: string | null = null
+): Promise<UpdateModResponse> {
+	return call<UpdateModResponse>('update_mod', {
+		path,
+		name,
+		force,
+		operation_id: operationId
+	} satisfies Schemas['UpdateModRequest']);
+}
+
+export function checkUpdates(path: string, names: string[] = []): Promise<UpdatesReport> {
+	return call<UpdatesReport>('check_updates', {
+		path,
+		names
+	} satisfies Schemas['CheckUpdatesRequest']);
+}
+
+export function clearCatalogCache(): Promise<ClearCacheResult> {
+	return call<ClearCacheResult>('clear_catalog_cache', {} satisfies Schemas['ClearCatalogCacheRequest']);
+}
+
 export function importList(
 	path: string,
-	listFile: string,
+	source: { listFile?: string; content?: string },
 	apply: boolean = false
 ): Promise<ImportDiff> {
 	return call<ImportDiff>('import_list', {
 		path,
-		list_file: listFile,
+		list_file: source.listFile ?? null,
+		content: source.content ?? null,
 		apply
 	} satisfies Schemas['ImportListRequest']);
 }

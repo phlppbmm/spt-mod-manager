@@ -6,7 +6,11 @@
 
 import type { components } from './types';
 
-export const API_BASE_URL = 'http://127.0.0.1:8787';
+/**
+ * Empty: requests go to the origin the app is served from. The dev and preview
+ * servers proxy `/api` to the sptmod server (see `vite.config.ts`).
+ */
+export const API_BASE_URL = '';
 
 export type ProgressEvent = components['schemas']['ProgressEvent'];
 export type ErrorDetails = components['schemas']['ErrorDetails'];
@@ -35,7 +39,7 @@ export async function call<T>(name: string, payload?: unknown): Promise<T> {
 	} catch (cause) {
 		const reason = cause instanceof Error ? cause.message : String(cause);
 		throw new ApiError(
-			`Cannot reach the sptmod server at ${API_BASE_URL}: ${reason}`,
+			`Cannot reach the sptmod server: ${reason}`,
 			'unreachable'
 		);
 	}

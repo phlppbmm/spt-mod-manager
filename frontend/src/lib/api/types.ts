@@ -313,6 +313,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/clear_catalog_cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Catalog Cache */
+        post: operations["clear_catalog_cache_api_clear_catalog_cache_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan_mod_install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Mod Install */
+        post: operations["plan_mod_install_api_plan_mod_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/install_mod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install Mod */
+        post: operations["install_mod_api_install_mod_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/check_updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Updates */
+        post: operations["check_updates_api_check_updates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/update_mod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Mod */
+        post: operations["update_mod_api_update_mod_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;
@@ -368,6 +453,28 @@ export interface components {
              * @default []
              */
             files: string[];
+        };
+        /**
+         * BlockedUpdate
+         * @description An installed mod whose newer version other installed mods block.
+         */
+        BlockedUpdate: {
+            /** Name */
+            name: string;
+            /** Installed Version */
+            installed_version: string;
+            /** New Version */
+            new_version: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Blocking Mods
+             * @default []
+             */
+            blocking_mods: string[];
         };
         /**
          * BrowseCatalogRequest
@@ -488,6 +595,42 @@ export interface components {
             warnings: string[];
         };
         /**
+         * CheckUpdatesRequest
+         * @description Parameters of ``check_updates``.
+         */
+        CheckUpdatesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Names */
+            names?: string[] | null;
+            /** Db Path */
+            db_path?: string | null;
+        };
+        /**
+         * ClearCacheResult
+         * @description Outcome of ``clear_catalog_cache``.
+         */
+        ClearCacheResult: {
+            /**
+             * Db Path
+             * Format: path
+             */
+            db_path: string;
+            /** Removed */
+            removed: boolean;
+        };
+        /**
+         * ClearCatalogCacheRequest
+         * @description Parameters of ``clear_catalog_cache``.
+         */
+        ClearCatalogCacheRequest: {
+            /** Db Path */
+            db_path?: string | null;
+        };
+        /**
          * CommitInfo
          * @description A commit with its parsed trailers.
          */
@@ -567,10 +710,20 @@ export interface components {
              */
             conflicts: components["schemas"]["Conflict"][];
             /**
+             * Residues
+             * @default []
+             */
+            residues: components["schemas"]["ProfileResidue"][];
+            /**
              * Conflicting Paths
              * @default []
              */
             conflicting_paths: string[];
+            /**
+             * Installed
+             * @default []
+             */
+            installed: string[];
             /**
              * Name
              * @default
@@ -693,6 +846,11 @@ export interface components {
              * @default []
              */
             extra: components["schemas"]["ImportEntry"][];
+            /**
+             * Installed
+             * @default []
+             */
+            installed: components["schemas"]["InstallModResult"][];
         };
         /**
          * ImportEntry
@@ -720,6 +878,8 @@ export interface components {
         /**
          * ImportListRequest
          * @description Parameters of ``import_list``.
+         *
+         *     Exactly one of ``list_file`` and ``content`` carries the mod list.
          */
         ImportListRequest: {
             /**
@@ -727,16 +887,37 @@ export interface components {
              * Format: path
              */
             path: string;
-            /**
-             * List File
-             * Format: path
-             */
-            list_file: string;
+            /** List File */
+            list_file?: string | null;
             /**
              * Apply
              * @default false
              */
             apply: boolean;
+            /** Content */
+            content?: string | null;
+            /** Db Path */
+            db_path?: string | null;
+        };
+        /**
+         * IncompatibleMod
+         * @description An installed mod without any version for the queried SPT release.
+         */
+        IncompatibleMod: {
+            /** Name */
+            name: string;
+            /** Installed Version */
+            installed_version: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Latest Compatible Version
+             * @default
+             */
+            latest_compatible_version: string;
         };
         /**
          * InitGameDirRequest
@@ -806,6 +987,13 @@ export interface components {
              * @default false
              */
             force: boolean;
+            /**
+             * Forge Match
+             * @default false
+             */
+            forge_match: boolean;
+            /** Db Path */
+            db_path?: string | null;
             /** Operation Id */
             operation_id?: string | null;
         };
@@ -827,6 +1015,89 @@ export interface components {
             warnings: components["schemas"]["Conflict"][];
             /** Operation Id */
             operation_id: string;
+        };
+        /**
+         * InstallModRequest
+         * @description Parameters of ``install_mod``.
+         *
+         *     ``operation_id`` names the progress stream of this install; a generated one
+         *     is used and echoed back when the caller sends none.
+         */
+        InstallModRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Mod Id Or Name */
+            mod_id_or_name: number | string;
+            /** Version */
+            version?: string | null;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /** Db Path */
+            db_path?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * InstallModResponse
+         * @description Outcome of ``install_mod`` plus its progress operation ID.
+         */
+        InstallModResponse: {
+            plan: components["schemas"]["InstallPlan"];
+            /**
+             * Installed
+             * @default []
+             */
+            installed: components["schemas"]["InstallResult"][];
+            /** Operation Id */
+            operation_id: string;
+        };
+        /**
+         * InstallModResult
+         * @description Outcome of ``install_mod``.
+         */
+        InstallModResult: {
+            plan: components["schemas"]["InstallPlan"];
+            /**
+             * Installed
+             * @default []
+             */
+            installed: components["schemas"]["InstallResult"][];
+        };
+        /**
+         * InstallPlan
+         * @description What an install would download and install, in install order.
+         */
+        InstallPlan: {
+            /** Spt Version */
+            spt_version: string;
+            /**
+             * Entries
+             * @default []
+             */
+            entries: components["schemas"]["PlanEntry"][];
+        };
+        /**
+         * InstallResult
+         * @description Outcome of ``install_from_archive``.
+         */
+        InstallResult: {
+            mod: components["schemas"]["ModInfo"];
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: components["schemas"]["Conflict"][];
         };
         /**
          * ListModsRequest
@@ -920,6 +1191,45 @@ export interface components {
         ModState: "installed" | "updated" | "disabled" | "enabled" | "removed";
         /** @enum {string} */
         ModType: "server" | "client" | "hybrid";
+        /**
+         * PlanEntry
+         * @description One mod to install as part of an ``InstallPlan``.
+         */
+        PlanEntry: {
+            /** Mod Id */
+            mod_id: number;
+            /** Name */
+            name: string;
+            /** Guid */
+            guid: string | null;
+            /** Version */
+            version: string;
+            /** Version Id */
+            version_id: number;
+            /** Link */
+            link: string | null;
+            /** Content Length */
+            content_length: number | null;
+            /** Is Dependency */
+            is_dependency: boolean;
+        };
+        /**
+         * PlanModInstallRequest
+         * @description Parameters of ``plan_mod_install``.
+         */
+        PlanModInstallRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Mod Id Or Name */
+            mod_id_or_name: number | string;
+            /** Version */
+            version?: string | null;
+            /** Db Path */
+            db_path?: string | null;
+        };
         /**
          * ProfileResidue
          * @description IDs of one mod that one player profile still references.
@@ -1143,6 +1453,127 @@ export interface components {
              * @default
              */
             notice: string;
+        };
+        /**
+         * UpdateCandidate
+         * @description An installed mod Forge recommends a newer version for.
+         */
+        UpdateCandidate: {
+            /** Name */
+            name: string;
+            /** Installed Version */
+            installed_version: string;
+            /** New Version */
+            new_version: string;
+            /** Version Id */
+            version_id: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /** Content Length */
+            content_length?: number | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * UpdateModRequest
+         * @description Parameters of ``update_mod``.
+         *
+         *     ``operation_id`` names the progress stream of this update; a generated one
+         *     is used and echoed back when the caller sends none.
+         */
+        UpdateModRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /** Db Path */
+            db_path?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * UpdateModResponse
+         * @description Outcome of ``update_mod`` plus its progress operation ID.
+         */
+        UpdateModResponse: {
+            /** Name */
+            name: string;
+            /** Previous Version */
+            previous_version: string;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+            /**
+             * Commit
+             * @default
+             */
+            commit: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["ModFile"][];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: components["schemas"]["Conflict"][];
+            /**
+             * Notice
+             * @default
+             */
+            notice: string;
+            /** Operation Id */
+            operation_id: string;
+        };
+        /**
+         * UpdatesReport
+         * @description What ``check_updates`` found for the installed mods.
+         */
+        UpdatesReport: {
+            /** Spt Version */
+            spt_version: string;
+            /**
+             * Available
+             * @default []
+             */
+            available: components["schemas"]["UpdateCandidate"][];
+            /**
+             * Blocked
+             * @default []
+             */
+            blocked: components["schemas"]["BlockedUpdate"][];
+            /**
+             * Up To Date
+             * @default []
+             */
+            up_to_date: string[];
+            /**
+             * Incompatible
+             * @default []
+             */
+            incompatible: components["schemas"]["IncompatibleMod"][];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: string[];
         };
     };
     responses: never;
@@ -1730,6 +2161,171 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportDiff"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    clear_catalog_cache_api_clear_catalog_cache_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearCatalogCacheRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearCacheResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_mod_install_api_plan_mod_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanModInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallPlan"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    install_mod_api_install_mod_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallModRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallModResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_updates_api_check_updates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckUpdatesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesReport"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_mod_api_update_mod_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateModResponse"];
                 };
             };
             /** @description Default Response */

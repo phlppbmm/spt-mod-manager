@@ -11,6 +11,8 @@ function jsonResponse(status: number, body: unknown): Response {
 const sampleDetails: ErrorDetails = {
 	conflicts: [],
 	conflicting_paths: [],
+	residues: [],
+	installed: [],
 	name: 'some-mod',
 	candidates: [],
 	dependency: '',
@@ -120,7 +122,7 @@ describe('call', () => {
 		await expect(promise).rejects.toBeInstanceOf(ApiError);
 		await expect(promise).rejects.toMatchObject({
 			code: 'unreachable',
-			message: `Cannot reach the sptmod server at ${API_BASE_URL}: network down`
+			message: `Cannot reach the sptmod server: network down`
 		});
 	});
 
@@ -129,7 +131,7 @@ describe('call', () => {
 
 		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
 			code: 'unreachable',
-			message: `Cannot reach the sptmod server at ${API_BASE_URL}: offline`
+			message: `Cannot reach the sptmod server: offline`
 		});
 	});
 });

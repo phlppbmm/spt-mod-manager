@@ -701,6 +701,196 @@
         }
       }
     },
+    "/api/clear_catalog_cache": {
+      "post": {
+        "summary": "Clear Catalog Cache",
+        "operationId": "clear_catalog_cache_api_clear_catalog_cache_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearCatalogCacheRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearCacheResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan_mod_install": {
+      "post": {
+        "summary": "Plan Mod Install",
+        "operationId": "plan_mod_install_api_plan_mod_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanModInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallPlan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/install_mod": {
+      "post": {
+        "summary": "Install Mod",
+        "operationId": "install_mod_api_install_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallModResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/check_updates": {
+      "post": {
+        "summary": "Check Updates",
+        "operationId": "check_updates_api_check_updates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckUpdatesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/update_mod": {
+      "post": {
+        "summary": "Update Mod",
+        "operationId": "update_mod_api_update_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateModResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "summary": "Stream the progress of long-running operations",
@@ -787,6 +977,43 @@
         ],
         "title": "AdoptResult",
         "description": "Outcome of ``adopt_mod``."
+      },
+      "BlockedUpdate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "installed_version": {
+            "type": "string",
+            "title": "Installed Version"
+          },
+          "new_version": {
+            "type": "string",
+            "title": "New Version"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "blocking_mods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocking Mods",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "installed_version",
+          "new_version"
+        ],
+        "title": "BlockedUpdate",
+        "description": "An installed mod whose newer version other installed mods block."
       },
       "BrowseCatalogRequest": {
         "properties": {
@@ -1114,6 +1341,86 @@
         "title": "CheckResult",
         "description": "What a residue check over all mods and all profiles found."
       },
+      "CheckUpdatesRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "CheckUpdatesRequest",
+        "description": "Parameters of ``check_updates``."
+      },
+      "ClearCacheResult": {
+        "properties": {
+          "db_path": {
+            "type": "string",
+            "format": "path",
+            "title": "Db Path"
+          },
+          "removed": {
+            "type": "boolean",
+            "title": "Removed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "db_path",
+          "removed"
+        ],
+        "title": "ClearCacheResult",
+        "description": "Outcome of ``clear_catalog_cache``."
+      },
+      "ClearCatalogCacheRequest": {
+        "properties": {
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "title": "ClearCatalogCacheRequest",
+        "description": "Parameters of ``clear_catalog_cache``."
+      },
       "CommitInfo": {
         "properties": {
           "hash": {
@@ -1269,6 +1576,14 @@
             },
             "type": "array",
             "title": "Conflicting Paths",
+            "default": []
+          },
+          "installed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Installed",
             "default": []
           },
           "name": {
@@ -1460,6 +1775,14 @@
             "type": "array",
             "title": "Extra",
             "default": []
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/InstallModResult"
+            },
+            "type": "array",
+            "title": "Installed",
+            "default": []
           }
         },
         "type": "object",
@@ -1503,23 +1826,81 @@
             "title": "Path"
           },
           "list_file": {
-            "type": "string",
-            "format": "path",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "List File"
           },
           "apply": {
             "type": "boolean",
             "title": "Apply",
             "default": false
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
           }
         },
         "type": "object",
         "required": [
-          "path",
-          "list_file"
+          "path"
         ],
         "title": "ImportListRequest",
-        "description": "Parameters of ``import_list``."
+        "description": "Parameters of ``import_list``.\n\nExactly one of ``list_file`` and ``content`` carries the mod list."
+      },
+      "IncompatibleMod": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "installed_version": {
+            "type": "string",
+            "title": "Installed Version"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "latest_compatible_version": {
+            "type": "string",
+            "title": "Latest Compatible Version",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "installed_version"
+        ],
+        "title": "IncompatibleMod",
+        "description": "An installed mod without any version for the queried SPT release."
       },
       "InitGameDirRequest": {
         "properties": {
@@ -1633,6 +2014,23 @@
             "title": "Force",
             "default": false
           },
+          "forge_match": {
+            "type": "boolean",
+            "title": "Forge Match",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
           "operation_id": {
             "anyOf": [
               {
@@ -1687,6 +2085,171 @@
         ],
         "title": "InstallFromArchiveResponse",
         "description": "Outcome of ``install_from_archive`` plus its progress operation ID."
+      },
+      "InstallModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "mod_id_or_name": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Mod Id Or Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "mod_id_or_name"
+        ],
+        "title": "InstallModRequest",
+        "description": "Parameters of ``install_mod``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none."
+      },
+      "InstallModResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/InstallPlan"
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/InstallResult"
+            },
+            "type": "array",
+            "title": "Installed",
+            "default": []
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan",
+          "operation_id"
+        ],
+        "title": "InstallModResponse",
+        "description": "Outcome of ``install_mod`` plus its progress operation ID."
+      },
+      "InstallModResult": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/InstallPlan"
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/InstallResult"
+            },
+            "type": "array",
+            "title": "Installed",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "title": "InstallModResult",
+        "description": "Outcome of ``install_mod``."
+      },
+      "InstallPlan": {
+        "properties": {
+          "spt_version": {
+            "type": "string",
+            "title": "Spt Version"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/PlanEntry"
+            },
+            "type": "array",
+            "title": "Entries",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "spt_version"
+        ],
+        "title": "InstallPlan",
+        "description": "What an install would download and install, in install order."
+      },
+      "InstallResult": {
+        "properties": {
+          "mod": {
+            "$ref": "#/components/schemas/ModInfo"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod"
+        ],
+        "title": "InstallResult",
+        "description": "Outcome of ``install_from_archive``."
       },
       "ListModsRequest": {
         "properties": {
@@ -1856,6 +2419,126 @@
           "client",
           "hybrid"
         ]
+      },
+      "PlanEntry": {
+        "properties": {
+          "mod_id": {
+            "type": "integer",
+            "title": "Mod Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "guid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guid"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "version_id": {
+            "type": "integer",
+            "title": "Version Id"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "content_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Length"
+          },
+          "is_dependency": {
+            "type": "boolean",
+            "title": "Is Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod_id",
+          "name",
+          "guid",
+          "version",
+          "version_id",
+          "link",
+          "content_length",
+          "is_dependency"
+        ],
+        "title": "PlanEntry",
+        "description": "One mod to install as part of an ``InstallPlan``."
+      },
+      "PlanModInstallRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "mod_id_or_name": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Mod Id Or Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "mod_id_or_name"
+        ],
+        "title": "PlanModInstallRequest",
+        "description": "Parameters of ``plan_mod_install``."
       },
       "ProfileResidue": {
         "properties": {
@@ -2267,6 +2950,213 @@
         ],
         "title": "ToggleResult",
         "description": "Outcome of ``disable_mod`` and ``enable_mod``."
+      },
+      "UpdateCandidate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "installed_version": {
+            "type": "string",
+            "title": "Installed Version"
+          },
+          "new_version": {
+            "type": "string",
+            "title": "New Version"
+          },
+          "version_id": {
+            "type": "integer",
+            "title": "Version Id"
+          },
+          "link": {
+            "type": "string",
+            "title": "Link",
+            "default": ""
+          },
+          "content_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Length"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "installed_version",
+          "new_version",
+          "version_id"
+        ],
+        "title": "UpdateCandidate",
+        "description": "An installed mod Forge recommends a newer version for."
+      },
+      "UpdateModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "UpdateModRequest",
+        "description": "Parameters of ``update_mod``.\n\n``operation_id`` names the progress stream of this update; a generated one\nis used and echoed back when the caller sends none."
+      },
+      "UpdateModResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "previous_version": {
+            "type": "string",
+            "title": "Previous Version"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": ""
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit",
+            "default": ""
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ModFile"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          },
+          "notice": {
+            "type": "string",
+            "title": "Notice",
+            "default": ""
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "previous_version",
+          "operation_id"
+        ],
+        "title": "UpdateModResponse",
+        "description": "Outcome of ``update_mod`` plus its progress operation ID."
+      },
+      "UpdatesReport": {
+        "properties": {
+          "spt_version": {
+            "type": "string",
+            "title": "Spt Version"
+          },
+          "available": {
+            "items": {
+              "$ref": "#/components/schemas/UpdateCandidate"
+            },
+            "type": "array",
+            "title": "Available",
+            "default": []
+          },
+          "blocked": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedUpdate"
+            },
+            "type": "array",
+            "title": "Blocked",
+            "default": []
+          },
+          "up_to_date": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Up To Date",
+            "default": []
+          },
+          "incompatible": {
+            "items": {
+              "$ref": "#/components/schemas/IncompatibleMod"
+            },
+            "type": "array",
+            "title": "Incompatible",
+            "default": []
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "spt_version"
+        ],
+        "title": "UpdatesReport",
+        "description": "What ``check_updates`` found for the installed mods."
       }
     }
   }

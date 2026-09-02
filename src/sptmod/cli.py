@@ -24,8 +24,10 @@ from sptmod.core.errors import (
     ModNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
+    PartialInstallError,
     ProfileResidueError,
     SptmodError,
+    UnresolvableDependencyError,
 )
 from sptmod.core.forge.catalog import CatalogEntry
 from sptmod.core.models import (
@@ -33,6 +35,7 @@ from sptmod.core.models import (
     TRAILER_MOD_STATE,
     TRAILER_MOD_VERSION,
     CommitInfo,
+    InstallPlan,
     ModFile,
     ModInfo,
     ProfileResidue,
@@ -54,6 +57,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     GameRunningError: 5,
     ConflictError: 6,
     DependencyError: 7,
+    UnresolvableDependencyError: 7,
     ProfileResidueError: 8,
     ArchiveError: 9,
     GitError: 10,
@@ -66,6 +70,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"
 _SHORT_HASH_LENGTH: Final = 7
+_BYTES_PER_MB: Final = 1024 * 1024
 
 
 @contextmanager
@@ -236,6 +241,79 @@ def _print_status(report: services.StatusReport) -> None:
         console.print("nothing changed", markup=False)
 
 
+def _size(content_length: int | None) -> str:
+    if content_length is None:
+        return ""
+    return f"{content_length / _BYTES_PER_MB:.1f} MB"
+
+
+def _plan_table(plan: InstallPlan) -> Table:
+    table = Table(title=f"install plan for SPT {plan.spt_version}")
+    for column in ("Name", "Version", "Size", "Reason"):
+        table.add_column(column)
+    for entry in plan.entries:
+        table.add_row(
+            entry.name,
+            entry.version,
+            _size(entry.content_length),
+            "dependency" if entry.is_dependency else "requested",
+        )
+    return table
+
+
+def _updates_table(report: services.UpdatesReport) -> Table:
+    table = Table(title=f"updates for SPT {report.spt_version}")
+    for column in ("Mod", "Installed", "Available", "State", "Detail"):
+        table.add_column(column)
+    for candidate in report.available:
+        table.add_row(
+            candidate.name,
+            candidate.installed_version,
+            candidate.new_version,
+            "update",
+            candidate.reason,
+        )
+    for blocked in report.blocked:
+        table.add_row(
+            blocked.name,
+            blocked.installed_version,
+            blocked.new_version,
+            "blocked",
+            f"{blocked.reason} ({', '.join(blocked.blocking_mods)})",
+        )
+    for incompatible in report.incompatible:
+        table.add_row(
+            incompatible.name,
+            incompatible.installed_version,
+            incompatible.latest_compatible_version,
+            "incompatible",
+            incompatible.reason,
+        )
+    for name in report.up_to_date:
+        table.add_row(name, "", "", "up to date", "")
+    return table
+
+
+def _print_install(result: services.InstallResult) -> None:
+    console.print(
+        f"installed {result.mod.name} {result.mod.version}".rstrip()
+        + f" ({len(result.files)} files)"
+        + f" as {result.mod.commit[:_SHORT_HASH_LENGTH]}",
+        markup=False,
+    )
+
+
+def _print_update(result: services.UpdateResult) -> None:
+    if result.notice:
+        console.print(f"notice: {result.notice}", markup=False)
+        return
+    console.print(
+        f"updated {result.name} {result.previous_version} → {result.version} "
+        f"({len(result.files)} files) as {result.commit[:_SHORT_HASH_LENGTH]}",
+        markup=False,
+    )
+
+
 def _print_toggle(result: services.ToggleResult) -> None:
     if result.notice:
         console.print(f"notice: {result.notice}", markup=False)
@@ -306,37 +384,114 @@ def _adopt_pre_existing(game_dir: Path, mod_path: Path) -> None:
 
 @app.command()
 def install(
+    mod: Annotated[
+        str | None,
+        typer.Argument(metavar="MOD", help="Forge mod ID or name to install."),
+    ] = None,
     file: Annotated[
-        list[Path],
+        list[Path] | None,
         typer.Option("--file", "-f", help="Local mod archive; repeat for several."),
-    ],
+    ] = None,
     name: Annotated[
-        str | None, typer.Option("--name", help="Override the mod name.")
+        str | None, typer.Option("--name", help="Override the mod name (--file only).")
     ] = None,
     version: Annotated[
-        str | None, typer.Option("--version", help="Override the mod version.")
+        str | None,
+        typer.Option("--version", help="Version to install, or override for --file."),
     ] = None,
     force: Annotated[
         bool,
         typer.Option("--force", help="Install despite conflicts or missing deps."),
     ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Install without confirming the plan.")
+    ] = False,
 ) -> None:
-    """Install mods from local archives."""
+    """Install mods from Forge or from local archives.
+
+    With ``--file`` one or more local archives are installed directly. Without it
+    a Forge install plan is resolved, shown for confirmation (skipped with ``--yes``),
+    and then installed. Each mod becomes its own commit.
+    """
+    if file:
+        if mod is not None:
+            raise typer.BadParameter("pass either MOD or --file, not both")
+        with _handled():
+            for archive in file:
+                _print_install(
+                    services.install_from_archive(
+                        Path.cwd(),
+                        archive,
+                        name_override=name,
+                        version_override=version,
+                        force=force,
+                        progress=_report_progress,
+                        forge_match=True,
+                    )
+                )
+        return
+    if mod is None:
+        raise typer.BadParameter("pass a mod ID or name, or --file ARCHIVE")
     with _handled():
-        for archive in file:
-            result = services.install_from_archive(
-                Path.cwd(),
-                archive,
-                name_override=name,
-                version_override=version,
-                force=force,
-                progress=_report_progress,
+        plan = services.plan_mod_install(Path.cwd(), mod, version)
+        console.print(_plan_table(plan))
+        if not yes and not typer.confirm("install this plan?", default=True):
+            console.print("cancelled", markup=False)
+            return
+        try:
+            result = services.install_mod(
+                Path.cwd(), mod, version, force=force, progress=_report_progress
             )
-            console.print(
-                f"installed {result.mod.name} {result.mod.version}".rstrip()
-                + f" ({len(result.files)} files)"
-                + f" as {result.mod.commit[:_SHORT_HASH_LENGTH]}",
-                markup=False,
+        except PartialInstallError as error:
+            for installed in error.installed:
+                _print_install(installed)
+            raise
+        for installed in result.installed:
+            _print_install(installed)
+
+
+@app.command()
+def update(
+    names: Annotated[
+        list[str] | None,
+        typer.Argument(metavar="[NAME]...", help="Mods to update; default: all."),
+    ] = None,
+    check: Annotated[
+        bool, typer.Option("--check", help="Only report the available updates.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Update despite conflicts or missing deps.")
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Update without confirming.")
+    ] = False,
+) -> None:
+    """Update installed mods to the versions Forge recommends.
+
+    Queries Forge for updates, shows the available ones (skipped with ``--check``),
+    asks for confirmation (skipped with ``--yes``), and applies them one at a time.
+    """
+    with _handled():
+        report = services.check_updates(Path.cwd(), names)
+        console.print(_updates_table(report))
+        for skipped in report.skipped:
+            console.print(f"not identified on Forge: {skipped}", markup=False)
+        if check:
+            return
+        if not report.available:
+            console.print("nothing to update", markup=False)
+            return
+        if not yes and not typer.confirm("apply these updates?", default=True):
+            console.print("cancelled", markup=False)
+            return
+        for candidate in report.available:
+            _print_update(
+                services.update_mod(
+                    Path.cwd(),
+                    candidate.name,
+                    force=force,
+                    progress=_report_progress,
+                )
             )
 
 
@@ -479,7 +634,11 @@ def import_mods(
 ) -> None:
     """Compare an exported mod list with the installed mods."""
     with _handled():
-        console.print(_import_table(services.import_list(Path.cwd(), list_file, apply)))
+        diff = services.import_list(Path.cwd(), list_file, apply, _report_progress)
+        console.print(_import_table(diff))
+        for applied in diff.installed:
+            for installed in applied.installed:
+                _print_install(installed)
 
 
 @app.command()

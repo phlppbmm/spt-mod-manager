@@ -2,8 +2,12 @@
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sptmod.core.models import Conflict, ProfileResidue
+
+if TYPE_CHECKING:
+    from sptmod.core.services import InstallResult
 
 
 class SptmodError(Exception):
@@ -119,6 +123,26 @@ class AmbiguousModError(SptmodError):
 
 class NotImplementedYetError(SptmodError):
     """The requested operation is wired but has no implementation yet."""
+
+
+class PartialInstallError(SptmodError):
+    """An install plan failed after some of its mods were already installed.
+
+    The commits of the finished mods stay in place, so the game directory is
+    consistent and the install can be repeated once the cause is fixed.
+
+    Attributes:
+        installed: The mods installed before the failure, in install order.
+        cause: The error that stopped the run.
+    """
+
+    def __init__(
+        self, message: str, installed: Sequence["InstallResult"], cause: Exception
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.installed: list[InstallResult] = list(installed)
+        self.cause = cause
 
 
 class UnresolvableDependencyError(DependencyError):

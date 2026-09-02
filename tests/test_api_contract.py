@@ -3,8 +3,8 @@ OpenAPI schema generation, the dump script, and the FastAPI-native shape of
 validation errors.
 
 Covers §9 of the task: every public service function has a matching
-``POST /api/<name>`` route, the OpenAPI schema/dump include all 17 service
-routes plus ``/api/health`` and ``/api/events``, and a request that fails
+``POST /api/<name>`` route, the OpenAPI schema/dump include every service
+route plus ``/api/health`` and ``/api/events``, and a request that fails
 Pydantic validation gets FastAPI's own ``{"detail": [...]}`` body rather than
 the core error shape.
 """
@@ -53,11 +53,17 @@ def _service_function_names() -> list[str]:
 SERVICE_FUNCTION_NAMES = _service_function_names()
 
 
-def test_services_module_exposes_the_expected_17_public_functions() -> None:
-    # Pins the count the rest of this module's parametrization relies on, so
-    # a function silently renamed/removed from services.py is caught here
-    # instead of just shrinking the parametrize list unnoticed.
-    assert len(SERVICE_FUNCTION_NAMES) == 17
+def test_every_service_function_name_has_a_matching_post_route() -> None:
+    # Pins the route-per-function property on the full, current function list
+    # rather than a hardcoded count, so the module stays the single source of
+    # truth for what "every service function" means.
+    post_paths = {
+        route.path
+        for route in router.routes
+        if isinstance(route, APIRoute) and "POST" in route.methods
+    }
+    expected = {f"/api/{name}" for name in SERVICE_FUNCTION_NAMES}
+    assert expected <= post_paths
 
 
 @pytest.mark.parametrize("name", SERVICE_FUNCTION_NAMES)

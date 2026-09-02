@@ -27,12 +27,13 @@ from sptmod.core.errors import (
     ModNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
+    PartialInstallError,
     ProfileResidueError,
     SptmodError,
     UnresolvableDependencyError,
 )
 from sptmod.core.forge.catalog import CatalogEntry, NoCompatibleVersionError
-from sptmod.core.models import CommitInfo, ModFile, ModInfo
+from sptmod.core.models import CommitInfo, InstallPlan, ModFile, ModInfo
 from sptmod.core.modmeta import InvalidMetadataError, UnsupportedRangeError
 from sptmod.core.profile import CheckResult
 from sptmod.server import events, schemas
@@ -61,6 +62,7 @@ ERROR_MAPPING: dict[type[Exception], tuple[str, int]] = {
     DependencyError: ("DEPENDENCY", 409),
     UnresolvableDependencyError: ("UNRESOLVABLE_DEPENDENCY", 409),
     ProfileResidueError: ("PROFILE_RESIDUE", 409),
+    PartialInstallError: ("PARTIAL_INSTALL", 409),
     GitError: ("GIT_ERROR", 500),
     SptmodError: ("SPTMOD_ERROR", 500),
     NotImplementedYetError: ("NOT_IMPLEMENTED_YET", 501),
@@ -97,6 +99,8 @@ def install_from_archive(
         request.version_override,
         request.force,
         events.progress_callback(operation_id),
+        forge_match=request.forge_match,
+        db_path=request.db_path,
     )
     return schemas.InstallFromArchiveResponse(
         operation_id=operation_id,
@@ -215,7 +219,77 @@ def export_mods(request: schemas.ExportModsRequest) -> schemas.ExportModsRespons
 
 @router.post("/import_list", response_model=schemas.ImportDiff)
 def import_list(request: schemas.ImportListRequest) -> services.ImportDiff:
-    return services.import_list(request.path, request.list_file, request.apply)
+    return services.import_list(
+        request.path,
+        request.list_file,
+        request.apply,
+        content=request.content,
+        db_path=request.db_path,
+    )
+
+
+@router.post("/clear_catalog_cache", response_model=schemas.ClearCacheResult)
+def clear_catalog_cache(
+    request: schemas.ClearCatalogCacheRequest,
+) -> services.ClearCacheResult:
+    return services.clear_catalog_cache(request.db_path)
+
+
+@router.post("/plan_mod_install", response_model=schemas.InstallPlan)
+def plan_mod_install(request: schemas.PlanModInstallRequest) -> InstallPlan:
+    return services.plan_mod_install(
+        request.path,
+        request.mod_id_or_name,
+        request.version,
+        db_path=request.db_path,
+    )
+
+
+@router.post("/install_mod", response_model=schemas.InstallModResponse)
+def install_mod(request: schemas.InstallModRequest) -> schemas.InstallModResponse:
+    operation_id = request.operation_id or events.new_operation_id()
+    result = services.install_mod(
+        request.path,
+        request.mod_id_or_name,
+        request.version,
+        request.force,
+        events.progress_callback(operation_id),
+        db_path=request.db_path,
+    )
+    return schemas.InstallModResponse(
+        operation_id=operation_id,
+        plan=schemas.InstallPlan.model_validate(result.plan),
+        installed=[
+            schemas.InstallResult.model_validate(item) for item in result.installed
+        ],
+    )
+
+
+@router.post("/check_updates", response_model=schemas.UpdatesReport)
+def check_updates(request: schemas.CheckUpdatesRequest) -> services.UpdatesReport:
+    return services.check_updates(request.path, request.names, db_path=request.db_path)
+
+
+@router.post("/update_mod", response_model=schemas.UpdateModResponse)
+def update_mod(request: schemas.UpdateModRequest) -> schemas.UpdateModResponse:
+    operation_id = request.operation_id or events.new_operation_id()
+    result = services.update_mod(
+        request.path,
+        request.name,
+        request.force,
+        events.progress_callback(operation_id),
+        db_path=request.db_path,
+    )
+    return schemas.UpdateModResponse(
+        operation_id=operation_id,
+        name=result.name,
+        previous_version=result.previous_version,
+        version=result.version,
+        commit=result.commit,
+        files=[schemas.ModFile.model_validate(item) for item in result.files],
+        warnings=[schemas.Conflict.model_validate(item) for item in result.warnings],
+        notice=result.notice,
+    )
 
 
 def error_code_and_status(error_type: type[Exception]) -> tuple[str, int]:
@@ -238,6 +312,10 @@ def error_details(error: Exception) -> schemas.ErrorDetails:
                 reason=error.reason,
             )
         return schemas.ErrorDetails(conflicts=conflicts)
+    if isinstance(error, PartialInstallError):
+        return schemas.ErrorDetails(
+            installed=[item.mod.name for item in error.installed]
+        )
     if isinstance(error, ProfileResidueError):
         return schemas.ErrorDetails(
             residues=[

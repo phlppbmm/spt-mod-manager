@@ -217,12 +217,94 @@ class ImportEntry(CoreModel):
     link: str = ""
 
 
+class PlanEntry(CoreModel):
+    """One mod to install as part of an ``InstallPlan``."""
+
+    mod_id: int
+    name: str
+    guid: str | None
+    version: str
+    version_id: int
+    link: str | None
+    content_length: int | None
+    is_dependency: bool
+
+
+class InstallPlan(CoreModel):
+    """What an install would download and install, in install order."""
+
+    spt_version: str
+    entries: list[PlanEntry] = []
+
+
+class InstallModResult(CoreModel):
+    """Outcome of ``install_mod``."""
+
+    plan: InstallPlan
+    installed: list[InstallResult] = []
+
+
 class ImportDiff(CoreModel):
     """The difference between an imported mod list and the installed mods."""
 
     missing: list[ImportEntry] = []
     different: list[ImportEntry] = []
     extra: list[ImportEntry] = []
+    installed: list[InstallModResult] = []
+
+
+class UpdateCandidate(CoreModel):
+    """An installed mod Forge recommends a newer version for."""
+
+    name: str
+    installed_version: str
+    new_version: str
+    version_id: int
+    link: str = ""
+    content_length: int | None = None
+    reason: str = ""
+
+
+class BlockedUpdate(CoreModel):
+    """An installed mod whose newer version other installed mods block."""
+
+    name: str
+    installed_version: str
+    new_version: str
+    reason: str = ""
+    blocking_mods: list[str] = []
+
+
+class IncompatibleMod(CoreModel):
+    """An installed mod without any version for the queried SPT release."""
+
+    name: str
+    installed_version: str
+    reason: str = ""
+    latest_compatible_version: str = ""
+
+
+class UpdatesReport(CoreModel):
+    """What ``check_updates`` found for the installed mods."""
+
+    spt_version: str
+    available: list[UpdateCandidate] = []
+    blocked: list[BlockedUpdate] = []
+    up_to_date: list[str] = []
+    incompatible: list[IncompatibleMod] = []
+    skipped: list[str] = []
+
+
+class UpdateResult(CoreModel):
+    """Outcome of ``update_mod``."""
+
+    name: str
+    previous_version: str
+    version: str = ""
+    commit: str = ""
+    files: list[ModFile] = []
+    warnings: list[Conflict] = []
+    notice: str = ""
 
 
 class InitGameDirRequest(CoreModel):
@@ -244,6 +326,8 @@ class InstallFromArchiveRequest(CoreModel):
     name_override: str | None = None
     version_override: str | None = None
     force: bool = False
+    forge_match: bool = False
+    db_path: Path | None = None
     operation_id: str | None = None
 
 
@@ -377,11 +461,87 @@ class ExportModsResponse(CoreModel):
 
 
 class ImportListRequest(CoreModel):
-    """Parameters of ``import_list``."""
+    """Parameters of ``import_list``.
+
+    Exactly one of ``list_file`` and ``content`` carries the mod list.
+    """
 
     path: Path
-    list_file: Path
+    list_file: Path | None = None
     apply: bool = False
+    content: str | None = None
+    db_path: Path | None = None
+
+
+class ClearCacheResult(CoreModel):
+    """Outcome of ``clear_catalog_cache``."""
+
+    db_path: Path
+    removed: bool
+
+
+class ClearCatalogCacheRequest(CoreModel):
+    """Parameters of ``clear_catalog_cache``."""
+
+    db_path: Path | None = None
+
+
+class PlanModInstallRequest(CoreModel):
+    """Parameters of ``plan_mod_install``."""
+
+    path: Path
+    mod_id_or_name: int | str
+    version: str | None = None
+    db_path: Path | None = None
+
+
+class InstallModRequest(CoreModel):
+    """Parameters of ``install_mod``.
+
+    ``operation_id`` names the progress stream of this install; a generated one
+    is used and echoed back when the caller sends none.
+    """
+
+    path: Path
+    mod_id_or_name: int | str
+    version: str | None = None
+    force: bool = False
+    db_path: Path | None = None
+    operation_id: str | None = None
+
+
+class InstallModResponse(InstallModResult):
+    """Outcome of ``install_mod`` plus its progress operation ID."""
+
+    operation_id: str
+
+
+class CheckUpdatesRequest(CoreModel):
+    """Parameters of ``check_updates``."""
+
+    path: Path
+    names: list[str] | None = None
+    db_path: Path | None = None
+
+
+class UpdateModRequest(CoreModel):
+    """Parameters of ``update_mod``.
+
+    ``operation_id`` names the progress stream of this update; a generated one
+    is used and echoed back when the caller sends none.
+    """
+
+    path: Path
+    name: str
+    force: bool = False
+    db_path: Path | None = None
+    operation_id: str | None = None
+
+
+class UpdateModResponse(UpdateResult):
+    """Outcome of ``update_mod`` plus its progress operation ID."""
+
+    operation_id: str
 
 
 class ProgressEvent(CoreModel):
@@ -399,6 +559,7 @@ class ErrorDetails(CoreModel):
     conflicts: list[Conflict] = []
     residues: list[ProfileResidue] = []
     conflicting_paths: list[Path] = []
+    installed: list[str] = []
     name: str = ""
     candidates: list[str] = []
     dependency: str = ""

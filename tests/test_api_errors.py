@@ -5,8 +5,9 @@ body at the status code fixed by ``sptmod.server.app.ERROR_MAPPING``. Covers
 the exceptions named in the task: ``NotAGameDirError`` (400),
 ``ModNotFoundError`` (404), ``ConflictError`` (409, with populated
 ``details.conflicts``), ``AmbiguousModError`` (409, with ``details.name`` and
-``details.candidates``), ``NotImplementedYetError`` via ``import_list
-apply=True`` (501) and ``GitError`` (500).
+``details.candidates``), ``NotImplementedYetError`` (501, forced via a
+synthetic raiser since every service function is now implemented) and
+``GitError`` (500).
 
 The final test covers ``ProfileResidueError`` (409, with structured
 ``details.residues`` listing which profiles/categories/IDs are blocking a
@@ -19,7 +20,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from sptmod.core import game_dir
+from sptmod.core import game_dir, services
+from sptmod.core.errors import NotImplementedYetError
 from sptmod.core.repo import Repo
 from sptmod.server.app import app
 
@@ -106,19 +108,22 @@ def test_ambiguous_mod_error_returns_409_with_name_and_candidates(
     assert set(body["details"]["candidates"]) == {"CoolMod", "coolmod"}
 
 
-def test_not_implemented_yet_error_returns_501_for_import_apply(
-    game_dir_path: Path, tmp_path: Path
+def test_not_implemented_yet_error_returns_501(
+    game_dir_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Every service function is implemented now, so no real call raises
+    # NotImplementedYetError on its own; force one to keep the 501 mapping
+    # of that exception type covered.
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise NotImplementedYetError("synthetic: forced for mapping coverage")
+
+    monkeypatch.setattr(services, "import_list", _raise)
     list_file = tmp_path / "mods.txt"
     list_file.write_text("SomeMod 1.0.0\n", encoding="utf-8")
 
     response = client.post(
         "/api/import_list",
-        json={
-            "path": str(game_dir_path),
-            "list_file": str(list_file),
-            "apply": True,
-        },
+        json={"path": str(game_dir_path), "list_file": str(list_file)},
     )
 
     assert response.status_code == 501

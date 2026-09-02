@@ -1,0 +1,674 @@
+"""Tests for ``check_updates`` and ``update_mod`` of ``sptmod.core.services``.
+
+Covers the mapping of the four ``/mods/updates`` lists into ``UpdatesReport``,
+skipping active mods neither a ``Mod-Forge-Id`` nor the catalog identifies,
+the single-commit file replacement of ``update_mod`` (old files removed, new
+files added, ``BepInEx/config/`` untouched, ``Mod-Previous-Version`` trailer),
+and its no-op behaviour for blocked, incompatible or absent updates.
+"""
+
+import json
+from pathlib import Path
+
+import httpx
+import pytest
+import respx
+from typer.testing import CliRunner
+
+from sptmod.cli import app as cli_app
+from sptmod.core import services
+from sptmod.core.errors import AmbiguousModError, DirtyTreeError, ModNotFoundError
+from sptmod.core.forge.catalog import DB_FILE_NAME
+from sptmod.core.repo import Repo
+from test_forge_catalog_fixtures import (
+    client_factory,
+    db_path,
+    fake_clock,
+    recording_sleep,
+    respx_router,
+)
+from test_forge_client_fixtures import success_envelope
+
+__all__ = ["client_factory", "db_path", "fake_clock", "recording_sleep", "respx_router"]
+
+SPT_VERSION = "4.1.0"
+
+cli_runner = CliRunner()
+
+
+@pytest.fixture
+def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point ``default_db_path()`` at an isolated location for CLI tests.
+
+    The CLI never passes ``db_path`` explicitly, so it resolves through
+    ``forge.catalog.default_db_path()``, which must not touch the developer's
+    real config directory.
+    """
+    config_dir = tmp_path / "config"
+    monkeypatch.setattr(
+        "sptmod.core.forge.catalog.platformdirs.user_config_path",
+        lambda *args, **kwargs: config_dir,
+    )
+    return config_dir / DB_FILE_NAME
+
+
+def _mock_updates(respx_router: respx.MockRouter, data: dict) -> None:
+    respx_router.get("/mods/updates").mock(
+        return_value=httpx.Response(200, json=success_envelope(data))
+    )
+
+
+def _current_version(
+    *, id: int, mod_id: int, name: str, version: str, slug: str | None = None
+) -> dict:
+    return {
+        "id": id,
+        "mod_id": mod_id,
+        "guid": None,
+        "name": name,
+        "version": version,
+        "slug": slug,
+    }
+
+
+# --- check_updates -----------------------------------------------------
+
+
+def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+) -> None:
+    """If check_updates's body is `pass`, this fails: returns None instead of
+    an UpdatesReport with the mods sorted into their four buckets."""
+    install_commit(
+        clean_repo, "Available Mod", "1.0.0", mod_type="server",
+        **{"Mod-Forge-Id": "10"},
+    )
+    install_commit(
+        clean_repo, "Blocked Mod", "1.5.0", mod_type="server", minute=2,
+        **{"Mod-Forge-Id": "20"},
+    )
+    install_commit(
+        clean_repo, "Uptodate Mod", "2.0.0", mod_type="server", minute=3,
+        **{"Mod-Forge-Id": "40"},
+    )
+    install_commit(
+        clean_repo, "Incompat Mod", "0.9.0", mod_type="server", minute=4,
+        **{"Mod-Forge-Id": "30"},
+    )
+    install_commit(
+        clean_repo, "Ghost Mod", "1.0.0", mod_type="server", minute=5,
+        **{"Mod-Forge-Id": ""},
+    )
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [
+                {
+                    "current_version": _current_version(
+                        id=100, mod_id=10, name="Available Mod",
+                        version="1.0.0", slug="available-mod",
+                    ),
+                    "recommended_version": {
+                        "id": 200,
+                        "version": "2.0.0",
+                        "link": "https://dl.example/available-2.0.0.zip",
+                        "content_length": 12345,
+                        "fika_compatibility": "unknown",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "update_reason": "newer version available",
+                }
+            ],
+            "blocked_updates": [
+                {
+                    "current_version": _current_version(
+                        id=101, mod_id=20, name="Blocked Mod", version="1.5.0",
+                    ),
+                    "latest_version": {
+                        "id": 201,
+                        "version": "2.0.0",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "block_reason": "Conflicting mod dependency.",
+                    "blocking_mods": [
+                        {
+                            "mod_id": 99,
+                            "mod_guid": None,
+                            "mod_name": "Other Mod",
+                            "current_version": "1.0.0",
+                            "constraint": "<2.0.0",
+                            "incompatible_with": "2.0.0",
+                        }
+                    ],
+                }
+            ],
+            "up_to_date": [
+                {
+                    "id": 102,
+                    "mod_id": 40,
+                    "guid": None,
+                    "name": "Uptodate Mod",
+                    "version": "2.0.0",
+                    "spt_versions": [SPT_VERSION],
+                }
+            ],
+            "incompatible_with_spt": [
+                {
+                    "id": 103,
+                    "mod_id": 30,
+                    "guid": None,
+                    "name": "Incompat Mod",
+                    "version": "0.9.0",
+                    "reason": "No version for this SPT release.",
+                    "latest_compatible_version": "1.0.0",
+                }
+            ],
+        },
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    report = services.check_updates(clean_repo.path, db_path=db_path, client=client)
+
+    assert report.spt_version == SPT_VERSION
+    assert report.available == [
+        services.UpdateCandidate(
+            name="Available Mod",
+            installed_version="1.0.0",
+            new_version="2.0.0",
+            version_id=200,
+            link="https://dl.example/available-2.0.0.zip",
+            content_length=12345,
+            reason="newer version available",
+        )
+    ]
+    assert report.blocked == [
+        services.BlockedUpdate(
+            name="Blocked Mod",
+            installed_version="1.5.0",
+            new_version="2.0.0",
+            reason="Conflicting mod dependency.",
+            blocking_mods=["Other Mod"],
+        )
+    ]
+    assert report.up_to_date == ["Uptodate Mod"]
+    assert report.incompatible == [
+        services.IncompatibleMod(
+            name="Incompat Mod",
+            installed_version="0.9.0",
+            reason="No version for this SPT release.",
+            latest_compatible_version="1.0.0",
+        )
+    ]
+    assert report.skipped == ["Ghost Mod"]
+    # Read-only: nothing is downloaded or written.
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_check_updates_unknown_name_raises_mod_not_found(
+    clean_repo: Repo, client_factory, db_path: Path, install_commit
+) -> None:
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server")
+    client = client_factory()
+
+    with pytest.raises(ModNotFoundError):
+        services.check_updates(
+            clean_repo.path, names=["Missing Mod"], db_path=db_path, client=client
+        )
+
+
+def test_check_updates_ambiguous_name_raises_ambiguous_mod(
+    clean_repo: Repo, client_factory, db_path: Path, install_commit
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+    )
+    install_commit(
+        clean_repo, "coolmod", "2.0.0", mod_type="server", minute=2,
+        **{"Mod-Forge-Id": "2"},
+    )
+    client = client_factory()
+
+    with pytest.raises(AmbiguousModError):
+        services.check_updates(
+            clean_repo.path, names=["coolmod"], db_path=db_path, client=client
+        )
+
+
+# --- update_mod ----------------------------------------------------------
+
+
+def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+    make_archive,
+) -> None:
+    """If update_mod's body is `pass`, this fails: no commit is created and
+    the returned result is None instead of an UpdateResult."""
+    install_commit(
+        clean_repo,
+        "CoolMod",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
+            ),
+            "SPT/user/mods/CoolMod/old_only.txt": "old text",
+            "BepInEx/config/CoolMod.cfg": "user settings",
+        },
+        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+    )
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "2.0.0", "author": "Acme"}
+            ),
+            "SPT/user/mods/CoolMod/new_only.txt": "new text",
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/coolmod-2.0.0.zip"
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [
+                {
+                    "current_version": _current_version(
+                        id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                        slug="coolmod",
+                    ),
+                    "recommended_version": {
+                        "id": 200,
+                        "version": "2.0.0",
+                        "link": link,
+                        "content_length": len(body),
+                        "fika_compatibility": "unknown",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "update_reason": "newer version available",
+                }
+            ],
+            "blocked_updates": [],
+            "up_to_date": [],
+            "incompatible_with_spt": [],
+        },
+    )
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.name == "CoolMod"
+    assert result.previous_version == "1.0.0"
+    assert result.version == "2.0.0"
+    assert result.commit != ""
+    assert result.notice == ""
+
+    commits = clean_repo.log()
+    assert len(commits) == commits_before + 1
+    top = commits[0]
+    assert top.hash == result.commit
+    assert top.subject == "mod: CoolMod 1.0.0 → 2.0.0"
+    assert top.trailers["Mod-Previous-Version"] == "1.0.0"
+    assert top.trailers["Mod-State"] == "updated"
+    assert top.trailers["Mod-Forge-Id"] == "10"
+    assert top.trailers["Mod-Forge-Version-Id"] == "200"
+    assert top.trailers["Mod-Source"] == link
+    assert top.trailers["Mod-Version"] == "2.0.0"
+
+    root = clean_repo.path
+    assert not (root / "SPT/user/mods/CoolMod/old_only.txt").exists()
+    assert (root / "SPT/user/mods/CoolMod/new_only.txt").read_text() == "new text"
+    assert (root / "BepInEx/config/CoolMod.cfg").read_text() == "user settings"
+    package = json.loads((root / "SPT/user/mods/CoolMod/package.json").read_text())
+    assert package["version"] == "2.0.0"
+
+    changes = {file.path.as_posix(): file.change for file in result.files}
+    assert changes.get("SPT/user/mods/CoolMod/old_only.txt") == "deleted"
+    assert changes.get("SPT/user/mods/CoolMod/new_only.txt") == "added"
+    assert "BepInEx/config/CoolMod.cfg" not in changes
+
+
+def test_update_mod_with_a_pre_existing_untracked_file_raises_dirty_tree_error(
+    clean_repo: Repo,
+    client_factory,
+    db_path: Path,
+    install_commit,
+) -> None:
+    """§4b requires a clean tree before update, same as install: an untracked
+    file inside the mod folder must abort with DirtyTreeError rather than
+    being silently clobbered."""
+    install_commit(
+        clean_repo,
+        "CoolMod",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
+            )
+        },
+        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+    )
+    colliding = clean_repo.path / "SPT/user/mods/CoolMod/new_file.txt"
+    colliding.write_text("manually placed", encoding="utf-8")
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    with pytest.raises(DirtyTreeError):
+        services.update_mod(clean_repo.path, "CoolMod", db_path=db_path, client=client)
+
+    assert colliding.read_text() == "manually placed"
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_with_no_update_available_is_a_friendly_noop(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [],
+            "blocked_updates": [],
+            "up_to_date": [
+                {
+                    "id": 100,
+                    "mod_id": 10,
+                    "guid": None,
+                    "name": "CoolMod",
+                    "version": "1.0.0",
+                    "spt_versions": [SPT_VERSION],
+                }
+            ],
+            "incompatible_with_spt": [],
+        },
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.version == ""
+    assert result.commit == ""
+    assert result.previous_version == "1.0.0"
+    assert result.notice != ""
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_blocked_update_is_a_noop_with_notice(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [],
+            "blocked_updates": [
+                {
+                    "current_version": _current_version(
+                        id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                    ),
+                    "latest_version": {
+                        "id": 200,
+                        "version": "2.0.0",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "block_reason": "Conflicting mod dependency.",
+                    "blocking_mods": [],
+                }
+            ],
+            "up_to_date": [],
+            "incompatible_with_spt": [],
+        },
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.commit == ""
+    assert result.version == ""
+    assert result.notice != ""
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_incompatible_is_a_noop_with_notice(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "0.9.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [],
+            "blocked_updates": [],
+            "up_to_date": [],
+            "incompatible_with_spt": [
+                {
+                    "id": 100,
+                    "mod_id": 10,
+                    "guid": None,
+                    "name": "CoolMod",
+                    "version": "0.9.0",
+                    "reason": "No version for this SPT release.",
+                    "latest_compatible_version": "1.0.0",
+                }
+            ],
+        },
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.commit == ""
+    assert result.version == ""
+    assert result.notice != ""
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_unknown_name_raises_mod_not_found(
+    clean_repo: Repo, client_factory, db_path: Path
+) -> None:
+    client = client_factory()
+
+    with pytest.raises(ModNotFoundError):
+        services.update_mod(
+            clean_repo.path, "Nonexistent", db_path=db_path, client=client
+        )
+
+
+# --- CLI: update confirmation --------------------------------------------
+
+
+def _available_update_data(link: str, content_length: int) -> dict:
+    return {
+        "spt_version": SPT_VERSION,
+        "updates": [
+            {
+                "current_version": _current_version(
+                    id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                    slug="coolmod",
+                ),
+                "recommended_version": {
+                    "id": 200,
+                    "version": "2.0.0",
+                    "link": link,
+                    "content_length": content_length,
+                    "fika_compatibility": "unknown",
+                    "spt_versions": [SPT_VERSION],
+                },
+                "update_reason": "newer version available",
+            }
+        ],
+        "blocked_updates": [],
+        "up_to_date": [],
+        "incompatible_with_spt": [],
+    }
+
+
+def test_cli_update_check_never_prompts(
+    clean_repo: Repo,
+    isolated_default_db_path: Path,
+    respx_router: respx.MockRouter,
+    install_commit,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1)
+    )
+    monkeypatch.chdir(clean_repo.path)
+
+    # Empty stdin: if --check tried to prompt, CliRunner would hit EOF and
+    # the command would abort instead of exiting 0 with the report printed.
+    result = cli_runner.invoke(cli_app, ["update", "--check"], input="")
+
+    assert result.exit_code == 0
+    assert "CoolMod" in result.stdout
+
+
+def test_cli_update_without_yes_prompts_and_cancels_on_no(
+    clean_repo: Repo,
+    isolated_default_db_path: Path,
+    respx_router: respx.MockRouter,
+    install_commit,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If update never prompts before applying, this fails: the update is
+    applied anyway even though the simulated user answered 'n'."""
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1)
+    )
+    commits_before = len(clean_repo.log())
+    monkeypatch.chdir(clean_repo.path)
+
+    result = cli_runner.invoke(cli_app, ["update"], input="n\n")
+
+    assert result.exit_code == 0
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_cli_update_without_yes_prompts_and_applies_on_yes(
+    clean_repo: Repo,
+    isolated_default_db_path: Path,
+    respx_router: respx.MockRouter,
+    install_commit,
+    make_archive,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "2.0.0", "author": "Acme"}
+            )
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/coolmod-2.0.0-yes.zip"
+    _mock_updates(respx_router, _available_update_data(link, len(body)))
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    commits_before = len(clean_repo.log())
+    monkeypatch.chdir(clean_repo.path)
+
+    result = cli_runner.invoke(cli_app, ["update"], input="y\n")
+
+    assert result.exit_code == 0
+    assert len(clean_repo.log()) == commits_before + 1
+
+
+def test_cli_update_yes_flag_applies_without_prompting(
+    clean_repo: Repo,
+    isolated_default_db_path: Path,
+    respx_router: respx.MockRouter,
+    install_commit,
+    make_archive,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If --yes does not exist yet or does not skip the prompt, this fails:
+    either Typer rejects the unknown option, or empty stdin makes the prompt
+    hit EOF and abort instead of applying."""
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "2.0.0", "author": "Acme"}
+            )
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/coolmod-2.0.0-flag.zip"
+    _mock_updates(respx_router, _available_update_data(link, len(body)))
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    commits_before = len(clean_repo.log())
+    monkeypatch.chdir(clean_repo.path)
+
+    result = cli_runner.invoke(cli_app, ["update", "--yes"], input="")
+
+    assert result.exit_code == 0
+    assert len(clean_repo.log()) == commits_before + 1

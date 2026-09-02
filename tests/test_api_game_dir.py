@@ -353,7 +353,12 @@ def test_import_list_reports_no_diff_for_an_export_of_the_same_state(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"missing": [], "different": [], "extra": []}
+    assert response.json() == {
+        "missing": [],
+        "different": [],
+        "extra": [],
+        "installed": [],
+    }
 
 
 def test_import_list_reports_a_mod_only_the_list_has_as_missing(

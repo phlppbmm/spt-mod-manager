@@ -4,8 +4,9 @@ Covers ``status()`` grouping (modified profile, modified config, modified
 mod file, untracked mod folder/loose plugin as manual mods), ``export_mods``
 (text/json rendering, ``--client-only`` filtering, catalog link lookup) and
 ``import_list`` (diff against a deviating install state, format detection by
-content, the ``--apply`` seam raising ``NotImplementedYetError``). CLI cases
-exercise the same paths through Typer's ``CliRunner``.
+content; the ``--apply`` Forge install path itself is covered in
+``test_services_forge_install.py``). CLI cases exercise the same paths
+through Typer's ``CliRunner``.
 """
 
 import json
@@ -18,8 +19,7 @@ from typer.testing import CliRunner
 
 from sptmod.cli import app
 from sptmod.core import game_dir, services
-from sptmod.core.errors import NotImplementedYetError
-from sptmod.core.forge.catalog import Catalog
+from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 from test_forge_client_fixtures import (
@@ -30,6 +30,7 @@ from test_forge_client_fixtures import (
     page_envelope,
     recording_sleep,
     respx_router,
+    version_json,
 )
 
 __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
@@ -48,6 +49,23 @@ def _clean_repo(path: Path) -> Repo:
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
     )
     return repo
+
+
+@pytest.fixture
+def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point ``default_db_path()`` at an isolated location for CLI tests.
+
+    Mirrors the fixture of the same name in ``test_services_catalog.py``: the
+    CLI never passes ``db_path`` explicitly, so it resolves through
+    ``forge.catalog.default_db_path()``, which must not touch the developer's
+    real config directory.
+    """
+    config_dir = tmp_path / "config"
+    monkeypatch.setattr(
+        "sptmod.core.forge.catalog.platformdirs.user_config_path",
+        lambda *args, **kwargs: config_dir,
+    )
+    return config_dir / DB_FILE_NAME
 
 
 # --- status ------------------------------------------------------------------
@@ -280,17 +298,6 @@ def test_import_raises_invalid_metadata_for_a_missing_list_file(
         services.import_list(clean_repo.path, tmp_path / "does-not-exist.txt")
 
 
-def test_import_apply_raises_not_implemented_yet_error(
-    clean_repo: Repo, install_commit, tmp_path: Path
-) -> None:
-    install_commit(clean_repo, "ModA", version="1.0.0")
-    list_file = tmp_path / "wanted.txt"
-    list_file.write_text("ModB 2.0.0\n", encoding="utf-8")
-
-    with pytest.raises(NotImplementedYetError):
-        services.import_list(clean_repo.path, list_file, apply=True)
-
-
 def test_export_import_text_roundtrip(
     clean_repo: Repo, install_commit, tmp_path: Path
 ) -> None:
@@ -359,14 +366,81 @@ def test_cli_export_json_happy_path(
     assert "CoolMod" in result.stdout
 
 
-def test_cli_import_apply_exits_with_code_15(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_cli_import_apply_installs_the_missing_mod_via_the_mocked_forge_path(
+    fake_game_dir: Path,
+    isolated_default_db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    make_archive,
+    tmp_path: Path,
 ) -> None:
     _clean_repo(fake_game_dir)
+    archive = make_archive(
+        {
+            "SPT/user/mods/Import Target/package.json": json.dumps(
+                {"name": "Import Target", "version": "3.0.0", "author": "Acme"}
+            )
+        },
+        "zip",
+    )
+    body = archive.read_bytes()
+    link = "https://dl.example/import-target-3.0.0.zip"
+    mod = mod_json_full(
+        id=701,
+        name="Import Target",
+        slug="import-target",
+        owner=owner_json(id=7010, name="Alice"),
+        versions=[
+            {
+                "id": 7010,
+                "version": "3.0.0",
+                "spt_version_constraint": "^4.0.0",
+                "downloads": 1,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+        ],
+    )
+    page = page_envelope([mod], current_page=1, last_page=1, total=1, next_url=None)
+    respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page))
+    seed_client = client_factory()
+    with Catalog(isolated_default_db_path) as cat:
+        cat.sync(seed_client, full=True)
+        versions_page = page_envelope(
+            [
+                version_json(
+                    id=7010,
+                    version="3.0.0",
+                    link=link,
+                    content_length=len(body),
+                    spt_version_constraint="^4.0.0",
+                )
+            ],
+            current_page=1,
+            last_page=1,
+            total=1,
+            next_url=None,
+        )
+        respx_router.get("/mod/701/versions").mock(
+            return_value=httpx.Response(200, json=versions_page)
+        )
+        cat.fetch_versions(seed_client, 701)
+
+    def _echo_dependencies(request: httpx.Request) -> httpx.Response:
+        pair = request.url.params["mods"]
+        return httpx.Response(200, json={"success": True, "data": {pair: []}})
+
+    respx_router.get("/mods/dependencies").mock(side_effect=_echo_dependencies)
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
     list_file = tmp_path / "wanted.txt"
-    list_file.write_text("SomeMod 1.0.0\n", encoding="utf-8")
+    list_file.write_text("Import Target 3.0.0\n", encoding="utf-8")
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["import", str(list_file), "--apply"])
 
-    assert result.exit_code == 15
+    assert result.exit_code == 0
+    assert "installed Import Target 3.0.0" in result.stdout

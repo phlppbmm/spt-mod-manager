@@ -127,6 +127,10 @@
 		);
 	}
 
+	function installedName(): string {
+		return installed?.name ?? entry.mod.name;
+	}
+
 	let description: ModDescription | null = $state(null);
 
 	async function showDescription(): Promise<void> {
@@ -145,7 +149,7 @@
 		busy = true;
 		errorMessage = '';
 		try {
-			files = await modFiles(path, entry.mod.name);
+			files = await modFiles(path, installedName());
 		} catch (cause) {
 			errorMessage = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -206,7 +210,7 @@
 			<button
 				type="button"
 				disabled={busy}
-				onclick={() => void perform(() => enableMod(path, entry.mod.name), false, null)}
+				onclick={() => void perform(() => enableMod(path, installedName()), false, null)}
 			>
 				Enable
 			</button>
@@ -223,7 +227,7 @@
 					<li>
 						<button
 							type="button"
-							onclick={() => void perform(() => disableMod(path, entry.mod.name), false, null)}
+							onclick={() => void perform(() => disableMod(path, installedName()), false, null)}
 						>
 							Disable
 						</button>
@@ -233,7 +237,7 @@
 					<li>
 						<button
 							type="button"
-							onclick={() => void perform(() => enableMod(path, entry.mod.name), false, null)}
+							onclick={() => void perform(() => enableMod(path, installedName()), false, null)}
 						>
 							Enable
 						</button>
@@ -302,12 +306,12 @@
 					confirmation = null;
 					if (kind === 'remove') {
 						void perform(
-							(force) => removeMod(path, entry.mod.name, force),
+							(force) => removeMod(path, installedName(), force),
 							false,
 							'Remove anyway'
 						);
 					} else {
-						void perform(() => disableMod(path, entry.mod.name), false, null);
+						void perform(() => disableMod(path, installedName()), false, null);
 					}
 				}}
 			>

@@ -47,6 +47,15 @@
 	let installedByName = $derived(
 		new Map(mods.map((mod) => [mod.name.toLowerCase(), mod] as const))
 	);
+	// The trailer name comes from the mod's own package.json and often differs
+	// from the Forge display name, so the Forge id is the reliable link.
+	let installedByForgeId = $derived(
+		new Map(
+			mods
+				.filter((mod) => mod.forge_id !== '')
+				.map((mod) => [mod.forge_id, mod] as const)
+		)
+	);
 	let sort = $state<ModSort | null>(null);
 	let rows = $derived(
 		sortEntries(filterEntries(entries, { tab, compatibleOnly, search }), sort)
@@ -167,7 +176,9 @@
 				{path}
 				{entry}
 				modState={rowState(entry, disabledMods)}
-				installed={installedByName.get(entry.mod.name.toLowerCase()) ?? null}
+				installed={installedByForgeId.get(String(entry.mod.id)) ??
+					installedByName.get(entry.mod.name.toLowerCase()) ??
+					null}
 				onchanged={() => (reload += 1)}
 			/>
 		{/each}

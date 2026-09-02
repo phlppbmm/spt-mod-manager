@@ -2309,11 +2309,32 @@ def _prune_empty(root: Path, directory: Path, layout: GameLayout) -> None:
 
 
 def _ensure_installable(repo: Repo) -> None:
+    """Ensure the game is closed and the working tree is clean.
+
+    Changed profiles and BepInEx configs are the normal aftermath of playing
+    and are silently secured in an automatic snapshot commit, so the user
+    never has to know about the underlying version control. Only files the
+    manager cannot account for (manually copied mods or unexpected changes)
+    stop the operation, in plain language.
+    """
+    ensure_game_not_running()
+    if repo.is_clean():
+        return
+    report = status(repo.path)
+    blockers = [str(mod.path) for mod in report.manual_mods]
+    blockers += [str(p) for p in report.other_modified + report.other_untracked]
+    if blockers:
+        listed = ", ".join(blockers[:5]) + (" …" if len(blockers) > 5 else "")
+        raise DirtyTreeError(
+            "there are files in the game folder sptmod does not manage: "
+            f"{listed}. If these are mods you installed manually, add them "
+            "via adopt; otherwise move them out of the game folder."
+        )
+    snapshot(repo.path, "automatic snapshot before changing mods")
     if not repo.is_clean():
         raise DirtyTreeError(
-            f"{repo.path} has uncommitted changes, commit or snapshot them first"
+            f"{repo.path} still has unexpected changes after snapshotting"
         )
-    ensure_game_not_running()
 
 
 def _for_game_layout(layout: ArchiveLayout, game_layout: GameLayout) -> ArchiveLayout:

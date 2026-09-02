@@ -426,3 +426,35 @@ def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem_tyfo
     result = services.install_from_archive(clean_repo.path, archive)
 
     assert result.mod.name == "UIFixes"
+
+
+def test_install_auto_snapshots_changed_profiles_instead_of_failing(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Played-with profiles never block an install; they are snapshotted."""
+    profile = clean_repo.path / "SPT/user/profiles/abc.json"
+    profile.write_text(profile.read_text() + "\n")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    result = services.install_from_archive(clean_repo.path, archive)
+
+    assert result.mod.name == "CoolPlugin"
+    subjects = [commit.subject for commit in clean_repo.log()]
+    assert subjects[0].startswith("mod: CoolPlugin")
+    assert subjects[1].startswith("snapshot:")
+    assert clean_repo.is_clean()
+
+
+def test_install_blocks_on_unmanaged_changes_in_plain_language(
+    clean_repo: Repo, install_commit, make_archive
+) -> None:
+    install_commit(clean_repo, "ModA", "1.0.0")
+    (clean_repo.path / "BepInEx/plugins/ModA.dll").write_bytes(b"tampered")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    with pytest.raises(DirtyTreeError) as excinfo:
+        services.install_from_archive(clean_repo.path, archive)
+
+    message = str(excinfo.value)
+    assert "does not manage" in message
+    assert "uncommitted" not in message

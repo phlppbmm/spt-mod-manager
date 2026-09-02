@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Final
 
 from sptmod.core.errors import GitError
-from sptmod.core.game_dir import MODS_DIR, PROFILE_BACKUPS_DIR, PROFILES_DIR
+from sptmod.core.game_dir import GameLayout
 from sptmod.core.models import (
     ACTIVE_STATES,
     TRAILER_MOD,
@@ -63,10 +63,10 @@ class CheckResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def collect_mod_ids(repo: Repo, install_commit: str) -> ModIds:
+def collect_mod_ids(repo: Repo, install_commit: str, layout: GameLayout) -> ModIds:
     """Collect the content IDs the mod's install commit adds.
 
-    Reads every ``SPT/user/mods/*/db/**/*.json`` the commit touches from the
+    Reads every ``<runtime>/user/mods/*/db/**/*.json`` the commit touches from the
     commit itself (``repo.show_file_content``), never from the working tree, so
     the result does not depend on the current state of the game directory.
 
@@ -91,7 +91,7 @@ def collect_mod_ids(repo: Repo, install_commit: str) -> ModIds:
     """
     ids = ModIds()
     for mod_file in repo.show_files(install_commit):
-        db_path = _db_relative(mod_file.path)
+        db_path = _db_relative(mod_file.path, layout)
         if mod_file.change == "deleted" or db_path is None:
             continue
         try:
@@ -128,7 +128,7 @@ def find_residues(profile_path: Path, ids: ModIds) -> list[ProfileResidue]:
     return _residues_in(parsed, ids)
 
 
-def check_all(repo: Repo, game_dir: Path) -> CheckResult:
+def check_all(repo: Repo, layout: GameLayout) -> CheckResult:
     """Check every active mod against every profile without changing anything.
 
     Collects the IDs of each active mod from its install commit and searches
@@ -140,12 +140,12 @@ def check_all(repo: Repo, game_dir: Path) -> CheckResult:
     """
     profiles = [
         parsed
-        for path in profile_paths(game_dir)
+        for path in profile_paths(layout)
         if (parsed := _parse_profile(path)) is not None
     ]
     result = CheckResult()
     for name, commit in _active_mod_commits(repo).items():
-        ids = collect_mod_ids(repo, commit)
+        ids = collect_mod_ids(repo, commit, layout)
         result.warnings.extend(f"{name}: {warning}" for warning in ids.warnings)
         residues = [
             residue for profile in profiles for residue in _residues_in(profile, ids)
@@ -155,15 +155,15 @@ def check_all(repo: Repo, game_dir: Path) -> CheckResult:
     return result
 
 
-def profile_paths(game_dir: Path) -> list[Path]:
-    """Return the profile files of ``game_dir``, sorted by name.
+def profile_paths(layout: GameLayout) -> list[Path]:
+    """Return the profile files of the installation, sorted by name.
 
-    These are the ``*.json`` files directly in ``SPT/user/profiles``; the
-    ``backups/`` directory below it is skipped. Returns an empty list if the
-    profiles directory does not exist.
+    These are the ``*.json`` files directly in the profiles directory of
+    ``layout``; the ``backups/`` directory below it is skipped. Returns an
+    empty list if the profiles directory does not exist.
     """
-    profiles_dir = game_dir / PROFILES_DIR
-    backups_dir = game_dir / PROFILE_BACKUPS_DIR
+    profiles_dir = layout.root / layout.profiles_dir
+    backups_dir = layout.root / layout.profile_backups_dir
     if not profiles_dir.is_dir():
         return []
     return sorted(
@@ -228,11 +228,11 @@ def _residues_in(profile: _ParsedProfile, ids: ModIds) -> list[ProfileResidue]:
     return residues
 
 
-def _db_relative(path: Path) -> Path | None:
+def _db_relative(path: Path, layout: GameLayout) -> Path | None:
     """Return the ``db/``-relative part of a mod db JSON file, or ``None``."""
-    if path.suffix.lower() != ".json" or not path.is_relative_to(MODS_DIR):
+    if path.suffix.lower() != ".json" or not path.is_relative_to(layout.mods_dir):
         return None
-    parts = path.relative_to(MODS_DIR).parts
+    parts = path.relative_to(layout.mods_dir).parts
     if len(parts) < 3 or parts[1] != DB_DIR_NAME:
         return None
     return Path(*parts[2:])

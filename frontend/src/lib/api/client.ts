@@ -10,6 +10,7 @@ export type Conflict = Schemas['Conflict'];
 export type ProfileResidue = Schemas['ProfileResidue'];
 export type CheckResult = Schemas['CheckResult'];
 export type InitResult = Schemas['InitResult'];
+export type SetSptVersionResponse = Schemas['SetSptVersionResponse'];
 export type RemoveResult = Schemas['RemoveResult'];
 export type ToggleResult = Schemas['ToggleResult'];
 export type StatusReport = Schemas['StatusReport'];
@@ -58,6 +59,13 @@ export function initGameDir(path: string, adopt: boolean | string[] = false): Pr
 		path,
 		adopt
 	} satisfies Schemas['InitGameDirRequest']);
+}
+
+export function setSptVersion(path: string, version: string): Promise<SetSptVersionResponse> {
+	return call<SetSptVersionResponse>('set_spt_version', {
+		path,
+		version
+	} satisfies Schemas['SetSptVersionRequest']);
 }
 
 export function listMods(path: string, includeAll: boolean = false): Promise<ModInfo[]> {

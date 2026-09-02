@@ -12,7 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal
 
-from sptmod.core.archive import ArchiveLayout, extract, find_anchor
+from sptmod.core.archive import (
+    SERVER_MODS_TARGET,
+    ArchiveLayout,
+    extract,
+    find_anchor,
+)
 from sptmod.core.conflicts import (
     apply_force,
     check_dependencies,
@@ -45,12 +50,13 @@ from sptmod.core.forge.download import download
 from sptmod.core.forge.resolve import plan_install
 from sptmod.core.game_dir import (
     BEPINEX_CONFIG_DIR,
-    MODS_DIR,
     PLUGINS_DIR,
-    PROFILES_DIR,
+    GameLayout,
+    detect_layout,
     ensure_game_not_running,
     is_game_dir,
-    spt_version,
+    resolve_spt_version,
+    store_spt_version,
     validate_game_dir,
 )
 from sptmod.core.models import (
@@ -134,7 +140,6 @@ _DEPENDENCY_KINDS: Final[tuple[ConflictKind, ...]] = (
     "dependency-version",
 )
 
-_MOD_PREFIXES: Final[tuple[Path, ...]] = (MODS_DIR, PLUGINS_DIR)
 _CLIENT_TYPES: Final[tuple[ModType, ...]] = ("client", "hybrid")
 _SNAPSHOT_TIME_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
 _LINK_MARKER: Final = "://"
@@ -155,12 +160,18 @@ class InitResult:
 
     ``pre_existing_mods`` lists every mod found in the untracked game
     directory, ``adopted`` the ones the ``adopt`` selection turned into
-    install commits.
+    install commits. ``spt_version_known`` is ``False`` when no step of the
+    version chain found a version, in which case ``spt_version`` is
+    ``UNKNOWN_SPT_VERSION`` and the caller has to ask the user and pass the
+    answer to :func:`set_spt_version`. ``warnings`` carries the layout
+    detection notes, for instance when both runtime directories exist.
     """
 
     game_dir: Path
     commit: str
     spt_version: str
+    spt_version_known: bool = True
+    warnings: list[str] = field(default_factory=list)
     pre_existing_mods: list[Path] = field(default_factory=list)
     adopted: list[ModInfo] = field(default_factory=list)
 
@@ -551,18 +562,23 @@ def _matches_fingerprint(candidate: Path, fingerprint: Sequence[str]) -> bool:
     return all(os.path.exists(candidate / entry) for entry in fingerprint)
 
 
-def init_game_dir(path: Path, adopt: Sequence[Path] | bool = False) -> InitResult:
+def init_game_dir(
+    path: Path,
+    adopt: Sequence[Path] | bool = False,
+    spt_version: str | None = None,
+) -> InitResult:
     """Turn the SPT installation at ``path`` into a tracked repository.
 
-    Validates the game directory, writes the whitelist ``.gitignore``, runs
+    Detects the layout, writes the matching whitelist ``.gitignore``, runs
     ``git init`` and creates the initial commit ``chore: clean SPT <version>``
-    carrying the ``Spt-Version`` trailer. The version comes from
-    ``SPT/SPT_Data/configs/core.json`` and falls back to
-    ``UNKNOWN_SPT_VERSION`` when it cannot be read.
+    carrying the ``Spt-Version`` trailer. ``spt_version`` is the version a user
+    supplies up front; without it the version comes from
+    :func:`~sptmod.core.game_dir.resolve_spt_version` and falls back to
+    ``UNKNOWN_SPT_VERSION``, which ``spt_version_known`` reports.
 
     The initial commit holds only ``.gitignore``, the tracked profiles and the
-    BepInEx configs. Mod content that already exists below ``SPT/user/mods``
-    and ``BepInEx/plugins`` stays untracked and is returned as
+    BepInEx configs. Mod content that already exists below the server mod
+    directory and ``BepInEx/plugins`` stays untracked and is returned as
     ``pre_existing_mods`` (one path per mod folder or loose plugin file,
     relative to the game directory) so callers can offer them for adoption.
 
@@ -572,24 +588,27 @@ def init_game_dir(path: Path, adopt: Sequence[Path] | bool = False) -> InitResul
     back the entries a user confirmed.
 
     Raises:
-        NotAGameDirError: ``path`` is missing, is no directory or lacks
-            ``SPT/`` or ``BepInEx/``.
+        NotAGameDirError: ``path`` is missing, is no directory or lacks a
+            runtime directory or ``BepInEx/``.
         InvalidMetadataError: a mod selected for adoption has no usable
             metadata.
         GitError: ``path`` is already a git repository or git failed.
     """
-    validate_game_dir(path)
-    repo = Repo.init(path)
-    version = spt_version(path) or UNKNOWN_SPT_VERSION
+    layout = validate_game_dir(path)
+    repo = Repo.init(layout)
+    if spt_version:
+        store_spt_version(repo, spt_version.strip())
+    detected = resolve_spt_version(layout, repo)
+    version = detected or UNKNOWN_SPT_VERSION
 
     untracked = repo.untracked_under(Path("."))
-    baseline = [entry for entry in untracked if _mod_prefix_of(entry) is None]
+    baseline = [entry for entry in untracked if _mod_prefix_of(entry, layout) is None]
     commit_hash = repo.commit(
         f"chore: clean SPT {version}",
         trailers={SPT_VERSION_TRAILER: version},
         paths=baseline,
     )
-    pre_existing = _mod_entries(untracked)
+    pre_existing = _mod_entries(untracked, layout)
     if isinstance(adopt, bool):
         selected = pre_existing if adopt else []
     else:
@@ -598,9 +617,39 @@ def init_game_dir(path: Path, adopt: Sequence[Path] | bool = False) -> InitResul
         game_dir=path,
         commit=commit_hash,
         spt_version=version,
+        spt_version_known=detected is not None,
+        warnings=[layout.warning] if layout.warning else [],
         pre_existing_mods=pre_existing,
         adopted=[adopt_mod(path, entry).mod for entry in selected],
     )
+
+
+def set_spt_version(path: Path, version: str) -> str:
+    """Store ``version`` as the SPT version of the game directory ``path``.
+
+    The answer a user gives when neither the core config nor the server
+    executable reveals a version. It is kept in the local git config of the
+    game repository, so :func:`~sptmod.core.game_dir.resolve_spt_version`
+    picks it up on every later run.
+
+    Args:
+        path: The game directory.
+        version: The SPT version to store, for example ``4.1.2``.
+
+    Returns:
+        The stored version, stripped of surrounding whitespace.
+
+    Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
+        ValueError: ``version`` is empty.
+        GitError: ``path`` is no git repository or git failed.
+    """
+    validate_game_dir(path)
+    cleaned = version.strip()
+    if not cleaned:
+        raise ValueError("the SPT version must not be empty")
+    store_spt_version(Repo(path), cleaned)
+    return cleaned
 
 
 def install_from_archive(
@@ -657,6 +706,7 @@ def install_from_archive(
     does not exist yet.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         DirtyTreeError: the working tree has uncommitted or untracked changes.
         GameRunningError: the SPT server or client is running.
         ArchiveError: the archive is unreadable, unsafe or has no anchor.
@@ -667,6 +717,7 @@ def install_from_archive(
             incompatible version and ``force`` is not set.
         GitError: git failed or metadata contains invalid trailer values.
     """
+    game_layout = detect_layout(path)
     repo = Repo(path)
     _report(progress, "check", "checking the working tree and running processes")
     _ensure_installable(repo)
@@ -677,13 +728,15 @@ def install_from_archive(
         extract(archive, temp)
 
         _report(progress, "anchor", "searching the mod anchor")
-        layout = find_anchor(temp)
+        layout = _for_game_layout(find_anchor(temp), game_layout)
 
         _report(progress, "metadata", "reading the mod metadata")
-        meta = _read_meta(layout, name_override, version_override, archive)
+        meta = _read_meta(
+            layout, game_layout.mods_dir, name_override, version_override, archive
+        )
 
         _report(progress, "conflicts", "checking conflicts and dependencies")
-        warnings = _check_install_conflicts(repo, layout, meta, force)
+        warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
 
         _report(progress, "copy", f"copying {len(layout.files)} files")
         added = [file for file in layout.files if not (path / file).exists()]
@@ -717,7 +770,7 @@ def install_from_archive(
             paths=layout.files,
         )
     except Exception:
-        _remove_copied(path, added)
+        _remove_copied(path, added, game_layout)
         raise
     committed = repo.log()[0]
     _report(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
@@ -813,7 +866,7 @@ def check_profiles(path: Path) -> CheckResult:
     Raises:
         GitError: git failed.
     """
-    return check_all(Repo(path), path)
+    return check_all(Repo(path), detect_layout(path))
 
 
 def history(path: Path, name: str | None = None) -> list[CommitInfo]:
@@ -1050,8 +1103,8 @@ def adopt_mod(
 ) -> AdoptResult:
     """Take the untracked mod ``target`` into the repository at ``path``.
 
-    ``target`` is a mod folder or a single DLL below ``SPT/user/mods`` or
-    ``BepInEx/plugins``, given absolute or relative to the game directory.
+    ``target`` is a mod folder or a single DLL below the server mod directory
+    or ``BepInEx/plugins``, given absolute or relative to the game directory.
     Metadata comes from ``package.json`` for a mod folder and from the file
     name for a bare DLL, which needs ``version_override`` to carry a version;
     both overrides win over what was found.
@@ -1075,12 +1128,13 @@ def adopt_mod(
             a name and a version.
         GitError: git failed or metadata contains invalid trailer values.
     """
+    layout = detect_layout(path)
     repo = Repo(path)
     relative = _relative_target(path, target)
-    if _mod_prefix_of(relative) is None:
+    if _mod_prefix_of(relative, layout) is None:
         raise NotAGameDirError(
             f"cannot adopt {relative.as_posix()}: it is below neither "
-            f"{MODS_DIR.as_posix()} nor {PLUGINS_DIR.as_posix()}"
+            f"{layout.mods_dir.as_posix()} nor {PLUGINS_DIR.as_posix()}"
         )
     if not (path / relative).exists():
         raise ModNotFoundError(f"{relative.as_posix()} does not exist in {path}")
@@ -1103,7 +1157,7 @@ def adopt_mod(
     draft = ModInfo(
         name=meta.name,
         version=meta.version,
-        mod_type="server" if relative.is_relative_to(MODS_DIR) else "client",
+        mod_type="server" if relative.is_relative_to(layout.mods_dir) else "client",
         author=meta.author,
         spt_range=meta.spt_range,
         state="installed",
@@ -1137,8 +1191,10 @@ def status(path: Path) -> StatusReport:
     :func:`snapshot` commits them together.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         GitError: git failed.
     """
+    layout = detect_layout(path)
     raw = Repo(path).status()
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
@@ -1147,16 +1203,18 @@ def status(path: Path) -> StatusReport:
     manual_files: dict[Path, list[Path]] = {}
 
     for entry in raw.modified:
-        _group_snapshot_path(entry, modified_profiles, modified_configs, other_modified)
+        _group_snapshot_path(
+            entry, layout, modified_profiles, modified_configs, other_modified
+        )
 
     for entry in raw.untracked:
-        prefix = _mod_prefix_of(entry)
+        prefix = _mod_prefix_of(entry, layout)
         if prefix is not None:
             top = prefix / entry.relative_to(prefix).parts[0]
             manual_files.setdefault(top, []).append(entry)
             continue
         _group_snapshot_path(
-            entry, modified_profiles, modified_configs, other_untracked
+            entry, layout, modified_profiles, modified_configs, other_untracked
         )
 
     return StatusReport(
@@ -1173,12 +1231,13 @@ def status(path: Path) -> StatusReport:
 def snapshot(path: Path, message: str | None = None) -> SnapshotResult:
     """Commit the profile and config changes of the game directory at ``path``.
 
-    Stages only the changed files below ``SPT/user/profiles/`` and
+    Stages only the changed files below the profile directory and
     ``BepInEx/config/`` and commits them as ``snapshot: <message>``, defaulting
     to a timestamp, without any ``Mod:`` trailer. Changes to tracked mod files
     stay uncommitted.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         GitError: neither profiles nor configs changed, or git failed.
     """
     repo = Repo(path)
@@ -1488,7 +1547,8 @@ def update_mod(
         result carrying a notice.
 
     Raises:
-        NotAGameDirError: the SPT version of ``path`` cannot be determined.
+        NotAGameDirError: ``path`` is no SPT game directory or its SPT version
+            cannot be determined.
         ModNotFoundError: no active mod matches ``name``.
         AmbiguousModError: several mods match ``name``.
         ArchiveError: the update has no download link, or its archive is
@@ -1621,7 +1681,7 @@ def _required_spt_version(path: Path) -> str:
     Raises:
         NotAGameDirError: the version cannot be read.
     """
-    version = spt_version(path)
+    version = _detected_spt_version(path)
     if version is None:
         raise NotAGameDirError(
             f"the SPT version of {path} cannot be read, so Forge cannot be "
@@ -1842,6 +1902,7 @@ def _apply_update(
     db_path: Path | None,
     client: ForgeClient,
 ) -> UpdateResult:
+    game_layout = detect_layout(path)
     repo = Repo(path)
     active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
     mod = _resolve(active, name)
@@ -1873,13 +1934,15 @@ def _apply_update(
         extract(archive, unpacked)
 
         _report(reporter, "anchor", "searching the mod anchor")
-        layout = find_anchor(unpacked)
+        layout = _for_game_layout(find_anchor(unpacked), game_layout)
 
         _report(reporter, "metadata", "reading the mod metadata")
-        meta = _read_meta(layout, mod.name, candidate.new_version, archive)
+        meta = _read_meta(
+            layout, game_layout.mods_dir, mod.name, candidate.new_version, archive
+        )
 
         _report(reporter, "conflicts", "checking conflicts and dependencies")
-        warnings = _check_update_conflicts(repo, layout, meta, mod, force)
+        warnings = _check_update_conflicts(repo, game_layout, layout, meta, mod, force)
 
         removed = [file for file in obsolete if file not in set(layout.files)]
         _report(reporter, "copy", f"copying {len(layout.files)} files")
@@ -1888,7 +1951,7 @@ def _apply_update(
         for mapping in layout.mappings:
             shutil.copytree(mapping.source, path / mapping.target, dirs_exist_ok=True)
     for directory in sorted({(path / file).parent for file in removed}, reverse=True):
-        _prune_empty(path, directory)
+        _prune_empty(path, directory, game_layout)
 
     _report(reporter, "commit", f"committing {mod.name} {candidate.new_version}")
     draft = replace(
@@ -1941,7 +2004,12 @@ def _replaceable_files(repo: Repo, mod: ModInfo) -> list[Path]:
 
 
 def _check_update_conflicts(
-    repo: Repo, layout: ArchiveLayout, meta: ModMeta, mod: ModInfo, force: bool
+    repo: Repo,
+    game_layout: GameLayout,
+    layout: ArchiveLayout,
+    meta: ModMeta,
+    mod: ModInfo,
+    force: bool,
 ) -> list[Conflict]:
     """Run the install checks of an update, ignoring the mod's own files.
 
@@ -1962,7 +2030,9 @@ def _check_update_conflicts(
             ],
             *check_dll_duplicates(repo.path, layout.files),
             *check_dependencies(active, meta),
-            *check_spt_compat(spt_version(repo.path) or "", meta.spt_range),
+            *check_spt_compat(
+                resolve_spt_version(game_layout, repo) or "", meta.spt_range
+            ),
         ],
         force,
     )
@@ -1999,11 +2069,20 @@ def _no_update_notice(mod: ModInfo, report: UpdatesReport) -> str:
 
 
 def _compatible_with(path: Path, compatible_only: bool) -> str | None:
-    return spt_version(path) if compatible_only else None
+    return _detected_spt_version(path) if compatible_only else None
+
+
+def _detected_spt_version(path: Path) -> str | None:
+    """Return the SPT version of the game directory at ``path``, or ``None``."""
+    return resolve_spt_version(detect_layout(path), Repo(path))
 
 
 def _check_install_conflicts(
-    repo: Repo, layout: ArchiveLayout, meta: ModMeta, force: bool
+    repo: Repo,
+    game_layout: GameLayout,
+    layout: ArchiveLayout,
+    meta: ModMeta,
+    force: bool,
 ) -> list[Conflict]:
     """Seam for the file, DLL and dependency checks of ``core.conflicts``.
 
@@ -2019,7 +2098,9 @@ def _check_install_conflicts(
             *check_file_conflicts(repo, layout.files),
             *check_dll_duplicates(repo.path, layout.files),
             *check_dependencies(active, meta),
-            *check_spt_compat(spt_version(repo.path) or "", meta.spt_range),
+            *check_spt_compat(
+                resolve_spt_version(game_layout, repo) or "", meta.spt_range
+            ),
         ],
         force,
     )
@@ -2044,10 +2125,11 @@ def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
     ``ProfileResidueError`` when a profile still references content of ``mod``
     unless ``force`` is set.
     """
-    ids = collect_mod_ids(repo, mod.commit)
+    layout = detect_layout(repo.path)
+    ids = collect_mod_ids(repo, mod.commit, layout)
     residues = [
         residue
-        for profile in profile_paths(repo.path)
+        for profile in profile_paths(layout)
         for residue in find_residues(profile, ids)
     ]
     if residues and not force:
@@ -2081,19 +2163,19 @@ def _report(
         )
 
 
-def _remove_copied(root: Path, files: Sequence[Path]) -> None:
+def _remove_copied(root: Path, files: Sequence[Path], layout: GameLayout) -> None:
     """Undo a copy step so a rejected install leaves no files behind."""
     for file in files:
         (root / file).unlink(missing_ok=True)
     for directory in sorted({(root / file).parent for file in files}, reverse=True):
-        _prune_empty(root, directory)
+        _prune_empty(root, directory, layout)
 
 
-def _prune_empty(root: Path, directory: Path) -> None:
+def _prune_empty(root: Path, directory: Path, layout: GameLayout) -> None:
     current = directory
     while (
         current != root
-        and current.relative_to(root) not in _MOD_PREFIXES
+        and current.relative_to(root) not in _mod_prefixes(layout)
         and current.is_dir()
         and not any(current.iterdir())
     ):
@@ -2109,8 +2191,36 @@ def _ensure_installable(repo: Repo) -> None:
     ensure_game_not_running()
 
 
+def _for_game_layout(layout: ArchiveLayout, game_layout: GameLayout) -> ArchiveLayout:
+    """Point the canonical server targets of ``layout`` at the detected runtime dir.
+
+    Archives ship their content below ``SPT/`` or ``SPT_Runtime/`` regardless
+    of the installation they are meant for, so ``find_anchor`` normalizes both
+    to the canonical ``SPT/user/mods`` and the install translates that prefix
+    to the runtime directory the game directory actually uses.
+    """
+    if game_layout.mods_dir == SERVER_MODS_TARGET:
+        return layout
+    return replace(
+        layout,
+        mappings=[
+            replace(mapping, target=_to_game_layout(mapping.target, game_layout))
+            for mapping in layout.mappings
+        ],
+        files=[_to_game_layout(file, game_layout) for file in layout.files],
+    )
+
+
+def _to_game_layout(target: Path, game_layout: GameLayout) -> Path:
+    """Translate one canonical archive target to the detected layout."""
+    if not target.is_relative_to(SERVER_MODS_TARGET):
+        return target
+    return game_layout.mods_dir / target.relative_to(SERVER_MODS_TARGET)
+
+
 def _read_meta(
     layout: ArchiveLayout,
+    mods_dir: Path,
     name_override: str | None,
     version_override: str | None,
     archive: Path,
@@ -2118,7 +2228,7 @@ def _read_meta(
     if layout.mod_type == "client":
         meta = _dll_meta(layout, name_override, version_override, archive.stem)
     else:
-        mod_dir = _server_mod_dir(layout)
+        mod_dir = _server_mod_dir(layout, mods_dir)
         if mod_dir is not None:
             meta = read_package_json(mod_dir)
         else:
@@ -2129,7 +2239,7 @@ def _read_meta(
             if not (name_override or meta.name):
                 raise InvalidMetadataError(
                     f"{archive.name} carries no {PACKAGE_JSON_NAME} below "
-                    f"{MODS_DIR.as_posix()} and no DLL to derive a name from; "
+                    f"{mods_dir.as_posix()} and no DLL to derive a name from; "
                     f"pass a name and a version"
                 )
     resolved = replace(
@@ -2160,10 +2270,10 @@ def _reject_multiline_metadata(meta: ModMeta) -> None:
             )
 
 
-def _server_mod_dir(layout: ArchiveLayout) -> Path | None:
+def _server_mod_dir(layout: ArchiveLayout, mods_dir: Path) -> Path | None:
     """Return the mod folder carrying the ``package.json``, if the archive has one."""
     sources = [
-        mapping.source for mapping in layout.mappings if mapping.target == MODS_DIR
+        mapping.source for mapping in layout.mappings if mapping.target == mods_dir
     ]
     for source in sources:
         for child in sorted(source.iterdir()):
@@ -2361,9 +2471,13 @@ def _adopt_meta(
 
 
 def _group_snapshot_path(
-    entry: Path, profiles: list[Path], configs: list[Path], rest: list[Path]
+    entry: Path,
+    layout: GameLayout,
+    profiles: list[Path],
+    configs: list[Path],
+    rest: list[Path],
 ) -> None:
-    if entry.is_relative_to(PROFILES_DIR):
+    if entry.is_relative_to(layout.profiles_dir):
         profiles.append(entry)
     elif entry.is_relative_to(BEPINEX_CONFIG_DIR):
         configs.append(entry)
@@ -2518,16 +2632,22 @@ def _parse_mod_list_text(source: str, raw: str) -> list[ExportEntry]:
     return entries
 
 
-def _mod_prefix_of(entry: Path) -> Path | None:
+def _mod_prefixes(layout: GameLayout) -> tuple[Path, ...]:
+    """Return the game-dir-relative paths mod content lives under."""
+    return (layout.mods_dir, PLUGINS_DIR)
+
+
+def _mod_prefix_of(entry: Path, layout: GameLayout) -> Path | None:
     return next(
-        (prefix for prefix in _MOD_PREFIXES if entry.is_relative_to(prefix)), None
+        (prefix for prefix in _mod_prefixes(layout) if entry.is_relative_to(prefix)),
+        None,
     )
 
 
-def _mod_entries(untracked: Sequence[Path]) -> list[Path]:
+def _mod_entries(untracked: Sequence[Path], layout: GameLayout) -> list[Path]:
     entries: list[Path] = []
     for entry in untracked:
-        prefix = _mod_prefix_of(entry)
+        prefix = _mod_prefix_of(entry, layout)
         if prefix is None:
             continue
         top = prefix / entry.relative_to(prefix).parts[0]

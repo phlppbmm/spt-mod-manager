@@ -4,29 +4,39 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from sptmod.core.errors import GitError, NotAGameDirError
 from sptmod.core.models import CommitInfo, FileChange, ModFile, RepoStatus
 
-# Deviates from the verbatim patterns of HANDOFF §5: "!dir/" only re-includes
-# the directory entry itself, while the leading "*" keeps matching every file
-# basename at any depth. The "!dir/**" and "!dir/*.json" lines re-include the
-# contents that have to stay trackable. "BepInEx/patchers/" goes beyond §5 as
-# well: mods such as WTT-CommonLib ship patcher DLLs that must be tracked like
-# plugins.
-GITIGNORE_WHITELIST: Final = """\
+if TYPE_CHECKING:
+    from sptmod.core.game_dir import GameLayout
+
+
+def gitignore_whitelist(runtime_dir_name: str) -> str:
+    """Return the whitelist ``.gitignore`` for a runtime directory name.
+
+    ``runtime_dir_name`` is ``SPT_Runtime`` or ``SPT``, depending on the
+    detected layout of the installation.
+    """
+    # Deviates from the verbatim patterns of HANDOFF §5: "!dir/" only
+    # re-includes the directory entry itself, while the leading "*" keeps
+    # matching every file basename at any depth. The "!dir/**" and
+    # "!dir/*.json" lines re-include the contents that have to stay trackable.
+    # "BepInEx/patchers/" goes beyond §5 as well: mods such as WTT-CommonLib
+    # ship patcher DLLs that must be tracked like plugins.
+    return f"""\
 *
 !.gitignore
-!SPT/
-SPT/*
-!SPT/user/
-SPT/user/*
-!SPT/user/mods/
-!SPT/user/mods/**
-!SPT/user/profiles/
-!SPT/user/profiles/*.json
-SPT/user/profiles/backups/
+!{runtime_dir_name}/
+{runtime_dir_name}/*
+!{runtime_dir_name}/user/
+{runtime_dir_name}/user/*
+!{runtime_dir_name}/user/mods/
+!{runtime_dir_name}/user/mods/**
+!{runtime_dir_name}/user/profiles/
+!{runtime_dir_name}/user/profiles/*.json
+{runtime_dir_name}/user/profiles/backups/
 !BepInEx/
 BepInEx/*
 !BepInEx/plugins/
@@ -37,9 +47,11 @@ BepInEx/*
 !BepInEx/patchers/**
 """
 
+
 COMMITTER_NAME: Final = "sptmod"
 COMMITTER_EMAIL: Final = "sptmod@localhost"
 
+_CONFIG_KEY_UNSET: Final = 1
 _RECORD_SEPARATOR: Final = "\x1e"
 _FIELD_SEPARATOR: Final = "\x1f"
 _TRAILER_SEPARATOR: Final = "\x1d"
@@ -113,17 +125,19 @@ class Repo:
         self.path = path
 
     @classmethod
-    def init(cls, path: Path) -> "Repo":
-        """Create a repository in ``path`` with the whitelist ``.gitignore``.
+    def init(cls, layout: "GameLayout") -> "Repo":
+        """Create a repository in ``layout.root`` with the whitelist ``.gitignore``.
 
-        Writes ``GITIGNORE_WHITELIST`` and sets a local committer identity so
-        operations do not depend on the global git config. The repository has no
-        commit yet; the initial commit is made through :meth:`commit`.
+        Writes the whitelist for the detected runtime directory and sets a local
+        committer identity so operations do not depend on the global git config.
+        The repository has no commit yet; the initial commit is made through
+        :meth:`commit`.
 
         Raises:
-            NotAGameDirError: ``path`` is no SPT game directory.
-            GitError: ``path`` is already a repository or git failed.
+            NotAGameDirError: ``layout.root`` is no directory.
+            GitError: the directory is already a repository or git failed.
         """
+        path = layout.root
         if not path.is_dir():
             raise NotAGameDirError(f"{path} is not a directory")
         if (path / ".git").exists():
@@ -131,7 +145,9 @@ class Repo:
 
         repo = cls(path)
         repo._git("init", "--quiet")
-        (path / ".gitignore").write_text(GITIGNORE_WHITELIST, encoding="utf-8")
+        (path / ".gitignore").write_text(
+            gitignore_whitelist(layout.runtime_dir_name), encoding="utf-8"
+        )
         repo._git("config", "user.name", COMMITTER_NAME)
         repo._git("config", "user.email", COMMITTER_EMAIL)
         return repo
@@ -335,6 +351,34 @@ class Repo:
         """
         status = self.status()
         return not status.modified and not status.untracked
+
+    def config_get(self, key: str) -> str | None:
+        """Return the local git config value of ``key``, or ``None`` if unset.
+
+        Args:
+            key: The config key in ``section.name`` form.
+
+        Raises:
+            GitError: git failed for a reason other than the key being unset.
+        """
+        result = self._run("config", "--local", "--get", key)
+        if result.returncode == _CONFIG_KEY_UNSET:
+            return None
+        if result.returncode != 0:
+            raise GitError(f"git config --get {key} failed: {_failure_detail(result)}")
+        return result.stdout.strip()
+
+    def config_set(self, key: str, value: str) -> None:
+        """Set the local git config ``key`` to ``value``.
+
+        Args:
+            key: The config key in ``section.name`` form.
+            value: The value to store; replaces an existing one.
+
+        Raises:
+            GitError: git failed.
+        """
+        self._git("config", "--local", key, value)
 
     def untracked_under(self, prefix: Path) -> list[Path]:
         """Return untracked, non-ignored paths below ``prefix``.

@@ -1,4 +1,12 @@
-"""Tests for Repo.init: repository creation, whitelist .gitignore, local identity."""
+"""Tests for Repo.init: repository creation, whitelist .gitignore, local identity.
+
+CONTRACT CHANGE (spt-mod-manager-fyx): ``Repo.init`` now takes the detected
+``GameLayout`` instead of a bare ``Path`` (so it can generate the runtime-dir-
+correct whitelist), and the old fixed ``GITIGNORE_WHITELIST`` constant was
+replaced by ``gitignore_whitelist(runtime_dir_name)``. Updated accordingly;
+the ``SPT_Runtime`` counterpart of the whitelist-generation behavior lives in
+tests/test_game_layout.py.
+"""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +14,8 @@ from pathlib import Path
 import pytest
 
 from sptmod.core.errors import GitError
-from sptmod.core.repo import COMMITTER_EMAIL, COMMITTER_NAME, GITIGNORE_WHITELIST, Repo
+from sptmod.core.game_dir import detect_layout
+from sptmod.core.repo import COMMITTER_EMAIL, COMMITTER_NAME, Repo, gitignore_whitelist
 
 
 def _git(path: Path, *args: str) -> str:
@@ -20,26 +29,26 @@ def _git(path: Path, *args: str) -> str:
 
 
 def test_init_returns_repo_bound_to_the_given_path(fake_game_dir: Path) -> None:
-    repo = Repo.init(fake_game_dir)
+    repo = Repo.init(detect_layout(fake_game_dir))
 
     assert repo.path == fake_game_dir
 
 
 def test_init_creates_a_git_repository(fake_game_dir: Path) -> None:
-    Repo.init(fake_game_dir)
+    Repo.init(detect_layout(fake_game_dir))
 
     assert (fake_game_dir / ".git").is_dir()
 
 
 def test_init_writes_the_whitelist_gitignore_verbatim(fake_game_dir: Path) -> None:
-    Repo.init(fake_game_dir)
+    Repo.init(detect_layout(fake_game_dir))
 
     gitignore = fake_game_dir / ".gitignore"
-    assert gitignore.read_text(encoding="utf-8") == GITIGNORE_WHITELIST
+    assert gitignore.read_text(encoding="utf-8") == gitignore_whitelist("SPT")
 
 
 def test_init_does_not_create_an_initial_commit(fake_game_dir: Path) -> None:
-    Repo.init(fake_game_dir)
+    Repo.init(detect_layout(fake_game_dir))
 
     # The repository must exist (otherwise the assertion below is meaningless)
     # but have zero commits, i.e. no valid HEAD to log.
@@ -54,7 +63,7 @@ def test_init_does_not_create_an_initial_commit(fake_game_dir: Path) -> None:
 
 
 def test_init_sets_local_committer_identity_not_global(fake_game_dir: Path) -> None:
-    Repo.init(fake_game_dir)
+    Repo.init(detect_layout(fake_game_dir))
 
     name = _git(fake_game_dir, "config", "--local", "--get", "user.name")
     email = _git(fake_game_dir, "config", "--local", "--get", "user.email")
@@ -67,7 +76,7 @@ def test_init_identity_works_without_any_global_git_config(fake_game_dir: Path) 
     # The autouse isolate_git_config fixture already points HOME and
     # GIT_CONFIG_GLOBAL at nonexistent files. If Repo.init relied on the
     # global config being present it would fail here.
-    repo = Repo.init(fake_game_dir)
+    repo = Repo.init(detect_layout(fake_game_dir))
 
     (fake_game_dir / "SPT" / "user" / "profiles" / "abc.json").write_text(
         '{"changed": true}', encoding="utf-8"
@@ -80,7 +89,8 @@ def test_init_identity_works_without_any_global_git_config(fake_game_dir: Path) 
 
 
 def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
-    Repo.init(fake_game_dir)
+    layout = detect_layout(fake_game_dir)
+    Repo.init(layout)
 
     with pytest.raises(GitError):
-        Repo.init(fake_game_dir)
+        Repo.init(layout)

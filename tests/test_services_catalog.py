@@ -17,6 +17,7 @@ from sptmod.core import services
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, SyncResult
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 from test_forge_catalog_fixtures import (
     client_factory,
@@ -45,7 +46,7 @@ _FORGE_UNAVAILABLE_EXIT_CODE = 14
 
 
 def _clean_repo(path: Path) -> Repo:
-    repo = Repo.init(path)
+    repo = Repo.init(detect_layout(path))
     repo.commit(
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
     )

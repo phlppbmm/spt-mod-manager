@@ -360,13 +360,26 @@ def init(
         bool,
         typer.Option("--yes", "-y", help="Adopt pre-existing mods without asking."),
     ] = False,
+    spt_version: Annotated[
+        str | None,
+        typer.Option(
+            "--spt-version",
+            help="SPT version to record when it cannot be detected.",
+        ),
+    ] = None,
 ) -> None:
     """Track an SPT installation as a git repository."""
     with _handled():
-        result = services.init_game_dir(path or Path.cwd(), adopt=yes)
+        result = services.init_game_dir(
+            path or Path.cwd(), adopt=yes, spt_version=spt_version
+        )
+        for warning in result.warnings:
+            console.print(f"warning: {warning}", markup=False)
+        version = result.spt_version
+        if not result.spt_version_known:
+            version = _ask_spt_version(result.game_dir)
         console.print(
-            f"initialized SPT {result.spt_version} "
-            f"at {result.commit[:_SHORT_HASH_LENGTH]}",
+            f"initialized SPT {version} at {result.commit[:_SHORT_HASH_LENGTH]}",
             markup=False,
         )
         console.print(str(result.game_dir), markup=False)
@@ -376,6 +389,17 @@ def init(
             return
         for mod_path in result.pre_existing_mods:
             _adopt_pre_existing(result.game_dir, mod_path)
+
+
+def _ask_spt_version(game_dir: Path) -> str:
+    """Ask for the SPT version the detection could not determine and store it."""
+    console.print(
+        "the SPT version of this installation cannot be detected", markup=False
+    )
+    answer = typer.prompt("SPT version (empty to skip)", default="", show_default=False)
+    if not answer.strip():
+        return services.UNKNOWN_SPT_VERSION
+    return services.set_spt_version(game_dir, answer)
 
 
 def _adopt_pre_existing(game_dir: Path, mod_path: Path) -> None:

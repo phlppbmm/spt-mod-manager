@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
 
@@ -90,9 +91,71 @@ def fake_game_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def fake_game_dir_runtime(tmp_path: Path) -> Path:
+    """Build a minimal, realistic SPT 4.1+ game directory (``SPT_Runtime`` layout).
+
+    Mirrors :func:`fake_game_dir` but uses the ``SPT_Runtime`` runtime directory
+    SPT 4.1+ installers write, and a genuinely 4.x-shaped ``core.json`` that
+    carries no ``sptVersion`` field (that field lived only in the 3.x/4.0.x
+    layout; 4.x compiles the version into ``SPT.Server.exe`` instead). Layout:
+
+      SPT_Runtime/user/mods/                        (empty, trackable)
+      SPT_Runtime/user/profiles/abc.json            (minimal profile, trackable)
+      SPT_Runtime/user/profiles/backups/old.json    (dummy, must stay ignored)
+      SPT_Runtime/user/logs/x.log                   (dummy, must stay ignored)
+      SPT_Runtime/SPT_Data/configs/core.json        (no sptVersion key, untracked)
+      BepInEx/plugins/                              (empty, trackable)
+      BepInEx/config/                               (empty, trackable)
+      EscapeFromTarkov_Data/foo                      (dummy, must stay ignored)
+
+    Without a ``SPT.Server.exe`` added by the caller (or a stored version) the
+    SPT version of this fixture is genuinely undetectable, which is deliberate:
+    it is the layout the version-chain fallback and CLI-prompt tests build on.
+    """
+    root = tmp_path / "game"
+    (root / "SPT_Runtime" / "user" / "mods").mkdir(parents=True)
+    (root / "SPT_Runtime" / "user" / "profiles" / "backups").mkdir(parents=True)
+    (root / "SPT_Runtime" / "user" / "logs").mkdir(parents=True)
+    (root / "SPT_Runtime" / "SPT_Data" / "configs").mkdir(parents=True)
+    (root / "BepInEx" / "plugins").mkdir(parents=True)
+    (root / "BepInEx" / "config").mkdir(parents=True)
+    (root / "EscapeFromTarkov_Data").mkdir(parents=True)
+
+    profile = {
+        "Inventory": {"items": []},
+        "TradersInfo": {},
+        "Quests": [],
+    }
+    (root / "SPT_Runtime" / "user" / "profiles" / "abc.json").write_text(
+        json.dumps(profile), encoding="utf-8"
+    )
+
+    core_config = {"projectName": "SPT", "compatibleTarkovVersion": "1.0.0"}
+    (root / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json").write_text(
+        json.dumps(core_config), encoding="utf-8"
+    )
+
+    (root / "SPT_Runtime" / "user" / "logs" / "x.log").write_text(
+        "dummy log line\n", encoding="utf-8"
+    )
+    (root / "EscapeFromTarkov_Data" / "foo").write_text(
+        "dummy game data\n", encoding="utf-8"
+    )
+    (root / "SPT_Runtime" / "user" / "profiles" / "backups" / "old.json").write_text(
+        "{}", encoding="utf-8"
+    )
+
+    return root
+
+
+@pytest.fixture
 def initialized_repo(fake_game_dir: Path) -> Repo:
-    """A ``Repo`` freshly initialized on top of :func:`fake_game_dir`."""
-    return Repo.init(fake_game_dir)
+    """A ``Repo`` freshly initialized on top of :func:`fake_game_dir`.
+
+    CONTRACT CHANGE (spt-mod-manager-fyx): ``Repo.init`` now takes the detected
+    ``GameLayout`` instead of a bare ``Path``.
+    """
+    return Repo.init(detect_layout(fake_game_dir))
 
 
 @pytest.fixture

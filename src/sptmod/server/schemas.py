@@ -140,11 +140,18 @@ class SyncResult(CoreModel):
 
 
 class InitResult(CoreModel):
-    """Outcome of ``init_game_dir``."""
+    """Outcome of ``init_game_dir``.
+
+    ``spt_version_known`` is ``False`` when the version chain found nothing, in
+    which case the setup flow has to ask for a version and send it to
+    ``set_spt_version``.
+    """
 
     game_dir: Path
     commit: str
     spt_version: str
+    spt_version_known: bool = True
+    warnings: list[str] = []
     pre_existing_mods: list[Path] = []
     adopted: list[ModInfo] = []
 
@@ -348,6 +355,19 @@ class InitGameDirRequest(CoreModel):
 
     path: Path
     adopt: bool | list[Path] = False
+
+
+class SetSptVersionRequest(CoreModel):
+    """Parameters of ``set_spt_version``."""
+
+    path: Path
+    version: str
+
+
+class SetSptVersionResponse(CoreModel):
+    """The SPT version stored for a game directory."""
+
+    spt_version: str
 
 
 class InstallFromArchiveRequest(CoreModel):

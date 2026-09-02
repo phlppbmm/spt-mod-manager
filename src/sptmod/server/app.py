@@ -108,6 +108,15 @@ def init_game_dir(request: schemas.InitGameDirRequest) -> services.InitResult:
     return services.init_game_dir(request.path, request.adopt)
 
 
+@router.post("/set_spt_version", response_model=schemas.SetSptVersionResponse)
+def set_spt_version(
+    request: schemas.SetSptVersionRequest,
+) -> schemas.SetSptVersionResponse:
+    return schemas.SetSptVersionResponse(
+        spt_version=services.set_spt_version(request.path, request.version)
+    )
+
+
 @router.post("/install_from_archive", response_model=schemas.InstallFromArchiveResponse)
 def install_from_archive(
     request: schemas.InstallFromArchiveRequest,

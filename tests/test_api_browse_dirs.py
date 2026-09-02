@@ -110,11 +110,16 @@ def test_list_directories_raises_invalid_path_error_for_permission_denied(
 
 @pytest.fixture
 def locate_root(tmp_path: Path) -> Path:
-    """Two directories named 'SPT': only one carries the fingerprint entries."""
+    """Two directories named 'SPT': only one carries the fingerprint entries.
+
+    CONTRACT CHANGE (spt-mod-manager-fyx): the second fingerprint entry used to
+    be an arbitrary name ("SPT_Runtime"); now that name makes is_game_dir()
+    true, so it was swapped for a still-arbitrary "cache" to keep this fixture
+    a fingerprint match that is deliberately not a real game dir."""
     root = tmp_path / "locate-root"
     (root / "parent_a" / "SPT").mkdir(parents=True)
     (root / "parent_b" / "SPT" / "BepInEx").mkdir(parents=True)
-    (root / "parent_b" / "SPT" / "SPT_Runtime").mkdir(parents=True)
+    (root / "parent_b" / "SPT" / "cache").mkdir(parents=True)
     return root
 
 
@@ -126,7 +131,7 @@ def test_locate_directory_search_roots_are_patchable_not_hardcoded(
     # patching it away from the real filesystem must fully redirect the
     # search to the patched roots.
     with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("SPT", ["BepInEx", "SPT_Runtime"])
+        matches = services.locate_directory("SPT", ["BepInEx", "cache"])
 
     assert [match.path for match in matches] == [locate_root / "parent_b" / "SPT"]
 
@@ -135,7 +140,7 @@ def test_locate_directory_returns_only_the_fingerprint_matching_directory(
     locate_root: Path,
 ) -> None:
     with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("SPT", ["BepInEx", "SPT_Runtime"])
+        matches = services.locate_directory("SPT", ["BepInEx", "cache"])
 
     assert len(matches) == 1
     assert matches[0].path == locate_root / "parent_b" / "SPT"
@@ -213,7 +218,7 @@ def test_post_locate_directory_returns_the_fingerprint_matching_entry(
     with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
         response = client.post(
             "/api/locate_directory",
-            json={"name": "SPT", "fingerprint": ["BepInEx", "SPT_Runtime"]},
+            json={"name": "SPT", "fingerprint": ["BepInEx", "cache"]},
         )
 
     assert response.status_code == 200

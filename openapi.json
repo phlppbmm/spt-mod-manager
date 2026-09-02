@@ -153,6 +153,44 @@
         }
       }
     },
+    "/api/set_spt_version": {
+      "post": {
+        "summary": "Set Spt Version",
+        "operationId": "set_spt_version_api_set_spt_version_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSptVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSptVersionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/install_from_archive": {
       "post": {
         "summary": "Install From Archive",
@@ -2088,6 +2126,19 @@
             "type": "string",
             "title": "Spt Version"
           },
+          "spt_version_known": {
+            "type": "boolean",
+            "title": "Spt Version Known",
+            "default": true
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          },
           "pre_existing_mods": {
             "items": {
               "type": "string",
@@ -2113,7 +2164,7 @@
           "spt_version"
         ],
         "title": "InitResult",
-        "description": "Outcome of ``init_game_dir``."
+        "description": "Outcome of ``init_game_dir``.\n\n``spt_version_known`` is ``False`` when the version chain found nothing, in\nwhich case the setup flow has to ask for a version and send it to\n``set_spt_version``."
       },
       "InstallFromArchiveRequest": {
         "properties": {
@@ -2907,6 +2958,40 @@
         ],
         "title": "SearchCatalogRequest",
         "description": "Parameters of ``search_catalog``."
+      },
+      "SetSptVersionRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "version"
+        ],
+        "title": "SetSptVersionRequest",
+        "description": "Parameters of ``set_spt_version``."
+      },
+      "SetSptVersionResponse": {
+        "properties": {
+          "spt_version": {
+            "type": "string",
+            "title": "Spt Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "spt_version"
+        ],
+        "title": "SetSptVersionResponse",
+        "description": "The SPT version stored for a game directory."
       },
       "SnapshotRequest": {
         "properties": {

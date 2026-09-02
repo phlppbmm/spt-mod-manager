@@ -20,6 +20,7 @@ from sptmod.core.errors import (
     ModNotFoundError,
     NotAGameDirError,
 )
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
@@ -32,7 +33,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _clean_repo(path: Path) -> Repo:
-    repo = Repo.init(path)
+    repo = Repo.init(detect_layout(path))
     repo.commit(
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
     )

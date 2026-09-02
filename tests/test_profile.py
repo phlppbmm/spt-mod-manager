@@ -5,6 +5,12 @@ the working tree, tolerating broken JSON), ``find_residues`` (matching a
 mod's IDs against a player profile, per-category counts, the string
 fallback and its exclusion of structurally-matched IDs), ``profile_paths``
 and ``check_all``.
+
+CONTRACT CHANGE (spt-mod-manager-fyx): ``collect_mod_ids``, ``profile_paths``
+and ``check_all`` now take a ``GameLayout`` instead of a bare game-dir
+``Path``, so the whitelisted db/profile paths are relative to the detected
+runtime directory. Updated accordingly; the ``SPT_Runtime`` counterpart of
+this layout-awareness is covered in tests/test_game_layout.py.
 """
 
 import json
@@ -14,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from sptmod.core.errors import GitError
+from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.models import ProfileResidue
 from sptmod.core.profile import (
     ModIds,
@@ -82,7 +89,7 @@ def test_collect_mod_ids_reads_item_trader_and_quest_ids_from_the_commit(
     shutil.rmtree(clean_repo.path / "SPT/user/mods/ServerMod/db/traders")
     (clean_repo.path / "SPT/user/mods/ServerMod/db/quests/quests.json").unlink()
 
-    result = collect_mod_ids(clean_repo, commit_hash)
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.items == {ITEM_A, ITEM_B}
     assert result.traders == {TRADER_ID}
@@ -103,7 +110,7 @@ def test_collect_mod_ids_trader_id_includes_both_folder_name_and_base_json_id(
         clean_repo, "ServerMod", mod_type="server", files=files
     )
 
-    result = collect_mod_ids(clean_repo, commit_hash)
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.traders == {folder_name, TRADER_ID}
 
@@ -120,7 +127,7 @@ def test_collect_mod_ids_finds_item_ids_below_an_items_path_segment(
         clean_repo, "ServerMod", mod_type="server", files=files
     )
 
-    result = collect_mod_ids(clean_repo, commit_hash)
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.items == {ITEM_C}
 
@@ -138,7 +145,7 @@ def test_collect_mod_ids_broken_json_warns_and_keeps_scanning_other_files(
         clean_repo, "ServerMod", mod_type="server", files=files
     )
 
-    result = collect_mod_ids(clean_repo, commit_hash)
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.traders == {TRADER_ID}
     assert result.items == set()
@@ -153,7 +160,7 @@ def test_collect_mod_ids_mod_without_db_dir_yields_no_ids_and_no_warnings(
         clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"}
     )
 
-    result = collect_mod_ids(clean_repo, commit_hash)
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result == ModIds()
 
@@ -162,7 +169,7 @@ def test_collect_mod_ids_raises_git_error_for_an_unknown_commit(
     clean_repo: Repo,
 ) -> None:
     with pytest.raises(GitError):
-        collect_mod_ids(clean_repo, "0" * 40)
+        collect_mod_ids(clean_repo, "0" * 40, detect_layout(clean_repo.path))
 
 
 # --------------------------------------------------------------------------
@@ -335,7 +342,7 @@ def test_profile_paths_returns_json_files_sorted_and_skips_backups(
     (profiles_dir / "notes.txt").write_text("hello", encoding="utf-8")
     (profiles_dir / "backups" / "old.json").write_text("{}", encoding="utf-8")
 
-    result = profile_paths(tmp_path)
+    result = profile_paths(GameLayout(root=tmp_path, runtime_dir_name="SPT"))
 
     assert result == [profiles_dir / "a.json", profiles_dir / "b.json"]
 
@@ -343,7 +350,7 @@ def test_profile_paths_returns_json_files_sorted_and_skips_backups(
 def test_profile_paths_returns_empty_list_when_profiles_dir_is_missing(
     tmp_path: Path,
 ) -> None:
-    assert profile_paths(tmp_path) == []
+    assert profile_paths(GameLayout(root=tmp_path, runtime_dir_name="SPT")) == []
 
 
 # --------------------------------------------------------------------------
@@ -391,7 +398,7 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
         json.dumps(_empty_pmc_profile()), encoding="utf-8"
     )
 
-    result = check_all(clean_repo, clean_repo.path)
+    result = check_all(clean_repo, detect_layout(clean_repo.path))
 
     assert set(result.residues.keys()) == {"ModX"}
     assert result.residues["ModX"] == [
@@ -424,7 +431,7 @@ def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit) -> None:
         json.dumps(profile_with_x), encoding="utf-8"
     )
 
-    result = check_all(clean_repo, clean_repo.path)
+    result = check_all(clean_repo, detect_layout(clean_repo.path))
 
     assert result.residues == {}
 
@@ -441,7 +448,7 @@ def test_check_all_prefixes_collection_warnings_with_the_mod_name(
         },
     )
 
-    result = check_all(clean_repo, clean_repo.path)
+    result = check_all(clean_repo, detect_layout(clean_repo.path))
 
     assert len(result.warnings) == 1
     assert result.warnings[0].startswith("BrokenMod")
@@ -471,6 +478,6 @@ def test_check_all_does_not_modify_the_repository_or_profiles(
     )
     before = (profiles_dir / "abc.json").read_bytes()
 
-    check_all(clean_repo, clean_repo.path)
+    check_all(clean_repo, detect_layout(clean_repo.path))
 
     assert (profiles_dir / "abc.json").read_bytes() == before

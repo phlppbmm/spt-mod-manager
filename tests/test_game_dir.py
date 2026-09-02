@@ -1,4 +1,13 @@
-"""Tests for game directory detection, SPT version lookup and process check."""
+"""Tests for game directory detection, SPT version lookup and process check.
+
+CONTRACT CHANGE (spt-mod-manager-fyx): ``validate_game_dir`` now returns the
+detected ``GameLayout`` instead of ``None`` (still raising ``NotAGameDirError``
+for the same bad-input cases, so the tests below are otherwise unchanged), and
+the free ``spt_version(path)`` function was removed in favor of the layout- and
+git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version``,
+``resolve_spt_version``). Its former core.json-reading coverage moved to
+``tests/test_game_layout.py::test_read_core_json_version_*``.
+"""
 
 from pathlib import Path
 
@@ -9,7 +18,6 @@ from sptmod.core.game_dir import (
     ensure_game_not_running,
     is_game_dir,
     is_game_process_name,
-    spt_version,
     validate_game_dir,
 )
 
@@ -87,43 +95,6 @@ def test_validate_game_dir_raises_when_path_is_a_file(tmp_path: Path) -> None:
 def test_validate_game_dir_raises_when_path_does_not_exist(tmp_path: Path) -> None:
     with pytest.raises(NotAGameDirError):
         validate_game_dir(tmp_path / "does-not-exist")
-
-
-# --- spt_version -------------------------------------------------------------
-
-
-def _write_core_json(game_dir: Path, content: str) -> None:
-    config_dir = game_dir / "SPT" / "SPT_Data" / "configs"
-    config_dir.mkdir(parents=True)
-    (config_dir / "core.json").write_text(content, encoding="utf-8")
-
-
-def test_spt_version_reads_field_from_core_json(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    _write_core_json(game_dir, '{"sptVersion": "4.1.0"}')
-
-    assert spt_version(game_dir) == "4.1.0"
-
-
-def test_spt_version_none_when_file_missing(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-
-    assert spt_version(game_dir) is None
-
-
-def test_spt_version_none_when_field_missing(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    _write_core_json(game_dir, '{"otherField": "value"}')
-
-    assert spt_version(game_dir) is None
-
-
-def test_spt_version_none_when_json_malformed(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    _write_core_json(game_dir, "{not valid json")
-
-    assert spt_version(game_dir) is None
 
 
 # --- is_game_process_name ---------------------------------------------------

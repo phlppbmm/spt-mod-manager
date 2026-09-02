@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from sptmod.cli import app
 from sptmod.core import game_dir
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
 runner = CliRunner()
@@ -19,7 +20,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _clean_repo(path: Path) -> Repo:
-    repo = Repo.init(path)
+    repo = Repo.init(detect_layout(path))
     repo.commit(
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
     )
@@ -250,7 +251,7 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
 ) -> None:
     if scenario == "dirty_tree":
         # No baseline commit: the tracked profile is still untracked.
-        Repo.init(fake_game_dir)
+        Repo.init(detect_layout(fake_game_dir))
         archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
         argv = ["install", "--file", str(archive)]
     elif scenario == "game_running":

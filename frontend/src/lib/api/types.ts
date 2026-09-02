@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/set_spt_version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Spt Version */
+        post: operations["set_spt_version_api_set_spt_version_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/install_from_archive": {
         parameters: {
             query?: never;
@@ -1005,6 +1022,10 @@ export interface components {
         /**
          * InitResult
          * @description Outcome of ``init_game_dir``.
+         *
+         *     ``spt_version_known`` is ``False`` when the version chain found nothing, in
+         *     which case the setup flow has to ask for a version and send it to
+         *     ``set_spt_version``.
          */
         InitResult: {
             /**
@@ -1016,6 +1037,16 @@ export interface components {
             commit: string;
             /** Spt Version */
             spt_version: string;
+            /**
+             * Spt Version Known
+             * @default true
+             */
+            spt_version_known: boolean;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
             /**
              * Pre Existing Mods
              * @default []
@@ -1419,6 +1450,27 @@ export interface components {
             db_path?: string | null;
         };
         /**
+         * SetSptVersionRequest
+         * @description Parameters of ``set_spt_version``.
+         */
+        SetSptVersionRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * SetSptVersionResponse
+         * @description The SPT version stored for a game directory.
+         */
+        SetSptVersionResponse: {
+            /** Spt Version */
+            spt_version: string;
+        };
+        /**
          * SnapshotRequest
          * @description Parameters of ``snapshot``.
          */
@@ -1800,6 +1852,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InitResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_spt_version_api_set_spt_version_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSptVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetSptVersionResponse"];
                 };
             };
             /** @description Default Response */

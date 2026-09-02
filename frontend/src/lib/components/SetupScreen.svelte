@@ -19,6 +19,7 @@
 	let { initialPath, onready }: Props = $props();
 
 	const FINGERPRINT_LIMIT = 5;
+	const SPT_VERSION_UNKNOWN = 'SPT_VERSION_UNKNOWN';
 
 	let path = $state(untrack(() => initialPath));
 	let busy = $state(false);
@@ -28,6 +29,8 @@
 	let picker: HTMLInputElement | undefined = $state();
 	let locating = $state(false);
 	let matches: LocatedDirectory[] = $state([]);
+	let sptVersion = $state('');
+	let needsVersion = $state(false);
 	let listing: DirectoryListing | null = $state(null);
 
 	/**
@@ -107,7 +110,8 @@
 		busy = true;
 		error = '';
 		try {
-			const result: InitResult = await initGameDir(path.trim());
+			const result: InitResult = await initGameDir(path.trim(), false, versionAnswer());
+			needsVersion = false;
 			if (result.pre_existing_mods.length === 0) {
 				onready(result.game_dir);
 				return;
@@ -115,7 +119,12 @@
 			candidates = result.pre_existing_mods;
 			adopted = [...result.pre_existing_mods];
 		} catch (cause) {
-			error = messageOf(cause);
+			if (cause instanceof ApiError && cause.code === SPT_VERSION_UNKNOWN) {
+				needsVersion = true;
+				error = 'The SPT version cannot be detected. Enter it and continue.';
+			} else {
+				error = messageOf(cause);
+			}
 		} finally {
 			busy = false;
 		}
@@ -125,7 +134,11 @@
 		busy = true;
 		error = '';
 		try {
-			const result = await initGameDir(path.trim(), adopted.length > 0 ? adopted : false);
+			const result = await initGameDir(
+				path.trim(),
+				adopted.length > 0 ? adopted : false,
+				versionAnswer()
+			);
 			onready(result.game_dir);
 		} catch (cause) {
 			error = messageOf(cause);
@@ -136,6 +149,10 @@
 
 	function toggle(name: string, checked: boolean): void {
 		adopted = checked ? [...adopted, name] : adopted.filter((entry) => entry !== name);
+	}
+
+	function versionAnswer(): string | null {
+		return sptVersion.trim() === '' ? null : sptVersion.trim();
 	}
 
 	function messageOf(cause: unknown): string {
@@ -180,7 +197,19 @@
 			<button type="button" disabled={busy || locating} onclick={() => picker?.click()}>
 				{locating ? 'Locating…' : 'Browse…'}
 			</button>
-			<button type="submit" disabled={busy || path.trim() === ''}>
+			{#if needsVersion}
+				<input
+					type="text"
+					bind:value={sptVersion}
+					placeholder="4.1.2"
+					aria-label="SPT version"
+					disabled={busy}
+				/>
+			{/if}
+			<button
+				type="submit"
+				disabled={busy || path.trim() === '' || (needsVersion && sptVersion.trim() === '')}
+			>
 				{busy ? 'Checking…' : 'Continue'}
 			</button>
 		</form>

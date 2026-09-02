@@ -54,10 +54,15 @@ export function locateDirectory(
 	} satisfies Schemas['LocateDirectoryRequest']);
 }
 
-export function initGameDir(path: string, adopt: boolean | string[] = false): Promise<InitResult> {
+export function initGameDir(
+	path: string,
+	adopt: boolean | string[] = false,
+	sptVersion: string | null = null
+): Promise<InitResult> {
 	return call<InitResult>('init_game_dir', {
 		path,
-		adopt
+		adopt,
+		spt_version: sptVersion
 	} satisfies Schemas['InitGameDirRequest']);
 }
 

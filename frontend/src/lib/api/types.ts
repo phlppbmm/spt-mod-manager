@@ -1006,6 +1006,9 @@ export interface components {
         /**
          * InitGameDirRequest
          * @description Parameters of ``init_game_dir``.
+         *
+         *     ``spt_version`` answers the ``SPT_VERSION_UNKNOWN`` error of an earlier
+         *     call, which the setup flow repeats with the version a user entered.
          */
         InitGameDirRequest: {
             /**
@@ -1018,14 +1021,12 @@ export interface components {
              * @default false
              */
             adopt: boolean | string[];
+            /** Spt Version */
+            spt_version?: string | null;
         };
         /**
          * InitResult
          * @description Outcome of ``init_game_dir``.
-         *
-         *     ``spt_version_known`` is ``False`` when the version chain found nothing, in
-         *     which case the setup flow has to ask for a version and send it to
-         *     ``set_spt_version``.
          */
         InitResult: {
             /**
@@ -1037,11 +1038,6 @@ export interface components {
             commit: string;
             /** Spt Version */
             spt_version: string;
-            /**
-             * Spt Version Known
-             * @default true
-             */
-            spt_version_known: boolean;
             /**
              * Warnings
              * @default []

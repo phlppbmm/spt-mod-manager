@@ -1,0 +1,247 @@
+"""Tests for Repo.revert and Repo.cherry_pick: happy paths and conflict handling."""
+
+from pathlib import Path
+
+import pytest
+
+from sptmod.core.errors import GitError
+from sptmod.core.repo import Repo
+
+
+def _add_and_commit(repo: Repo, relative: Path, content: str, message: str) -> str:
+    full = repo.path / relative
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_text(content, encoding="utf-8")
+    return repo.commit(
+        message, trailers={"Mod": "ModA", "Mod-State": "installed"}, paths=[relative]
+    )
+
+
+def _modify_and_commit(repo: Repo, relative: Path, content: str, message: str) -> str:
+    full = repo.path / relative
+    full.write_text(content, encoding="utf-8")
+    return repo.commit(
+        message, trailers={"Mod": "ModA", "Mod-State": "updated"}, paths=[relative]
+    )
+
+
+def test_revert_removes_the_files_added_by_the_reverted_commit(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+
+    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+
+    assert not (initialized_repo.path / relative).exists()
+
+
+def test_revert_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+
+    revert_hash = initialized_repo.revert(
+        add_hash, extra_trailers={"Mod-State": "removed"}
+    )
+
+    assert revert_hash != ""
+    assert revert_hash != add_hash
+
+
+def test_revert_adds_the_extra_trailers_to_the_new_commit(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+
+    revert_hash = initialized_repo.revert(
+        add_hash, extra_trailers={"Mod-State": "removed", "Mod": "ModA"}
+    )
+
+    commits = {c.hash: c for c in initialized_repo.log()}
+    assert revert_hash in commits
+    assert commits[revert_hash].trailers.get("Mod-State") == "removed"
+    assert commits[revert_hash].trailers.get("Mod") == "ModA"
+
+
+def test_cherry_pick_reintroduces_the_removed_file(initialized_repo: Repo) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+    assert not (initialized_repo.path / relative).exists()
+
+    initialized_repo.cherry_pick(add_hash, extra_trailers={"Mod-State": "enabled"})
+
+    assert (initialized_repo.path / relative).read_text(
+        encoding="utf-8"
+    ) == "content-v1\n"
+
+
+def test_cherry_pick_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+
+    cherry_hash = initialized_repo.cherry_pick(
+        add_hash, extra_trailers={"Mod-State": "enabled"}
+    )
+
+    assert cherry_hash != ""
+    assert cherry_hash != add_hash
+
+
+def test_cherry_pick_adds_the_extra_trailers_to_the_new_commit(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+
+    cherry_hash = initialized_repo.cherry_pick(
+        add_hash, extra_trailers={"Mod-State": "enabled"}
+    )
+
+    commits = {c.hash: c for c in initialized_repo.log()}
+    assert commits[cherry_hash].trailers.get("Mod-State") == "enabled"
+
+
+def test_revert_conflict_raises_git_error_with_conflicting_path_and_leaves_clean_tree(
+    initialized_repo: Repo,
+) -> None:
+    # Track the fixture's own whitelisted files (.gitignore, abc.json) first,
+    # so the only untracked file below the scenario builds is the one we
+    # explicitly create to prove revert doesn't absorb it.
+    initialized_repo.commit("baseline", paths=None)
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "base\n", "mod: ModA install"
+    )
+    # A later commit changes the same file, so reverting the add conflicts
+    # (git reports a modify/delete conflict).
+    _modify_and_commit(
+        initialized_repo, relative, "changed-by-later-commit\n", "mod: ModA update"
+    )
+    # An unrelated untracked whitelisted file lying around must survive the
+    # aborted revert untouched: "clean tree" means "no conflict leftovers",
+    # not "no untracked files".
+    unrelated = Path("SPT/user/mods/ModB/other.txt")
+    (initialized_repo.path / unrelated).parent.mkdir(parents=True)
+    (initialized_repo.path / unrelated).write_text("unrelated\n", encoding="utf-8")
+
+    with pytest.raises(GitError) as exc_info:
+        initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+
+    assert relative in exc_info.value.conflicting_paths
+    assert initialized_repo.is_clean() is False
+    assert initialized_repo.status().modified == []
+    assert initialized_repo.status().untracked == [unrelated]
+
+
+def test_revert_conflict_leaves_the_working_tree_content_untouched(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "base\n", "mod: ModA install"
+    )
+    _modify_and_commit(
+        initialized_repo, relative, "changed-by-later-commit\n", "mod: ModA update"
+    )
+
+    with pytest.raises(GitError):
+        initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+
+    assert (initialized_repo.path / relative).read_text(
+        encoding="utf-8"
+    ) == "changed-by-later-commit\n"
+
+
+def test_revert_does_not_stage_an_unrelated_untracked_file(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    unrelated = Path("SPT/user/mods/ModB/other.txt")
+    (initialized_repo.path / unrelated).parent.mkdir(parents=True)
+    (initialized_repo.path / unrelated).write_text("unrelated\n", encoding="utf-8")
+
+    revert_hash = initialized_repo.revert(
+        add_hash, extra_trailers={"Mod-State": "removed"}
+    )
+
+    assert unrelated in initialized_repo.status().untracked
+    committed_files = {f.path for f in initialized_repo.show_files(revert_hash)}
+    assert unrelated not in committed_files
+
+
+def test_cherry_pick_does_not_stage_an_unrelated_untracked_file(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
+    unrelated = Path("SPT/user/mods/ModB/other.txt")
+    (initialized_repo.path / unrelated).parent.mkdir(parents=True)
+    (initialized_repo.path / unrelated).write_text("unrelated\n", encoding="utf-8")
+
+    cherry_hash = initialized_repo.cherry_pick(
+        add_hash, extra_trailers={"Mod-State": "enabled"}
+    )
+
+    assert unrelated in initialized_repo.status().untracked
+    committed_files = {f.path for f in initialized_repo.show_files(cherry_hash)}
+    assert unrelated not in committed_files
+
+
+def test_revert_rejects_extra_trailer_values_containing_newlines(
+    initialized_repo: Repo,
+) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+
+    with pytest.raises(GitError):
+        initialized_repo.revert(
+            add_hash, extra_trailers={"Mod-State": "removed\nMod-Author: injected"}
+        )
+
+
+def test_cherry_pick_conflict_raises_git_error_and_leaves_clean_tree(
+    initialized_repo: Repo,
+) -> None:
+    # Track the fixture's own whitelisted files first, otherwise they show up
+    # as legitimately untracked ("??") and is_clean() would correctly be False.
+    initialized_repo.commit("baseline", paths=None)
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    _add_and_commit(initialized_repo, relative, "base\n", "mod: ModA install")
+    diverging_hash = _modify_and_commit(
+        initialized_repo, relative, "from-a-diverging-commit\n", "mod: ModA update-a"
+    )
+    _modify_and_commit(
+        initialized_repo, relative, "current-head-content\n", "mod: ModA update-b"
+    )
+
+    with pytest.raises(GitError) as exc_info:
+        initialized_repo.cherry_pick(
+            diverging_hash, extra_trailers={"Mod-State": "updated"}
+        )
+
+    assert relative in exc_info.value.conflicting_paths
+    assert initialized_repo.is_clean() is True

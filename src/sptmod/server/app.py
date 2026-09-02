@@ -17,6 +17,7 @@ from starlette.responses import Response
 
 from sptmod.core import services
 from sptmod.core.errors import (
+    AlreadyInitializedError,
     AmbiguousModError,
     ArchiveError,
     CatalogUnavailableError,
@@ -71,6 +72,7 @@ ERROR_MAPPING: dict[type[Exception], tuple[str, int]] = {
     UnresolvableDependencyError: ("UNRESOLVABLE_DEPENDENCY", 409),
     ProfileResidueError: ("PROFILE_RESIDUE", 409),
     PartialInstallError: ("PARTIAL_INSTALL", 409),
+    AlreadyInitializedError: ("ALREADY_INITIALIZED", 409),
     GitError: ("GIT_ERROR", 500),
     SptmodError: ("SPTMOD_ERROR", 500),
     NotImplementedYetError: ("NOT_IMPLEMENTED_YET", 501),

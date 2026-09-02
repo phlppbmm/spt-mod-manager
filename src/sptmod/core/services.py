@@ -26,6 +26,7 @@ from sptmod.core.conflicts import (
     check_spt_compat,
 )
 from sptmod.core.errors import (
+    AlreadyInitializedError,
     AmbiguousModError,
     ArchiveError,
     CatalogUnavailableError,
@@ -658,7 +659,9 @@ def _open_for_init(layout: GameLayout) -> tuple[Repo, bool]:
         return Repo.init(layout), True
     repo = Repo(layout.root)
     if repo.log():
-        raise GitError(f"{layout.root} is already a git repository")
+        raise AlreadyInitializedError(
+            f"{layout.root} is already an initialized sptmod repository"
+        )
     repo.configure(layout)
     return repo, False
 

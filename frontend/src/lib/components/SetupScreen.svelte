@@ -119,7 +119,11 @@
 			candidates = result.pre_existing_mods;
 			adopted = [...result.pre_existing_mods];
 		} catch (cause) {
-			if (cause instanceof ApiError && cause.code === SPT_VERSION_UNKNOWN) {
+			if (cause instanceof ApiError && cause.code === 'ALREADY_INITIALIZED') {
+				// Setup already ran for this directory — proceed straight in.
+				onready(path.trim());
+				return;
+			} else if (cause instanceof ApiError && cause.code === SPT_VERSION_UNKNOWN) {
 				needsVersion = true;
 				error = 'The SPT version cannot be detected. Enter it and continue.';
 			} else {

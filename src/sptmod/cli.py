@@ -14,6 +14,7 @@ from rich.table import Table
 
 from sptmod.core import services
 from sptmod.core.errors import (
+    AlreadyInitializedError,
     AmbiguousModError,
     ArchiveError,
     ConflictError,
@@ -68,6 +69,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     ProfileResidueError: 8,
     ArchiveError: 9,
     GitError: 10,
+    AlreadyInitializedError: 10,
     ModNotFoundError: 11,
     AmbiguousModError: 12,
     InvalidMetadataError: 13,

@@ -90,6 +90,14 @@ class GitError(SptmodError):
         self.conflicting_paths: list[Path] = list(conflicting_paths)
 
 
+class AlreadyInitializedError(GitError):
+    """The game directory is already an initialized sptmod repository.
+
+    Raised by init on a repository that has commits; callers such as the
+    setup flow treat this as "setup is done" rather than as a failure.
+    """
+
+
 class ForgeUnavailableError(SptmodError):
     """The Forge API is unreachable or still failing after all retries.
 

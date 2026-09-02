@@ -34,6 +34,7 @@ from sptmod.core.errors import (
     PartialInstallError,
     ProfileResidueError,
     SptmodError,
+    SptVersionUnknownError,
     UnresolvableDependencyError,
 )
 from sptmod.core.forge.catalog import CatalogEntry, NoCompatibleVersionError
@@ -59,6 +60,7 @@ ERROR_MAPPING: dict[type[Exception], tuple[str, int]] = {
     InvalidMetadataError: ("INVALID_METADATA", 400),
     InvalidPathError: ("INVALID_PATH", 400),
     UnsupportedRangeError: ("UNSUPPORTED_RANGE", 400),
+    SptVersionUnknownError: ("SPT_VERSION_UNKNOWN", 400),
     ModNotFoundError: ("MOD_NOT_FOUND", 404),
     NoCompatibleVersionError: ("NO_COMPATIBLE_VERSION", 404),
     AmbiguousModError: ("AMBIGUOUS_MOD", 409),
@@ -105,7 +107,7 @@ def locate_directory(
 
 @router.post("/init_game_dir", response_model=schemas.InitResult)
 def init_game_dir(request: schemas.InitGameDirRequest) -> services.InitResult:
-    return services.init_game_dir(request.path, request.adopt)
+    return services.init_game_dir(request.path, request.adopt, request.spt_version)
 
 
 @router.post("/set_spt_version", response_model=schemas.SetSptVersionResponse)

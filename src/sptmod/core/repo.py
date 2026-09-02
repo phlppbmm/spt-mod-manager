@@ -145,12 +145,26 @@ class Repo:
 
         repo = cls(path)
         repo._git("init", "--quiet")
-        (path / ".gitignore").write_text(
-            gitignore_whitelist(layout.runtime_dir_name), encoding="utf-8"
-        )
-        repo._git("config", "user.name", COMMITTER_NAME)
-        repo._git("config", "user.email", COMMITTER_EMAIL)
+        repo.configure(layout)
         return repo
+
+    def configure(self, layout: "GameLayout") -> None:
+        """Write the whitelist ``.gitignore`` if absent and set the identity.
+
+        The local committer identity keeps operations independent of the global
+        git config. Safe to call on a repository that is already configured,
+        which is how a half-finished init is resumed.
+
+        Raises:
+            GitError: git failed.
+        """
+        gitignore = self.path / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(
+                gitignore_whitelist(layout.runtime_dir_name), encoding="utf-8"
+            )
+        self._git("config", "user.name", COMMITTER_NAME)
+        self._git("config", "user.email", COMMITTER_EMAIL)
 
     def commit(
         self,

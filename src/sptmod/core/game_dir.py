@@ -21,6 +21,13 @@ SERVER_EXE_NAME: Final = "SPT.Server.exe"
 # them below the runtime directory.
 LEGACY_FLAT_DIR_NAMES: Final[tuple[str, ...]] = ("SPT_Data", "user")
 
+# Client files SPT itself ships below BepInEx; they are part of the
+# installation, never mods, and must survive every mod operation.
+SPT_OWN_CLIENT_PATHS: Final[tuple[Path, ...]] = (
+    Path("BepInEx/plugins/spt"),
+    Path("BepInEx/patchers/spt-prepatch.dll"),
+)
+
 SPT_VERSION_FIELD: Final = "sptVersion"
 SPT_VERSION_CONFIG_KEY: Final = "sptmod.sptversion"
 
@@ -39,6 +46,9 @@ _RT_VERSION: Final = 16
 _TEXT_VALUE: Final = 1
 _FIXED_INFO_SIGNATURE: Final = b"\xbd\x04\xef\xfe"
 _FIXED_INFO_SIZE: Final = 52
+# Upper bound for the resource bytes a crafted header may make us read; real
+# resource sections stay far below it.
+_MAX_RESOURCE_BYTES: Final = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -137,6 +147,19 @@ def detect_layout(path: Path) -> GameLayout:
 def _is_flat_legacy_dir(path: Path) -> bool:
     """Return whether ``path`` looks like a flat SPT 3.x installation."""
     return all((path / name).is_dir() for name in LEGACY_FLAT_DIR_NAMES)
+
+
+def is_spt_own_path(entry: Path) -> bool:
+    """Return whether ``entry`` is one of SPT's own client files.
+
+    ``entry`` is relative to the game directory. Matching is case-insensitive,
+    because the installer writes these names on Windows.
+    """
+    lowered = entry.as_posix().casefold()
+    return any(
+        lowered == own or lowered.startswith(f"{own}/")
+        for own in (path.as_posix().casefold() for path in SPT_OWN_CLIENT_PATHS)
+    )
 
 
 def is_game_dir(path: Path) -> bool:
@@ -288,7 +311,7 @@ def _read_version_resource(stream: IO[bytes]) -> bytes | None:
     if section is None:
         return None
     stream.seek(section.raw_pointer)
-    data = stream.read(section.raw_size)
+    data = stream.read(min(section.raw_size, _MAX_RESOURCE_BYTES))
     return _version_resource_bytes(
         data, resource_rva - section.virtual_address, section
     )
@@ -339,7 +362,7 @@ def _version_resource_bytes(data: bytes, base: int, section: _Section) -> bytes 
         return None
     data_rva, size = struct.unpack_from("<II", data, leaf)
     start = data_rva - section.virtual_address
-    if start < 0 or start + size > len(data):
+    if start < 0 or size > _MAX_RESOURCE_BYTES or start + size > len(data):
         return None
     return data[start : start + size]
 

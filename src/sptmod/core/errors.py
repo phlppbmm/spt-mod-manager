@@ -18,6 +18,15 @@ class NotAGameDirError(SptmodError):
     """The given path is not a usable SPT game directory."""
 
 
+class SptVersionUnknownError(SptmodError):
+    """The SPT version of a game directory cannot be determined.
+
+    Raised where an operation needs the version and no step of the detection
+    chain found one, so the caller has to ask the user and pass the answer
+    back.
+    """
+
+
 class DirtyTreeError(SptmodError):
     """The repository has uncommitted changes blocking the operation."""
 

@@ -38,6 +38,7 @@ from sptmod.core.errors import (
     NotAGameDirError,
     PartialInstallError,
     ProfileResidueError,
+    SptVersionUnknownError,
 )
 from sptmod.core.forge.catalog import (
     Catalog,
@@ -55,6 +56,9 @@ from sptmod.core.game_dir import (
     detect_layout,
     ensure_game_not_running,
     is_game_dir,
+    is_spt_own_path,
+    read_core_json_version,
+    read_pe_file_version,
     resolve_spt_version,
     store_spt_version,
     validate_game_dir,
@@ -160,17 +164,13 @@ class InitResult:
 
     ``pre_existing_mods`` lists every mod found in the untracked game
     directory, ``adopted`` the ones the ``adopt`` selection turned into
-    install commits. ``spt_version_known`` is ``False`` when no step of the
-    version chain found a version, in which case ``spt_version`` is
-    ``UNKNOWN_SPT_VERSION`` and the caller has to ask the user and pass the
-    answer to :func:`set_spt_version`. ``warnings`` carries the layout
-    detection notes, for instance when both runtime directories exist.
+    install commits. ``warnings`` carries the layout detection notes, for
+    instance when both runtime directories exist.
     """
 
     game_dir: Path
     commit: str
     spt_version: str
-    spt_version_known: bool = True
     warnings: list[str] = field(default_factory=list)
     pre_existing_mods: list[Path] = field(default_factory=list)
     adopted: list[ModInfo] = field(default_factory=list)
@@ -569,12 +569,15 @@ def init_game_dir(
 ) -> InitResult:
     """Turn the SPT installation at ``path`` into a tracked repository.
 
-    Detects the layout, writes the matching whitelist ``.gitignore``, runs
-    ``git init`` and creates the initial commit ``chore: clean SPT <version>``
-    carrying the ``Spt-Version`` trailer. ``spt_version`` is the version a user
-    supplies up front; without it the version comes from
-    :func:`~sptmod.core.game_dir.resolve_spt_version` and falls back to
-    ``UNKNOWN_SPT_VERSION``, which ``spt_version_known`` reports.
+    Detects the layout, determines the SPT version, writes the matching
+    whitelist ``.gitignore``, runs ``git init`` and creates the initial commit
+    ``chore: clean SPT <version>`` carrying the ``Spt-Version`` trailer.
+
+    ``spt_version`` is the version a user supplies; it wins over the detection
+    chain and is stored in the repository for later runs. Without it the
+    version comes from :func:`~sptmod.core.game_dir.resolve_spt_version`, and
+    when that finds nothing the call fails before anything is written, so the
+    caller can ask for a version and repeat the init.
 
     The initial commit holds only ``.gitignore``, the tracked profiles and the
     BepInEx configs. Mod content that already exists below the server mod
@@ -587,40 +590,89 @@ def init_game_dir(
     and a sequence of paths adopts exactly those, which is how a caller passes
     back the entries a user confirmed.
 
+    A repository this call created is removed again when a later step fails, and
+    a repository without any commit, left behind by an interrupted init, is
+    continued instead of refused.
+
     Raises:
         NotAGameDirError: ``path`` is missing, is no directory or lacks a
             runtime directory or ``BepInEx/``.
+        SptVersionUnknownError: no SPT version was given and none could be
+            detected.
         InvalidMetadataError: a mod selected for adoption has no usable
             metadata.
-        GitError: ``path`` is already a git repository or git failed.
+        GitError: ``path`` is an initialized repository with commits, or git
+            failed.
     """
     layout = validate_game_dir(path)
-    repo = Repo.init(layout)
-    if spt_version:
-        store_spt_version(repo, spt_version.strip())
-    detected = resolve_spt_version(layout, repo)
-    version = detected or UNKNOWN_SPT_VERSION
+    version = (spt_version or "").strip() or _detect_spt_version(layout)
+    if not version:
+        raise SptVersionUnknownError(
+            f"the SPT version of {path} cannot be detected, pass it explicitly"
+        )
 
-    untracked = repo.untracked_under(Path("."))
-    baseline = [entry for entry in untracked if _mod_prefix_of(entry, layout) is None]
-    commit_hash = repo.commit(
-        f"chore: clean SPT {version}",
-        trailers={SPT_VERSION_TRAILER: version},
-        paths=baseline,
-    )
-    pre_existing = _mod_entries(untracked, layout)
-    if isinstance(adopt, bool):
-        selected = pre_existing if adopt else []
-    else:
-        selected = list(adopt)
+    repo, created = _open_for_init(layout)
+    try:
+        if spt_version:
+            store_spt_version(repo, version)
+        untracked = repo.untracked_under(Path("."))
+        baseline = [
+            entry for entry in untracked if _mod_prefix_of(entry, layout) is None
+        ]
+        commit_hash = repo.commit(
+            f"chore: clean SPT {version}",
+            trailers={SPT_VERSION_TRAILER: version},
+            paths=baseline,
+        )
+        pre_existing = _mod_entries(untracked, layout)
+        if isinstance(adopt, bool):
+            selected = pre_existing if adopt else []
+        else:
+            selected = list(adopt)
+        adopted = [adopt_mod(path, entry).mod for entry in selected]
+    except Exception:
+        if created:
+            shutil.rmtree(path / ".git", ignore_errors=True)
+        raise
+
     return InitResult(
         game_dir=path,
         commit=commit_hash,
         spt_version=version,
-        spt_version_known=detected is not None,
         warnings=[layout.warning] if layout.warning else [],
         pre_existing_mods=pre_existing,
-        adopted=[adopt_mod(path, entry).mod for entry in selected],
+        adopted=adopted,
+    )
+
+
+def _open_for_init(layout: GameLayout) -> tuple[Repo, bool]:
+    """Return the repository to initialize into and whether this call created it.
+
+    An interrupted init leaves a repository without any commit behind; that one
+    is reused and completed, while a repository with commits is refused.
+
+    Raises:
+        GitError: the game directory is an initialized repository with commits.
+    """
+    if not (layout.root / ".git").exists():
+        return Repo.init(layout), True
+    repo = Repo(layout.root)
+    if repo.log():
+        raise GitError(f"{layout.root} is already a git repository")
+    repo.configure(layout)
+    return repo, False
+
+
+def _detect_spt_version(layout: GameLayout) -> str | None:
+    """Return the detected SPT version of ``layout`` before any git init.
+
+    The stored answer of an earlier run is only part of the chain once the game
+    directory is a repository.
+    """
+    if (layout.root / ".git").exists():
+        return resolve_spt_version(layout, Repo(layout.root))
+    return read_core_json_version(layout) or read_pe_file_version(
+        layout.root / layout.server_exe
     )
 
 
@@ -1121,9 +1173,9 @@ def adopt_mod(
         NotAGameDirError: ``target`` lies outside the game directory or below
             none of the mod paths.
         ModNotFoundError: ``target`` does not exist.
-        ConflictError: an active mod already provides ``target``, even when it
-            also holds untracked files, or ``target`` is tracked without
-            belonging to a mod.
+        ConflictError: ``target`` is part of SPT itself, an active mod already
+            provides it, even when it also holds untracked files, or it is
+            tracked without belonging to a mod.
         InvalidMetadataError: neither ``package.json`` nor the overrides supply
             a name and a version.
         GitError: git failed or metadata contains invalid trailer values.
@@ -1131,6 +1183,10 @@ def adopt_mod(
     layout = detect_layout(path)
     repo = Repo(path)
     relative = _relative_target(path, target)
+    if is_spt_own_path(relative):
+        raise ConflictError(
+            f"cannot adopt {relative.as_posix()}: it is part of SPT itself, not a mod"
+        )
     if _mod_prefix_of(relative, layout) is None:
         raise NotAGameDirError(
             f"cannot adopt {relative.as_posix()}: it is below neither "
@@ -2638,6 +2694,8 @@ def _mod_prefixes(layout: GameLayout) -> tuple[Path, ...]:
 
 
 def _mod_prefix_of(entry: Path, layout: GameLayout) -> Path | None:
+    if is_spt_own_path(entry):
+        return None
     return next(
         (prefix for prefix in _mod_prefixes(layout) if entry.is_relative_to(prefix)),
         None,

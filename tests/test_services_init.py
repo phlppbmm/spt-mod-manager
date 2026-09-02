@@ -1,9 +1,14 @@
 """Tests for ``sptmod.core.services.init_game_dir``.
 
 Covers the initial commit content (whitelist + tracked profile, ignored
-dummies absent), the ``Spt-Version`` trailer (and its ``unknown`` fallback),
-refusing a second ``init``, and reporting pre-existing mod content instead
-of silently ignoring it.
+dummies absent), the ``Spt-Version`` trailer, refusing a second ``init`` on a
+repo with commits, and reporting pre-existing mod content instead of
+silently ignoring it.
+
+CONTRACT CHANGE (spt-mod-manager init-deadlock fix): an undetectable SPT
+version no longer falls back to ``UNKNOWN_SPT_VERSION``; ``init_game_dir``
+now raises ``SptVersionUnknownError`` before writing anything, so the caller
+can ask for a version and retry via the ``spt_version`` argument.
 """
 
 from pathlib import Path
@@ -11,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from sptmod.core import services
-from sptmod.core.errors import GitError
+from sptmod.core.errors import GitError, SptVersionUnknownError
 from sptmod.core.repo import Repo
 
 
@@ -54,17 +59,28 @@ def test_init_commit_subject_and_trailer_carry_the_spt_version(
     assert commit.trailers.get("Spt-Version") == "4.1.0"
 
 
-def test_init_falls_back_to_unknown_version_when_core_json_is_missing(
+def test_init_raises_spt_version_unknown_and_leaves_no_git_when_core_json_is_missing(
     fake_game_dir: Path,
 ) -> None:
     (fake_game_dir / "SPT" / "SPT_Data" / "configs" / "core.json").unlink()
 
-    result = services.init_game_dir(fake_game_dir)
+    with pytest.raises(SptVersionUnknownError):
+        services.init_game_dir(fake_game_dir)
 
-    assert result.spt_version == services.UNKNOWN_SPT_VERSION
+    assert not (fake_game_dir / ".git").exists()
+
+
+def test_init_with_an_explicit_spt_version_succeeds_when_core_json_is_missing(
+    fake_game_dir: Path,
+) -> None:
+    (fake_game_dir / "SPT" / "SPT_Data" / "configs" / "core.json").unlink()
+
+    result = services.init_game_dir(fake_game_dir, spt_version="4.1.2")
+
+    assert result.spt_version == "4.1.2"
     commit = Repo(fake_game_dir).log()[0]
-    assert commit.subject == "chore: clean SPT unknown"
-    assert commit.trailers.get("Spt-Version") == "unknown"
+    assert commit.subject == "chore: clean SPT 4.1.2"
+    assert commit.trailers.get("Spt-Version") == "4.1.2"
 
 
 def test_init_returns_the_given_game_dir(fake_game_dir: Path) -> None:

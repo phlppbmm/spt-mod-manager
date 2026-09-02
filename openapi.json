@@ -2102,6 +2102,17 @@
             ],
             "title": "Adopt",
             "default": false
+          },
+          "spt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spt Version"
           }
         },
         "type": "object",
@@ -2109,7 +2120,7 @@
           "path"
         ],
         "title": "InitGameDirRequest",
-        "description": "Parameters of ``init_game_dir``."
+        "description": "Parameters of ``init_game_dir``.\n\n``spt_version`` answers the ``SPT_VERSION_UNKNOWN`` error of an earlier\ncall, which the setup flow repeats with the version a user entered."
       },
       "InitResult": {
         "properties": {
@@ -2125,11 +2136,6 @@
           "spt_version": {
             "type": "string",
             "title": "Spt Version"
-          },
-          "spt_version_known": {
-            "type": "boolean",
-            "title": "Spt Version Known",
-            "default": true
           },
           "warnings": {
             "items": {
@@ -2164,7 +2170,7 @@
           "spt_version"
         ],
         "title": "InitResult",
-        "description": "Outcome of ``init_game_dir``.\n\n``spt_version_known`` is ``False`` when the version chain found nothing, in\nwhich case the setup flow has to ask for a version and send it to\n``set_spt_version``."
+        "description": "Outcome of ``init_game_dir``."
       },
       "InstallFromArchiveRequest": {
         "properties": {

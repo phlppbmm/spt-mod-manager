@@ -9,6 +9,8 @@ from test_forge_client_fixtures import page_envelope, respx_router
 
 __all__ = ["respx_router"]
 
+FORGE_URL_ENV_VAR = "SPTMOD_FORGE_URL"
+
 
 @pytest.mark.parametrize("rate_per_minute", [0, -1, -100])
 def test_non_positive_rate_per_minute_raises_value_error(rate_per_minute: int) -> None:
@@ -29,3 +31,54 @@ def test_context_manager_closes_client_on_exit(respx_router: respx.MockRouter) -
         # ForgeUnavailableError are both acceptable "closed" signals); what
         # matters is that a request after close() no longer succeeds.
         client.mods()
+
+
+# --------------------------------------------------------------------------
+# SPTMOD_FORGE_URL: overrides the base URL when no explicit one is given.
+# --------------------------------------------------------------------------
+
+
+def test_env_var_sets_the_base_url_when_no_explicit_base_url_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    custom_url = "https://custom.forge.invalid/api/v1"
+    monkeypatch.setenv(FORGE_URL_ENV_VAR, custom_url)
+
+    with respx.mock(base_url=custom_url, assert_all_called=False) as router:
+        route = router.get("/mods").mock(
+            return_value=httpx.Response(200, json=page_envelope([]))
+        )
+        with ForgeClient() as client:
+            client.mods()
+
+        assert route.called
+
+
+def test_default_base_url_is_used_when_env_var_is_unset(
+    monkeypatch: pytest.MonkeyPatch, respx_router: respx.MockRouter
+) -> None:
+    monkeypatch.delenv(FORGE_URL_ENV_VAR, raising=False)
+    route = respx_router.get("/mods").mock(
+        return_value=httpx.Response(200, json=page_envelope([]))
+    )
+
+    with ForgeClient() as client:
+        client.mods()
+
+    assert route.called
+
+
+def test_explicit_base_url_wins_over_the_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(FORGE_URL_ENV_VAR, "https://env.forge.invalid/api/v1")
+    explicit_url = "https://explicit.forge.invalid/api/v1"
+
+    with respx.mock(base_url=explicit_url, assert_all_called=False) as router:
+        route = router.get("/mods").mock(
+            return_value=httpx.Response(200, json=page_envelope([]))
+        )
+        with ForgeClient(base_url=explicit_url) as client:
+            client.mods()
+
+        assert route.called

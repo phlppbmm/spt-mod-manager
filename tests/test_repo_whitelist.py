@@ -59,6 +59,30 @@ def test_untracked_under_shows_new_trackable_plugin_and_config(
     }
 
 
+def test_untracked_under_shows_new_trackable_patcher(
+    initialized_repo: Repo,
+) -> None:
+    """``BepInEx/patchers/`` (e.g. WTT-CommonLib's FixPluginTypesSerialization.dll)
+    must be trackable like ``BepInEx/plugins/`` and ``BepInEx/config/``.
+    """
+    _write(initialized_repo.path / "BepInEx" / "patchers" / "Fixer.dll", "patcher")
+
+    result = initialized_repo.untracked_under(Path("BepInEx"))
+
+    assert Path("BepInEx/patchers/Fixer.dll") in result
+
+
+def test_commit_with_paths_none_stages_bepinex_patchers(
+    initialized_repo: Repo,
+) -> None:
+    _write(initialized_repo.path / "BepInEx" / "patchers" / "Fixer.dll", "patcher")
+
+    commit_hash = initialized_repo.commit("mod: whitelist patchers", paths=None)
+    files = {mod_file.path for mod_file in initialized_repo.show_files(commit_hash)}
+
+    assert Path("BepInEx/patchers/Fixer.dll") in files
+
+
 def test_status_untracked_lists_profile_json_before_first_commit(
     initialized_repo: Repo,
 ) -> None:

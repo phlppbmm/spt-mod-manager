@@ -35,6 +35,7 @@ from test_forge_client_fixtures import (
     mod_json_full,
     owner_json,
     page_envelope,
+    success_envelope,
     version_json,
 )
 
@@ -127,6 +128,70 @@ def _seed_target(
             return_value=httpx.Response(200, json=full_versions_page)
         )
         cat.fetch_versions(client, mod_id)
+    return client
+
+
+def _seed_target_without_fetch_versions(
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    *,
+    mod_id: int,
+    name: str,
+    version: str,
+    version_id: int,
+    link: str,
+    content_length: int,
+):
+    """Sync one mod but stop short of ``fetch_versions``.
+
+    The cached version stays a summary with ``link=None`` and no
+    ``content_length``, mirroring what a live ``sync_catalog`` (without a
+    later, separate ``fetch_versions`` call) leaves behind. The
+    ``/mod/{id}/versions`` route is still registered so a service that fixes
+    the gap by calling ``fetch_versions`` itself can resolve the real link.
+    """
+    slug = name.lower().replace(" ", "-")
+    mod = mod_json_full(
+        id=mod_id,
+        name=name,
+        slug=slug,
+        owner=owner_json(id=mod_id * 10, name="Alice"),
+        detail_url=f"{DEFAULT_BASE_URL}/mods/{slug}",
+        versions=[
+            {
+                "id": version_id,
+                "version": version,
+                "spt_version_constraint": SPT_CONSTRAINT,
+                "downloads": 1,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+        ],
+    )
+    page = page_envelope([mod], current_page=1, last_page=1, total=1, next_url=None)
+    respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page))
+    client = client_factory()
+    with Catalog(db_path) as cat:
+        cat.sync(client, full=True)
+
+    full_versions_page = page_envelope(
+        [
+            version_json(
+                id=version_id,
+                version=version,
+                link=link,
+                content_length=content_length,
+                spt_version_constraint=SPT_CONSTRAINT,
+            )
+        ],
+        current_page=1,
+        last_page=1,
+        total=1,
+        next_url=None,
+    )
+    respx_router.get(f"/mod/{mod_id}/versions").mock(
+        return_value=httpx.Response(200, json=full_versions_page)
+    )
     return client
 
 
@@ -251,6 +316,66 @@ def test_plan_mod_install_orders_dependency_before_the_requested_mod(
     ]
 
 
+def test_plan_mod_install_resolves_a_link_missing_from_a_sync_only_catalog(
+    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path
+) -> None:
+    """``sync`` alone caches only the version *summary* (no link); the plan
+    must still carry a usable download link -- the service must call
+    ``fetch_versions`` itself for entries whose cached link is ``None``.
+    """
+    client = _seed_target_without_fetch_versions(
+        client_factory,
+        respx_router,
+        db_path,
+        mod_id=901,
+        name="Link Mod",
+        version="1.0.0",
+        version_id=9010,
+        link="https://dl.example/link-mod-1.0.0.zip",
+        content_length=800,
+    )
+    _echo_dependencies(respx_router, [])
+
+    plan = services.plan_mod_install(
+        clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client
+    )
+
+    assert plan.entries[0].link == "https://dl.example/link-mod-1.0.0.zip"
+    assert plan.entries[0].content_length == 800
+
+
+def test_install_mod_succeeds_when_the_catalog_was_only_synced(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive,
+) -> None:
+    archive = _package_archive(make_archive, "LinkMod", "Link Mod", "1.0.0")
+    link = "https://dl.example/link-mod-1.0.0.zip"
+    content_length = len(archive.read_bytes())
+    client = _seed_target_without_fetch_versions(
+        client_factory,
+        respx_router,
+        db_path,
+        mod_id=902,
+        name="Link Mod",
+        version="1.0.0",
+        version_id=9020,
+        link=link,
+        content_length=content_length,
+    )
+    _echo_dependencies(respx_router, [])
+    _mock_download(respx_router, link, archive)
+
+    result = services.install_mod(
+        clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client
+    )
+
+    assert [entry.mod.name for entry in result.installed] == ["Link Mod"]
+    assert (clean_repo.path / "SPT/user/mods/LinkMod/package.json").is_file()
+
+
 def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
     clean_repo: Repo, client_factory, db_path: Path
 ) -> None:
@@ -346,6 +471,95 @@ def test_install_mod_installs_missing_dependency_as_its_own_commit_before_the_ta
     assert commits[0].trailers["Mod-Source"] == "https://dl.example/target-mod-2.0.0.zip"
     assert commits[1].trailers["Mod-Forge-Id"] == "202"
     assert commits[1].trailers["Mod-Source"] == "https://dl.example/dep-mod-1.0.0.zip"
+
+
+def test_install_mod_writes_the_plan_version_when_the_archive_carries_none(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive,
+) -> None:
+    """A bare-DLL client archive carries no embedded version
+    (``meta_from_dll`` leaves it empty). The commit's ``Mod-Version`` must
+    still be the version Forge resolved for the plan entry, not empty --
+    otherwise the mod becomes uncheckable for updates afterwards (see
+    ``test_check_updates_after_a_metadata_less_install_queries_the_plan_version``).
+    """
+    archive = make_archive({"BepInEx/plugins/VersionlessMod.dll": b"dll-bytes"}, "zip")
+    body = archive.read_bytes()
+    link = "https://dl.example/versionless-mod-3.2.1.zip"
+    client = _seed_target(
+        client_factory,
+        respx_router,
+        db_path,
+        mod_id=903,
+        name="Versionless Mod",
+        version="3.2.1",
+        version_id=9030,
+        link=link,
+        content_length=len(body),
+    )
+    _echo_dependencies(respx_router, [])
+    _mock_download(respx_router, link, archive)
+
+    result = services.install_mod(
+        clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client
+    )
+
+    assert result.installed[0].mod.version == "3.2.1"
+    commit = Repo(clean_repo.path).log()[0]
+    assert commit.trailers["Mod-Version"] == "3.2.1"
+
+
+def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive,
+) -> None:
+    archive = make_archive({"BepInEx/plugins/VersionlessMod.dll": b"dll-bytes"}, "zip")
+    body = archive.read_bytes()
+    link = "https://dl.example/versionless-mod-3.2.1.zip"
+    client = _seed_target(
+        client_factory,
+        respx_router,
+        db_path,
+        mod_id=904,
+        name="Versionless Mod",
+        version="3.2.1",
+        version_id=9040,
+        link=link,
+        content_length=len(body),
+    )
+    _echo_dependencies(respx_router, [])
+    _mock_download(respx_router, link, archive)
+    services.install_mod(
+        clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client
+    )
+
+    captured: dict[str, str] = {}
+
+    def _updates_handler(request: httpx.Request) -> httpx.Response:
+        captured["mods"] = request.url.params["mods"]
+        return httpx.Response(
+            200,
+            json=success_envelope(
+                {
+                    "updates": [],
+                    "blocked_updates": [],
+                    "up_to_date": [],
+                    "incompatible_with_spt": [],
+                }
+            ),
+        )
+
+    respx_router.get("/mods/updates").mock(side_effect=_updates_handler)
+
+    services.check_updates(clean_repo.path, db_path=db_path, client=client)
+
+    assert captured["mods"] == "904:3.2.1"
 
 
 def test_install_mod_aborts_on_a_file_conflict_without_force(

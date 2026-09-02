@@ -1,5 +1,6 @@
 """HTTP client for the read-only Forge API v0 (the only module importing httpx)."""
 
+import os
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -11,6 +12,7 @@ import httpx
 from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
 
 DEFAULT_BASE_URL: Final = "https://forge.sp-tarkov.com/api/v0"
+BASE_URL_ENV_VAR: Final = "SPTMOD_FORGE_URL"
 MAX_PER_PAGE: Final = 50
 DEFAULT_RATE_PER_MINUTE: Final = 200
 DEFAULT_MAX_RETRIES: Final = 4
@@ -706,6 +708,11 @@ class ForgeClient:
     retried with exponential backoff on 429 or 5xx responses. An optional
     ``Retry-After`` header is honoured if present.
 
+    Without an explicit ``base_url`` the environment variable
+    ``SPTMOD_FORGE_URL`` is read at construction time and overrides
+    :data:`DEFAULT_BASE_URL`, so a test or staging Forge can be pointed at
+    without code changes.
+
     Warning:
         A sparse fieldset (``fields=``) must always list ``id``: fields the
         server omits are filled with defaults, so a missing ``id`` silently
@@ -714,7 +721,7 @@ class ForgeClient:
 
     def __init__(
         self,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: str | None = None,
         *,
         rate_per_minute: int = DEFAULT_RATE_PER_MINUTE,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -725,7 +732,8 @@ class ForgeClient:
         """Initialize a ForgeClient.
 
         Args:
-            base_url: The API base URL (default: Forge production).
+            base_url: The API base URL; defaults to ``SPTMOD_FORGE_URL`` when
+                that variable is set, otherwise to Forge production.
             rate_per_minute: Throttle rate in requests per minute (must be > 0).
                 Defaults to 200.
             max_retries: Maximum number of retries on 429 or 5xx (default: 4).
@@ -740,6 +748,8 @@ class ForgeClient:
         """
         if rate_per_minute <= 0:
             raise ValueError("rate_per_minute must be greater than 0")
+        if base_url is None:
+            base_url = os.environ.get(BASE_URL_ENV_VAR) or DEFAULT_BASE_URL
         self.base_url = base_url.rstrip("/")
         self.rate_per_minute = rate_per_minute
         self.max_retries = max_retries
@@ -747,7 +757,9 @@ class ForgeClient:
         self._sleep = sleep
         self._tokens = float(rate_per_minute)
         self._refilled_at = clock()
-        self._http = httpx.Client(base_url=self.base_url, timeout=timeout)
+        self._http = httpx.Client(
+            base_url=self.base_url, timeout=timeout, follow_redirects=True
+        )
 
     def _take_token(self) -> None:
         """Token bucket refill and consume logic.
@@ -1148,7 +1160,8 @@ class ForgeClient:
         This method bypasses the token bucket and API envelope envelope parsing.
         Raises on any HTTP error (non-2xx status or network issues). The response
         is guaranteed to be closed on all code paths (normal iteration, exception,
-        or early exit) because it uses a context manager.
+        or early exit) because it uses a context manager. Download links answer
+        with a 307 to a CDN URL, which the client follows.
 
         Args:
             url: Absolute or relative URL to download from.

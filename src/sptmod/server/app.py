@@ -17,6 +17,7 @@ from sptmod.core import services
 from sptmod.core.errors import (
     AmbiguousModError,
     ArchiveError,
+    CatalogUnavailableError,
     ConflictError,
     DependencyError,
     DirtyTreeError,
@@ -69,6 +70,7 @@ ERROR_MAPPING: dict[type[Exception], tuple[str, int]] = {
     NotImplementedError: ("NOT_IMPLEMENTED_YET", 501),
     ForgeApiError: ("FORGE_API_ERROR", 502),
     ForgeUnavailableError: ("FORGE_UNAVAILABLE", 503),
+    CatalogUnavailableError: ("CATALOG_UNAVAILABLE", 503),
 }
 
 router = APIRouter(

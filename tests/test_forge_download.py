@@ -214,6 +214,27 @@ def test_download_expected_length_none_skips_the_size_check(
     assert result.read_bytes() == body
 
 
+def test_download_follows_a_redirect_to_the_final_url(
+    client_factory, dest_dir: Path
+) -> None:
+    """Forge download links can 30x-redirect to a CDN URL; the client's
+    ``httpx.Client`` must follow it (``follow_redirects=True``), not treat
+    the redirect itself as the (unusable) response.
+    """
+    body = b"redirected-archive-bytes"
+    redirect_target = "https://cdn.example.com/releases/download/v1/final.zip"
+    with respx.mock() as router:
+        router.get(DOWNLOAD_URL).mock(
+            return_value=httpx.Response(307, headers={"Location": redirect_target})
+        )
+        router.get(redirect_target).mock(return_value=httpx.Response(200, content=body))
+        client = client_factory()
+
+        result = download(client, DOWNLOAD_URL, dest_dir)
+
+    assert result.read_bytes() == body
+
+
 def test_download_propagates_forge_unavailable_error_and_leaves_no_temp_file(
     client_factory, dest_dir: Path
 ) -> None:

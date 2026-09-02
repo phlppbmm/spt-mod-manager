@@ -60,6 +60,38 @@ def test_install_happy_path_exits_zero_and_reports_the_installed_mod(
     assert "CoolPlugin" in result.stdout
 
 
+def test_install_file_without_a_resolvable_version_prints_a_hint(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+) -> None:
+    """A bare-DLL client install with no version override has no version to
+    read (``meta_from_dll`` leaves it empty); the CLI must call this out and
+    point at ``--version`` rather than silently committing an empty version.
+    """
+    _clean_repo(fake_game_dir)
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["install", "--file", str(archive)])
+
+    assert result.exit_code == 0
+    assert "--version" in result.stdout
+
+
+def test_install_file_with_a_version_override_prints_no_versionless_hint(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+) -> None:
+    _clean_repo(fake_game_dir)
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(
+        app, ["install", "--file", str(archive), "--version", "1.0.0"]
+    )
+
+    assert result.exit_code == 0
+    assert "--version" not in result.stdout
+
+
 def test_list_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
 ) -> None:
@@ -107,6 +139,67 @@ def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
 
     assert result.exit_code == 0
     assert "CoolMod" in result.stdout
+
+
+def test_remove_without_yes_prompts_and_declining_removes_nothing(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    repo = _clean_repo(fake_game_dir)
+    install_commit(repo, "CoolMod")
+    monkeypatch.chdir(fake_game_dir)
+    dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
+
+    result = runner.invoke(app, ["remove", "CoolMod"], input="n\n")
+
+    assert result.exit_code != 0
+    assert dll.exists()
+
+
+def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    repo = _clean_repo(fake_game_dir)
+    install_commit(repo, "CoolMod")
+    monkeypatch.chdir(fake_game_dir)
+    dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
+
+    result = runner.invoke(app, ["remove", "CoolMod"], input="y\n")
+
+    assert result.exit_code == 0
+    assert "CoolMod" in result.stdout
+    assert not dll.exists()
+
+
+def test_remove_with_yes_flag_skips_the_confirmation_prompt(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    repo = _clean_repo(fake_game_dir)
+    install_commit(repo, "CoolMod")
+    monkeypatch.chdir(fake_game_dir)
+    dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
+
+    result = runner.invoke(app, ["remove", "CoolMod", "--yes"])
+
+    assert result.exit_code == 0
+    assert "CoolMod" in result.stdout
+    assert not dll.exists()
+
+
+def test_remove_with_force_still_prompts_without_yes(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    """``--force`` only bypasses the profile-residue check inside
+    ``remove_mod``; it must not also imply ``--yes``.
+    """
+    repo = _clean_repo(fake_game_dir)
+    install_commit(repo, "CoolMod")
+    monkeypatch.chdir(fake_game_dir)
+    dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
+
+    result = runner.invoke(app, ["remove", "CoolMod", "--force"], input="n\n")
+
+    assert result.exit_code != 0
+    assert dll.exists()
 
 
 def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(

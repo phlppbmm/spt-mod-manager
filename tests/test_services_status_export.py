@@ -236,6 +236,28 @@ def test_export_includes_the_catalog_link_when_the_db_has_a_match(
     assert output.strip("\n") == "Alpha 2.0.0 https://forge.sp-tarkov.com/mods/alpha"
 
 
+def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
+    clean_repo: Repo, install_commit, tmp_path: Path
+) -> None:
+    """The catalog-link lookup opens the cache DB whose parent directory it
+    creates on the fly (``Catalog.__init__``); when that directory cannot be
+    created (e.g. a file sits where the directory should be, mirroring a
+    permission failure in the real config dir), ``export_mods`` must degrade
+    to the same mod list without links rather than raising -- unlike
+    ``sync_catalog``/``search_catalog``/``browse_catalog``, which still raise
+    ``CatalogUnavailableError`` (pinned in ``test_api_errors.py``), export has
+    a link-free fallback and must keep working.
+    """
+    install_commit(clean_repo, "Alpha", version="1.0.0")
+    blocked = tmp_path / "blocked-config-dir"
+    blocked.write_text("not a directory", encoding="utf-8")
+    db_path = blocked / "catalog.db"
+
+    output = services.export_mods(clean_repo.path, format="text", db_path=db_path)
+
+    assert output.strip("\n") == "Alpha 1.0.0"
+
+
 # --- import ------------------------------------------------------------------
 
 

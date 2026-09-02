@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sqlite3
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -20,6 +21,7 @@ from sptmod.core.conflicts import (
 from sptmod.core.errors import (
     AmbiguousModError,
     ArchiveError,
+    CatalogUnavailableError,
     ConflictError,
     DependencyError,
     DirtyTreeError,
@@ -515,7 +517,7 @@ def install_from_archive(
         layout = find_anchor(temp)
 
         _report(progress, "metadata", "reading the mod metadata")
-        meta = _read_meta(layout, name_override, version_override)
+        meta = _read_meta(layout, name_override, version_override, archive)
 
         _report(progress, "conflicts", "checking conflicts and dependencies")
         warnings = _check_install_conflicts(repo, layout, meta, force)
@@ -696,14 +698,15 @@ def sync_catalog(
         The counts of inserted and updated mods and versions.
 
     Raises:
+        CatalogUnavailableError: The catalog cache cannot be opened.
         ForgeUnavailableError: The API is unreachable; the cache keeps its
             previous contents.
         ForgeApiError: The API answered with an error envelope.
     """
     if client is not None:
-        with Catalog(db_path) as catalog:
+        with _open_catalog(db_path) as catalog:
             return catalog.sync(client, full=full, progress=progress)
-    with ForgeClient() as owned, Catalog(db_path) as catalog:
+    with ForgeClient() as owned, _open_catalog(db_path) as catalog:
         return catalog.sync(owned, full=full, progress=progress)
 
 
@@ -731,11 +734,12 @@ def search_catalog(
         The matching entries ordered by mod name.
 
     Raises:
+        CatalogUnavailableError: The catalog cache cannot be opened.
         GitError: git failed.
     """
     installed = list_mods(path)
     compatible_with = _compatible_with(path, compatible_only)
-    with Catalog(db_path) as catalog:
+    with _open_catalog(db_path) as catalog:
         matched = {
             mod.id for mod in catalog.search(query, compatible_with=compatible_with)
         }
@@ -767,10 +771,11 @@ def browse_catalog(
         The selected entries ordered by mod name.
 
     Raises:
+        CatalogUnavailableError: The catalog cache cannot be opened.
         GitError: git failed.
     """
     installed = list_mods(path)
-    with Catalog(db_path) as catalog:
+    with _open_catalog(db_path) as catalog:
         entries = catalog.classify(
             installed, compatible_with=_compatible_with(path, compatible_only)
         )
@@ -1048,6 +1053,8 @@ def export_mods(
         format: The output format.
         client_only: Keep only mods with a client part.
         db_path: Catalog database path; defaults to :func:`default_db_path`.
+            An unusable catalog cache is not fatal here: the list is then
+            rendered without Forge links.
 
     Returns:
         The rendered list, ending in a newline.
@@ -1058,7 +1065,10 @@ def export_mods(
     mods = list_mods(path)
     if client_only:
         mods = [mod for mod in mods if mod.mod_type in _CLIENT_TYPES]
-    links = _catalog_links(mods, db_path)
+    try:
+        links = _catalog_links(mods, db_path)
+    except CatalogUnavailableError:
+        links = {}
     entries = sorted(
         (
             ExportEntry(
@@ -1476,10 +1486,29 @@ def _resolve_plan(
     client: ForgeClient,
 ) -> InstallPlan:
     installed = _required_spt_version(path)
-    with Catalog(db_path) as catalog:
-        return plan_install(
+    with _open_catalog(db_path) as catalog:
+        plan = plan_install(
             mod_id_or_name, version, catalog, client, list_mods(path), installed
         )
+        return replace(
+            plan,
+            entries=[_with_link(entry, catalog, client) for entry in plan.entries],
+        )
+
+
+def _with_link(entry: PlanEntry, catalog: Catalog, client: ForgeClient) -> PlanEntry:
+    """Fill the download link of ``entry`` from Forge when the cache has none.
+
+    A synced catalog holds version summaries without a link; only
+    :meth:`Catalog.fetch_versions` loads the full version records.
+    """
+    if entry.link:
+        return entry
+    versions = catalog.fetch_versions(client, entry.mod_id)
+    fetched = next((v for v in versions if v.id == entry.version_id), None)
+    if fetched is None:
+        return entry
+    return replace(entry, link=fetched.link, content_length=fetched.content_length)
 
 
 def _install_plan(
@@ -1530,6 +1559,7 @@ def _install_entry(
     return install_from_archive(
         path,
         archive,
+        version_override=entry.version,
         force=force,
         progress=reporter,
         forge_id=str(entry.mod_id),
@@ -1683,7 +1713,7 @@ def _apply_update(
         layout = find_anchor(unpacked)
 
         _report(reporter, "metadata", "reading the mod metadata")
-        meta = _read_meta(layout, mod.name, candidate.new_version)
+        meta = _read_meta(layout, mod.name, candidate.new_version, archive)
 
         _report(reporter, "conflicts", "checking conflicts and dependencies")
         warnings = _check_update_conflicts(repo, layout, meta, mod, force)
@@ -1917,13 +1947,28 @@ def _ensure_installable(repo: Repo) -> None:
 
 
 def _read_meta(
-    layout: ArchiveLayout, name_override: str | None, version_override: str | None
+    layout: ArchiveLayout,
+    name_override: str | None,
+    version_override: str | None,
+    archive: Path,
 ) -> ModMeta:
-    meta = (
-        _client_meta(layout, name_override, version_override)
-        if layout.mod_type == "client"
-        else read_package_json(_server_mod_dir(layout))
-    )
+    if layout.mod_type == "client":
+        meta = _dll_meta(layout, name_override, version_override, archive.stem)
+    else:
+        mod_dir = _server_mod_dir(layout)
+        if mod_dir is not None:
+            meta = read_package_json(mod_dir)
+        else:
+            # Real server mods regularly ship no package.json at all, just a
+            # DLL and data folders; the DLL name or the overrides carry the
+            # metadata then.
+            meta = _dll_meta(layout, name_override, version_override, archive.stem)
+            if not (name_override or meta.name):
+                raise InvalidMetadataError(
+                    f"{archive.name} carries no {PACKAGE_JSON_NAME} below "
+                    f"{MODS_DIR.as_posix()} and no DLL to derive a name from; "
+                    f"pass a name and a version"
+                )
     resolved = replace(
         meta,
         name=name_override or meta.name,
@@ -1952,7 +1997,8 @@ def _reject_multiline_metadata(meta: ModMeta) -> None:
             )
 
 
-def _server_mod_dir(layout: ArchiveLayout) -> Path:
+def _server_mod_dir(layout: ArchiveLayout) -> Path | None:
+    """Return the mod folder carrying the ``package.json``, if the archive has one."""
     sources = [
         mapping.source for mapping in layout.mappings if mapping.target == MODS_DIR
     ]
@@ -1960,19 +2006,44 @@ def _server_mod_dir(layout: ArchiveLayout) -> Path:
         for child in sorted(source.iterdir()):
             if (child / PACKAGE_JSON_NAME).is_file():
                 return child
-    raise InvalidMetadataError(
-        f"no mod folder with a {PACKAGE_JSON_NAME} below "
-        f"{MODS_DIR.as_posix()} in the archive"
-    )
+    return None
 
 
-def _client_meta(
-    layout: ArchiveLayout, name_override: str | None, version_override: str | None
+def _dll_meta(
+    layout: ArchiveLayout,
+    name_override: str | None,
+    version_override: str | None,
+    archive_stem: str,
 ) -> ModMeta:
-    dll = next((path for path in layout.files if path.suffix.lower() == ".dll"), None)
-    if dll is None:
+    dlls = [path for path in layout.files if path.suffix.lower() == ".dll"]
+    if not dlls:
         return ModMeta(name=name_override or "", version=version_override or "")
-    return meta_from_dll(dll, name_override, version_override)
+    dll, derived_name = _preferred_dll(dlls, archive_stem)
+    return meta_from_dll(dll, name_override or derived_name, version_override)
+
+
+def _preferred_dll(dlls: Sequence[Path], archive_stem: str) -> tuple[Path, str]:
+    """Pick the DLL naming the mod and the name it yields.
+
+    Plugin folders ship helper assemblies next to the main DLL, so the archive
+    file name decides: the longest DLL stem -- or dot-separated segment of one
+    -- that occurs in it wins (``Tyfon-UIFixes-6.0.2.zip`` with
+    ``Tyfon.UIFixes.dll`` and ``Tyfon.UIFixes.Net.dll`` yields ``UIFixes``).
+    Without any match the first DLL and its full stem are used.
+    """
+    lowered_stem = archive_stem.lower()
+    matches = [
+        (candidate, dll)
+        for dll in dlls
+        for candidate in (dll.stem, *dll.stem.split("."))
+        if candidate and candidate.lower() in lowered_stem
+    ]
+    if not matches:
+        return dlls[0], dlls[0].stem
+    candidate, dll = max(
+        matches, key=lambda match: (len(match[0]), -len(match[1].stem))
+    )
+    return dll, candidate
 
 
 def _current_mods(repo: Repo) -> list[ModInfo]:
@@ -2165,11 +2236,31 @@ def _catalog_match(name: str, version: str, db_path: Path | None) -> tuple[str, 
     return str(mods[0].id), str(versions[0].id)
 
 
+def _open_catalog(db_path: Path | None) -> Catalog:
+    """Open the catalog cache, mapping filesystem and SQLite failures to a type.
+
+    Raises:
+        CatalogUnavailableError: the cache file or its directory cannot be
+            created or opened.
+    """
+    try:
+        return Catalog(db_path)
+    except (OSError, sqlite3.Error) as error:
+        raise CatalogUnavailableError(
+            f"the catalog cache cannot be opened: {error}"
+        ) from error
+
+
 def _catalog_links(mods: Sequence[ModInfo], db_path: Path | None) -> dict[str, str]:
-    """Return the Forge detail URL per installed mod name, case-folded."""
+    """Return the Forge detail URL per installed mod name, case-folded.
+
+    Raises:
+        CatalogUnavailableError: the catalog cache cannot be opened, for
+            example because its directory cannot be created.
+    """
     by_forge_id = {mod.forge_id: mod for mod in mods if mod.forge_id}
     links: dict[str, str] = {}
-    with Catalog(db_path) as catalog:
+    with _open_catalog(db_path) as catalog:
         for entry in catalog.classify(mods):
             if entry.installed_version is None:
                 continue

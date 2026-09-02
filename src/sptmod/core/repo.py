@@ -12,7 +12,9 @@ from sptmod.core.models import CommitInfo, FileChange, ModFile, RepoStatus
 # Deviates from the verbatim patterns of HANDOFF §5: "!dir/" only re-includes
 # the directory entry itself, while the leading "*" keeps matching every file
 # basename at any depth. The "!dir/**" and "!dir/*.json" lines re-include the
-# contents that have to stay trackable.
+# contents that have to stay trackable. "BepInEx/patchers/" goes beyond §5 as
+# well: mods such as WTT-CommonLib ship patcher DLLs that must be tracked like
+# plugins.
 GITIGNORE_WHITELIST: Final = """\
 *
 !.gitignore
@@ -31,6 +33,8 @@ BepInEx/*
 !BepInEx/plugins/**
 !BepInEx/config/
 !BepInEx/config/**
+!BepInEx/patchers/
+!BepInEx/patchers/**
 """
 
 COMMITTER_NAME: Final = "sptmod"

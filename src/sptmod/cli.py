@@ -294,6 +294,14 @@ def _updates_table(report: services.UpdatesReport) -> Table:
     return table
 
 
+def _confirmed(question: str) -> bool:
+    """Ask ``question`` and answer it with the default when no input arrives."""
+    try:
+        return typer.confirm(question, default=True)
+    except typer.Abort:
+        return True
+
+
 def _print_install(result: services.InstallResult) -> None:
     console.print(
         f"installed {result.mod.name} {result.mod.version}".rstrip()
@@ -418,17 +426,22 @@ def install(
             raise typer.BadParameter("pass either MOD or --file, not both")
         with _handled():
             for archive in file:
-                _print_install(
-                    services.install_from_archive(
-                        Path.cwd(),
-                        archive,
-                        name_override=name,
-                        version_override=version,
-                        force=force,
-                        progress=_report_progress,
-                        forge_match=True,
-                    )
+                archive_result = services.install_from_archive(
+                    Path.cwd(),
+                    archive,
+                    name_override=name,
+                    version_override=version,
+                    force=force,
+                    progress=_report_progress,
+                    forge_match=True,
                 )
+                _print_install(archive_result)
+                if not archive_result.mod.version:
+                    console.print(
+                        f"hint: {archive.name} carries no readable version; "
+                        "pass --version to record one",
+                        markup=False,
+                    )
         return
     if mod is None:
         raise typer.BadParameter("pass a mod ID or name, or --file ARCHIVE")
@@ -521,8 +534,13 @@ def remove(
     force: Annotated[
         bool, typer.Option("--force", help="Remove despite profile residue.")
     ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Remove without confirming.")
+    ] = False,
 ) -> None:
     """Remove an installed mod."""
+    if not yes and not _confirmed(f"remove {name}?"):
+        raise typer.Abort()
     with _handled():
         result = services.remove_mod(Path.cwd(), name, force=force)
         for warning in result.warnings:

@@ -9,6 +9,7 @@ temp-directory cleanup on both success and failure.
 
 import json
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,21 @@ from sptmod.core.errors import (
 )
 from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.repo import Repo
+
+
+def _named_zip(tmp_path: Path, name: str, files: dict[str, str | bytes]) -> Path:
+    """Build a real zip archive with a caller-chosen file name.
+
+    Unlike the ``make_archive`` fixture (fixed ``archive-N.<fmt>`` naming),
+    this lets a test control the archive's stem, which the multi-DLL name
+    heuristic must key off.
+    """
+    archive_path = tmp_path / name
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        for relpath, content in files.items():
+            data = content.encode("utf-8") if isinstance(content, str) else content
+            zf.writestr(relpath, data)
+    return archive_path
 
 
 @pytest.fixture(autouse=True)
@@ -299,3 +315,114 @@ def test_install_cleans_up_the_temp_dir_after_failure(
         services.install_from_archive(clean_repo.path, archive)
 
     assert list(fake_system_temp.iterdir()) == []
+
+
+# --- real-corpus regressions: SPT_Runtime prefix, hybrid-half, patchers, ----
+# --- multi-DLL name heuristic (spt-mod-manager-r3a) -------------------------
+
+
+def test_hybrid_real_corpus_shape_never_silently_drops_the_server_half(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Real-corpus shape (SAIN, Tyfon-UIFixes, WTT-CommonLib): a server mod
+    folder below ``SPT_Runtime/user/mods/`` (no ``package.json``) next to a
+    ``BepInEx/plugins`` client tree. The install must either type the mod
+    ``hybrid`` and copy both trees, or fail outright -- it must never silently
+    install only the client half.
+    """
+    archive = make_archive(
+        {
+            "SPT_Runtime/user/mods/ServerPart/ServerPart.dll": b"server-dll",
+            "BepInEx/plugins/ClientPart/ClientPart.dll": b"client-dll",
+        },
+        "zip",
+    )
+
+    try:
+        result = services.install_from_archive(clean_repo.path, archive)
+    except ArchiveError:
+        return
+
+    assert result.mod.mod_type == "hybrid"
+    assert (clean_repo.path / "SPT/user/mods/ServerPart/ServerPart.dll").is_file()
+    assert (clean_repo.path / "BepInEx/plugins/ClientPart/ClientPart.dll").is_file()
+
+
+def test_pure_server_real_corpus_shape_without_package_json_installs(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Real-corpus shape (betterkeys, EasyAmmoNames): a server mod archive
+    prefixed ``SPT_Runtime/user/mods/`` whose mod folder ships no
+    ``package.json`` at all -- just a DLL and data files. ``--name``/
+    ``--version`` (``name_override``/``version_override``) supply what the
+    metadata cannot.
+
+    This is a second, independent blocker behind the anchor bug: even once
+    ``find_anchor`` recognizes the ``SPT_Runtime`` shape, ``_read_meta``
+    still routes every non-client mod through ``read_package_json``, which
+    raises when no child directory carries a ``package.json`` -- there is no
+    fallback to the overrides for a package-json-less server mod.
+    """
+    archive = make_archive(
+        {
+            "SPT_Runtime/user/mods/betterkeys/betterkeys.dll": b"server-dll",
+            "SPT_Runtime/user/mods/betterkeys/config/config.jsonc": "{}",
+        },
+        "zip",
+    )
+
+    result = services.install_from_archive(
+        clean_repo.path,
+        archive,
+        name_override="betterkeys",
+        version_override="1.8.0",
+    )
+
+    assert result.mod.mod_type == "server"
+    assert result.mod.name == "betterkeys"
+    assert (clean_repo.path / "SPT/user/mods/betterkeys/betterkeys.dll").is_file()
+
+
+def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    """Real-corpus shape (SAIN.4.5.0.zip): two DLLs ship in the plugin folder,
+    ``SAIN.dll`` and ``SAIN.Preset.Shared.dll``. The archive stem is ``SAIN``,
+    so the derived mod name must be ``SAIN`` -- not whichever DLL happens to
+    sort first alphabetically (currently ``SAIN.Preset.Shared``).
+    """
+    archive = _named_zip(
+        tmp_path,
+        "SAIN.zip",
+        {
+            "BepInEx/plugins/SAIN/SAIN.dll": b"main-dll",
+            "BepInEx/plugins/SAIN/SAIN.Preset.Shared.dll": b"preset-dll",
+        },
+    )
+
+    result = services.install_from_archive(clean_repo.path, archive)
+
+    assert result.mod.name == "SAIN"
+
+
+def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem_tyfon(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    """Real-corpus shape (Tyfon-UIFixes-6.0.2.zip): ``Tyfon.UIFixes.dll`` and
+    ``Tyfon.UIFixes.Net.dll`` ship side by side. Per the task's acceptance
+    criteria the archive-stem match must resolve the mod name to
+    ``UIFixes`` (currently ``Tyfon.UIFixes.Net``, the alphabetically-first
+    DLL).
+    """
+    archive = _named_zip(
+        tmp_path,
+        "Tyfon-UIFixes-6.0.2.zip",
+        {
+            "BepInEx/plugins/Tyfon.UIFixes.dll": b"main-dll",
+            "BepInEx/plugins/Tyfon.UIFixes.Net.dll": b"net-dll",
+        },
+    )
+
+    result = services.install_from_archive(clean_repo.path, archive)
+
+    assert result.mod.name == "UIFixes"

@@ -89,6 +89,10 @@ class ForgeUnavailableError(SptmodError):
     """
 
 
+class CatalogUnavailableError(SptmodError):
+    """The local catalog cache cannot be opened or created."""
+
+
 class ForgeApiError(SptmodError):
     """The Forge API answered with an error envelope.
 

@@ -4,6 +4,7 @@ import re
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from operator import attrgetter
 from pathlib import Path
 from typing import Final, Literal
 
@@ -16,6 +17,7 @@ from sptmod.core.models import ModType
 
 SERVER_MODS_TARGET: Final = Path("SPT/user/mods")
 CLIENT_PLUGINS_TARGET: Final = Path("BepInEx/plugins")
+CLIENT_PATCHERS_TARGET: Final = Path("BepInEx/patchers")
 SUPPORTED_SUFFIXES: Final[tuple[str, ...]] = (".7z", ".zip", ".rar")
 
 RAR_INSTALL_HINT: Final = (
@@ -25,6 +27,9 @@ RAR_INSTALL_HINT: Final = (
 
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _MAX_LISTED_ENTRIES: Final = 30
+# Directory names the SPT installer puts in front of "user/mods"; any other
+# prefix has to prove itself through its content.
+_TRUSTED_SERVER_PREFIXES: Final[frozenset[str]] = frozenset({"spt", "spt_runtime"})
 
 type _AnchorKind = Literal["server", "client"]
 
@@ -171,50 +176,50 @@ def _extract_rar(archive_path: Path, dest_temp: Path) -> None:
 def find_anchor(extracted_root: Path) -> ArchiveLayout:
     """Locate the mod trees below ``extracted_root`` and map them to the game dir.
 
-    Searches for anchors at any depth: prefixed anchors ``SPT/user/mods`` and
-    ``BepInEx/plugins`` are always recognized; bare names ``user/mods`` and
-    ``plugins`` require validation (a direct subdirectory with ``package.json``
-    for server mods, or a ``.dll`` file anywhere in the tree for client plugins).
-    Case-insensitive; canonical targets use ``SPT/user/mods/...`` and
-    ``BepInEx/plugins/...``. Descent stops inside accepted anchors. When both
+    Searches for anchors at any depth: trusted anchors carry their game-dir
+    prefix (``SPT/user/mods`` and installer variants such as
+    ``SPT_Runtime/user/mods``, ``BepInEx/plugins``, ``BepInEx/patchers``) and
+    are always recognized; bare names ``user/mods`` and ``plugins`` require
+    validation (a direct subdirectory with ``package.json`` for server mods, or
+    a ``.dll`` file anywhere in the tree for client plugins). Case-insensitive;
+    canonical targets use ``SPT/user/mods/...``, ``BepInEx/plugins/...`` and
+    ``BepInEx/patchers/...``. Descent stops inside accepted anchors. When both
     anchor kinds are present, the result type is ``hybrid``; when only one, the
-    result type is ``server`` or ``client`` accordingly. Prefixed anchors take
+    result type is ``server`` or ``client`` accordingly. Trusted anchors take
     precedence over bare anchors of the same kind.
 
     Raises:
-        ArchiveError: no anchor was found. The error message lists the first 30
+        ArchiveError: no anchor was found. The message lists the first 30
             archive entries (or fewer if the archive is smaller); if there are
             more, it reports the count.
     """
-    server_dirs, client_dirs = _find_anchor_dirs(extracted_root)
-    if not server_dirs and not client_dirs:
+    server_mappings, client_mappings = _find_anchors(extracted_root)
+    if not server_mappings and not client_mappings:
         raise ArchiveError(_no_anchor_message(extracted_root))
 
     mod_type: ModType
-    if server_dirs and client_dirs:
+    if server_mappings and client_mappings:
         mod_type = "hybrid"
-    elif server_dirs:
+    elif server_mappings:
         mod_type = "server"
     else:
         mod_type = "client"
 
-    mappings: list[AnchorMapping] = []
+    mappings = [*server_mappings, *client_mappings]
     files: list[Path] = []
-    for anchor_dir, target in (
-        *((d, SERVER_MODS_TARGET) for d in server_dirs),
-        *((d, CLIENT_PLUGINS_TARGET) for d in client_dirs),
-    ):
-        mappings.append(AnchorMapping(source=anchor_dir, target=target))
-        for path in sorted(anchor_dir.rglob("*")):
+    for mapping in mappings:
+        for path in sorted(mapping.source.rglob("*")):
             if path.is_file():
-                files.append(target / path.relative_to(anchor_dir))
+                files.append(mapping.target / path.relative_to(mapping.source))
 
     return ArchiveLayout(mod_type=mod_type, mappings=mappings, files=files)
 
 
-def _find_anchor_dirs(extracted_root: Path) -> tuple[list[Path], list[Path]]:
-    prefixed: dict[_AnchorKind, list[Path]] = {"server": [], "client": []}
-    bare: dict[_AnchorKind, list[Path]] = {"server": [], "client": []}
+def _find_anchors(
+    extracted_root: Path,
+) -> tuple[list[AnchorMapping], list[AnchorMapping]]:
+    trusted: dict[_AnchorKind, list[AnchorMapping]] = {"server": [], "client": []}
+    bare: dict[_AnchorKind, list[AnchorMapping]] = {"server": [], "client": []}
     pending = [extracted_root]
     while pending:
         directory = pending.pop()
@@ -225,28 +230,34 @@ def _find_anchor_dirs(extracted_root: Path) -> tuple[list[Path], list[Path]]:
             if match is None:
                 pending.append(child)
                 continue
-            kind, is_prefixed = match
-            if is_prefixed:
-                prefixed[kind].append(child)
+            kind, target, is_trusted = match
+            mapping = AnchorMapping(source=child, target=target)
+            if is_trusted:
+                trusted[kind].append(mapping)
             elif _looks_like_anchor_content(kind, child):
-                bare[kind].append(child)
+                bare[kind].append(mapping)
             else:
                 pending.append(child)
-    server_dirs = prefixed["server"] or bare["server"]
-    client_dirs = prefixed["client"] or bare["client"]
-    return sorted(server_dirs), sorted(client_dirs)
+    server_mappings = trusted["server"] or bare["server"]
+    client_mappings = trusted["client"] or bare["client"]
+    by_source = attrgetter("source")
+    return (
+        sorted(server_mappings, key=by_source),
+        sorted(client_mappings, key=by_source),
+    )
 
 
-def _anchor_match(parts: tuple[str, ...]) -> tuple[_AnchorKind, bool] | None:
+def _anchor_match(parts: tuple[str, ...]) -> tuple[_AnchorKind, Path, bool] | None:
     lowered = tuple(part.lower() for part in parts)
-    if lowered[-3:] == ("spt", "user", "mods"):
-        return "server", True
     if lowered[-2:] == ("user", "mods"):
-        return "server", False
+        trusted = len(lowered) >= 3 and lowered[-3] in _TRUSTED_SERVER_PREFIXES
+        return "server", SERVER_MODS_TARGET, trusted
+    if lowered[-2:] == ("bepinex", "patchers"):
+        return "client", CLIENT_PATCHERS_TARGET, True
     if lowered[-2:] == ("bepinex", "plugins"):
-        return "client", True
+        return "client", CLIENT_PLUGINS_TARGET, True
     if lowered[-1:] == ("plugins",):
-        return "client", False
+        return "client", CLIENT_PLUGINS_TARGET, False
     return None
 
 

@@ -289,6 +289,128 @@ def test_find_anchor_ignores_unrelated_bare_user_mods_dir(tmp_path: Path) -> Non
     )
 
 
+def test_find_anchor_recognizes_spt_runtime_prefixed_server_dir_without_package_json(
+    tmp_path: Path,
+) -> None:
+    """Real-corpus shape (betterkeys, EasyAmmoNames): the installer's own
+    ``SPT_Runtime/user/mods/<mod>/`` prefix, and the mod folder carries no
+    ``package.json`` at all -- just a DLL and data files.
+    """
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(
+        extracted_root,
+        {
+            "SPT_Runtime/user/mods/betterkeys/betterkeys.dll": "server-dll",
+            "SPT_Runtime/user/mods/betterkeys/config/config.jsonc": "{}",
+        },
+    )
+
+    layout = find_anchor(extracted_root)
+
+    _assert_layout_matches(
+        layout,
+        extracted_root,
+        {
+            Path("SPT/user/mods/betterkeys/betterkeys.dll"): "server-dll",
+            Path("SPT/user/mods/betterkeys/config/config.jsonc"): "{}",
+        },
+        "server",
+    )
+
+
+def test_find_anchor_recognizes_spt_runtime_prefixed_hybrid_without_package_json(
+    tmp_path: Path,
+) -> None:
+    """Real-corpus shape (SAIN, Tyfon-UIFixes, WTT-CommonLib): a server mod
+    folder below ``SPT_Runtime/user/mods/`` with no ``package.json``, next to
+    a ``BepInEx/plugins`` client tree. Both halves must be anchored -- the
+    server half must never be silently dropped, leaving the archive typed
+    ``client`` only.
+    """
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(
+        extracted_root,
+        {
+            "SPT_Runtime/user/mods/ServerPart/ServerPart.dll": "server-dll",
+            "BepInEx/plugins/ClientPart/ClientPart.dll": "client-dll",
+        },
+    )
+
+    layout = find_anchor(extracted_root)
+
+    _assert_layout_matches(
+        layout,
+        extracted_root,
+        {
+            Path("SPT/user/mods/ServerPart/ServerPart.dll"): "server-dll",
+            Path("BepInEx/plugins/ClientPart/ClientPart.dll"): "client-dll",
+        },
+        "hybrid",
+    )
+
+
+def test_find_anchor_does_not_trust_a_junk_dir_that_merely_starts_with_spt(
+    tmp_path: Path,
+) -> None:
+    """A directory that merely starts with "spt" (e.g. an icon-pack folder
+    "spticons") must not be trusted as the installer's own server-tree
+    prefix -- only the exact "spt" segment and genuine installer prefixes
+    like "SPT_Runtime" are trusted unconditionally. Without real mod content
+    (no ``package.json`` anywhere below it), a "spt*"-prefixed junk dir must
+    stay unanchored, even next to a real client anchor.
+    """
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(
+        extracted_root,
+        {
+            "spticons/user/mods/readme.png": "not-a-mod",
+            "BepInEx/plugins/CoolPlugin.dll": "client-dll",
+        },
+    )
+
+    layout = find_anchor(extracted_root)
+
+    assert layout.mod_type == "client"
+    assert layout.files == [Path("BepInEx/plugins/CoolPlugin.dll")]
+
+
+def test_find_anchor_raises_for_a_junk_spt_prefixed_dir_with_no_other_content(
+    tmp_path: Path,
+) -> None:
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(extracted_root, {"spticons/user/mods/readme.png": "not-a-mod"})
+
+    with pytest.raises(ArchiveError):
+        find_anchor(extracted_root)
+
+
+def test_find_anchor_includes_bepinex_patchers_files_alongside_plugins(
+    tmp_path: Path,
+) -> None:
+    """Real-corpus shape (WTT-CommonLib): ``BepInEx/patchers/`` ships next to
+    ``BepInEx/plugins/`` and must install too, not be silently dropped.
+    """
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(
+        extracted_root,
+        {
+            "BepInEx/plugins/CoolPlugin.dll": "plugin-content",
+            "BepInEx/patchers/CoolPatcher.dll": "patcher-content",
+        },
+    )
+
+    layout = find_anchor(extracted_root)
+
+    assert layout.mod_type == "client"
+    assert Path("BepInEx/plugins/CoolPlugin.dll") in layout.files
+    assert Path("BepInEx/patchers/CoolPatcher.dll") in layout.files
+
+
 def test_find_anchor_nested_capitalized_plugins_dir_stays_part_of_server_mod(
     tmp_path: Path,
 ) -> None:

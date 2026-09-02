@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sptmod.core import game_dir, services
-from sptmod.core.errors import NotImplementedYetError
+from sptmod.core.errors import CatalogUnavailableError, NotImplementedYetError
 from sptmod.core.repo import Repo
 from sptmod.server.app import app
 
@@ -189,3 +189,61 @@ def test_remove_mod_profile_residue_error_returns_structured_residue_details(
     assert body["details"]["residues"] == [
         {"profile": "abc", "category": "item", "ids": [item_id], "count": 1}
     ]
+
+
+# --------------------------------------------------------------------------
+# CatalogUnavailableError: an unwritable/uncreatable catalog cache directory
+# must degrade to a typed error, not a raw crash (spt-mod-manager-r3a).
+# --------------------------------------------------------------------------
+
+
+def _blocked_db_path(tmp_path: Path) -> Path:
+    """A ``db_path`` whose parent cannot be created: a file sits in its place."""
+    blocked = tmp_path / "blocked-config-dir"
+    blocked.write_text("not a directory", encoding="utf-8")
+    return blocked / "catalog.db"
+
+
+def test_search_catalog_raises_catalog_unavailable_not_os_error(
+    game_dir_path: Path, tmp_path: Path
+) -> None:
+    with pytest.raises(CatalogUnavailableError):
+        services.search_catalog(
+            game_dir_path, query="", db_path=_blocked_db_path(tmp_path)
+        )
+
+
+def test_browse_catalog_raises_catalog_unavailable_not_os_error(
+    game_dir_path: Path, tmp_path: Path
+) -> None:
+    with pytest.raises(CatalogUnavailableError):
+        services.browse_catalog(game_dir_path, db_path=_blocked_db_path(tmp_path))
+
+
+def test_sync_catalog_raises_catalog_unavailable_not_os_error(
+    game_dir_path: Path, tmp_path: Path
+) -> None:
+    # A dummy client is enough: Catalog(db_path) must fail before the client
+    # is ever used to talk to Forge.
+    with pytest.raises(CatalogUnavailableError):
+        services.sync_catalog(
+            game_dir_path, db_path=_blocked_db_path(tmp_path), client=object()
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint", ["search_catalog", "browse_catalog", "sync_catalog"]
+)
+def test_catalog_unavailable_error_returns_503_with_a_distinct_code_over_the_api(
+    game_dir_path: Path, tmp_path: Path, endpoint: str
+) -> None:
+    payload = {"path": str(game_dir_path), "db_path": str(_blocked_db_path(tmp_path))}
+    if endpoint == "search_catalog":
+        payload["query"] = ""
+
+    response = client.post(f"/api/{endpoint}", json=payload)
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "CATALOG_UNAVAILABLE"
+    assert body["error"] != ""

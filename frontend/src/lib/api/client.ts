@@ -33,6 +33,25 @@ export type UpdatesReport = Schemas['UpdatesReport'];
 export type UpdateCandidate = Schemas['UpdateCandidate'];
 export type BlockedUpdate = Schemas['BlockedUpdate'];
 export type ClearCacheResult = Schemas['ClearCacheResult'];
+export type DirectoryListing = Schemas['DirectoryListing'];
+export type DirectoryEntry = Schemas['DirectoryEntry'];
+export type LocatedDirectory = Schemas['LocatedDirectory'];
+
+export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
+	return call<DirectoryListing>('list_directories', {
+		path
+	} satisfies Schemas['ListDirectoriesRequest']);
+}
+
+export function locateDirectory(
+	name: string,
+	fingerprint: string[] = []
+): Promise<LocatedDirectory[]> {
+	return call<LocatedDirectory[]>('locate_directory', {
+		name,
+		fingerprint
+	} satisfies Schemas['LocateDirectoryRequest']);
+}
 
 export function initGameDir(path: string, adopt: boolean | string[] = false): Promise<InitResult> {
 	return call<InitResult>('init_game_dir', {

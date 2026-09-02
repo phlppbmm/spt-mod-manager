@@ -89,6 +89,10 @@ class ForgeUnavailableError(SptmodError):
     """
 
 
+class InvalidPathError(SptmodError):
+    """A browsed path is missing, is no directory or cannot be read."""
+
+
 class CatalogUnavailableError(SptmodError):
     """The local catalog cache cannot be opened or created."""
 

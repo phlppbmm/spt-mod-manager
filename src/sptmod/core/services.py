@@ -1,10 +1,12 @@
 """Service layer: the operations behind the CLI and the HTTP adapter."""
 
 import json
+import os.path
 import shutil
 import sqlite3
 import tempfile
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,7 @@ from sptmod.core.errors import (
     DependencyError,
     DirtyTreeError,
     GitError,
+    InvalidPathError,
     ModNotFoundError,
     NotAGameDirError,
     PartialInstallError,
@@ -46,6 +49,7 @@ from sptmod.core.game_dir import (
     PLUGINS_DIR,
     PROFILES_DIR,
     ensure_game_not_running,
+    is_game_dir,
     spt_version,
     validate_game_dir,
 )
@@ -136,6 +140,13 @@ _SNAPSHOT_TIME_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
 _LINK_MARKER: Final = "://"
 _CONTENT_SOURCE: Final = "the given mod list"
 _UNSET_DATE: Final = datetime.min
+_LOCATE_MOUNTS: Final[tuple[str, ...]] = ("/mnt", "/media", "/opt")
+_LOCATE_SKIP_NAMES: Final[frozenset[str]] = frozenset(
+    {"node_modules", "__pycache__", "proc", "sys", "dev"}
+)
+_LOCATE_MAX_DEPTH: Final = 5
+_LOCATE_MAX_RESULTS: Final = 10
+_LOCATE_TIME_BUDGET: Final = 5.0
 
 
 @dataclass(frozen=True)
@@ -386,6 +397,158 @@ class UpdateResult:
     files: list[ModFile] = field(default_factory=list)
     warnings: list[Conflict] = field(default_factory=list)
     notice: str = ""
+
+
+@dataclass(frozen=True)
+class DirectoryEntry:
+    """One subdirectory of a browsed directory."""
+
+    name: str
+    path: Path
+    is_game_dir: bool
+
+
+@dataclass(frozen=True)
+class DirectoryListing:
+    """The subdirectories of one directory, for a folder picker.
+
+    ``parent`` is None at the filesystem root, where browsing cannot go up.
+    """
+
+    path: Path
+    parent: Path | None
+    entries: list[DirectoryEntry] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LocatedDirectory:
+    """A directory the fingerprint search matched."""
+
+    path: Path
+    is_game_dir: bool
+
+
+def list_directories(path: str | Path | None = None) -> DirectoryListing:
+    """List the subdirectories of ``path`` for a folder picker.
+
+    Without ``path`` the home directory of the current user is listed. Hidden
+    directories are skipped, files are not reported, and the entries are
+    sorted by name.
+
+    Raises:
+        InvalidPathError: ``path`` does not exist, is no directory or cannot
+            be read.
+    """
+    target = Path(path).expanduser() if path is not None else Path.home()
+    try:
+        resolved = target.resolve()
+        if not resolved.exists():
+            raise InvalidPathError(f"{resolved} does not exist")
+        if not resolved.is_dir():
+            raise InvalidPathError(f"{resolved} is not a directory")
+        children = sorted(
+            (child for child in resolved.iterdir() if _is_listable_dir(child)),
+            key=lambda child: child.name.casefold(),
+        )
+    except OSError as error:
+        raise InvalidPathError(f"{target} cannot be read: {error}") from error
+    return DirectoryListing(
+        path=resolved,
+        parent=resolved.parent if resolved.parent != resolved else None,
+        entries=[
+            DirectoryEntry(
+                name=child.name, path=child, is_game_dir=_looks_like_game_dir(child)
+            )
+            for child in children
+        ],
+    )
+
+
+def locate_directory(name: str, fingerprint: Sequence[str]) -> list[LocatedDirectory]:
+    """Find directories named ``name`` that contain every ``fingerprint`` entry.
+
+    The browser hands a folder picker's selection over as a folder name plus a
+    few of its entry names; this maps that back to absolute paths. Searched are
+    the home directory and the mount points ``/mnt``, ``/media`` and ``/opt``
+    where they exist, down to :data:`_LOCATE_MAX_DEPTH` levels, skipping hidden
+    and notoriously deep directories. The search stops after
+    :data:`_LOCATE_MAX_RESULTS` matches or :data:`_LOCATE_TIME_BUDGET` seconds.
+
+    Raises:
+        InvalidPathError: ``name`` is empty or contains a path separator.
+    """
+    if not name or "/" in name or "\\" in name:
+        raise InvalidPathError(f"{name!r} is not a plain directory name")
+    deadline = time.monotonic() + _LOCATE_TIME_BUDGET
+    found: list[LocatedDirectory] = []
+    seen: set[Path] = set()
+    for root in _locate_roots():
+        for candidate in _walk_for_name(root, name, deadline):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if not _matches_fingerprint(candidate, fingerprint):
+                continue
+            found.append(
+                LocatedDirectory(
+                    path=candidate, is_game_dir=_looks_like_game_dir(candidate)
+                )
+            )
+            if len(found) >= _LOCATE_MAX_RESULTS:
+                return found
+    return found
+
+
+def _is_listable_dir(path: Path) -> bool:
+    return not path.name.startswith(".") and os.path.isdir(path)
+
+
+def _looks_like_game_dir(path: Path) -> bool:
+    """Answer :func:`is_game_dir` for a directory that may be unreadable."""
+    try:
+        return is_game_dir(path)
+    except OSError:
+        return False
+
+
+def _locate_roots() -> list[Path]:
+    roots = [Path.home(), *(Path(mount) for mount in _LOCATE_MOUNTS)]
+    return [root for root in roots if root.is_dir()]
+
+
+def _walk_for_name(root: Path, name: str, deadline: float) -> Iterator[Path]:
+    """Yield directories named ``name`` below ``root``, breadth-first."""
+    level = [root]
+    for _ in range(_LOCATE_MAX_DEPTH):
+        if not level or time.monotonic() > deadline:
+            return
+        children: list[Path] = []
+        for directory in level:
+            try:
+                entries = sorted(directory.iterdir(), key=lambda entry: entry.name)
+            except OSError:
+                continue
+            for entry in entries:
+                if not _is_searchable_dir(entry):
+                    continue
+                if entry.name == name:
+                    yield entry
+                else:
+                    children.append(entry)
+        level = children
+
+
+def _is_searchable_dir(path: Path) -> bool:
+    return (
+        not path.name.startswith(".")
+        and path.name not in _LOCATE_SKIP_NAMES
+        and os.path.isdir(path)
+        and not os.path.islink(path)
+    )
+
+
+def _matches_fingerprint(candidate: Path, fingerprint: Sequence[str]) -> bool:
+    return all(os.path.exists(candidate / entry) for entry in fingerprint)
 
 
 def init_game_dir(path: Path, adopt: Sequence[Path] | bool = False) -> InitResult:

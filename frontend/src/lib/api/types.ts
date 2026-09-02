@@ -24,6 +24,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/list_directories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Directories */
+        post: operations["list_directories_api_list_directories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/locate_directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Locate Directory */
+        post: operations["locate_directory_api_locate_directory_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/init_game_dir": {
         parameters: {
             query?: never;
@@ -674,6 +708,39 @@ export interface components {
         /** @enum {string} */
         ConflictSeverity: "error" | "warning";
         /**
+         * DirectoryEntry
+         * @description One subdirectory of a browsed directory.
+         */
+        DirectoryEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Is Game Dir */
+            is_game_dir: boolean;
+        };
+        /**
+         * DirectoryListing
+         * @description Outcome of ``list_directories``.
+         */
+        DirectoryListing: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Parent */
+            parent?: string | null;
+            /**
+             * Entries
+             * @default []
+             */
+            entries: components["schemas"]["DirectoryEntry"][];
+        };
+        /**
          * DisableModRequest
          * @description Parameters of ``disable_mod``.
          */
@@ -1100,6 +1167,14 @@ export interface components {
             warnings: components["schemas"]["Conflict"][];
         };
         /**
+         * ListDirectoriesRequest
+         * @description Parameters of ``list_directories``.
+         */
+        ListDirectoriesRequest: {
+            /** Path */
+            path?: string | null;
+        };
+        /**
          * ListModsRequest
          * @description Parameters of ``list_mods``.
          */
@@ -1114,6 +1189,32 @@ export interface components {
              * @default false
              */
             include_all: boolean;
+        };
+        /**
+         * LocateDirectoryRequest
+         * @description Parameters of ``locate_directory``.
+         */
+        LocateDirectoryRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Fingerprint
+             * @default []
+             */
+            fingerprint: string[];
+        };
+        /**
+         * LocatedDirectory
+         * @description A directory matched by ``locate_directory``.
+         */
+        LocatedDirectory: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Is Game Dir */
+            is_game_dir: boolean;
         };
         /**
          * ManualMod
@@ -1600,6 +1701,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_directories_api_list_directories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListDirectoriesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectoryListing"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    locate_directory_api_locate_directory_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocateDirectoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocatedDirectory"][];
                 };
             };
             /** @description Default Response */

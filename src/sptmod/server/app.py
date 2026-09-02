@@ -27,6 +27,7 @@ from sptmod.core.errors import (
     ForgeUnavailableError,
     GameRunningError,
     GitError,
+    InvalidPathError,
     ModNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
@@ -56,6 +57,7 @@ ERROR_MAPPING: dict[type[Exception], tuple[str, int]] = {
     NotAGameDirError: ("NOT_A_GAME_DIR", 400),
     ArchiveError: ("ARCHIVE_ERROR", 400),
     InvalidMetadataError: ("INVALID_METADATA", 400),
+    InvalidPathError: ("INVALID_PATH", 400),
     UnsupportedRangeError: ("UNSUPPORTED_RANGE", 400),
     ModNotFoundError: ("MOD_NOT_FOUND", 404),
     NoCompatibleVersionError: ("NO_COMPATIBLE_VERSION", 404),
@@ -85,6 +87,20 @@ router = APIRouter(
 def health() -> schemas.HealthResponse:
     """Report that the server is up."""
     return schemas.HealthResponse()
+
+
+@router.post("/list_directories", response_model=schemas.DirectoryListing)
+def list_directories(
+    request: schemas.ListDirectoriesRequest,
+) -> services.DirectoryListing:
+    return services.list_directories(request.path)
+
+
+@router.post("/locate_directory", response_model=list[schemas.LocatedDirectory])
+def locate_directory(
+    request: schemas.LocateDirectoryRequest,
+) -> list[services.LocatedDirectory]:
+    return services.locate_directory(request.name, request.fingerprint)
 
 
 @router.post("/init_game_dir", response_model=schemas.InitResult)

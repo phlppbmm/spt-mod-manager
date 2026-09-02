@@ -307,6 +307,42 @@ class UpdateResult(CoreModel):
     notice: str = ""
 
 
+class DirectoryEntry(CoreModel):
+    """One subdirectory of a browsed directory."""
+
+    name: str
+    path: Path
+    is_game_dir: bool
+
+
+class DirectoryListing(CoreModel):
+    """Outcome of ``list_directories``."""
+
+    path: Path
+    parent: Path | None = None
+    entries: list[DirectoryEntry] = []
+
+
+class ListDirectoriesRequest(CoreModel):
+    """Parameters of ``list_directories``."""
+
+    path: Path | None = None
+
+
+class LocatedDirectory(CoreModel):
+    """A directory matched by ``locate_directory``."""
+
+    path: Path
+    is_game_dir: bool
+
+
+class LocateDirectoryRequest(CoreModel):
+    """Parameters of ``locate_directory``."""
+
+    name: str
+    fingerprint: list[str] = []
+
+
 class InitGameDirRequest(CoreModel):
     """Parameters of ``init_game_dir``."""
 

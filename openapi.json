@@ -35,6 +35,86 @@
         }
       }
     },
+    "/api/list_directories": {
+      "post": {
+        "summary": "List Directories",
+        "operationId": "list_directories_api_list_directories_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListDirectoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryListing"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locate_directory": {
+      "post": {
+        "summary": "Locate Directory",
+        "operationId": "locate_directory_api_locate_directory_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocateDirectoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LocatedDirectory"
+                  },
+                  "type": "array",
+                  "title": "Response Locate Directory Api Locate Directory Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/init_game_dir": {
       "post": {
         "summary": "Init Game Dir",
@@ -1511,6 +1591,66 @@
           "warning"
         ]
       },
+      "DirectoryEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "is_game_dir": {
+            "type": "boolean",
+            "title": "Is Game Dir"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "is_game_dir"
+        ],
+        "title": "DirectoryEntry",
+        "description": "One subdirectory of a browsed directory."
+      },
+      "DirectoryListing": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/DirectoryEntry"
+            },
+            "type": "array",
+            "title": "Entries",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "DirectoryListing",
+        "description": "Outcome of ``list_directories``."
+      },
       "DisableModRequest": {
         "properties": {
           "path": {
@@ -2251,6 +2391,25 @@
         "title": "InstallResult",
         "description": "Outcome of ``install_from_archive``."
       },
+      "ListDirectoriesRequest": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "title": "ListDirectoriesRequest",
+        "description": "Parameters of ``list_directories``."
+      },
       "ListModsRequest": {
         "properties": {
           "path": {
@@ -2270,6 +2429,48 @@
         ],
         "title": "ListModsRequest",
         "description": "Parameters of ``list_mods``."
+      },
+      "LocateDirectoryRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "fingerprint": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fingerprint",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "LocateDirectoryRequest",
+        "description": "Parameters of ``locate_directory``."
+      },
+      "LocatedDirectory": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "is_game_dir": {
+            "type": "boolean",
+            "title": "Is Game Dir"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "is_game_dir"
+        ],
+        "title": "LocatedDirectory",
+        "description": "A directory matched by ``locate_directory``."
       },
       "ManualMod": {
         "properties": {

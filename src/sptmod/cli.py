@@ -1,11 +1,13 @@
 """Command-line interface for sptmod."""
 
+import webbrowser
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Final
 
 import typer
+import uvicorn
 from rich.console import Console
 from rich.table import Table
 
@@ -36,6 +38,7 @@ from sptmod.core.models import (
     ProfileResidue,
 )
 from sptmod.core.modmeta import InvalidMetadataError
+from sptmod.server.app import DEFAULT_HOST, DEFAULT_PORT, create_app
 
 app = typer.Typer(help="sptmod: mod manager for SPT (Single Player Tarkov).")
 
@@ -565,6 +568,23 @@ def browse(
                 )
             )
         )
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int, typer.Option("--port", help="Port the server listens on.")
+    ] = DEFAULT_PORT,
+    open_browser: Annotated[
+        bool, typer.Option("--open-browser", help="Open the UI in a web browser.")
+    ] = False,
+) -> None:
+    """Serve the API on localhost (127.0.0.1), not exposed to the network."""
+    url = f"http://{DEFAULT_HOST}:{port}"
+    console.print(f"serving {url}", markup=False)
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run(create_app(), host=DEFAULT_HOST, port=port)
 
 
 def main() -> None:

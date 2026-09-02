@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from sptmod.core.models import Conflict
+from sptmod.core.models import Conflict, ProfileResidue
 
 
 class SptmodError(Exception):
@@ -49,7 +49,16 @@ class DependencyError(SptmodError):
 
 
 class ProfileResidueError(SptmodError):
-    """Removing a mod would leave residue in at least one player profile."""
+    """Removing a mod would leave residue in at least one player profile.
+
+    ``residues`` holds the findings per profile, so callers can report which
+    profiles still reference which content of the mod.
+    """
+
+    def __init__(self, message: str, residues: Sequence[ProfileResidue] = ()) -> None:
+        super().__init__(message)
+        self.message = message
+        self.residues: list[ProfileResidue] = list(residues)
 
 
 class ArchiveError(SptmodError):

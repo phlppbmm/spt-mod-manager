@@ -1072,7 +1072,7 @@ def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
         for residue in find_residues(profile, ids)
     ]
     if residues and not force:
-        raise ProfileResidueError(_residue_message(mod.name, residues))
+        raise ProfileResidueError(_residue_message(mod.name, residues), residues)
     return ids.warnings
 
 

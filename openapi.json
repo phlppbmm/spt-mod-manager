@@ -1,0 +1,2273 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "sptmod",
+    "description": "HTTP adapter over the sptmod core services.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Report that the server is up.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/init_game_dir": {
+      "post": {
+        "summary": "Init Game Dir",
+        "operationId": "init_game_dir_api_init_game_dir_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitGameDirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InitResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/install_from_archive": {
+      "post": {
+        "summary": "Install From Archive",
+        "operationId": "install_from_archive_api_install_from_archive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallFromArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallFromArchiveResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/list_mods": {
+      "post": {
+        "summary": "List Mods",
+        "operationId": "list_mods_api_list_mods_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListModsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Mods Api List Mods Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mod_files": {
+      "post": {
+        "summary": "Mod Files",
+        "operationId": "mod_files_api_mod_files_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModFilesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModFile"
+                  },
+                  "type": "array",
+                  "title": "Response Mod Files Api Mod Files Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/remove_mod": {
+      "post": {
+        "summary": "Remove Mod",
+        "operationId": "remove_mod_api_remove_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/check_profiles": {
+      "post": {
+        "summary": "Check Profiles",
+        "operationId": "check_profiles_api_check_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckProfilesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history": {
+      "post": {
+        "summary": "History",
+        "operationId": "history_api_history_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CommitInfo"
+                  },
+                  "type": "array",
+                  "title": "Response History Api History Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync_catalog": {
+      "post": {
+        "summary": "Sync Catalog",
+        "operationId": "sync_catalog_api_sync_catalog_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncCatalogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncCatalogResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search_catalog": {
+      "post": {
+        "summary": "Search Catalog",
+        "operationId": "search_catalog_api_search_catalog_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchCatalogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogEntry"
+                  },
+                  "type": "array",
+                  "title": "Response Search Catalog Api Search Catalog Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/browse_catalog": {
+      "post": {
+        "summary": "Browse Catalog",
+        "operationId": "browse_catalog_api_browse_catalog_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowseCatalogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogEntry"
+                  },
+                  "type": "array",
+                  "title": "Response Browse Catalog Api Browse Catalog Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/disable_mod": {
+      "post": {
+        "summary": "Disable Mod",
+        "operationId": "disable_mod_api_disable_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToggleResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/enable_mod": {
+      "post": {
+        "summary": "Enable Mod",
+        "operationId": "enable_mod_api_enable_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnableModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToggleResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/adopt_mod": {
+      "post": {
+        "summary": "Adopt Mod",
+        "operationId": "adopt_mod_api_adopt_mod_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdoptModRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdoptResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "post": {
+        "summary": "Status",
+        "operationId": "status_api_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshot": {
+      "post": {
+        "summary": "Snapshot",
+        "operationId": "snapshot_api_snapshot_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export_mods": {
+      "post": {
+        "summary": "Export Mods",
+        "operationId": "export_mods_api_export_mods_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportModsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportModsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/import_list": {
+      "post": {
+        "summary": "Import List",
+        "operationId": "import_list_api_import_list_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDiff"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "summary": "Stream the progress of long-running operations",
+        "description": "Stream one message per progress callback of any running operation.",
+        "operationId": "events_api_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdoptModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "target": {
+            "type": "string",
+            "format": "path",
+            "title": "Target"
+          },
+          "name_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Override"
+          },
+          "version_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Override"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "target"
+        ],
+        "title": "AdoptModRequest",
+        "description": "Parameters of ``adopt_mod``."
+      },
+      "AdoptResult": {
+        "properties": {
+          "mod": {
+            "$ref": "#/components/schemas/ModInfo"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod"
+        ],
+        "title": "AdoptResult",
+        "description": "Outcome of ``adopt_mod``."
+      },
+      "BrowseCatalogRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "filter": {
+            "$ref": "#/components/schemas/BrowseFilter",
+            "default": "all"
+          },
+          "compatible_only": {
+            "type": "boolean",
+            "title": "Compatible Only",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "BrowseCatalogRequest",
+        "description": "Parameters of ``browse_catalog``."
+      },
+      "BrowseFilter": {
+        "type": "string",
+        "enum": [
+          "all",
+          "installed",
+          "available"
+        ]
+      },
+      "CatalogEntry": {
+        "properties": {
+          "mod": {
+            "$ref": "#/components/schemas/CatalogMod"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CatalogState"
+          },
+          "installed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Version"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod",
+          "state",
+          "installed_version",
+          "latest_version"
+        ],
+        "title": "CatalogEntry",
+        "description": "A cached mod joined with the installed state of the game repository."
+      },
+      "CatalogMod": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "hub_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hub Id"
+          },
+          "guid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "teaser": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teaser"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "downloads": {
+            "type": "integer",
+            "title": "Downloads"
+          },
+          "detail_url": {
+            "type": "string",
+            "title": "Detail Url"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "hub_id",
+          "guid",
+          "name",
+          "slug",
+          "teaser",
+          "author",
+          "downloads",
+          "detail_url",
+          "published_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CatalogMod",
+        "description": "A mod as cached in the local Forge catalog."
+      },
+      "CatalogState": {
+        "type": "string",
+        "enum": [
+          "installed",
+          "update_available",
+          "available"
+        ]
+      },
+      "CatalogVersion": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "mod_id": {
+            "type": "integer",
+            "title": "Mod Id"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "content_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Length"
+          },
+          "spt_version_constraint": {
+            "type": "string",
+            "title": "Spt Version Constraint"
+          },
+          "downloads": {
+            "type": "integer",
+            "title": "Downloads"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "mod_id",
+          "version",
+          "link",
+          "content_length",
+          "spt_version_constraint",
+          "downloads",
+          "published_at",
+          "updated_at"
+        ],
+        "title": "CatalogVersion",
+        "description": "A mod version as cached in the local Forge catalog."
+      },
+      "CheckProfilesRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "CheckProfilesRequest",
+        "description": "Parameters of ``check_profiles``."
+      },
+      "CheckResult": {
+        "properties": {
+          "residues": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ProfileResidue"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Residues",
+            "default": {}
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "CheckResult",
+        "description": "What a residue check over all mods and all profiles found."
+      },
+      "CommitInfo": {
+        "properties": {
+          "hash": {
+            "type": "string",
+            "title": "Hash"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Date"
+          },
+          "trailers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Trailers",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "hash",
+          "subject",
+          "date"
+        ],
+        "title": "CommitInfo",
+        "description": "A commit with its parsed trailers."
+      },
+      "Conflict": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ConflictKind"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ConflictSeverity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "mod": {
+            "type": "string",
+            "title": "Mod",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "severity",
+          "message"
+        ],
+        "title": "Conflict",
+        "description": "A finding of the pre-install conflict and dependency checks."
+      },
+      "ConflictKind": {
+        "type": "string",
+        "enum": [
+          "tracked-file",
+          "untracked-file",
+          "dll-duplicate",
+          "missing-dependency",
+          "dependency-version",
+          "spt-version"
+        ]
+      },
+      "ConflictSeverity": {
+        "type": "string",
+        "enum": [
+          "error",
+          "warning"
+        ]
+      },
+      "DisableModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "DisableModRequest",
+        "description": "Parameters of ``disable_mod``."
+      },
+      "EnableModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "EnableModRequest",
+        "description": "Parameters of ``enable_mod``."
+      },
+      "ErrorDetails": {
+        "properties": {
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array",
+            "title": "Conflicts",
+            "default": []
+          },
+          "residues": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileResidue"
+            },
+            "type": "array",
+            "title": "Residues",
+            "default": []
+          },
+          "conflicting_paths": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Conflicting Paths",
+            "default": []
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "candidates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Candidates",
+            "default": []
+          },
+          "dependency": {
+            "type": "string",
+            "title": "Dependency",
+            "default": ""
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "api_code": {
+            "type": "string",
+            "title": "Api Code",
+            "default": ""
+          },
+          "api_status": {
+            "type": "integer",
+            "title": "Api Status",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "ErrorDetails",
+        "description": "The structured payload a failed operation carries, empty where it has none."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "details": {
+            "$ref": "#/components/schemas/ErrorDetails"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "code"
+        ],
+        "title": "ErrorResponse",
+        "description": "Body of every failed request.\n\n``code`` is the stable machine-readable name of the core exception class,\n``error`` its human-readable message."
+      },
+      "ExportFormat": {
+        "type": "string",
+        "enum": [
+          "text",
+          "json"
+        ]
+      },
+      "ExportModsRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat",
+            "default": "text"
+          },
+          "client_only": {
+            "type": "boolean",
+            "title": "Client Only",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ExportModsRequest",
+        "description": "Parameters of ``export_mods``."
+      },
+      "ExportModsResponse": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "ExportModsResponse",
+        "description": "The rendered mod list of ``export_mods``."
+      },
+      "FileChange": {
+        "type": "string",
+        "enum": [
+          "added",
+          "modified",
+          "deleted"
+        ]
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status",
+            "default": "ok"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse",
+        "description": "Body of the health check."
+      },
+      "HistoryRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "HistoryRequest",
+        "description": "Parameters of ``history``."
+      },
+      "ImportDiff": {
+        "properties": {
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEntry"
+            },
+            "type": "array",
+            "title": "Missing",
+            "default": []
+          },
+          "different": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEntry"
+            },
+            "type": "array",
+            "title": "Different",
+            "default": []
+          },
+          "extra": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEntry"
+            },
+            "type": "array",
+            "title": "Extra",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "ImportDiff",
+        "description": "The difference between an imported mod list and the installed mods."
+      },
+      "ImportEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "wanted_version": {
+            "type": "string",
+            "title": "Wanted Version",
+            "default": ""
+          },
+          "installed_version": {
+            "type": "string",
+            "title": "Installed Version",
+            "default": ""
+          },
+          "link": {
+            "type": "string",
+            "title": "Link",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImportEntry",
+        "description": "One mod an imported list and the installed mods disagree about."
+      },
+      "ImportListRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "list_file": {
+            "type": "string",
+            "format": "path",
+            "title": "List File"
+          },
+          "apply": {
+            "type": "boolean",
+            "title": "Apply",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "list_file"
+        ],
+        "title": "ImportListRequest",
+        "description": "Parameters of ``import_list``."
+      },
+      "InitGameDirRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "adopt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "type": "string",
+                  "format": "path"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Adopt",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "InitGameDirRequest",
+        "description": "Parameters of ``init_game_dir``."
+      },
+      "InitResult": {
+        "properties": {
+          "game_dir": {
+            "type": "string",
+            "format": "path",
+            "title": "Game Dir"
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit"
+          },
+          "spt_version": {
+            "type": "string",
+            "title": "Spt Version"
+          },
+          "pre_existing_mods": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Pre Existing Mods",
+            "default": []
+          },
+          "adopted": {
+            "items": {
+              "$ref": "#/components/schemas/ModInfo"
+            },
+            "type": "array",
+            "title": "Adopted",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "game_dir",
+          "commit",
+          "spt_version"
+        ],
+        "title": "InitResult",
+        "description": "Outcome of ``init_game_dir``."
+      },
+      "InstallFromArchiveRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "archive": {
+            "type": "string",
+            "format": "path",
+            "title": "Archive"
+          },
+          "name_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Override"
+          },
+          "version_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Override"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "archive"
+        ],
+        "title": "InstallFromArchiveRequest",
+        "description": "Parameters of ``install_from_archive``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none."
+      },
+      "InstallFromArchiveResponse": {
+        "properties": {
+          "mod": {
+            "$ref": "#/components/schemas/ModInfo"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod",
+          "operation_id"
+        ],
+        "title": "InstallFromArchiveResponse",
+        "description": "Outcome of ``install_from_archive`` plus its progress operation ID."
+      },
+      "ListModsRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "include_all": {
+            "type": "boolean",
+            "title": "Include All",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ListModsRequest",
+        "description": "Parameters of ``list_mods``."
+      },
+      "ManualMod": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ManualMod",
+        "description": "Untracked files below a mod path, grouped by their mod folder."
+      },
+      "ModFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "change": {
+            "$ref": "#/components/schemas/FileChange"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "change"
+        ],
+        "title": "ModFile",
+        "description": "A file touched by a commit, relative to the game directory."
+      },
+      "ModFilesRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "ModFilesRequest",
+        "description": "Parameters of ``mod_files``."
+      },
+      "ModInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "mod_type": {
+            "$ref": "#/components/schemas/ModType"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "spt_range": {
+            "type": "string",
+            "title": "Spt Range"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModState"
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Date"
+          },
+          "forge_id": {
+            "type": "string",
+            "title": "Forge Id"
+          },
+          "forge_version_id": {
+            "type": "string",
+            "title": "Forge Version Id"
+          },
+          "guid": {
+            "type": "string",
+            "title": "Guid"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "mod_type",
+          "author",
+          "spt_range",
+          "state",
+          "commit",
+          "date",
+          "forge_id",
+          "forge_version_id",
+          "guid",
+          "source"
+        ],
+        "title": "ModInfo",
+        "description": "A mod as described by the trailers of its most recent commit."
+      },
+      "ModState": {
+        "type": "string",
+        "enum": [
+          "installed",
+          "updated",
+          "disabled",
+          "enabled",
+          "removed"
+        ]
+      },
+      "ModType": {
+        "type": "string",
+        "enum": [
+          "server",
+          "client",
+          "hybrid"
+        ]
+      },
+      "ProfileResidue": {
+        "properties": {
+          "profile": {
+            "type": "string",
+            "title": "Profile"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ResidueCategory"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile",
+          "category",
+          "ids",
+          "count"
+        ],
+        "title": "ProfileResidue",
+        "description": "IDs of one mod that one player profile still references."
+      },
+      "ProgressEvent": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "step": {
+            "type": "string",
+            "title": "Step"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "step",
+          "percent",
+          "message"
+        ],
+        "title": "ProgressEvent",
+        "description": "One progress message of a long-running operation, sent over SSE."
+      },
+      "RemoveModRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "RemoveModRequest",
+        "description": "Parameters of ``remove_mod``."
+      },
+      "RemoveResult": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "commit"
+        ],
+        "title": "RemoveResult",
+        "description": "Outcome of ``remove_mod``."
+      },
+      "ResidueCategory": {
+        "type": "string",
+        "enum": [
+          "item",
+          "trader",
+          "quest",
+          "string"
+        ]
+      },
+      "SearchCatalogRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "compatible_only": {
+            "type": "boolean",
+            "title": "Compatible Only",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "query"
+        ],
+        "title": "SearchCatalogRequest",
+        "description": "Parameters of ``search_catalog``."
+      },
+      "SnapshotRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "SnapshotRequest",
+        "description": "Parameters of ``snapshot``."
+      },
+      "SnapshotResult": {
+        "properties": {
+          "commit": {
+            "type": "string",
+            "title": "Commit"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "commit",
+          "message"
+        ],
+        "title": "SnapshotResult",
+        "description": "Outcome of ``snapshot``."
+      },
+      "StatusReport": {
+        "properties": {
+          "modified_profiles": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Modified Profiles",
+            "default": []
+          },
+          "modified_configs": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Modified Configs",
+            "default": []
+          },
+          "manual_mods": {
+            "items": {
+              "$ref": "#/components/schemas/ManualMod"
+            },
+            "type": "array",
+            "title": "Manual Mods",
+            "default": []
+          },
+          "other_modified": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Other Modified",
+            "default": []
+          },
+          "other_untracked": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Other Untracked",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "StatusReport",
+        "description": "The interpreted working-tree status of a game directory."
+      },
+      "StatusRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "StatusRequest",
+        "description": "Parameters of ``status``."
+      },
+      "SyncCatalogRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "path",
+            "title": "Path"
+          },
+          "full": {
+            "type": "boolean",
+            "title": "Full",
+            "default": false
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "SyncCatalogRequest",
+        "description": "Parameters of ``sync_catalog``.\n\n``operation_id`` names the progress stream of this sync; a generated one is\nused and echoed back when the caller sends none."
+      },
+      "SyncCatalogResponse": {
+        "properties": {
+          "new_mods": {
+            "type": "integer",
+            "title": "New Mods"
+          },
+          "updated_mods": {
+            "type": "integer",
+            "title": "Updated Mods"
+          },
+          "new_versions": {
+            "type": "integer",
+            "title": "New Versions"
+          },
+          "updated_versions": {
+            "type": "integer",
+            "title": "Updated Versions"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          },
+          "full": {
+            "type": "boolean",
+            "title": "Full"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_mods",
+          "updated_mods",
+          "new_versions",
+          "updated_versions",
+          "pages",
+          "full",
+          "operation_id"
+        ],
+        "title": "SyncCatalogResponse",
+        "description": "Outcome of ``sync_catalog`` plus its progress operation ID."
+      },
+      "ToggleResult": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModState"
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit",
+            "default": ""
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "path"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "notice": {
+            "type": "string",
+            "title": "Notice",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "state"
+        ],
+        "title": "ToggleResult",
+        "description": "Outcome of ``disable_mod`` and ``enable_mod``."
+      }
+    }
+  }
+}

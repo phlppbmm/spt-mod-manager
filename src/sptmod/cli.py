@@ -21,6 +21,7 @@ from sptmod.core.errors import (
     GitError,
     ModNotFoundError,
     NotAGameDirError,
+    NotImplementedYetError,
     ProfileResidueError,
     SptmodError,
 )
@@ -57,6 +58,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     AmbiguousModError: 12,
     InvalidMetadataError: 13,
     ForgeUnavailableError: 14,
+    NotImplementedYetError: 15,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"
@@ -164,6 +166,84 @@ def _history_table(commits: Sequence[CommitInfo]) -> Table:
     return table
 
 
+def _export_format(value: str) -> services.ExportFormat:
+    for known in services.EXPORT_FORMATS:
+        if value == known:
+            return known
+    raise typer.BadParameter(
+        f"--format must be one of {', '.join(services.EXPORT_FORMATS)}"
+    )
+
+
+def _import_table(diff: services.ImportDiff) -> Table:
+    table = Table()
+    for column in ("Change", "Name", "Wanted", "Installed", "Link"):
+        table.add_column(column)
+    groups = (
+        ("missing", diff.missing),
+        ("version differs", diff.different),
+        ("extra", diff.extra),
+    )
+    for change, entries in groups:
+        for entry in entries:
+            table.add_row(
+                change,
+                entry.name,
+                entry.wanted_version,
+                entry.installed_version,
+                entry.link,
+            )
+    return table
+
+
+def _print_paths(headline: str, paths: Sequence[Path]) -> None:
+    if not paths:
+        return
+    console.print(headline, markup=False)
+    for path in paths:
+        console.print(f"  {path.as_posix()}", markup=False)
+
+
+def _print_status(report: services.StatusReport) -> None:
+    _print_paths(
+        "modified profiles (normal after playing, keep them with 'sptmod snapshot'):",
+        report.modified_profiles,
+    )
+    _print_paths(
+        "modified configs (keep them with 'sptmod snapshot'):",
+        report.modified_configs,
+    )
+    for manual in report.manual_mods:
+        console.print(
+            f"manually installed ({len(manual.files)} files), take it over "
+            f"with 'sptmod adopt {manual.path.as_posix()}'",
+            markup=False,
+        )
+    _print_paths("other changes:", report.other_modified)
+    _print_paths("other untracked files:", report.other_untracked)
+    if not any(
+        (
+            report.modified_profiles,
+            report.modified_configs,
+            report.manual_mods,
+            report.other_modified,
+            report.other_untracked,
+        )
+    ):
+        console.print("nothing changed", markup=False)
+
+
+def _print_toggle(result: services.ToggleResult) -> None:
+    if result.notice:
+        console.print(f"notice: {result.notice}", markup=False)
+        return
+    console.print(
+        f"{result.state} {result.name} ({len(result.files)} files) "
+        f"as {result.commit[:_SHORT_HASH_LENGTH]}",
+        markup=False,
+    )
+
+
 @app.callback()
 def callback() -> None:
     """sptmod command-line interface."""
@@ -181,21 +261,44 @@ def init(
         Path | None,
         typer.Argument(help="SPT game directory (default: current directory)."),
     ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Adopt pre-existing mods without asking."),
+    ] = False,
 ) -> None:
     """Track an SPT installation as a git repository."""
     with _handled():
-        result = services.init_game_dir(path or Path.cwd())
+        result = services.init_game_dir(path or Path.cwd(), adopt=yes)
         console.print(
             f"initialized SPT {result.spt_version} "
             f"at {result.commit[:_SHORT_HASH_LENGTH]}",
             markup=False,
         )
         console.print(str(result.game_dir), markup=False)
+        for mod in result.adopted:
+            console.print(f"adopted {mod.name} {mod.version}".rstrip(), markup=False)
+        if yes:
+            return
         for mod_path in result.pre_existing_mods:
-            console.print(
-                f"pre-existing mod, run 'sptmod adopt': {mod_path.as_posix()}",
-                markup=False,
-            )
+            _adopt_pre_existing(result.game_dir, mod_path)
+
+
+def _adopt_pre_existing(game_dir: Path, mod_path: Path) -> None:
+    if not typer.confirm(
+        f"adopt pre-existing mod {mod_path.as_posix()}?", default=True
+    ):
+        console.print(
+            f"left untracked, run 'sptmod adopt {mod_path.as_posix()}' later",
+            markup=False,
+        )
+        return
+    result = services.adopt_mod(game_dir, mod_path)
+    console.print(
+        f"adopted {result.mod.name} {result.mod.version}".rstrip()
+        + f" ({len(result.files)} files)"
+        + f" as {result.mod.commit[:_SHORT_HASH_LENGTH]}",
+        markup=False,
+    )
 
 
 @app.command()
@@ -271,6 +374,109 @@ def remove(
             f"as {result.commit[:_SHORT_HASH_LENGTH]}",
             markup=False,
         )
+
+
+@app.command()
+def disable(
+    name: Annotated[str, typer.Argument(help="Mod name (case-insensitive).")],
+) -> None:
+    """Disable an installed mod without losing its files."""
+    with _handled():
+        _print_toggle(services.disable_mod(Path.cwd(), name))
+
+
+@app.command()
+def enable(
+    name: Annotated[str, typer.Argument(help="Mod name (case-insensitive).")],
+) -> None:
+    """Enable a disabled mod again."""
+    with _handled():
+        _print_toggle(services.enable_mod(Path.cwd(), name))
+
+
+@app.command()
+def adopt(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            metavar="PATH", help="Untracked mod folder or DLL in the game directory."
+        ),
+    ],
+    name: Annotated[
+        str | None, typer.Option("--name", help="Override the mod name.")
+    ] = None,
+    version: Annotated[
+        str | None, typer.Option("--version", help="Override the mod version.")
+    ] = None,
+) -> None:
+    """Take a manually installed mod into the repository."""
+    with _handled():
+        result = services.adopt_mod(
+            Path.cwd(), target, name_override=name, version_override=version
+        )
+        console.print(
+            f"adopted {result.mod.name} {result.mod.version}".rstrip()
+            + f" ({len(result.files)} files)"
+            + f" as {result.mod.commit[:_SHORT_HASH_LENGTH]}",
+            markup=False,
+        )
+
+
+@app.command()
+def status() -> None:
+    """Show what changed in the game directory since the last commit."""
+    with _handled():
+        _print_status(services.status(Path.cwd()))
+
+
+@app.command()
+def snapshot(
+    message: Annotated[
+        str | None,
+        typer.Option("--message", "-m", help="Snapshot message (default: timestamp)."),
+    ] = None,
+) -> None:
+    """Commit the current profiles and BepInEx configs."""
+    with _handled():
+        result = services.snapshot(Path.cwd(), message)
+        console.print(
+            f"snapshot: {result.message} ({len(result.files)} files) "
+            f"as {result.commit[:_SHORT_HASH_LENGTH]}",
+            markup=False,
+        )
+
+
+@app.command()
+def export(
+    format: Annotated[
+        str, typer.Option("--format", help="Output format: text or json.")
+    ] = "text",
+    client_only: Annotated[
+        bool, typer.Option("--client-only", help="Only mods with a client part.")
+    ] = False,
+) -> None:
+    """Write the active mod list as text or JSON."""
+    with _handled():
+        typer.echo(
+            services.export_mods(
+                Path.cwd(), _export_format(format), client_only=client_only
+            ),
+            nl=False,
+        )
+
+
+@app.command("import")
+def import_mods(
+    list_file: Annotated[
+        Path, typer.Argument(metavar="LIST", help="Exported mod list (text or JSON).")
+    ],
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Install the missing mods from Forge.")
+    ] = False,
+) -> None:
+    """Compare an exported mod list with the installed mods."""
+    with _handled():
+        console.print(_import_table(services.import_list(Path.cwd(), list_file, apply)))
 
 
 @app.command()

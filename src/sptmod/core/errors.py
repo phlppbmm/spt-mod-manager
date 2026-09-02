@@ -108,6 +108,10 @@ class AmbiguousModError(SptmodError):
         self.candidates: list[str] = list(candidates)
 
 
+class NotImplementedYetError(SptmodError):
+    """The requested operation is wired but has no implementation yet."""
+
+
 class UnresolvableDependencyError(DependencyError):
     """A dependency of a requested mod cannot be resolved for an install plan.
 

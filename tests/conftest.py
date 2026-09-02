@@ -187,3 +187,83 @@ def make_archive(tmp_path: Path):
         return archive_path
 
     return _make
+
+
+@pytest.fixture
+def clean_repo(initialized_repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Repo:
+    """An ``initialized_repo`` with one baseline whitelist commit, tree clean.
+
+    Mirrors the initial commit ``init_game_dir`` is specified to create
+    (``.gitignore`` plus the tracked profile), without depending on that
+    (stubbed) service. Reused by tests of ``install_from_archive``,
+    ``list_mods``, ``mod_files``, ``remove_mod`` and ``history``, which all
+    need a clean tree with a known "time zero" to build further commits on.
+    """
+    date = "2024-01-01T00:00:00+00:00"
+    monkeypatch.setenv("GIT_AUTHOR_DATE", date)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", date)
+    initialized_repo.commit(
+        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
+    )
+    return initialized_repo
+
+
+@pytest.fixture
+def install_commit(monkeypatch: pytest.MonkeyPatch):
+    """Factory writing a mod's files and committing them with full mod trailers.
+
+    Builds git history directly (bypassing the stubbed ``install_from_archive``
+    service) so ``list_mods``, ``mod_files``, ``remove_mod`` and ``history``
+    tests can set up realistic install commits on their own.
+
+    Returns a callable
+    ``install_commit(repo, name, version="1.0.0", *, mod_type="client",
+    state="installed", files=None, minute=1, **trailer_overrides) -> commit_hash``.
+    ``files`` maps a path (relative to the repo root, as ``str``) to its
+    content (``str`` or ``bytes``); defaults to a single
+    ``BepInEx/plugins/<name>.dll``. ``minute`` sets both the author and
+    committer date to a fixed, strictly increasing timestamp (minutes after
+    a fixed 2024-01-01 baseline) so tests can assert commit ordering without
+    relying on wall-clock timing.
+    """
+
+    def _install(
+        repo: Repo,
+        name: str,
+        version: str = "1.0.0",
+        *,
+        mod_type: str = "client",
+        state: str = "installed",
+        files: dict[str, str | bytes] | None = None,
+        minute: int = 1,
+        **trailer_overrides: str,
+    ) -> str:
+        entries = files or {f"BepInEx/plugins/{name}.dll": f"{name}-{version}-content"}
+        paths: list[Path] = []
+        for relpath, content in entries.items():
+            full = repo.path / relpath
+            full.parent.mkdir(parents=True, exist_ok=True)
+            data = content.encode("utf-8") if isinstance(content, str) else content
+            full.write_bytes(data)
+            paths.append(Path(relpath))
+
+        trailers = {
+            "Mod": name,
+            "Mod-Version": version,
+            "Mod-Type": mod_type,
+            "Mod-Author": "tester",
+            "Mod-SPT": "~4.1.0",
+            "Mod-Source": f"{name}-{version}.zip",
+            "Mod-Forge-Id": "",
+            "Mod-Forge-Version-Id": "",
+            "Mod-Guid": "",
+            "Mod-State": state,
+        }
+        trailers.update(trailer_overrides)
+
+        date = f"2024-01-01T00:{minute:02d}:00+00:00"
+        monkeypatch.setenv("GIT_AUTHOR_DATE", date)
+        monkeypatch.setenv("GIT_COMMITTER_DATE", date)
+        return repo.commit(f"mod: {name} {version}", trailers=trailers, paths=paths)
+
+    return _install

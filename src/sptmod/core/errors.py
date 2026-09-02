@@ -71,3 +71,18 @@ class ForgeApiError(SptmodError):
         self.code = code
         self.message = message
         self.status = status
+
+
+class ModNotFoundError(SptmodError):
+    """No mod matching the requested name is known to the repository."""
+
+
+class AmbiguousModError(SptmodError):
+    """Several mods match the requested name case-insensitively."""
+
+    def __init__(self, name: str, candidates: Sequence[str]) -> None:
+        super().__init__(
+            f"{name!r} matches several mods: {', '.join(sorted(candidates))}"
+        )
+        self.name = name
+        self.candidates: list[str] = list(candidates)

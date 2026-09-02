@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, Protocol
 
 type ModType = Literal["server", "client", "hybrid"]
 type ModState = Literal["installed", "updated", "disabled", "enabled", "removed"]
@@ -86,3 +86,14 @@ class RepoStatus:
 
     modified: list[Path] = field(default_factory=list)
     untracked: list[Path] = field(default_factory=list)
+
+
+class Progress(Protocol):
+    """Callback reporting the progress of a long-running operation.
+
+    ``step`` is a stable machine-readable step name, ``percent`` the overall
+    progress of the operation in the range 0 to 100, and ``message`` a
+    human-readable detail line. Implementations must not raise.
+    """
+
+    def __call__(self, step: str, percent: int, message: str) -> None: ...

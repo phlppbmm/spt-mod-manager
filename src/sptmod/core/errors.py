@@ -49,11 +49,22 @@ class GitError(SptmodError):
 
 
 class ForgeUnavailableError(SptmodError):
-    """The Forge API is unreachable or still failing after all retries."""
+    """The Forge API is unreachable or still failing after all retries.
+
+    Raised on network errors, server 5xx responses, or when the maximum retry
+    count is exhausted.
+    """
 
 
 class ForgeApiError(SptmodError):
-    """The Forge API answered with an error envelope."""
+    """The Forge API answered with an error envelope.
+
+    Attributes:
+        code: The error code from the API response (e.g., 'VALIDATION_FAILED',
+            'NOT_FOUND', or 'UNKNOWN' if missing).
+        message: The human-readable error message from the API.
+        status: The HTTP status code of the response.
+    """
 
     def __init__(self, code: str, message: str, status: int) -> None:
         super().__init__(message)

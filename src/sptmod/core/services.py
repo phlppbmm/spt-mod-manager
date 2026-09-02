@@ -9,9 +9,17 @@ from pathlib import Path
 from typing import Final, Literal
 
 from sptmod.core.archive import ArchiveLayout, extract, find_anchor
+from sptmod.core.conflicts import (
+    apply_force,
+    check_dependencies,
+    check_dll_duplicates,
+    check_file_conflicts,
+    check_spt_compat,
+)
 from sptmod.core.errors import (
     AmbiguousModError,
     ConflictError,
+    DependencyError,
     DirtyTreeError,
     GitError,
     ModNotFoundError,
@@ -30,6 +38,8 @@ from sptmod.core.models import (
     TRAILER_MOD_STATE,
     TRAILER_MOD_TYPE,
     CommitInfo,
+    Conflict,
+    ConflictKind,
     ModFile,
     ModInfo,
     ModState,
@@ -81,6 +91,11 @@ _STEP_PERCENT: Final[dict[InstallStep, int]] = {
     "commit": 90,
 }
 
+_DEPENDENCY_KINDS: Final[tuple[ConflictKind, ...]] = (
+    "missing-dependency",
+    "dependency-version",
+)
+
 _MOD_PREFIXES: Final[tuple[Path, ...]] = (MODS_DIR, PLUGINS_DIR)
 _UNSET_DATE: Final = datetime.min
 
@@ -97,10 +112,15 @@ class InitResult:
 
 @dataclass(frozen=True)
 class InstallResult:
-    """Outcome of :func:`install_from_archive`."""
+    """Outcome of :func:`install_from_archive`.
+
+    ``warnings`` holds the non-blocking findings of the conflict checks,
+    including the ones ``force`` downgraded from errors.
+    """
 
     mod: ModInfo
     files: list[Path] = field(default_factory=list)
+    warnings: list[Conflict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -218,7 +238,7 @@ def install_from_archive(
         meta = _read_meta(layout, name_override, version_override)
 
         _report(progress, "conflicts", "checking conflicts and dependencies")
-        _check_install_conflicts(repo, layout, force)
+        warnings = _check_install_conflicts(repo, layout, meta, force)
 
         _report(progress, "copy", f"copying {len(layout.files)} files")
         added = [file for file in layout.files if not (path / file).exists()]
@@ -254,6 +274,7 @@ def install_from_archive(
     return InstallResult(
         mod=replace(draft, commit=commit_hash, date=committed.date),
         files=list(layout.files),
+        warnings=warnings,
     )
 
 
@@ -352,14 +373,38 @@ def history(path: Path, name: str | None = None) -> list[CommitInfo]:
 
 
 def _check_install_conflicts(
-    repo: Repo, layout: ArchiveLayout, force: bool
-) -> list[str]:
+    repo: Repo, layout: ArchiveLayout, meta: ModMeta, force: bool
+) -> list[Conflict]:
     """Seam for the file, DLL and dependency checks of ``core.conflicts``.
 
-    Returns the warnings to hand to the caller and raises ``ConflictError`` or
-    ``DependencyError`` for blocking findings unless ``force`` is set.
+    Runs the file, DLL, dependency and SPT-compatibility checks, applies
+    ``force`` to their findings and returns the remaining warnings. Blocking
+    findings raise ``ConflictError`` for file and DLL problems and
+    ``DependencyError`` for dependency problems; both carry the complete list
+    of findings, warnings included.
     """
-    return []
+    active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
+    findings = apply_force(
+        [
+            *check_file_conflicts(repo, layout.files),
+            *check_dll_duplicates(repo.path, layout.files),
+            *check_dependencies(active, meta),
+            *check_spt_compat(spt_version(repo.path) or "", meta.spt_range),
+        ],
+        force,
+    )
+    blocking = [finding for finding in findings if finding.severity == "error"]
+    files = [finding for finding in blocking if finding.kind not in _DEPENDENCY_KINDS]
+    if files:
+        raise ConflictError(_blocked_message(meta.name, blocking), findings)
+    if blocking:
+        raise DependencyError(_blocked_message(meta.name, blocking), findings)
+    return findings
+
+
+def _blocked_message(name: str, blocking: Sequence[Conflict]) -> str:
+    details = "; ".join(finding.message for finding in blocking)
+    return f"cannot install {name}: {details} (use --force to install anyway)"
 
 
 def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:

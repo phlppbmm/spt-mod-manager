@@ -88,6 +88,41 @@ class RepoStatus:
     untracked: list[Path] = field(default_factory=list)
 
 
+type ConflictKind = Literal[
+    "tracked-file",
+    "untracked-file",
+    "dll-duplicate",
+    "missing-dependency",
+    "dependency-version",
+    "spt-version",
+]
+type ConflictSeverity = Literal["error", "warning"]
+
+
+@dataclass(frozen=True)
+class Conflict:
+    """A finding of the pre-install conflict and dependency checks.
+
+    Attributes:
+        kind: The machine-readable check that produced the finding.
+        severity: ``'error'`` blocks the install unless ``force`` is set,
+            ``'warning'`` is only reported.
+        message: The human-readable line for the CLI, including the hint at
+            ``--force`` or ``adopt`` where one applies.
+        path: The game-directory-relative file the finding is about, or
+            ``None`` for dependency and SPT-version findings.
+        mod: The mod the finding points at: the owning mod for file
+            conflicts, the dependency name for dependency findings, empty
+            when no mod can be named.
+    """
+
+    kind: ConflictKind
+    severity: ConflictSeverity
+    message: str
+    path: Path | None = None
+    mod: str = ""
+
+
 class Progress(Protocol):
     """Callback reporting the progress of a long-running operation.
 

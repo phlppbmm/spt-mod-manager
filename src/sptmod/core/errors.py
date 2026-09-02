@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from sptmod.core.models import Conflict
+
 
 class SptmodError(Exception):
     """Base class for every error raised by the sptmod core."""
@@ -21,11 +23,29 @@ class GameRunningError(SptmodError):
 
 
 class ConflictError(SptmodError):
-    """A file, DLL or install conflict blocks the operation."""
+    """A file, DLL or install conflict blocks the operation.
+
+    Carries the structured findings of the pre-install checks when it was
+    raised by an install; ``conflicts`` holds every finding, warnings
+    included, so callers can report the full picture.
+    """
+
+    def __init__(self, message: str, conflicts: Sequence[Conflict] = ()) -> None:
+        super().__init__(message)
+        self.message = message
+        self.conflicts: list[Conflict] = list(conflicts)
 
 
 class DependencyError(SptmodError):
-    """A required mod dependency is missing or has an incompatible version."""
+    """A required mod dependency is missing or has an incompatible version.
+
+    Shares the ``conflicts`` contract with :class:`ConflictError`.
+    """
+
+    def __init__(self, message: str, conflicts: Sequence[Conflict] = ()) -> None:
+        super().__init__(message)
+        self.message = message
+        self.conflicts: list[Conflict] = list(conflicts)
 
 
 class ProfileResidueError(SptmodError):

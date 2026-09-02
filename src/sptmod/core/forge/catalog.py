@@ -1,5 +1,6 @@
 """Local Forge catalog: SQLite cache with sync, search, resolve and browse."""
 
+import contextlib
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS mods (
     name TEXT NOT NULL,
     slug TEXT NOT NULL DEFAULT '',
     teaser TEXT,
+    thumbnail TEXT,
     author TEXT NOT NULL DEFAULT '',
     downloads INTEGER NOT NULL DEFAULT 0,
     detail_url TEXT NOT NULL DEFAULT '',
@@ -64,8 +66,8 @@ CREATE TABLE IF NOT EXISTS sync_state (
 """
 
 _MOD_COLUMNS: Final = (
-    "id, hub_id, guid, name, slug, teaser, author, downloads, detail_url,"
-    " published_at, created_at, updated_at"
+    "id, hub_id, guid, name, slug, teaser, thumbnail, author, downloads,"
+    " detail_url, published_at, created_at, updated_at"
 )
 _VERSION_COLUMNS: Final = (
     "id, mod_id, version, link, content_length, spt_version_constraint,"
@@ -102,6 +104,7 @@ class CatalogMod:
     name: str
     slug: str
     teaser: str | None
+    thumbnail: str | None
     author: str
     downloads: int
     detail_url: str
@@ -196,6 +199,7 @@ def _mod_from_row(row: sqlite3.Row) -> CatalogMod:
         name=row["name"],
         slug=row["slug"],
         teaser=row["teaser"],
+        thumbnail=row["thumbnail"],
         author=row["author"],
         downloads=row["downloads"],
         detail_url=row["detail_url"],
@@ -227,6 +231,7 @@ def _mod_from_forge(mod: ForgeMod) -> CatalogMod:
         name=mod.name,
         slug=mod.slug,
         teaser=mod.teaser,
+        thumbnail=mod.thumbnail,
         author="" if mod.owner is None else mod.owner.name,
         downloads=mod.downloads,
         detail_url=mod.detail_url,
@@ -349,6 +354,11 @@ class Catalog:
         try:
             self._db.row_factory = sqlite3.Row
             self._db.executescript(SCHEMA)
+            # Lightweight migration for caches created before the thumbnail
+            # column existed; the cache is disposable, so this is the only
+            # schema evolution mechanism.
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._db.execute("ALTER TABLE mods ADD COLUMN thumbnail TEXT")
             self._db.commit()
         except BaseException:
             self._db.close()
@@ -688,7 +698,7 @@ class Catalog:
             return "unchanged"
         self._db.execute(
             f"INSERT OR REPLACE INTO mods ({_MOD_COLUMNS})"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 mod.id,
                 mod.hub_id,
@@ -696,6 +706,7 @@ class Catalog:
                 mod.name,
                 mod.slug,
                 mod.teaser,
+                mod.thumbnail,
                 mod.author,
                 mod.downloads,
                 mod.detail_url,

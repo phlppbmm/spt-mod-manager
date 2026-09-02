@@ -7,7 +7,14 @@
 		type CatalogEntry,
 		type ModInfo
 	} from '$lib/api/client';
-	import { filterEntries, rowState, type ModTab } from '$lib/modfilter';
+	import {
+		filterEntries,
+		rowState,
+		sortEntries,
+		type ModSort,
+		type ModTab,
+		type SortKey
+	} from '$lib/modfilter';
 
 	interface Props {
 		path: string;
@@ -40,7 +47,26 @@
 	let installedByName = $derived(
 		new Map(mods.map((mod) => [mod.name.toLowerCase(), mod] as const))
 	);
-	let rows = $derived(filterEntries(entries, { tab, compatibleOnly, search }));
+	let sort = $state<ModSort | null>(null);
+	let rows = $derived(
+		sortEntries(filterEntries(entries, { tab, compatibleOnly, search }), sort)
+	);
+
+	function toggleSort(key: SortKey): void {
+		if (sort?.key === key) {
+			sort = sort.descending ? null : { key, descending: true };
+		} else {
+			// Numeric/date columns start descending (biggest/newest first).
+			sort = { key, descending: key === 'downloads' || key === 'updated' };
+		}
+	}
+
+	function sortMark(key: SortKey): string {
+		if (sort?.key !== key) {
+			return '';
+		}
+		return sort.descending ? ' ▼' : ' ▲';
+	}
 
 	$effect(() => {
 		void load(path, compatibleOnly, search, refreshKey, reload);
@@ -120,12 +146,18 @@
 
 	<div class="list">
 		<div class="head">
-			<div>Mod</div>
-			<div>Installed</div>
-			<div>Latest</div>
-			<div>SPT</div>
-			<div>Downloads</div>
-			<div>Updated</div>
+			<button class="sort" onclick={() => toggleSort('name')}>Mod{sortMark('name')}</button>
+			<button class="sort" onclick={() => toggleSort('installed')}>
+				Installed{sortMark('installed')}
+			</button>
+			<button class="sort" onclick={() => toggleSort('latest')}>Latest{sortMark('latest')}</button>
+			<button class="sort" onclick={() => toggleSort('spt')}>SPT{sortMark('spt')}</button>
+			<button class="sort" onclick={() => toggleSort('downloads')}>
+				Downloads{sortMark('downloads')}
+			</button>
+			<button class="sort" onclick={() => toggleSort('updated')}>
+				Updated{sortMark('updated')}
+			</button>
 			<div>Type</div>
 			<div>State</div>
 			<div></div>
@@ -205,6 +237,20 @@
 		padding: 0.45rem 0.6rem;
 		border-bottom: 1px solid #3a4048;
 		color: #98a2ad;
+	}
+
+	.head .sort {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.head .sort:hover {
+		color: #d7dde3;
 		font-size: 0.85em;
 	}
 

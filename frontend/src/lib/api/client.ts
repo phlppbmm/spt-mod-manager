@@ -217,6 +217,14 @@ export function checkUpdates(path: string, names: string[] = []): Promise<Update
 	} satisfies Schemas['CheckUpdatesRequest']);
 }
 
+export type ModDescription = Schemas['ModDescription'];
+
+export function getModDescription(modId: number): Promise<ModDescription> {
+	return call<ModDescription>('get_mod_description', {
+		mod_id: modId
+	} satisfies Schemas['GetModDescriptionRequest']);
+}
+
 export function clearCatalogCache(): Promise<ClearCacheResult> {
 	return call<ClearCacheResult>('clear_catalog_cache', {} satisfies Schemas['ClearCatalogCacheRequest']);
 }

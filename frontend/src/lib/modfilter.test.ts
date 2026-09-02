@@ -13,6 +13,7 @@ function makeMod(overrides: Partial<CatalogMod> = {}): CatalogMod {
 		name: `Mod ${id}`,
 		slug: `mod-${id}`,
 		teaser: null,
+		thumbnail: null,
 		author: `Author ${id}`,
 		downloads: 0,
 		detail_url: `https://example.test/mod/${id}`,

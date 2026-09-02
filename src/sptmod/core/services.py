@@ -9,6 +9,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Final, Literal
 
@@ -1402,6 +1403,71 @@ def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
     removed = cache.exists()
     cache.unlink(missing_ok=True)
     return ClearCacheResult(db_path=cache, removed=removed)
+
+
+@dataclass(frozen=True)
+class ModDescription:
+    """The detail text of a catalog mod, fetched live from the Forge."""
+
+    mod_id: int
+    name: str
+    description: str
+
+
+class _HtmlTextExtractor(HTMLParser):
+    """Collect the text content of an HTML fragment, dropping every tag."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self.parts.append(data)
+
+    def handle_starttag(self, tag: str, attrs: object) -> None:
+        if tag in ("script", "style"):
+            self._skip_depth += 1
+        elif tag in ("p", "br", "li", "div"):
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+
+def _html_to_text(html: str) -> str:
+    """Strip HTML tags from a Forge description, keeping paragraph breaks."""
+    extractor = _HtmlTextExtractor()
+    extractor.feed(html)
+    text = "".join(extractor.parts)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def get_mod_description(
+    mod_id: int, *, client: ForgeClient | None = None
+) -> ModDescription:
+    """Fetch a mod's full description text from the Forge detail endpoint.
+
+    The Forge serves the description as HTML; it is reduced to plain text
+    with paragraph breaks so callers can render it without trusting markup.
+
+    Raises:
+        ForgeUnavailableError: the Forge cannot be reached.
+        ForgeApiError: the mod does not exist or the API rejected the call.
+    """
+    if client is not None:
+        mod = client.mod(mod_id)
+    else:
+        with ForgeClient() as owned:
+            mod = owned.mod(mod_id)
+    return ModDescription(
+        mod_id=mod.id,
+        name=mod.name,
+        description=_html_to_text(mod.description or ""),
+    )
 
 
 def plan_mod_install(

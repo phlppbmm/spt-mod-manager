@@ -97,6 +97,7 @@ class CatalogMod(CoreModel):
     name: str
     slug: str
     teaser: str | None
+    thumbnail: str | None
     author: str
     downloads: int
     detail_url: str
@@ -539,6 +540,20 @@ class ClearCatalogCacheRequest(CoreModel):
     """Parameters of ``clear_catalog_cache``."""
 
     db_path: Path | None = None
+
+
+class ModDescription(CoreModel):
+    """Outcome of ``get_mod_description``: plain-text detail of a mod."""
+
+    mod_id: int
+    name: str
+    description: str
+
+
+class GetModDescriptionRequest(CoreModel):
+    """Parameters of ``get_mod_description``."""
+
+    mod_id: int
 
 
 class PlanModInstallRequest(CoreModel):

@@ -381,6 +381,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/get_mod_description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Mod Description */
+        post: operations["get_mod_description_api_get_mod_description_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan_mod_install": {
         parameters: {
             query?: never;
@@ -577,6 +594,8 @@ export interface components {
             slug: string;
             /** Teaser */
             teaser: string | null;
+            /** Thumbnail */
+            thumbnail: string | null;
             /** Author */
             author: string;
             /** Downloads */
@@ -885,6 +904,14 @@ export interface components {
         };
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
+        /**
+         * GetModDescriptionRequest
+         * @description Parameters of ``get_mod_description``.
+         */
+        GetModDescriptionRequest: {
+            /** Mod Id */
+            mod_id: number;
+        };
         /**
          * HealthResponse
          * @description Body of the health check.
@@ -1258,6 +1285,18 @@ export interface components {
              * @default []
              */
             files: string[];
+        };
+        /**
+         * ModDescription
+         * @description Outcome of ``get_mod_description``: plain-text detail of a mod.
+         */
+        ModDescription: {
+            /** Mod Id */
+            mod_id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
         };
         /**
          * ModFile
@@ -2442,6 +2481,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClearCacheResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_mod_description_api_get_mod_description_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GetModDescriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModDescription"];
                 };
             };
             /** @description Default Response */

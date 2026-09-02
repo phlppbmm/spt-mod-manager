@@ -3,6 +3,7 @@
 	import {
 		disableMod,
 		enableMod,
+		getModDescription,
 		installMod,
 		modFiles,
 		planModInstall,
@@ -11,6 +12,7 @@
 		type CatalogEntry,
 		type Conflict,
 		type InstallPlan,
+		type ModDescription,
 		type ModFile,
 		type ModInfo,
 		type ProfileResidue
@@ -125,6 +127,20 @@
 		);
 	}
 
+	let description: ModDescription | null = $state(null);
+
+	async function showDescription(): Promise<void> {
+		busy = true;
+		errorMessage = '';
+		try {
+			description = await getModDescription(entry.mod.id);
+		} catch (cause) {
+			errorMessage = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function showFiles(): Promise<void> {
 		busy = true;
 		errorMessage = '';
@@ -147,8 +163,16 @@
 
 <div class="row" class:busy>
 	<div class="name">
-		<strong>{entry.mod.name}</strong>
-		<span class="author">{entry.mod.author}</span>
+		{#if entry.mod.thumbnail}
+			<img class="thumb" src={entry.mod.thumbnail} alt="" loading="lazy" />
+		{/if}
+		<div class="name-text">
+			<strong>{entry.mod.name}</strong>
+			<span class="author">{entry.mod.author}</span>
+			{#if entry.mod.teaser}
+				<span class="teaser" title={entry.mod.teaser}>{entry.mod.teaser}</span>
+			{/if}
+		</div>
 	</div>
 	<div>{entry.installed_version ?? '—'}</div>
 	<div>{entry.latest_version?.version ?? '—'}</div>
@@ -221,6 +245,9 @@
 					</li>
 					<li><button type="button" onclick={() => void showFiles()}>Files</button></li>
 				{/if}
+				<li>
+					<button type="button" onclick={() => void showDescription()}>Details</button>
+				</li>
 				<li>
 					<a href={entry.mod.detail_url} target="_blank" rel="noreferrer">Open Forge page</a>
 				</li>
@@ -297,6 +324,15 @@
 				<li><code>{file.change}</code> {file.path}</li>
 			{/each}
 		</ul>
+	</Dialog>
+{/if}
+
+{#if description !== null}
+	<Dialog title={description.name} onclose={() => (description = null)}>
+		{#if entry.mod.thumbnail}
+			<img class="detail-thumb" src={entry.mod.thumbnail} alt="" />
+		{/if}
+		<p class="description">{description.description || 'No description available.'}</p>
 	</Dialog>
 {/if}
 
@@ -377,6 +413,47 @@
 
 	.row.busy {
 		opacity: 0.6;
+	}
+
+	.name {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+
+	.thumb {
+		width: 2.4rem;
+		height: 2.4rem;
+		object-fit: cover;
+		border-radius: 4px;
+		flex-shrink: 0;
+	}
+
+	.name-text {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.teaser {
+		color: #98a2ad;
+		font-size: 0.78rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.detail-thumb {
+		max-width: 12rem;
+		border-radius: 6px;
+		margin-bottom: 0.6rem;
+	}
+
+	.description {
+		white-space: pre-line;
+		max-height: 24rem;
+		overflow-y: auto;
 	}
 
 	.name strong {

@@ -67,3 +67,45 @@ export function rowState(entry: CatalogEntry, disabledMods: readonly string[]): 
 	}
 	return isCompatible(entry) ? 'available' : 'incompatible';
 }
+
+export type SortKey = 'name' | 'installed' | 'latest' | 'spt' | 'downloads' | 'updated';
+
+export interface ModSort {
+	key: SortKey;
+	descending: boolean;
+}
+
+function sortValue(entry: CatalogEntry, key: SortKey): string | number {
+	switch (key) {
+		case 'name':
+			return entry.mod.name.toLowerCase();
+		case 'installed':
+			return entry.installed_version ?? '';
+		case 'latest':
+			return entry.latest_version?.version ?? '';
+		case 'spt':
+			return entry.latest_version?.spt_version_constraint ?? '';
+		case 'downloads':
+			return entry.mod.downloads;
+		case 'updated':
+			return entry.mod.updated_at ?? '';
+	}
+}
+
+/** Stable sort of catalog entries by a column; ties keep the given order. */
+export function sortEntries(
+	entries: readonly CatalogEntry[],
+	sort: ModSort | null
+): CatalogEntry[] {
+	if (sort === null) {
+		return [...entries];
+	}
+	const direction = sort.descending ? -1 : 1;
+	return [...entries].sort((a, b) => {
+		const va = sortValue(a, sort.key);
+		const vb = sortValue(b, sort.key);
+		if (va < vb) return -direction;
+		if (va > vb) return direction;
+		return 0;
+	});
+}

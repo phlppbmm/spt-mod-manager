@@ -857,6 +857,44 @@
         }
       }
     },
+    "/api/get_mod_description": {
+      "post": {
+        "summary": "Get Mod Description",
+        "operationId": "get_mod_description_api_get_mod_description_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetModDescriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModDescription"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plan_mod_install": {
       "post": {
         "summary": "Plan Mod Install",
@@ -1264,6 +1302,17 @@
             ],
             "title": "Teaser"
           },
+          "thumbnail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail"
+          },
           "author": {
             "type": "string",
             "title": "Author"
@@ -1318,6 +1367,7 @@
           "name",
           "slug",
           "teaser",
+          "thumbnail",
           "author",
           "downloads",
           "detail_url",
@@ -1888,6 +1938,20 @@
           "modified",
           "deleted"
         ]
+      },
+      "GetModDescriptionRequest": {
+        "properties": {
+          "mod_id": {
+            "type": "integer",
+            "title": "Mod Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod_id"
+        ],
+        "title": "GetModDescriptionRequest",
+        "description": "Parameters of ``get_mod_description``."
       },
       "HealthResponse": {
         "properties": {
@@ -2552,6 +2616,30 @@
         ],
         "title": "ManualMod",
         "description": "Untracked files below a mod path, grouped by their mod folder."
+      },
+      "ModDescription": {
+        "properties": {
+          "mod_id": {
+            "type": "integer",
+            "title": "Mod Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mod_id",
+          "name",
+          "description"
+        ],
+        "title": "ModDescription",
+        "description": "Outcome of ``get_mod_description``: plain-text detail of a mod."
       },
       "ModFile": {
         "properties": {

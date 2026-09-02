@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "spt_mod_manager",
+  "project_id": "b404d251-6f68-4647-806d-519775915e82"
+}

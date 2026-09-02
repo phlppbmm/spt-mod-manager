@@ -6,10 +6,12 @@ the contract maps 1:1 onto Tauri commands later. Typed core exceptions become
 ``{error, code, details}`` bodies with a stable ``code`` per exception class.
 """
 
+import os
 from importlib.metadata import version
+from pathlib import Path
 
-from fastapi import APIRouter, FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -43,6 +45,7 @@ PACKAGE_NAME = "sptmod"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
+STATIC_DIR_ENV_VAR = "SPTMOD_STATIC_DIR"
 
 FALLBACK_ERROR_CODE = "INTERNAL_ERROR"
 FALLBACK_ERROR_STATUS = 500
@@ -349,8 +352,16 @@ def handle_error(request: Request, exc: Exception) -> Response:
     return error_response(exc)
 
 
-def create_app() -> FastAPI:
-    """Build the FastAPI application serving the sptmod service functions."""
+def create_app(static_dir: Path | None = None) -> FastAPI:
+    """Build the FastAPI application serving the sptmod service functions.
+
+    Args:
+        static_dir: Directory of the built frontend; without it the
+            ``SPTMOD_STATIC_DIR`` environment variable is read. When either
+            names a directory, its files are served below ``/`` and unknown
+            paths outside ``/api`` fall back to ``index.html`` so client-side
+            routing works.
+    """
     app = FastAPI(
         title=PACKAGE_NAME,
         version=version(PACKAGE_NAME),
@@ -360,7 +371,28 @@ def create_app() -> FastAPI:
     app.include_router(events.router, prefix="/api")
     app.add_exception_handler(SptmodError, handle_error)
     app.add_exception_handler(NotImplementedError, handle_error)
+    from_env = os.environ.get(STATIC_DIR_ENV_VAR)
+    resolved = static_dir if static_dir is not None else _optional_path(from_env)
+    if resolved is not None:
+        _serve_frontend(app, resolved)
     return app
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value) if value else None
+
+
+def _serve_frontend(app: FastAPI, static_dir: Path) -> None:
+    root = static_dir.resolve()
+
+    @app.get("/{asset_path:path}", include_in_schema=False)
+    def frontend(asset_path: str) -> FileResponse:
+        if asset_path == "api" or asset_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        asset = (root / asset_path).resolve()
+        if asset_path and asset.is_relative_to(root) and asset.is_file():
+            return FileResponse(asset)
+        return FileResponse(root / "index.html")
 
 
 app = create_app()

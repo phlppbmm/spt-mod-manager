@@ -72,7 +72,9 @@ sptmod serve
 ```
 
 The server binds to `127.0.0.1:8787` only and exposes the API (`/api/...`, `/api/events` for
-progress, `/openapi.json`, `/docs`). The user interface is the SvelteKit app in `frontend/`; it
+progress, `/openapi.json`, `/docs`). When a built UI exists in `frontend/build` (or is named by
+`--static-dir` or `SPTMOD_STATIC_DIR`), `sptmod serve` also serves it at `/`. The user interface
+is the SvelteKit app in `frontend/`; it
 calls the API with same-origin `/api/...` paths, and the Vite dev and preview servers proxy
 `/api` to `127.0.0.1:8787`, so run `pnpm dev` (or `pnpm build && pnpm preview`) while `sptmod
 serve` is running. The UI asks for the game directory once, runs `init` (with a list of pre-existing mods
@@ -136,7 +138,7 @@ reset it, delete the file and run `sptmod sync` again.
 | `sptmod sync [--full]` | Refresh the local Forge catalog cache. |
 | `sptmod search QUERY [--compatible]` | Search the cached catalog. |
 | `sptmod browse [--installed\|--available\|--all] [--compatible]` | List the cached catalog with the installed state. |
-| `sptmod serve [--port] [--open-browser]` | Serve the API on `127.0.0.1`. |
+| `sptmod serve [--port] [--open-browser] [--static-dir]` | Serve the API and the built web UI on `127.0.0.1`. |
 | `sptmod version` | Print the version. |
 
 ## Known limitation

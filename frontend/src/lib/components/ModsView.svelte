@@ -19,9 +19,13 @@
 	interface Props {
 		path: string;
 		refreshKey: number;
+		locked: boolean;
+		onbusy: (busy: boolean) => void;
 	}
 
-	let { path, refreshKey }: Props = $props();
+	let { path, refreshKey, locked, onbusy }: Props = $props();
+
+	const busyIds = new Set<number>();
 
 	const TABS: { id: ModTab; label: string }[] = [
 		{ id: 'all', label: 'All' },
@@ -114,6 +118,15 @@
 		}
 	}
 
+	function onRowBusy(modId: number, busy: boolean): void {
+		if (busy) {
+			busyIds.add(modId);
+		} else {
+			busyIds.delete(modId);
+		}
+		onbusy(busyIds.size > 0);
+	}
+
 	function onSearch(value: string): void {
 		searchInput = value;
 		clearTimeout(searchTimer);
@@ -179,7 +192,9 @@
 				installed={installedByForgeId.get(String(entry.mod.id)) ??
 					installedByName.get(entry.mod.name.toLowerCase()) ??
 					null}
+				{locked}
 				onchanged={() => (reload += 1)}
+				onbusy={onRowBusy}
 			/>
 		{/each}
 		{#if rows.length === 0}

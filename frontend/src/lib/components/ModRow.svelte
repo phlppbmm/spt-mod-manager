@@ -25,10 +25,12 @@
 		entry: CatalogEntry;
 		modState: RowState;
 		installed: ModInfo | null;
+		locked: boolean;
 		onchanged: () => void;
+		onbusy: (modId: number, busy: boolean) => void;
 	}
 
-	let { path, entry, modState, installed, onchanged }: Props = $props();
+	let { path, entry, modState, installed, locked, onchanged, onbusy }: Props = $props();
 
 	const FORCEABLE_CODES = [
 		'CONFLICT',
@@ -64,6 +66,7 @@
 		forceLabel: string | null
 	): Promise<void> {
 		busy = true;
+		onbusy(entry.mod.id, true);
 		errorMessage = '';
 		errorConflicts = [];
 		errorResidues = [];
@@ -87,12 +90,14 @@
 			}
 		} finally {
 			busy = false;
+			onbusy(entry.mod.id, false);
 			progress = null;
 		}
 	}
 
 	async function openPlan(): Promise<void> {
 		planning = true;
+		onbusy(entry.mod.id, true);
 		errorMessage = '';
 		try {
 			plan = await planModInstall(path, entry.mod.id);
@@ -100,6 +105,7 @@
 			errorMessage = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			planning = false;
+			onbusy(entry.mod.id, false);
 		}
 	}
 
@@ -193,7 +199,7 @@
 				{progress.step} {Math.round(progress.percent)}%
 			</span>
 		{:else if modState === 'available'}
-			<button type="button" disabled={busy || planning} onclick={() => void openPlan()}>
+			<button type="button" disabled={locked || busy || planning} onclick={() => void openPlan()}>
 				{planning ? 'Planning…' : 'Install'}
 			</button>
 		{:else if modState === 'incompatible'}
@@ -203,7 +209,7 @@
 		{:else if modState === 'update_available'}
 			<button
 				type="button"
-				disabled={busy}
+				disabled={locked || busy}
 				onclick={() => void perform(update, false, 'Update anyway')}
 			>
 				Update
@@ -211,13 +217,13 @@
 		{:else if modState === 'disabled'}
 			<button
 				type="button"
-				disabled={busy}
+				disabled={locked || busy}
 				onclick={() => void perform(() => enableMod(path, installedName()), false, null)}
 			>
 				Enable
 			</button>
 		{:else}
-			<button type="button" disabled={busy} onclick={() => (confirmation = 'disable')}>
+			<button type="button" disabled={locked || busy} onclick={() => (confirmation = 'disable')}>
 				Disable
 			</button>
 		{/if}
@@ -229,6 +235,7 @@
 					<li>
 						<button
 							type="button"
+							disabled={locked || busy}
 							onclick={() => void perform(() => disableMod(path, installedName()), false, null)}
 						>
 							Disable
@@ -239,6 +246,7 @@
 					<li>
 						<button
 							type="button"
+							disabled={locked || busy}
 							onclick={() => void perform(() => enableMod(path, installedName()), false, null)}
 						>
 							Enable
@@ -247,7 +255,9 @@
 				{/if}
 				{#if modState !== 'available' && modState !== 'incompatible'}
 					<li>
-						<button type="button" onclick={() => (confirmation = 'remove')}>Remove</button>
+						<button type="button" disabled={locked || busy} onclick={() => (confirmation = 'remove')}>
+							Remove
+						</button>
 					</li>
 					<li><button type="button" onclick={() => void showFiles()}>Files</button></li>
 				{/if}

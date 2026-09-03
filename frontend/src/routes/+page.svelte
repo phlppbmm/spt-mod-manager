@@ -2,9 +2,10 @@
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
-	import { status, syncCatalog } from '$lib/api/client';
+	import { checkUpdates, status, syncCatalog, updateMod } from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
+	import { runUpdates, summarize, updatableFrom, type UpdateTarget } from '$lib/updateall';
 
 	type Phase = 'checking' | 'setup' | 'ready' | 'unreachable';
 
@@ -15,6 +16,14 @@
 	let syncNote = $state('');
 	let syncing = $state(false);
 	let refreshKey = $state(0);
+	let candidates: UpdateTarget[] = $state([]);
+	let updatesChecked = $state(false);
+	let updatingAll = $state(false);
+	let updateProgress: ProgressEvent | null = $state(null);
+	let updateName = $state('');
+	let updateIndex = $state(0);
+	let updateTotal = $state(0);
+	let rowsBusy = $state(false);
 
 	onMount(() => {
 		void detect();
@@ -65,12 +74,56 @@
 			const result = await syncCatalog(path, false, operationId);
 			syncNote = `Catalog synced: ${result.new_mods} new mods, ${result.updated_mods} updated.`;
 			refreshKey += 1;
+			await refreshCandidates();
 		} catch (cause) {
 			syncNote = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			unsubscribe();
 			syncProgress = null;
 			syncing = false;
+		}
+	}
+
+	async function refreshCandidates(): Promise<void> {
+		try {
+			candidates = updatableFrom(await checkUpdates(path));
+			updatesChecked = true;
+		} catch {
+			// A failed check keeps the candidates of the previous check.
+		}
+	}
+
+	async function updateAll(): Promise<void> {
+		const targets = candidates;
+		updatingAll = true;
+		syncNote = '';
+		const result = await runUpdates(targets, {
+			update: updateOne,
+			onProgress: (index, total, name) => {
+				updateIndex = index;
+				updateTotal = total;
+				updateName = name;
+				updateProgress = null;
+			}
+		});
+		candidates = targets.filter((target) =>
+			result.failed.some((failure) => failure.name === target.name)
+		);
+		syncNote = summarize(result);
+		refreshKey += 1;
+		updatingAll = false;
+		updateName = '';
+	}
+
+	async function updateOne(name: string, operationId: string): Promise<void> {
+		const unsubscribe = await subscribe(operationId, (event) => {
+			updateProgress = event;
+		});
+		try {
+			await updateMod(path, name, false, operationId);
+		} finally {
+			unsubscribe();
+			updateProgress = null;
 		}
 	}
 </script>
@@ -88,8 +141,16 @@
 	<header>
 		<h1>sptmod</h1>
 		<span class="path" title={path}>{path}</span>
-		<button type="button" disabled={syncing} onclick={() => void sync()}>
+		<button type="button" disabled={syncing || updatingAll} onclick={() => void sync()}>
 			{syncing ? 'Syncing…' : 'Sync catalog'}
+		</button>
+		<button
+			type="button"
+			disabled={syncing || updatingAll || rowsBusy || candidates.length === 0}
+			title={updatesChecked && candidates.length === 0 ? 'Everything is up to date' : undefined}
+			onclick={() => void updateAll()}
+		>
+			{updatingAll ? 'Updating…' : `Update all (${candidates.length})`}
 		</button>
 	</header>
 	{#if syncProgress !== null}
@@ -97,10 +158,20 @@
 			<progress max="100" value={syncProgress.percent}></progress>
 			<span>{syncProgress.step}: {syncProgress.message}</span>
 		</div>
+	{:else if updatingAll}
+		<div class="sync">
+			<progress max="100" value={updateProgress?.percent ?? 0}></progress>
+			<span>Updating {updateName} ({updateIndex} of {updateTotal})</span>
+		</div>
 	{:else if syncNote !== ''}
 		<p class="sync-note">{syncNote}</p>
 	{/if}
-	<ModsView {path} {refreshKey} />
+	<ModsView
+		{path}
+		{refreshKey}
+		locked={updatingAll}
+		onbusy={(busy) => (rowsBusy = busy)}
+	/>
 {/if}
 
 <style>

@@ -2,6 +2,7 @@
 	import ModRow from './ModRow.svelte';
 	import {
 		browseCatalog,
+		listFavorites,
 		listMods,
 		searchCatalog,
 		type CatalogEntry,
@@ -35,6 +36,8 @@
 
 	let tab: ModTab = $state('all');
 	let compatibleOnly = $state(true);
+	let favoritesOnly = $state(false);
+	let favorites: number[] = $state([]);
 	let searchInput = $state('');
 	let search = $state('');
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -60,9 +63,19 @@
 				.map((mod) => [mod.forge_id, mod] as const)
 		)
 	);
+	let favoriteIds = $derived(new Set(favorites));
 	let sort = $state<ModSort | null>(null);
 	let rows = $derived(
-		sortEntries(filterEntries(entries, { tab, compatibleOnly, search }), sort)
+		sortEntries(
+			filterEntries(entries, {
+				tab,
+				compatibleOnly,
+				favoritesOnly,
+				favorites: favoriteIds,
+				search
+			}),
+			sort
+		)
 	);
 
 	function toggleSort(key: SortKey): void {
@@ -96,17 +109,19 @@
 		loading = true;
 		error = '';
 		try {
-			const [catalog, installed] = await Promise.all([
+			const [catalog, installed, favored] = await Promise.all([
 				query.trim() === ''
 					? browseCatalog(gameDir, 'all', compatible)
 					: searchCatalog(gameDir, query, compatible),
-				listMods(gameDir, true)
+				listMods(gameDir, true),
+				listFavorites()
 			]);
 			if (request !== requestId) {
 				return;
 			}
 			entries = catalog;
 			mods = installed;
+			favorites = favored.mod_ids;
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
@@ -160,6 +175,10 @@
 			<input type="checkbox" bind:checked={compatibleOnly} />
 			Only compatible with my SPT version
 		</label>
+		<label class="compat">
+			<input type="checkbox" bind:checked={favoritesOnly} />
+			Favorites only
+		</label>
 	</div>
 
 	{#if error !== ''}
@@ -193,6 +212,8 @@
 					installedByName.get(entry.mod.name.toLowerCase()) ??
 					null}
 				{locked}
+				favorite={favoriteIds.has(entry.mod.id)}
+				onfavorite={(ids) => (favorites = ids)}
 				onchanged={() => (reload += 1)}
 				onbusy={onRowBusy}
 			/>

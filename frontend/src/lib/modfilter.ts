@@ -7,6 +7,8 @@ export type RowState = 'active' | 'disabled' | 'update_available' | 'incompatibl
 export interface ModFilter {
 	tab: ModTab;
 	compatibleOnly: boolean;
+	favoritesOnly: boolean;
+	favorites: ReadonlySet<number>;
 	search: string;
 }
 
@@ -18,6 +20,10 @@ export interface ModFilter {
  */
 export function isCompatible(entry: CatalogEntry): boolean {
 	return entry.latest_version !== null;
+}
+
+export function isFavorite(entry: CatalogEntry, favorites: ReadonlySet<number>): boolean {
+	return favorites.has(entry.mod.id);
 }
 
 export function isInstalled(entry: CatalogEntry): boolean {
@@ -44,6 +50,9 @@ export function filterEntries(entries: readonly CatalogEntry[], filter: ModFilte
 			return false;
 		}
 		if (filter.compatibleOnly && !isCompatible(entry)) {
+			return false;
+		}
+		if (filter.favoritesOnly && !isFavorite(entry, filter.favorites)) {
 			return false;
 		}
 		return matchesSearch(entry, filter.search);

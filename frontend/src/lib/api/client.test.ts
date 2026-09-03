@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { listMods } from './client';
+import { listFavorites, listMods, setFavorite } from './client';
 
 vi.mock('@tauri-apps/api/core', () => ({
 	invoke: vi.fn()
@@ -31,5 +31,33 @@ describe('listMods', () => {
 			name: 'list_mods',
 			payload: { path: '/game', include_all: false }
 		});
+	});
+});
+
+describe('listFavorites', () => {
+	it('calls rpc with name list_favorites and an empty payload', async () => {
+		invokeMock.mockResolvedValue({ mod_ids: [7] });
+
+		const result = await listFavorites();
+
+		expect(invokeMock).toHaveBeenCalledWith('rpc', {
+			name: 'list_favorites',
+			payload: {}
+		});
+		expect(result).toEqual({ mod_ids: [7] });
+	});
+});
+
+describe('setFavorite', () => {
+	it('sends mod_id and favorite, without a favorites_path', async () => {
+		invokeMock.mockResolvedValue({ mod_ids: [7] });
+
+		const result = await setFavorite(7, true);
+
+		expect(invokeMock).toHaveBeenCalledWith('rpc', {
+			name: 'set_favorite',
+			payload: { mod_id: 7, favorite: true }
+		});
+		expect(result).toEqual({ mod_ids: [7] });
 	});
 });

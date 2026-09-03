@@ -119,7 +119,9 @@ downloads. Requests are throttled client-side and back off on HTTP 429.
 `sptmod sync` mirrors the catalog into a SQLite cache in the sptmod configuration directory of
 the current user (`forge-catalog.db`, e.g. `~/.config/sptmod/` on Linux and
 `%LOCALAPPDATA%\sptmod\` on Windows). The cache is never written into the game directory. To
-reset it, delete the file and run `sptmod sync` again.
+reset it, delete the file and run `sptmod sync` again. Mod favorites
+(`favorites.json`) are also stored in the configuration directory and persist across
+cache resets and game directory switches.
 
 ## Commands
 

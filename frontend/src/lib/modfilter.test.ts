@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { filterEntries, isCompatible, isInstalled, matchesSearch, rowState } from './modfilter';
+import {
+	filterEntries,
+	isCompatible,
+	isFavorite,
+	isInstalled,
+	matchesSearch,
+	rowState
+} from './modfilter';
 import type { CatalogEntry, CatalogMod, CatalogVersion } from './api/client';
 
 let nextId = 1;
@@ -86,6 +93,23 @@ describe('isInstalled', () => {
 	});
 });
 
+describe('isFavorite', () => {
+	it('is true when the entry mod id is in the favorites set', () => {
+		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
+		expect(isFavorite(entry, new Set([47]))).toBe(true);
+	});
+
+	it('is false when the entry mod id is not in the favorites set', () => {
+		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
+		expect(isFavorite(entry, new Set([50]))).toBe(false);
+	});
+
+	it('is false for an empty favorites set', () => {
+		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
+		expect(isFavorite(entry, new Set())).toBe(false);
+	});
+});
+
 describe('matchesSearch', () => {
 	it('matches on mod name, case-insensitively', () => {
 		const entry = makeEntry({ mod: makeMod({ name: 'Realistic Sound Mod', author: 'Zed' }) });
@@ -153,12 +177,77 @@ describe('filterEntries', () => {
 		{ tab: 'available' as const, compatibleOnly: false, expected: [entryC, entryD] },
 		{ tab: 'available' as const, compatibleOnly: true, expected: [entryC] }
 	])('tab=$tab compatibleOnly=$compatibleOnly', ({ tab, compatibleOnly, expected }) => {
-		const result = filterEntries(entries, { tab, compatibleOnly, search: '' });
+		const result = filterEntries(entries, {
+			tab,
+			compatibleOnly,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
+			search: ''
+		});
 		expect(result).toEqual(expected);
 	});
 
+	// Favorites: A (installed, compatible) and D (available, incompatible).
+	const favorites = new Set([entryA.mod.id, entryD.mod.id]);
+
+	it.each([
+		{ tab: 'all' as const, expected: [entryA, entryD] },
+		{ tab: 'installed' as const, expected: [entryA] },
+		{ tab: 'available' as const, expected: [entryD] }
+	])('favoritesOnly=true keeps only favorited entries on tab=$tab', ({ tab, expected }) => {
+		const result = filterEntries(entries, {
+			tab,
+			compatibleOnly: false,
+			favoritesOnly: true,
+			favorites,
+			search: ''
+		});
+		expect(result).toEqual(expected);
+	});
+
+	it('favoritesOnly=false ignores a non-empty favorites set', () => {
+		const result = filterEntries(entries, {
+			tab: 'all',
+			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites,
+			search: ''
+		});
+		expect(result).toEqual([entryA, entryB, entryC, entryD]);
+	});
+
+	it('favoritesOnly combines with compatibleOnly', () => {
+		// D is a favorite but incompatible, so compatibleOnly drops it, leaving A.
+		const result = filterEntries(entries, {
+			tab: 'all',
+			compatibleOnly: true,
+			favoritesOnly: true,
+			favorites,
+			search: ''
+		});
+		expect(result).toEqual([entryA]);
+	});
+
+	it('favoritesOnly combines with search', () => {
+		// Both A and D are favorites, but only D's name matches "delta".
+		const result = filterEntries(entries, {
+			tab: 'all',
+			compatibleOnly: false,
+			favoritesOnly: true,
+			favorites,
+			search: 'delta'
+		});
+		expect(result).toEqual([entryD]);
+	});
+
 	it('applies the search filter on top of the tab and compatibility filters', () => {
-		const result = filterEntries(entries, { tab: 'all', compatibleOnly: false, search: 'AL' });
+		const result = filterEntries(entries, {
+			tab: 'all',
+			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
+			search: 'AL'
+		});
 		// "AL" matches "Alpha" (name) and "Dana" author does not, but "Gary" doesn't either;
 		// only Alpha's name contains "al" case-insensitively.
 		expect(result).toEqual([entryA]);
@@ -168,6 +257,8 @@ describe('filterEntries', () => {
 		const result = filterEntries(entries, {
 			tab: 'available',
 			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
 			search: 'dana'
 		});
 		expect(result).toEqual([entryD]);
@@ -177,6 +268,8 @@ describe('filterEntries', () => {
 		const result = filterEntries(entries, {
 			tab: 'all',
 			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
 			search: '  gamma  '
 		});
 		expect(result).toEqual([entryC]);
@@ -186,13 +279,22 @@ describe('filterEntries', () => {
 		const result = filterEntries(entries, {
 			tab: 'installed',
 			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
 			search: 'gamma'
 		});
 		expect(result).toEqual([]);
 	});
 
 	it('returns an empty array for an empty entry list', () => {
-		expect(filterEntries([], { tab: 'all', compatibleOnly: false, search: '' })).toEqual([]);
+		const result = filterEntries([], {
+			tab: 'all',
+			compatibleOnly: false,
+			favoritesOnly: false,
+			favorites: new Set<number>(),
+			search: ''
+		});
+		expect(result).toEqual([]);
 	});
 });
 

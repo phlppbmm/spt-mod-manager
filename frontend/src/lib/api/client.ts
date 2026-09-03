@@ -37,6 +37,7 @@ export type ClearCacheResult = Schemas['ClearCacheResult'];
 export type DirectoryListing = Schemas['DirectoryListing'];
 export type DirectoryEntry = Schemas['DirectoryEntry'];
 export type LocatedDirectory = Schemas['LocatedDirectory'];
+export type FavoritesResponse = Schemas['FavoritesResponse'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -227,6 +228,17 @@ export function getModDetails(modId: number): Promise<ModDetails> {
 
 export function clearCatalogCache(): Promise<ClearCacheResult> {
 	return call<ClearCacheResult>('clear_catalog_cache', {} satisfies Schemas['ClearCatalogCacheRequest']);
+}
+
+export function listFavorites(): Promise<FavoritesResponse> {
+	return call<FavoritesResponse>('list_favorites', {} satisfies Schemas['ListFavoritesRequest']);
+}
+
+export function setFavorite(modId: number, favorite: boolean): Promise<FavoritesResponse> {
+	return call<FavoritesResponse>('set_favorite', {
+		mod_id: modId,
+		favorite
+	} satisfies Schemas['SetFavoriteRequest']);
 }
 
 export function importList(

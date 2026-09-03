@@ -8,6 +8,7 @@
 		modFiles,
 		planModInstall,
 		removeMod,
+		setFavorite,
 		updateMod,
 		type CatalogEntry,
 		type Conflict,
@@ -26,11 +27,23 @@
 		modState: RowState;
 		installed: ModInfo | null;
 		locked: boolean;
+		favorite: boolean;
 		onchanged: () => void;
+		onfavorite: (modIds: number[]) => void;
 		onbusy: (modId: number, busy: boolean) => void;
 	}
 
-	let { path, entry, modState, installed, locked, onchanged, onbusy }: Props = $props();
+	let {
+		path,
+		entry,
+		modState,
+		installed,
+		locked,
+		favorite,
+		onchanged,
+		onfavorite,
+		onbusy
+	}: Props = $props();
 
 	const FORCEABLE_CODES = [
 		'CONFLICT',
@@ -137,6 +150,21 @@
 		return installed?.name ?? entry.mod.name;
 	}
 
+	let markingFavorite = $state(false);
+
+	async function toggleFavorite(): Promise<void> {
+		markingFavorite = true;
+		errorMessage = '';
+		try {
+			const response = await setFavorite(entry.mod.id, !favorite);
+			onfavorite(response.mod_ids);
+		} catch (cause) {
+			errorMessage = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			markingFavorite = false;
+		}
+	}
+
 	let details: ModDetails | null = $state(null);
 
 	async function showDetails(): Promise<void> {
@@ -173,6 +201,17 @@
 
 <div class="row" class:busy>
 	<div class="name">
+		<button
+			type="button"
+			class="favorite"
+			class:marked={favorite}
+			aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+			aria-pressed={favorite}
+			disabled={markingFavorite}
+			onclick={() => void toggleFavorite()}
+		>
+			{favorite ? '★' : '☆'}
+		</button>
 		{#if entry.mod.thumbnail}
 			<img class="thumb" src={entry.mod.thumbnail} alt="" loading="lazy" />
 		{/if}
@@ -491,6 +530,21 @@
 		align-items: center;
 		gap: 0.55rem;
 		min-width: 0;
+	}
+
+	.favorite {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 1.1rem;
+		line-height: 1;
+		color: #98a2ad;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.favorite.marked {
+		color: #f0cf7d;
 	}
 
 	.thumb {

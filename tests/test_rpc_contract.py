@@ -148,10 +148,10 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
 CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
-def test_there_are_twenty_concrete_core_error_classes() -> None:
+def test_there_are_twentyone_concrete_core_error_classes() -> None:
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
-    assert len(CONCRETE_CORE_ERROR_CLASSES) == 20
+    assert len(CONCRETE_CORE_ERROR_CLASSES) == 21
 
 
 @pytest.mark.parametrize(
@@ -166,6 +166,10 @@ def test_every_concrete_core_error_maps_to_a_non_fallback_code(
 
     assert code != FALLBACK_ERROR_CODE
     assert error_type in ERROR_MAPPING
+
+
+def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
+    assert error_code(core_errors.OperationInProgressError) == "OPERATION_IN_PROGRESS"
 
 
 # --------------------------------------------------------------------------

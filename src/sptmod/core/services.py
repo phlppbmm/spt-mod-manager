@@ -105,6 +105,7 @@ from sptmod.core.profile import (
     profile_paths,
 )
 from sptmod.core.repo import Repo
+from sptmod.core.workspace import game_lock, is_locked, staging_dir
 
 SPT_VERSION_TRAILER: Final = "Spt-Version"
 UNKNOWN_SPT_VERSION: Final = "unknown"
@@ -616,29 +617,30 @@ def init_game_dir(
             f"the SPT version of {path} cannot be detected, pass it explicitly"
         )
 
-    repo, created = _open_for_init(layout)
-    try:
-        if spt_version:
-            store_spt_version(repo, version)
-        untracked = repo.untracked_under(Path("."))
-        baseline = [
-            entry for entry in untracked if _mod_prefix_of(entry, layout) is None
-        ]
-        commit_hash = repo.commit(
-            f"chore: clean SPT {version}",
-            trailers={SPT_VERSION_TRAILER: version},
-            paths=baseline,
-        )
-        pre_existing = _mod_entries(untracked, layout)
-        if isinstance(adopt, bool):
-            selected = pre_existing if adopt else []
-        else:
-            selected = list(adopt)
-        adopted = [adopt_mod(path, entry).mod for entry in selected]
-    except Exception:
-        if created:
-            shutil.rmtree(path / ".git", ignore_errors=True)
-        raise
+    with game_lock(path, "setting up the game folder"):
+        repo, created = _open_for_init(layout)
+        try:
+            if spt_version:
+                store_spt_version(repo, version)
+            untracked = repo.untracked_under(Path("."))
+            baseline = [
+                entry for entry in untracked if _mod_prefix_of(entry, layout) is None
+            ]
+            commit_hash = repo.commit(
+                f"chore: clean SPT {version}",
+                trailers={SPT_VERSION_TRAILER: version},
+                paths=baseline,
+            )
+            pre_existing = _mod_entries(untracked, layout)
+            if isinstance(adopt, bool):
+                selected = pre_existing if adopt else []
+            else:
+                selected = list(adopt)
+            adopted = [_adopt_mod(path, entry).mod for entry in selected]
+        except Exception:
+            if created:
+                shutil.rmtree(path / ".git", ignore_errors=True)
+            raise
 
     return InitResult(
         game_dir=path,
@@ -779,9 +781,10 @@ def install_from_archive(
     game_layout = detect_layout(path)
     repo = Repo(path)
     _report(progress, "check", "checking the working tree and running processes")
-    _ensure_installable(repo)
+    if not is_locked(path):
+        _ensure_installable(repo)
 
-    with tempfile.TemporaryDirectory(prefix="sptmod-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
         _report(progress, "extract", f"extracting {archive.name}")
         extract(archive, temp)
@@ -794,44 +797,49 @@ def install_from_archive(
             layout, game_layout.mods_dir, name_override, version_override, archive
         )
 
-        _report(progress, "conflicts", "checking conflicts and dependencies")
-        warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
+        with game_lock(path, f"installing {meta.name}", progress):
+            _ensure_installable(repo)
 
-        _report(progress, "copy", f"copying {len(layout.files)} files")
-        added = [file for file in layout.files if not (path / file).exists()]
-        for mapping in layout.mappings:
-            shutil.copytree(mapping.source, path / mapping.target, dirs_exist_ok=True)
+            _report(progress, "conflicts", "checking conflicts and dependencies")
+            warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
 
-    _report(progress, "commit", f"committing {meta.name} {meta.version}")
-    matched_id, matched_version_id = (
-        _catalog_match(meta.name, meta.version, db_path)
-        if forge_match and not forge_id
-        else ("", "")
-    )
-    draft = ModInfo(
-        name=meta.name,
-        version=meta.version,
-        mod_type=layout.mod_type,
-        author=meta.author,
-        spt_range=meta.spt_range,
-        state="installed",
-        commit="",
-        date=_UNSET_DATE,
-        forge_id=forge_id or matched_id,
-        forge_version_id=forge_version_id or matched_version_id,
-        guid=meta.guid,
-        source=archive.name if source is None else source,
-    )
-    try:
-        commit_hash = repo.commit(
-            f"mod: {meta.name} {meta.version}",
-            trailers=build_trailers(draft),
-            paths=layout.files,
-        )
-    except Exception:
-        _remove_copied(path, added, game_layout)
-        raise
-    committed = repo.log()[0]
+            _report(progress, "copy", f"copying {len(layout.files)} files")
+            added = [file for file in layout.files if not (path / file).exists()]
+            for mapping in layout.mappings:
+                shutil.copytree(
+                    mapping.source, path / mapping.target, dirs_exist_ok=True
+                )
+
+            _report(progress, "commit", f"committing {meta.name} {meta.version}")
+            matched_id, matched_version_id = (
+                _catalog_match(meta.name, meta.version, db_path)
+                if forge_match and not forge_id
+                else ("", "")
+            )
+            draft = ModInfo(
+                name=meta.name,
+                version=meta.version,
+                mod_type=layout.mod_type,
+                author=meta.author,
+                spt_range=meta.spt_range,
+                state="installed",
+                commit="",
+                date=_UNSET_DATE,
+                forge_id=forge_id or matched_id,
+                forge_version_id=forge_version_id or matched_version_id,
+                guid=meta.guid,
+                source=archive.name if source is None else source,
+            )
+            try:
+                commit_hash = repo.commit(
+                    f"mod: {meta.name} {meta.version}",
+                    trailers=build_trailers(draft),
+                    paths=layout.files,
+                )
+            except Exception:
+                _remove_copied(path, added, game_layout)
+                raise
+            committed = repo.log()[0]
     _report(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
     return InstallResult(
         mod=replace(draft, commit=commit_hash, date=committed.date),
@@ -894,19 +902,20 @@ def remove_mod(path: Path, name: str, force: bool = False) -> RemoveResult:
         GitError: git failed.
     """
     repo = Repo(path)
-    _ensure_installable(repo)
+    with game_lock(path, f"removing {name}"):
+        _ensure_installable(repo)
 
-    active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
-    mod = _resolve(active, name)
-    warnings = _check_profile_residue(repo, mod, force)
+        active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
+        mod = _resolve(active, name)
+        warnings = _check_profile_residue(repo, mod, force)
 
-    try:
-        commit_hash = repo.revert(
-            mod.commit,
-            extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "removed"},
-        )
-    except GitError as error:
-        raise _sequencer_conflict(repo, mod, error, "remove") from error
+        try:
+            commit_hash = repo.revert(
+                mod.commit,
+                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "removed"},
+            )
+        except GitError as error:
+            raise _sequencer_conflict(repo, mod, error, "remove") from error
 
     return RemoveResult(
         name=mod.name,
@@ -1081,22 +1090,23 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
         GitError: git failed.
     """
     repo = Repo(path)
-    mod = _resolve(_current_mods(repo), name)
-    if mod.state not in ACTIVE_STATES:
-        return ToggleResult(
-            name=mod.name,
-            state=mod.state,
-            notice=f"{mod.name} is already {mod.state}, nothing to disable",
-        )
-    _ensure_installable(repo)
+    with game_lock(path, f"disabling {name}"):
+        mod = _resolve(_current_mods(repo), name)
+        if mod.state not in ACTIVE_STATES:
+            return ToggleResult(
+                name=mod.name,
+                state=mod.state,
+                notice=f"{mod.name} is already {mod.state}, nothing to disable",
+            )
+        _ensure_installable(repo)
 
-    try:
-        commit_hash = repo.revert(
-            mod.commit,
-            extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "disabled"},
-        )
-    except GitError as error:
-        raise _sequencer_conflict(repo, mod, error, "disable") from error
+        try:
+            commit_hash = repo.revert(
+                mod.commit,
+                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "disabled"},
+            )
+        except GitError as error:
+            raise _sequencer_conflict(repo, mod, error, "disable") from error
 
     return ToggleResult(
         name=mod.name,
@@ -1129,22 +1139,23 @@ def enable_mod(path: Path, name: str) -> ToggleResult:
         GitError: git failed.
     """
     repo = Repo(path)
-    mod = _resolve(_current_mods(repo), name)
-    if mod.state != "disabled":
-        return ToggleResult(
-            name=mod.name,
-            state=mod.state,
-            notice=f"{mod.name} is {mod.state}, not disabled, nothing to enable",
-        )
-    _ensure_installable(repo)
+    with game_lock(path, f"enabling {name}"):
+        mod = _resolve(_current_mods(repo), name)
+        if mod.state != "disabled":
+            return ToggleResult(
+                name=mod.name,
+                state=mod.state,
+                notice=f"{mod.name} is {mod.state}, not disabled, nothing to enable",
+            )
+        _ensure_installable(repo)
 
-    try:
-        commit_hash = repo.cherry_pick(
-            _install_commit(repo, mod.name),
-            extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "enabled"},
-        )
-    except GitError as error:
-        raise _sequencer_conflict(repo, mod, error, "enable") from error
+        try:
+            commit_hash = repo.cherry_pick(
+                _install_commit(repo, mod.name),
+                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "enabled"},
+            )
+        except GitError as error:
+            raise _sequencer_conflict(repo, mod, error, "enable") from error
 
     return ToggleResult(
         name=mod.name,
@@ -1187,6 +1198,17 @@ def adopt_mod(
             a name and a version.
         GitError: git failed or metadata contains invalid trailer values.
     """
+    with game_lock(path, f"adopting {target.name}"):
+        return _adopt_mod(path, target, name_override, version_override)
+
+
+def _adopt_mod(
+    path: Path,
+    target: Path,
+    name_override: str | None = None,
+    version_override: str | None = None,
+) -> AdoptResult:
+    """Adopt ``target`` without taking the lock of the game directory."""
     layout = detect_layout(path)
     repo = Repo(path)
     relative = _relative_target(path, target)
@@ -1303,6 +1325,12 @@ def snapshot(path: Path, message: str | None = None) -> SnapshotResult:
         NotAGameDirError: ``path`` is no SPT game directory.
         GitError: neither profiles nor configs changed, or git failed.
     """
+    with game_lock(path, "securing your profile"):
+        return _snapshot(path, message)
+
+
+def _snapshot(path: Path, message: str | None) -> SnapshotResult:
+    """Commit profile and config changes without taking the lock."""
     repo = Repo(path)
     text = message or datetime.now().strftime(_SNAPSHOT_TIME_FORMAT)
     report = status(path)
@@ -1891,7 +1919,7 @@ def _install_plan(
 ) -> InstallModResult:
     plan = _resolve_plan(path, mod_id_or_name, version, db_path, client)
     installed: list[InstallResult] = []
-    with tempfile.TemporaryDirectory(prefix="sptmod-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         for entry in plan.entries:
             try:
                 installed.append(
@@ -2052,7 +2080,8 @@ def _apply_update(
     repo = Repo(path)
     active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
     mod = _resolve(active, name)
-    _ensure_installable(repo)
+    if not is_locked(path):
+        _ensure_installable(repo)
 
     report = _query_updates(path, [mod.name], db_path, client)
     candidate = next(
@@ -2068,7 +2097,7 @@ def _apply_update(
     reporter = _prefixed(progress, f"{mod.name} {candidate.new_version}")
     obsolete = _replaceable_files(repo, mod)
 
-    with tempfile.TemporaryDirectory(prefix="sptmod-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
         _report(reporter, "check", "downloading the new version")
         archive = _download_entry(
@@ -2087,38 +2116,50 @@ def _apply_update(
             layout, game_layout.mods_dir, mod.name, candidate.new_version, archive
         )
 
-        _report(reporter, "conflicts", "checking conflicts and dependencies")
-        warnings = _check_update_conflicts(repo, game_layout, layout, meta, mod, force)
+        with game_lock(path, f"updating {mod.name}", reporter):
+            _ensure_installable(repo)
 
-        removed = [file for file in obsolete if file not in set(layout.files)]
-        _report(reporter, "copy", f"copying {len(layout.files)} files")
-        for file in removed:
-            (path / file).unlink(missing_ok=True)
-        for mapping in layout.mappings:
-            shutil.copytree(mapping.source, path / mapping.target, dirs_exist_ok=True)
-    for directory in sorted({(path / file).parent for file in removed}, reverse=True):
-        _prune_empty(path, directory, game_layout)
+            _report(reporter, "conflicts", "checking conflicts and dependencies")
+            warnings = _check_update_conflicts(
+                repo, game_layout, layout, meta, mod, force
+            )
 
-    _report(reporter, "commit", f"committing {mod.name} {candidate.new_version}")
-    draft = replace(
-        mod,
-        version=candidate.new_version,
-        mod_type=layout.mod_type,
-        author=meta.author,
-        spt_range=meta.spt_range,
-        state="updated",
-        forge_version_id=str(candidate.version_id),
-        guid=meta.guid,
-        source=candidate.link,
-    )
-    commit_hash = repo.commit(
-        f"mod: {mod.name} {mod.version} → {candidate.new_version}",
-        trailers={
-            **build_trailers(draft),
-            TRAILER_MOD_PREVIOUS_VERSION: mod.version,
-        },
-        paths=[*removed, *layout.files],
-    )
+            removed = [file for file in obsolete if file not in set(layout.files)]
+            _report(reporter, "copy", f"copying {len(layout.files)} files")
+            for file in removed:
+                (path / file).unlink(missing_ok=True)
+            for mapping in layout.mappings:
+                shutil.copytree(
+                    mapping.source, path / mapping.target, dirs_exist_ok=True
+                )
+            for directory in sorted(
+                {(path / file).parent for file in removed}, reverse=True
+            ):
+                _prune_empty(path, directory, game_layout)
+
+            _report(
+                reporter, "commit", f"committing {mod.name} {candidate.new_version}"
+            )
+            draft = replace(
+                mod,
+                version=candidate.new_version,
+                mod_type=layout.mod_type,
+                author=meta.author,
+                spt_range=meta.spt_range,
+                state="updated",
+                forge_version_id=str(candidate.version_id),
+                guid=meta.guid,
+                source=candidate.link,
+            )
+            commit_hash = repo.commit(
+                f"mod: {mod.name} {mod.version} → {candidate.new_version}",
+                trailers={
+                    **build_trailers(draft),
+                    TRAILER_MOD_PREVIOUS_VERSION: mod.version,
+                },
+                paths=[*removed, *layout.files],
+            )
+
     _report(
         reporter,
         "commit",
@@ -2351,7 +2392,7 @@ def _ensure_installable(repo: Repo) -> None:
             f"{listed}. If these are mods you installed manually, add them "
             "via adopt; otherwise move them out of the game folder."
         )
-    snapshot(repo.path, "automatic snapshot before changing mods")
+    _snapshot(repo.path, "automatic snapshot before changing mods")
     if not repo.is_clean():
         raise DirtyTreeError(
             f"{repo.path} still has unexpected changes after snapshotting"

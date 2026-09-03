@@ -8,13 +8,12 @@ temp-directory cleanup on both success and failure.
 """
 
 import json
-import tempfile
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from sptmod.core import game_dir, services
+from sptmod.core import game_dir, services, workspace
 from sptmod.core.errors import (
     ArchiveError,
     DirtyTreeError,
@@ -23,6 +22,11 @@ from sptmod.core.errors import (
 )
 from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.repo import Repo
+
+
+def _tree_listing(root: Path) -> set[Path]:
+    """A snapshot of every file below ``root`` (git internals excluded)."""
+    return {p.relative_to(root) for p in root.rglob("*") if ".git" not in p.parts}
 
 
 def _named_zip(tmp_path: Path, name: str, files: dict[str, str | bytes]) -> Path:
@@ -267,14 +271,12 @@ def test_install_reports_progress_steps_in_order_with_monotonic_percent(
 def test_install_cleans_up_the_temp_dir_after_success(
     clean_repo: Repo, make_archive, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    fake_system_temp = tmp_path / "system-temp"
-    fake_system_temp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_system_temp))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
 
     services.install_from_archive(clean_repo.path, archive)
 
-    assert list(fake_system_temp.iterdir()) == []
+    assert list(workspace.staging_dir().iterdir()) == []
 
 
 def test_install_rolls_back_copied_files_when_the_commit_is_rejected(
@@ -304,17 +306,37 @@ def test_install_rolls_back_copied_files_when_the_commit_is_rejected(
 def test_install_cleans_up_the_temp_dir_after_failure(
     clean_repo: Repo, make_archive, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    fake_system_temp = tmp_path / "system-temp"
-    fake_system_temp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_system_temp))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     # No SPT/user/mods or BepInEx/plugins anchor in this archive: extraction
     # succeeds but the anchor-search step fails.
     archive = make_archive({"Readme.txt": "please read me"}, "zip")
+    before = _tree_listing(clean_repo.path)
 
     with pytest.raises(ArchiveError):
         services.install_from_archive(clean_repo.path, archive)
 
-    assert list(fake_system_temp.iterdir()) == []
+    assert list(workspace.staging_dir().iterdir()) == []
+    assert _tree_listing(clean_repo.path) == before
+    assert clean_repo.is_clean() is True
+
+
+def test_install_leaves_the_game_dir_untouched_when_extraction_fails_partway(
+    clean_repo: Repo, make_archive, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A traversal member fails inside ``extract()`` itself (before the
+    anchor step even runs), proving staging -- not the game dir -- takes the
+    partial write of a failing extraction.
+    """
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    archive = make_archive({"../evil.txt": "pwned"}, "zip")
+    before = _tree_listing(clean_repo.path)
+
+    with pytest.raises(ArchiveError):
+        services.install_from_archive(clean_repo.path, archive)
+
+    assert _tree_listing(clean_repo.path) == before
+    assert clean_repo.is_clean() is True
+    assert list(workspace.staging_dir().iterdir()) == []
 
 
 # --- real-corpus regressions: SPT_Runtime prefix, hybrid-half, patchers, ----

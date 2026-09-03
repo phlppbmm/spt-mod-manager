@@ -35,6 +35,22 @@ class GameRunningError(SptmodError):
     """The SPT server or client is running."""
 
 
+class OperationInProgressError(SptmodError):
+    """Another operation is changing the game directory and did not finish.
+
+    Attributes:
+        operation: The plain-language description of the blocking operation,
+            empty when it could not be read.
+    """
+
+    def __init__(self, operation: str) -> None:
+        detail = f" ({operation})" if operation else ""
+        super().__init__(
+            f"Another operation is still running{detail}. Try again when it finishes."
+        )
+        self.operation = operation
+
+
 class ConflictError(SptmodError):
     """A file, DLL or install conflict blocks the operation.
 

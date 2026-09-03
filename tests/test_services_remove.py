@@ -6,11 +6,13 @@ clean, later mod named in the error), unknown/non-active mods, ambiguous
 case-variant names, a dirty tree, and a running game.
 """
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
-from sptmod.core import game_dir, services
+from sptmod.core import game_dir, services, workspace
 from sptmod.core.errors import (
     AmbiguousModError,
     ConflictError,
@@ -19,6 +21,7 @@ from sptmod.core.errors import (
     ModNotFoundError,
 )
 from sptmod.core.repo import Repo
+from sptmod.core.workspace import game_lock
 
 
 @pytest.fixture(autouse=True)
@@ -29,9 +32,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_remove_mod_deletes_the_files_added_by_its_install_commit(
     clean_repo: Repo, install_commit
 ) -> None:
-    install_commit(
-        clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"}
-    )
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     services.remove_mod(clean_repo.path, "ModA")
 
@@ -41,9 +42,7 @@ def test_remove_mod_deletes_the_files_added_by_its_install_commit(
 def test_remove_mod_result_reports_name_commit_and_files(
     clean_repo: Repo, install_commit
 ) -> None:
-    install_commit(
-        clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"}
-    )
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     result = services.remove_mod(clean_repo.path, "ModA")
 
@@ -56,9 +55,7 @@ def test_remove_mod_result_reports_name_commit_and_files(
 def test_remove_mod_revert_commit_carries_the_removed_state_trailer(
     clean_repo: Repo, install_commit
 ) -> None:
-    install_commit(
-        clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"}
-    )
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     result = services.remove_mod(clean_repo.path, "ModA")
 
@@ -85,9 +82,9 @@ def test_remove_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
 
     assert "ModB" in str(exc_info.value)
     assert clean_repo.is_clean() is True
-    assert (
-        clean_repo.path / "BepInEx/plugins/shared.dll"
-    ).read_text(encoding="utf-8") == "overwritten-by-modb"
+    assert (clean_repo.path / "BepInEx/plugins/shared.dll").read_text(
+        encoding="utf-8"
+    ) == "overwritten-by-modb"
 
 
 def test_remove_mod_conflict_message_names_both_overwritten_files(
@@ -170,3 +167,30 @@ def test_remove_mod_rejects_a_running_game(
         services.remove_mod(clean_repo.path, "ModA")
 
     assert (clean_repo.path / "BepInEx/plugins/ModA.dll").exists()
+
+
+def test_remove_mod_waits_for_a_lock_held_by_another_operation_then_succeeds(
+    clean_repo: Repo, install_commit
+) -> None:
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
+    release_after = 0.3
+    holder_ready = threading.Event()
+
+    def hold() -> None:
+        with game_lock(clean_repo.path, "installing OtherMod"):
+            holder_ready.set()
+            time.sleep(release_after)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert holder_ready.wait(timeout=1.0)
+
+    started = time.monotonic()
+    result = services.remove_mod(clean_repo.path, "ModA")
+    elapsed = time.monotonic() - started
+    holder.join(timeout=1.0)
+
+    assert result.name == "ModA"
+    assert not (clean_repo.path / "BepInEx/plugins/ModA.dll").exists()
+    assert elapsed >= release_after * 0.5
+    assert workspace.is_locked(clean_repo.path) is False

@@ -34,6 +34,7 @@ def isolate_git_config(
         "GIT_COMMITTER_NAME",
         "GIT_COMMITTER_EMAIL",
         "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
     ):
         monkeypatch.delenv(var, raising=False)
 

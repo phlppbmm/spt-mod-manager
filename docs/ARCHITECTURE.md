@@ -39,6 +39,7 @@ src/sptmod/
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
     profile.py          profile residue detection from install commits (§7)
     services.py         all user-facing operations as pure functions
+    workspace.py        staging dir for downloads/extraction, apply lock
     forge/
       client.py         the ONLY module allowed to use httpx; Forge v0 client
       catalog.py        SQLite cache (config dir), sync/search/classify
@@ -134,6 +135,24 @@ changed profiles/configs are secured in an AUTOMATIC snapshot commit and the
 operation proceeds (that state is the normal aftermath of playing). Only
 unmanaged files (manual mod copies, tampered tracked files) block, with a
 plain-language message suggesting adopt. `_ensure_installable` in services.py.
+
+## Parallel operations (the apply lock)
+
+Each RPC call is its own process, so several operations can run at once.
+Downloads and extraction are unlocked and happen in a staging directory below
+the user cache dir (`core/workspace.py`, swept after a day). Only the final
+apply step — conflict check, copy/delete, commit — holds an exclusive lock
+(`.sptmod-lock` in the game directory, ignored by the whitelist gitignore).
+The file is created once and then stays; exclusivity is an operating-system
+lock on it (`fcntl.flock`, `msvcrt.locking` on Windows), which the system
+releases when the holding process ends, so a crash leaves nothing behind that
+blocks — a lock file nobody holds is simply taken. Its JSON content only names
+the running operation for the waiter's message. A colliding apply waits (up to
+five minutes, reporting that operation through the progress callback) before
+raising `OperationInProgressError` (`OPERATION_IN_PROGRESS`); read-only calls
+never lock. `_ensure_installable` runs inside the lock; its pre-download run
+is skipped while another apply holds the lock, because that apply's
+not-yet-committed files would look like manual installs.
 
 ## Archive handling (hardened by a 21-real-mod corpus)
 
@@ -254,6 +273,7 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
+| `XDG_CACHE_HOME` | relocates the staging dir for downloads (platformdirs) |
 
 ## Known limitations / open points
 
@@ -265,6 +285,5 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
 - sp-mod.com deviates from the old forge source in category/license/
   dependency-embed shapes — the client parses the LIVE shapes (with
   tolerant fallbacks); resolve uses `/mods/dependencies`, which matches.
-- No per-game-dir mutex in the Tauri driver (stage-2 option); Windows
-  `CREATE_NO_WINDOW` process handling is a follow-up; no read timeout on
-  child stdout. Linux-only verified (Windows build untested).
+- Windows `CREATE_NO_WINDOW` process handling is a follow-up; no read timeout
+  on child stdout. Linux-only verified (Windows build untested).

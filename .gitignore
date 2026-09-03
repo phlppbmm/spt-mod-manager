@@ -13,3 +13,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 dist/
+
+# Rust / Tauri
+target/
+src-tauri/gen/

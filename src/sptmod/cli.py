@@ -1,14 +1,11 @@
 """Command-line interface for sptmod."""
 
-import os
-import webbrowser
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Final
 
 import typer
-import uvicorn
 from rich.console import Console
 from rich.table import Table
 
@@ -44,12 +41,6 @@ from sptmod.core.models import (
     ProfileResidue,
 )
 from sptmod.core.modmeta import InvalidMetadataError
-from sptmod.server.app import (
-    DEFAULT_HOST,
-    DEFAULT_PORT,
-    STATIC_DIR_ENV_VAR,
-    create_app,
-)
 
 app = typer.Typer(help="sptmod: mod manager for SPT (Single Player Tarkov).")
 
@@ -783,43 +774,18 @@ def browse(
         )
 
 
-@app.command()
-def serve(
-    port: Annotated[
-        int, typer.Option("--port", help="Port the server listens on.")
-    ] = DEFAULT_PORT,
-    open_browser: Annotated[
-        bool, typer.Option("--open-browser", help="Open the UI in a web browser.")
-    ] = False,
-    static_dir: Annotated[
-        Path | None,
-        typer.Option("--static-dir", help="Directory of the built web UI."),
-    ] = None,
+@app.command(hidden=True)
+def rpc(
+    name: Annotated[str, typer.Argument(help="Name of the service function to call.")],
 ) -> None:
-    """Serve the API and, when a build exists, the web UI on localhost."""
-    url = f"http://{DEFAULT_HOST}:{port}"
-    resolved_static = _resolve_static_dir(static_dir)
-    console.print(f"serving {url}", markup=False)
-    if resolved_static is None:
-        console.print(
-            "note: no web UI found; build it with 'pnpm build' in frontend/ "
-            "or pass --static-dir",
-            markup=False,
-        )
-    if open_browser:
-        webbrowser.open(url)
-    uvicorn.run(create_app(resolved_static), host=DEFAULT_HOST, port=port)
+    """Call a service function with a JSON request on stdin.
 
+    Writes NDJSON to stdout: one line per progress report, then one result or
+    error line. Meant for a driver process, not for interactive use.
+    """
+    from sptmod.server.rpc import main as run_rpc
 
-def _resolve_static_dir(explicit: Path | None) -> Path | None:
-    """Return the frontend build directory: option, env var, then cwd default."""
-    if explicit is not None:
-        return explicit
-    from_env = os.environ.get(STATIC_DIR_ENV_VAR)
-    if from_env:
-        return Path(from_env)
-    detected = Path.cwd() / "frontend" / "build"
-    return detected if (detected / "index.html").is_file() else None
+    raise typer.Exit(run_rpc(name))
 
 
 def main() -> None:

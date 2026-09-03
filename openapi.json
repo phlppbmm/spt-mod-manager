@@ -2,39 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "sptmod",
-    "description": "HTTP adapter over the sptmod core services.",
+    "description": "Request and response contract of the sptmod core services.",
     "version": "0.1.0"
   },
   "paths": {
-    "/api/health": {
-      "get": {
-        "summary": "Health",
-        "description": "Report that the server is up.",
-        "operationId": "health_api_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/list_directories": {
       "post": {
         "summary": "List Directories",
@@ -93,10 +64,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/LocatedDirectory"
                   },
-                  "type": "array",
                   "title": "Response Locate Directory Api Locate Directory Post"
                 }
               }
@@ -249,10 +220,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/ModInfo"
                   },
-                  "type": "array",
                   "title": "Response List Mods Api List Mods Post"
                 }
               }
@@ -291,10 +262,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/ModFile"
                   },
-                  "type": "array",
                   "title": "Response Mod Files Api Mod Files Post"
                 }
               }
@@ -409,10 +380,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/CommitInfo"
                   },
-                  "type": "array",
                   "title": "Response History Api History Post"
                 }
               }
@@ -489,10 +460,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/CatalogEntry"
                   },
-                  "type": "array",
                   "title": "Response Search Catalog Api Search Catalog Post"
                 }
               }
@@ -531,10 +502,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/CatalogEntry"
                   },
-                  "type": "array",
                   "title": "Response Browse Catalog Api Browse Catalog Post"
                 }
               }
@@ -1046,40 +1017,22 @@
           }
         }
       }
-    },
-    "/api/events": {
-      "get": {
-        "summary": "Stream the progress of long-running operations",
-        "description": "Stream one message per progress callback of any running operation.",
-        "operationId": "events_api_events_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
       "AdoptModRequest": {
+        "description": "Parameters of ``adopt_mod``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "target": {
-            "type": "string",
             "format": "path",
-            "title": "Target"
+            "title": "Target",
+            "type": "string"
           },
           "name_override": {
             "anyOf": [
@@ -1104,94 +1057,94 @@
             "title": "Version Override"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "target"
         ],
         "title": "AdoptModRequest",
-        "description": "Parameters of ``adopt_mod``."
+        "type": "object"
       },
       "AdoptResult": {
+        "description": "Outcome of ``adopt_mod``.",
         "properties": {
           "mod": {
             "$ref": "#/components/schemas/ModInfo"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "mod"
         ],
         "title": "AdoptResult",
-        "description": "Outcome of ``adopt_mod``."
+        "type": "object"
       },
       "BlockedUpdate": {
+        "description": "An installed mod whose newer version other installed mods block.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "installed_version": {
-            "type": "string",
-            "title": "Installed Version"
+            "title": "Installed Version",
+            "type": "string"
           },
           "new_version": {
-            "type": "string",
-            "title": "New Version"
+            "title": "New Version",
+            "type": "string"
           },
           "reason": {
-            "type": "string",
+            "default": "",
             "title": "Reason",
-            "default": ""
+            "type": "string"
           },
           "blocking_mods": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Blocking Mods",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "installed_version",
           "new_version"
         ],
         "title": "BlockedUpdate",
-        "description": "An installed mod whose newer version other installed mods block."
+        "type": "object"
       },
       "BrowseCatalogRequest": {
+        "description": "Parameters of ``browse_catalog``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "filter": {
             "$ref": "#/components/schemas/BrowseFilter",
             "default": "all"
           },
           "compatible_only": {
-            "type": "boolean",
+            "default": false,
             "title": "Compatible Only",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1200,22 +1153,22 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "BrowseCatalogRequest",
-        "description": "Parameters of ``browse_catalog``."
+        "type": "object"
       },
       "BrowseFilter": {
-        "type": "string",
         "enum": [
           "all",
           "installed",
           "available"
-        ]
+        ],
+        "type": "string"
       },
       "CatalogEntry": {
+        "description": "A cached mod joined with the installed state of the game repository.",
         "properties": {
           "mod": {
             "$ref": "#/components/schemas/CatalogMod"
@@ -1245,7 +1198,6 @@
             ]
           }
         },
-        "type": "object",
         "required": [
           "mod",
           "state",
@@ -1253,13 +1205,14 @@
           "latest_version"
         ],
         "title": "CatalogEntry",
-        "description": "A cached mod joined with the installed state of the game repository."
+        "type": "object"
       },
       "CatalogMod": {
+        "description": "A mod as cached in the local Forge catalog.",
         "properties": {
           "id": {
-            "type": "integer",
-            "title": "Id"
+            "title": "Id",
+            "type": "integer"
           },
           "hub_id": {
             "anyOf": [
@@ -1284,12 +1237,12 @@
             "title": "Guid"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "slug": {
-            "type": "string",
-            "title": "Slug"
+            "title": "Slug",
+            "type": "string"
           },
           "teaser": {
             "anyOf": [
@@ -1314,16 +1267,16 @@
             "title": "Thumbnail"
           },
           "author": {
-            "type": "string",
-            "title": "Author"
+            "title": "Author",
+            "type": "string"
           },
           "downloads": {
-            "type": "integer",
-            "title": "Downloads"
+            "title": "Downloads",
+            "type": "integer"
           },
           "detail_url": {
-            "type": "string",
-            "title": "Detail Url"
+            "title": "Detail Url",
+            "type": "string"
           },
           "published_at": {
             "anyOf": [
@@ -1359,14 +1312,14 @@
             "title": "Updated At"
           },
           "favourites_count": {
-            "type": "integer",
+            "default": 0,
             "title": "Favourites Count",
-            "default": 0
+            "type": "integer"
           },
           "endorsements_count": {
-            "type": "integer",
+            "default": 0,
             "title": "Endorsements Count",
-            "default": 0
+            "type": "integer"
           },
           "fika_compatibility": {
             "anyOf": [
@@ -1380,19 +1333,19 @@
             "title": "Fika Compatibility"
           },
           "featured": {
-            "type": "boolean",
+            "default": false,
             "title": "Featured",
-            "default": false
+            "type": "boolean"
           },
           "contains_ads": {
-            "type": "boolean",
+            "default": false,
             "title": "Contains Ads",
-            "default": false
+            "type": "boolean"
           },
           "contains_ai_content": {
-            "type": "boolean",
+            "default": false,
             "title": "Contains Ai Content",
-            "default": false
+            "type": "boolean"
           },
           "category": {
             "anyOf": [
@@ -1428,15 +1381,14 @@
             "title": "License Link"
           },
           "source_links": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/CatalogSourceLink"
             },
-            "type": "array",
             "title": "Source Links",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "hub_id",
@@ -1453,48 +1405,49 @@
           "updated_at"
         ],
         "title": "CatalogMod",
-        "description": "A mod as cached in the local Forge catalog."
+        "type": "object"
       },
       "CatalogSourceLink": {
+        "description": "A labeled source-code link of a catalog mod.",
         "properties": {
           "url": {
-            "type": "string",
-            "title": "Url"
+            "title": "Url",
+            "type": "string"
           },
           "label": {
-            "type": "string",
-            "title": "Label"
+            "title": "Label",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "url",
           "label"
         ],
         "title": "CatalogSourceLink",
-        "description": "A labeled source-code link of a catalog mod."
+        "type": "object"
       },
       "CatalogState": {
-        "type": "string",
         "enum": [
           "installed",
           "update_available",
           "available"
-        ]
+        ],
+        "type": "string"
       },
       "CatalogVersion": {
+        "description": "A mod version as cached in the local Forge catalog.",
         "properties": {
           "id": {
-            "type": "integer",
-            "title": "Id"
+            "title": "Id",
+            "type": "integer"
           },
           "mod_id": {
-            "type": "integer",
-            "title": "Mod Id"
+            "title": "Mod Id",
+            "type": "integer"
           },
           "version": {
-            "type": "string",
-            "title": "Version"
+            "title": "Version",
+            "type": "string"
           },
           "link": {
             "anyOf": [
@@ -1519,12 +1472,12 @@
             "title": "Content Length"
           },
           "spt_version_constraint": {
-            "type": "string",
-            "title": "Spt Version Constraint"
+            "title": "Spt Version Constraint",
+            "type": "string"
           },
           "downloads": {
-            "type": "integer",
-            "title": "Downloads"
+            "title": "Downloads",
+            "type": "integer"
           },
           "published_at": {
             "anyOf": [
@@ -1549,7 +1502,6 @@
             "title": "Updated At"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "mod_id",
@@ -1562,24 +1514,25 @@
           "updated_at"
         ],
         "title": "CatalogVersion",
-        "description": "A mod version as cached in the local Forge catalog."
+        "type": "object"
       },
       "CheckProfilesRequest": {
+        "description": "Parameters of ``check_profiles``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "CheckProfilesRequest",
-        "description": "Parameters of ``check_profiles``."
+        "type": "object"
       },
       "CheckResult": {
+        "description": "What a residue check over all mods and all profiles found.",
         "properties": {
           "residues": {
             "additionalProperties": {
@@ -1588,29 +1541,29 @@
               },
               "type": "array"
             },
-            "type": "object",
+            "default": {},
             "title": "Residues",
-            "default": {}
+            "type": "object"
           },
           "warnings": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "title": "CheckResult",
-        "description": "What a residue check over all mods and all profiles found."
+        "type": "object"
       },
       "CheckUpdatesRequest": {
+        "description": "Parameters of ``check_updates``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "names": {
             "anyOf": [
@@ -1629,8 +1582,8 @@
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1639,40 +1592,40 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "CheckUpdatesRequest",
-        "description": "Parameters of ``check_updates``."
+        "type": "object"
       },
       "ClearCacheResult": {
+        "description": "Outcome of ``clear_catalog_cache``.",
         "properties": {
           "db_path": {
-            "type": "string",
             "format": "path",
-            "title": "Db Path"
+            "title": "Db Path",
+            "type": "string"
           },
           "removed": {
-            "type": "boolean",
-            "title": "Removed"
+            "title": "Removed",
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "db_path",
           "removed"
         ],
         "title": "ClearCacheResult",
-        "description": "Outcome of ``clear_catalog_cache``."
+        "type": "object"
       },
       "ClearCatalogCacheRequest": {
+        "description": "Parameters of ``clear_catalog_cache``.",
         "properties": {
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1681,44 +1634,44 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "title": "ClearCatalogCacheRequest",
-        "description": "Parameters of ``clear_catalog_cache``."
+        "type": "object"
       },
       "CommitInfo": {
+        "description": "A commit with its parsed trailers.",
         "properties": {
           "hash": {
-            "type": "string",
-            "title": "Hash"
+            "title": "Hash",
+            "type": "string"
           },
           "subject": {
-            "type": "string",
-            "title": "Subject"
+            "title": "Subject",
+            "type": "string"
           },
           "date": {
-            "type": "string",
             "format": "date-time",
-            "title": "Date"
+            "title": "Date",
+            "type": "string"
           },
           "trailers": {
             "additionalProperties": {
               "type": "string"
             },
-            "type": "object",
+            "default": {},
             "title": "Trailers",
-            "default": {}
+            "type": "object"
           }
         },
-        "type": "object",
         "required": [
           "hash",
           "subject",
           "date"
         ],
         "title": "CommitInfo",
-        "description": "A commit with its parsed trailers."
+        "type": "object"
       },
       "Conflict": {
+        "description": "A finding of the pre-install conflict and dependency checks.",
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/ConflictKind"
@@ -1727,14 +1680,14 @@
             "$ref": "#/components/schemas/ConflictSeverity"
           },
           "message": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           },
           "path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1743,22 +1696,20 @@
             "title": "Path"
           },
           "mod": {
-            "type": "string",
+            "default": "",
             "title": "Mod",
-            "default": ""
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "kind",
           "severity",
           "message"
         ],
         "title": "Conflict",
-        "description": "A finding of the pre-install conflict and dependency checks."
+        "type": "object"
       },
       "ConflictKind": {
-        "type": "string",
         "enum": [
           "tracked-file",
           "untracked-file",
@@ -1766,52 +1717,54 @@
           "missing-dependency",
           "dependency-version",
           "spt-version"
-        ]
+        ],
+        "type": "string"
       },
       "ConflictSeverity": {
-        "type": "string",
         "enum": [
           "error",
           "warning"
-        ]
+        ],
+        "type": "string"
       },
       "DirectoryEntry": {
+        "description": "One subdirectory of a browsed directory.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "is_game_dir": {
-            "type": "boolean",
-            "title": "Is Game Dir"
+            "title": "Is Game Dir",
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "path",
           "is_game_dir"
         ],
         "title": "DirectoryEntry",
-        "description": "One subdirectory of a browsed directory."
+        "type": "object"
       },
       "DirectoryListing": {
+        "description": "Outcome of ``list_directories``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "parent": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1820,184 +1773,184 @@
             "title": "Parent"
           },
           "entries": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/DirectoryEntry"
             },
-            "type": "array",
             "title": "Entries",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "DirectoryListing",
-        "description": "Outcome of ``list_directories``."
+        "type": "object"
       },
       "DisableModRequest": {
+        "description": "Parameters of ``disable_mod``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "name"
         ],
         "title": "DisableModRequest",
-        "description": "Parameters of ``disable_mod``."
+        "type": "object"
       },
       "EnableModRequest": {
+        "description": "Parameters of ``enable_mod``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "name"
         ],
         "title": "EnableModRequest",
-        "description": "Parameters of ``enable_mod``."
+        "type": "object"
       },
       "ErrorDetails": {
+        "description": "The structured payload a failed operation carries, empty where it has none.",
         "properties": {
           "conflicts": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/Conflict"
             },
-            "type": "array",
             "title": "Conflicts",
-            "default": []
+            "type": "array"
           },
           "residues": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ProfileResidue"
             },
-            "type": "array",
             "title": "Residues",
-            "default": []
+            "type": "array"
           },
           "conflicting_paths": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Conflicting Paths",
-            "default": []
+            "type": "array"
           },
           "installed": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Installed",
-            "default": []
+            "type": "array"
           },
           "name": {
-            "type": "string",
+            "default": "",
             "title": "Name",
-            "default": ""
+            "type": "string"
           },
           "candidates": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Candidates",
-            "default": []
+            "type": "array"
           },
           "dependency": {
-            "type": "string",
+            "default": "",
             "title": "Dependency",
-            "default": ""
+            "type": "string"
           },
           "reason": {
-            "type": "string",
+            "default": "",
             "title": "Reason",
-            "default": ""
+            "type": "string"
           },
           "api_code": {
-            "type": "string",
+            "default": "",
             "title": "Api Code",
-            "default": ""
+            "type": "string"
           },
           "api_status": {
-            "type": "integer",
+            "default": 0,
             "title": "Api Status",
-            "default": 0
+            "type": "integer"
           }
         },
-        "type": "object",
         "title": "ErrorDetails",
-        "description": "The structured payload a failed operation carries, empty where it has none."
+        "type": "object"
       },
       "ErrorResponse": {
+        "description": "Body of every failed request.\n\n``code`` is the stable machine-readable name of the core exception class,\n``error`` its human-readable message.",
         "properties": {
           "error": {
-            "type": "string",
-            "title": "Error"
+            "title": "Error",
+            "type": "string"
           },
           "code": {
-            "type": "string",
-            "title": "Code"
+            "title": "Code",
+            "type": "string"
           },
           "details": {
             "$ref": "#/components/schemas/ErrorDetails"
           }
         },
-        "type": "object",
         "required": [
           "error",
           "code"
         ],
         "title": "ErrorResponse",
-        "description": "Body of every failed request.\n\n``code`` is the stable machine-readable name of the core exception class,\n``error`` its human-readable message."
+        "type": "object"
       },
       "ExportFormat": {
-        "type": "string",
         "enum": [
           "text",
           "json"
-        ]
+        ],
+        "type": "string"
       },
       "ExportModsRequest": {
+        "description": "Parameters of ``export_mods``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "format": {
             "$ref": "#/components/schemas/ExportFormat",
             "default": "text"
           },
           "client_only": {
-            "type": "boolean",
+            "default": false,
             "title": "Client Only",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2006,46 +1959,46 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "ExportModsRequest",
-        "description": "Parameters of ``export_mods``."
+        "type": "object"
       },
       "ExportModsResponse": {
+        "description": "The rendered mod list of ``export_mods``.",
         "properties": {
           "content": {
-            "type": "string",
-            "title": "Content"
+            "title": "Content",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "content"
         ],
         "title": "ExportModsResponse",
-        "description": "The rendered mod list of ``export_mods``."
+        "type": "object"
       },
       "FileChange": {
-        "type": "string",
         "enum": [
           "added",
           "modified",
           "deleted"
-        ]
+        ],
+        "type": "string"
       },
       "GetModDetailsRequest": {
+        "description": "Parameters of ``get_mod_details``.",
         "properties": {
           "mod_id": {
-            "type": "integer",
-            "title": "Mod Id"
+            "title": "Mod Id",
+            "type": "integer"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2054,32 +2007,19 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "mod_id"
         ],
         "title": "GetModDetailsRequest",
-        "description": "Parameters of ``get_mod_details``."
-      },
-      "HealthResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "const": "ok",
-            "title": "Status",
-            "default": "ok"
-          }
-        },
-        "type": "object",
-        "title": "HealthResponse",
-        "description": "Body of the health check."
+        "type": "object"
       },
       "HistoryRequest": {
+        "description": "Parameters of ``history``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
             "anyOf": [
@@ -2093,93 +2033,93 @@
             "title": "Name"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "HistoryRequest",
-        "description": "Parameters of ``history``."
+        "type": "object"
       },
       "ImportDiff": {
+        "description": "The difference between an imported mod list and the installed mods.",
         "properties": {
           "missing": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ImportEntry"
             },
-            "type": "array",
             "title": "Missing",
-            "default": []
+            "type": "array"
           },
           "different": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ImportEntry"
             },
-            "type": "array",
             "title": "Different",
-            "default": []
+            "type": "array"
           },
           "extra": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ImportEntry"
             },
-            "type": "array",
             "title": "Extra",
-            "default": []
+            "type": "array"
           },
           "installed": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/InstallModResult"
             },
-            "type": "array",
             "title": "Installed",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "title": "ImportDiff",
-        "description": "The difference between an imported mod list and the installed mods."
+        "type": "object"
       },
       "ImportEntry": {
+        "description": "One mod an imported list and the installed mods disagree about.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "wanted_version": {
-            "type": "string",
+            "default": "",
             "title": "Wanted Version",
-            "default": ""
+            "type": "string"
           },
           "installed_version": {
-            "type": "string",
+            "default": "",
             "title": "Installed Version",
-            "default": ""
+            "type": "string"
           },
           "link": {
-            "type": "string",
+            "default": "",
             "title": "Link",
-            "default": ""
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name"
         ],
         "title": "ImportEntry",
-        "description": "One mod an imported list and the installed mods disagree about."
+        "type": "object"
       },
       "ImportListRequest": {
+        "description": "Parameters of ``import_list``.\n\nExactly one of ``list_file`` and ``content`` carries the mod list.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "list_file": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2188,9 +2128,9 @@
             "title": "List File"
           },
           "apply": {
-            "type": "boolean",
+            "default": false,
             "title": "Apply",
-            "default": false
+            "type": "boolean"
           },
           "content": {
             "anyOf": [
@@ -2206,8 +2146,8 @@
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2216,48 +2156,48 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "ImportListRequest",
-        "description": "Parameters of ``import_list``.\n\nExactly one of ``list_file`` and ``content`` carries the mod list."
+        "type": "object"
       },
       "IncompatibleMod": {
+        "description": "An installed mod without any version for the queried SPT release.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "installed_version": {
-            "type": "string",
-            "title": "Installed Version"
+            "title": "Installed Version",
+            "type": "string"
           },
           "reason": {
-            "type": "string",
+            "default": "",
             "title": "Reason",
-            "default": ""
+            "type": "string"
           },
           "latest_compatible_version": {
-            "type": "string",
+            "default": "",
             "title": "Latest Compatible Version",
-            "default": ""
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "installed_version"
         ],
         "title": "IncompatibleMod",
-        "description": "An installed mod without any version for the queried SPT release."
+        "type": "object"
       },
       "InitGameDirRequest": {
+        "description": "Parameters of ``init_game_dir``.\n\n``spt_version`` answers the ``SPT_VERSION_UNKNOWN`` error of an earlier\ncall, which the setup flow repeats with the version a user entered.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "adopt": {
             "anyOf": [
@@ -2266,14 +2206,14 @@
               },
               {
                 "items": {
-                  "type": "string",
-                  "format": "path"
+                  "format": "path",
+                  "type": "string"
                 },
                 "type": "array"
               }
             ],
-            "title": "Adopt",
-            "default": false
+            "default": false,
+            "title": "Adopt"
           },
           "spt_version": {
             "anyOf": [
@@ -2287,74 +2227,74 @@
             "title": "Spt Version"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "InitGameDirRequest",
-        "description": "Parameters of ``init_game_dir``.\n\n``spt_version`` answers the ``SPT_VERSION_UNKNOWN`` error of an earlier\ncall, which the setup flow repeats with the version a user entered."
+        "type": "object"
       },
       "InitResult": {
+        "description": "Outcome of ``init_game_dir``.",
         "properties": {
           "game_dir": {
-            "type": "string",
             "format": "path",
-            "title": "Game Dir"
+            "title": "Game Dir",
+            "type": "string"
           },
           "commit": {
-            "type": "string",
-            "title": "Commit"
+            "title": "Commit",
+            "type": "string"
           },
           "spt_version": {
-            "type": "string",
-            "title": "Spt Version"
+            "title": "Spt Version",
+            "type": "string"
           },
           "warnings": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           },
           "pre_existing_mods": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Pre Existing Mods",
-            "default": []
+            "type": "array"
           },
           "adopted": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ModInfo"
             },
-            "type": "array",
             "title": "Adopted",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "game_dir",
           "commit",
           "spt_version"
         ],
         "title": "InitResult",
-        "description": "Outcome of ``init_game_dir``."
+        "type": "object"
       },
       "InstallFromArchiveRequest": {
+        "description": "Parameters of ``install_from_archive``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "archive": {
-            "type": "string",
             "format": "path",
-            "title": "Archive"
+            "title": "Archive",
+            "type": "string"
           },
           "name_override": {
             "anyOf": [
@@ -2379,20 +2319,20 @@
             "title": "Version Override"
           },
           "force": {
-            "type": "boolean",
+            "default": false,
             "title": "Force",
-            "default": false
+            "type": "boolean"
           },
           "forge_match": {
-            "type": "boolean",
+            "default": false,
             "title": "Forge Match",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2412,55 +2352,55 @@
             "title": "Operation Id"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "archive"
         ],
         "title": "InstallFromArchiveRequest",
-        "description": "Parameters of ``install_from_archive``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none."
+        "type": "object"
       },
       "InstallFromArchiveResponse": {
+        "description": "Outcome of ``install_from_archive`` plus its progress operation ID.",
         "properties": {
           "mod": {
             "$ref": "#/components/schemas/ModInfo"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           },
           "warnings": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/Conflict"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           },
           "operation_id": {
-            "type": "string",
-            "title": "Operation Id"
+            "title": "Operation Id",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "mod",
           "operation_id"
         ],
         "title": "InstallFromArchiveResponse",
-        "description": "Outcome of ``install_from_archive`` plus its progress operation ID."
+        "type": "object"
       },
       "InstallModRequest": {
+        "description": "Parameters of ``install_mod``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "mod_id_or_name": {
             "anyOf": [
@@ -2485,15 +2425,15 @@
             "title": "Version"
           },
           "force": {
-            "type": "boolean",
+            "default": false,
             "title": "Force",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2513,120 +2453,120 @@
             "title": "Operation Id"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "mod_id_or_name"
         ],
         "title": "InstallModRequest",
-        "description": "Parameters of ``install_mod``.\n\n``operation_id`` names the progress stream of this install; a generated one\nis used and echoed back when the caller sends none."
+        "type": "object"
       },
       "InstallModResponse": {
+        "description": "Outcome of ``install_mod`` plus its progress operation ID.",
         "properties": {
           "plan": {
             "$ref": "#/components/schemas/InstallPlan"
           },
           "installed": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/InstallResult"
             },
-            "type": "array",
             "title": "Installed",
-            "default": []
+            "type": "array"
           },
           "operation_id": {
-            "type": "string",
-            "title": "Operation Id"
+            "title": "Operation Id",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "plan",
           "operation_id"
         ],
         "title": "InstallModResponse",
-        "description": "Outcome of ``install_mod`` plus its progress operation ID."
+        "type": "object"
       },
       "InstallModResult": {
+        "description": "Outcome of ``install_mod``.",
         "properties": {
           "plan": {
             "$ref": "#/components/schemas/InstallPlan"
           },
           "installed": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/InstallResult"
             },
-            "type": "array",
             "title": "Installed",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "plan"
         ],
         "title": "InstallModResult",
-        "description": "Outcome of ``install_mod``."
+        "type": "object"
       },
       "InstallPlan": {
+        "description": "What an install would download and install, in install order.",
         "properties": {
           "spt_version": {
-            "type": "string",
-            "title": "Spt Version"
+            "title": "Spt Version",
+            "type": "string"
           },
           "entries": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/PlanEntry"
             },
-            "type": "array",
             "title": "Entries",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "spt_version"
         ],
         "title": "InstallPlan",
-        "description": "What an install would download and install, in install order."
+        "type": "object"
       },
       "InstallResult": {
+        "description": "Outcome of ``install_from_archive``.",
         "properties": {
           "mod": {
             "$ref": "#/components/schemas/ModInfo"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           },
           "warnings": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/Conflict"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "mod"
         ],
         "title": "InstallResult",
-        "description": "Outcome of ``install_from_archive``."
+        "type": "object"
       },
       "ListDirectoriesRequest": {
+        "description": "Parameters of ``list_directories``.",
         "properties": {
           "path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2635,97 +2575,97 @@
             "title": "Path"
           }
         },
-        "type": "object",
         "title": "ListDirectoriesRequest",
-        "description": "Parameters of ``list_directories``."
+        "type": "object"
       },
       "ListModsRequest": {
+        "description": "Parameters of ``list_mods``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "include_all": {
-            "type": "boolean",
+            "default": false,
             "title": "Include All",
-            "default": false
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "ListModsRequest",
-        "description": "Parameters of ``list_mods``."
+        "type": "object"
       },
       "LocateDirectoryRequest": {
+        "description": "Parameters of ``locate_directory``.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "fingerprint": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Fingerprint",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "name"
         ],
         "title": "LocateDirectoryRequest",
-        "description": "Parameters of ``locate_directory``."
+        "type": "object"
       },
       "LocatedDirectory": {
+        "description": "A directory matched by ``locate_directory``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "is_game_dir": {
-            "type": "boolean",
-            "title": "Is Game Dir"
+            "title": "Is Game Dir",
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "is_game_dir"
         ],
         "title": "LocatedDirectory",
-        "description": "A directory matched by ``locate_directory``."
+        "type": "object"
       },
       "ManualMod": {
+        "description": "Untracked files below a mod path, grouped by their mod folder.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "ManualMod",
-        "description": "Untracked files below a mod path, grouped by their mod folder."
+        "type": "object"
       },
       "ModDetails": {
+        "description": "Outcome of ``get_mod_details``: cached data plus live description.",
         "properties": {
           "mod": {
             "anyOf": [
@@ -2741,113 +2681,112 @@
             "items": {
               "$ref": "#/components/schemas/CatalogVersion"
             },
-            "type": "array",
-            "title": "Versions"
+            "title": "Versions",
+            "type": "array"
           },
           "description": {
-            "type": "string",
-            "title": "Description"
+            "title": "Description",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "mod",
           "versions",
           "description"
         ],
         "title": "ModDetails",
-        "description": "Outcome of ``get_mod_details``: cached data plus live description."
+        "type": "object"
       },
       "ModFile": {
+        "description": "A file touched by a commit, relative to the game directory.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "change": {
             "$ref": "#/components/schemas/FileChange"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "change"
         ],
         "title": "ModFile",
-        "description": "A file touched by a commit, relative to the game directory."
+        "type": "object"
       },
       "ModFilesRequest": {
+        "description": "Parameters of ``mod_files``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "name"
         ],
         "title": "ModFilesRequest",
-        "description": "Parameters of ``mod_files``."
+        "type": "object"
       },
       "ModInfo": {
+        "description": "A mod as described by the trailers of its most recent commit.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "version": {
-            "type": "string",
-            "title": "Version"
+            "title": "Version",
+            "type": "string"
           },
           "mod_type": {
             "$ref": "#/components/schemas/ModType"
           },
           "author": {
-            "type": "string",
-            "title": "Author"
+            "title": "Author",
+            "type": "string"
           },
           "spt_range": {
-            "type": "string",
-            "title": "Spt Range"
+            "title": "Spt Range",
+            "type": "string"
           },
           "state": {
             "$ref": "#/components/schemas/ModState"
           },
           "commit": {
-            "type": "string",
-            "title": "Commit"
+            "title": "Commit",
+            "type": "string"
           },
           "date": {
-            "type": "string",
             "format": "date-time",
-            "title": "Date"
+            "title": "Date",
+            "type": "string"
           },
           "forge_id": {
-            "type": "string",
-            "title": "Forge Id"
+            "title": "Forge Id",
+            "type": "string"
           },
           "forge_version_id": {
-            "type": "string",
-            "title": "Forge Version Id"
+            "title": "Forge Version Id",
+            "type": "string"
           },
           "guid": {
-            "type": "string",
-            "title": "Guid"
+            "title": "Guid",
+            "type": "string"
           },
           "source": {
-            "type": "string",
-            "title": "Source"
+            "title": "Source",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "version",
@@ -2863,35 +2802,36 @@
           "source"
         ],
         "title": "ModInfo",
-        "description": "A mod as described by the trailers of its most recent commit."
+        "type": "object"
       },
       "ModState": {
-        "type": "string",
         "enum": [
           "installed",
           "updated",
           "disabled",
           "enabled",
           "removed"
-        ]
+        ],
+        "type": "string"
       },
       "ModType": {
-        "type": "string",
         "enum": [
           "server",
           "client",
           "hybrid"
-        ]
+        ],
+        "type": "string"
       },
       "PlanEntry": {
+        "description": "One mod to install as part of an ``InstallPlan``.",
         "properties": {
           "mod_id": {
-            "type": "integer",
-            "title": "Mod Id"
+            "title": "Mod Id",
+            "type": "integer"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "guid": {
             "anyOf": [
@@ -2905,12 +2845,12 @@
             "title": "Guid"
           },
           "version": {
-            "type": "string",
-            "title": "Version"
+            "title": "Version",
+            "type": "string"
           },
           "version_id": {
-            "type": "integer",
-            "title": "Version Id"
+            "title": "Version Id",
+            "type": "integer"
           },
           "link": {
             "anyOf": [
@@ -2935,11 +2875,10 @@
             "title": "Content Length"
           },
           "is_dependency": {
-            "type": "boolean",
-            "title": "Is Dependency"
+            "title": "Is Dependency",
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "mod_id",
           "name",
@@ -2951,14 +2890,15 @@
           "is_dependency"
         ],
         "title": "PlanEntry",
-        "description": "One mod to install as part of an ``InstallPlan``."
+        "type": "object"
       },
       "PlanModInstallRequest": {
+        "description": "Parameters of ``plan_mod_install``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "mod_id_or_name": {
             "anyOf": [
@@ -2985,8 +2925,8 @@
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2995,19 +2935,19 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "mod_id_or_name"
         ],
         "title": "PlanModInstallRequest",
-        "description": "Parameters of ``plan_mod_install``."
+        "type": "object"
       },
       "ProfileResidue": {
+        "description": "IDs of one mod that one player profile still references.",
         "properties": {
           "profile": {
-            "type": "string",
-            "title": "Profile"
+            "title": "Profile",
+            "type": "string"
           },
           "category": {
             "$ref": "#/components/schemas/ResidueCategory"
@@ -3016,15 +2956,14 @@
             "items": {
               "type": "string"
             },
-            "type": "array",
-            "title": "Ids"
+            "title": "Ids",
+            "type": "array"
           },
           "count": {
-            "type": "integer",
-            "title": "Count"
+            "title": "Count",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "profile",
           "category",
@@ -3032,28 +2971,28 @@
           "count"
         ],
         "title": "ProfileResidue",
-        "description": "IDs of one mod that one player profile still references."
+        "type": "object"
       },
       "ProgressEvent": {
+        "description": "One progress line of a long-running RPC operation on stdout.",
         "properties": {
           "operation_id": {
-            "type": "string",
-            "title": "Operation Id"
+            "title": "Operation Id",
+            "type": "string"
           },
           "step": {
-            "type": "string",
-            "title": "Step"
+            "title": "Step",
+            "type": "string"
           },
           "percent": {
-            "type": "integer",
-            "title": "Percent"
+            "title": "Percent",
+            "type": "integer"
           },
           "message": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "operation_id",
           "step",
@@ -3061,99 +3000,100 @@
           "message"
         ],
         "title": "ProgressEvent",
-        "description": "One progress message of a long-running operation, sent over SSE."
+        "type": "object"
       },
       "RemoveModRequest": {
+        "description": "Parameters of ``remove_mod``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "force": {
-            "type": "boolean",
+            "default": false,
             "title": "Force",
-            "default": false
+            "type": "boolean"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "name"
         ],
         "title": "RemoveModRequest",
-        "description": "Parameters of ``remove_mod``."
+        "type": "object"
       },
       "RemoveResult": {
+        "description": "Outcome of ``remove_mod``.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "commit": {
-            "type": "string",
-            "title": "Commit"
+            "title": "Commit",
+            "type": "string"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           },
           "warnings": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "commit"
         ],
         "title": "RemoveResult",
-        "description": "Outcome of ``remove_mod``."
+        "type": "object"
       },
       "ResidueCategory": {
-        "type": "string",
         "enum": [
           "item",
           "trader",
           "quest",
           "string"
-        ]
+        ],
+        "type": "string"
       },
       "SearchCatalogRequest": {
+        "description": "Parameters of ``search_catalog``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "query": {
-            "type": "string",
-            "title": "Query"
+            "title": "Query",
+            "type": "string"
           },
           "compatible_only": {
-            "type": "boolean",
+            "default": false,
             "title": "Compatible Only",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3162,54 +3102,54 @@
             "title": "Db Path"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "query"
         ],
         "title": "SearchCatalogRequest",
-        "description": "Parameters of ``search_catalog``."
+        "type": "object"
       },
       "SetSptVersionRequest": {
+        "description": "Parameters of ``set_spt_version``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "version": {
-            "type": "string",
-            "title": "Version"
+            "title": "Version",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "version"
         ],
         "title": "SetSptVersionRequest",
-        "description": "Parameters of ``set_spt_version``."
+        "type": "object"
       },
       "SetSptVersionResponse": {
+        "description": "The SPT version stored for a game directory.",
         "properties": {
           "spt_version": {
-            "type": "string",
-            "title": "Spt Version"
+            "title": "Spt Version",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "spt_version"
         ],
         "title": "SetSptVersionResponse",
-        "description": "The SPT version stored for a game directory."
+        "type": "object"
       },
       "SnapshotRequest": {
+        "description": "Parameters of ``snapshot``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "message": {
             "anyOf": [
@@ -3223,124 +3163,124 @@
             "title": "Message"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "SnapshotRequest",
-        "description": "Parameters of ``snapshot``."
+        "type": "object"
       },
       "SnapshotResult": {
+        "description": "Outcome of ``snapshot``.",
         "properties": {
           "commit": {
-            "type": "string",
-            "title": "Commit"
+            "title": "Commit",
+            "type": "string"
           },
           "message": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "commit",
           "message"
         ],
         "title": "SnapshotResult",
-        "description": "Outcome of ``snapshot``."
+        "type": "object"
       },
       "StatusReport": {
+        "description": "The interpreted working-tree status of a game directory.",
         "properties": {
           "modified_profiles": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Modified Profiles",
-            "default": []
+            "type": "array"
           },
           "modified_configs": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Modified Configs",
-            "default": []
+            "type": "array"
           },
           "manual_mods": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ManualMod"
             },
-            "type": "array",
             "title": "Manual Mods",
-            "default": []
+            "type": "array"
           },
           "other_modified": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Other Modified",
-            "default": []
+            "type": "array"
           },
           "other_untracked": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Other Untracked",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "title": "StatusReport",
-        "description": "The interpreted working-tree status of a game directory."
+        "type": "object"
       },
       "StatusRequest": {
+        "description": "Parameters of ``status``.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "StatusRequest",
-        "description": "Parameters of ``status``."
+        "type": "object"
       },
       "SyncCatalogRequest": {
+        "description": "Parameters of ``sync_catalog``.\n\n``operation_id`` names the progress stream of this sync; a generated one is\nused and echoed back when the caller sends none.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "full": {
-            "type": "boolean",
+            "default": false,
             "title": "Full",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3360,45 +3300,44 @@
             "title": "Operation Id"
           }
         },
-        "type": "object",
         "required": [
           "path"
         ],
         "title": "SyncCatalogRequest",
-        "description": "Parameters of ``sync_catalog``.\n\n``operation_id`` names the progress stream of this sync; a generated one is\nused and echoed back when the caller sends none."
+        "type": "object"
       },
       "SyncCatalogResponse": {
+        "description": "Outcome of ``sync_catalog`` plus its progress operation ID.",
         "properties": {
           "new_mods": {
-            "type": "integer",
-            "title": "New Mods"
+            "title": "New Mods",
+            "type": "integer"
           },
           "updated_mods": {
-            "type": "integer",
-            "title": "Updated Mods"
+            "title": "Updated Mods",
+            "type": "integer"
           },
           "new_versions": {
-            "type": "integer",
-            "title": "New Versions"
+            "title": "New Versions",
+            "type": "integer"
           },
           "updated_versions": {
-            "type": "integer",
-            "title": "Updated Versions"
+            "title": "Updated Versions",
+            "type": "integer"
           },
           "pages": {
-            "type": "integer",
-            "title": "Pages"
+            "title": "Pages",
+            "type": "integer"
           },
           "full": {
-            "type": "boolean",
-            "title": "Full"
+            "title": "Full",
+            "type": "boolean"
           },
           "operation_id": {
-            "type": "string",
-            "title": "Operation Id"
+            "title": "Operation Id",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "new_mods",
           "updated_mods",
@@ -3409,67 +3348,68 @@
           "operation_id"
         ],
         "title": "SyncCatalogResponse",
-        "description": "Outcome of ``sync_catalog`` plus its progress operation ID."
+        "type": "object"
       },
       "ToggleResult": {
+        "description": "Outcome of ``disable_mod`` and ``enable_mod``.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "state": {
             "$ref": "#/components/schemas/ModState"
           },
           "commit": {
-            "type": "string",
+            "default": "",
             "title": "Commit",
-            "default": ""
+            "type": "string"
           },
           "files": {
+            "default": [],
             "items": {
-              "type": "string",
-              "format": "path"
+              "format": "path",
+              "type": "string"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           },
           "notice": {
-            "type": "string",
+            "default": "",
             "title": "Notice",
-            "default": ""
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "state"
         ],
         "title": "ToggleResult",
-        "description": "Outcome of ``disable_mod`` and ``enable_mod``."
+        "type": "object"
       },
       "UpdateCandidate": {
+        "description": "An installed mod Forge recommends a newer version for.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "installed_version": {
-            "type": "string",
-            "title": "Installed Version"
+            "title": "Installed Version",
+            "type": "string"
           },
           "new_version": {
-            "type": "string",
-            "title": "New Version"
+            "title": "New Version",
+            "type": "string"
           },
           "version_id": {
-            "type": "integer",
-            "title": "Version Id"
+            "title": "Version Id",
+            "type": "integer"
           },
           "link": {
-            "type": "string",
+            "default": "",
             "title": "Link",
-            "default": ""
+            "type": "string"
           },
           "content_length": {
             "anyOf": [
@@ -3483,12 +3423,11 @@
             "title": "Content Length"
           },
           "reason": {
-            "type": "string",
+            "default": "",
             "title": "Reason",
-            "default": ""
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "installed_version",
@@ -3496,29 +3435,30 @@
           "version_id"
         ],
         "title": "UpdateCandidate",
-        "description": "An installed mod Forge recommends a newer version for."
+        "type": "object"
       },
       "UpdateModRequest": {
+        "description": "Parameters of ``update_mod``.\n\n``operation_id`` names the progress stream of this update; a generated one\nis used and echoed back when the caller sends none.",
         "properties": {
           "path": {
-            "type": "string",
             "format": "path",
-            "title": "Path"
+            "title": "Path",
+            "type": "string"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "force": {
-            "type": "boolean",
+            "default": false,
             "title": "Force",
-            "default": false
+            "type": "boolean"
           },
           "db_path": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "path"
+                "format": "path",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3538,122 +3478,121 @@
             "title": "Operation Id"
           }
         },
-        "type": "object",
         "required": [
           "path",
           "name"
         ],
         "title": "UpdateModRequest",
-        "description": "Parameters of ``update_mod``.\n\n``operation_id`` names the progress stream of this update; a generated one\nis used and echoed back when the caller sends none."
+        "type": "object"
       },
       "UpdateModResponse": {
+        "description": "Outcome of ``update_mod`` plus its progress operation ID.",
         "properties": {
           "name": {
-            "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "type": "string"
           },
           "previous_version": {
-            "type": "string",
-            "title": "Previous Version"
+            "title": "Previous Version",
+            "type": "string"
           },
           "version": {
-            "type": "string",
+            "default": "",
             "title": "Version",
-            "default": ""
+            "type": "string"
           },
           "commit": {
-            "type": "string",
+            "default": "",
             "title": "Commit",
-            "default": ""
+            "type": "string"
           },
           "files": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ModFile"
             },
-            "type": "array",
             "title": "Files",
-            "default": []
+            "type": "array"
           },
           "warnings": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/Conflict"
             },
-            "type": "array",
             "title": "Warnings",
-            "default": []
+            "type": "array"
           },
           "notice": {
-            "type": "string",
+            "default": "",
             "title": "Notice",
-            "default": ""
+            "type": "string"
           },
           "operation_id": {
-            "type": "string",
-            "title": "Operation Id"
+            "title": "Operation Id",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "name",
           "previous_version",
           "operation_id"
         ],
         "title": "UpdateModResponse",
-        "description": "Outcome of ``update_mod`` plus its progress operation ID."
+        "type": "object"
       },
       "UpdatesReport": {
+        "description": "What ``check_updates`` found for the installed mods.",
         "properties": {
           "spt_version": {
-            "type": "string",
-            "title": "Spt Version"
+            "title": "Spt Version",
+            "type": "string"
           },
           "available": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/UpdateCandidate"
             },
-            "type": "array",
             "title": "Available",
-            "default": []
+            "type": "array"
           },
           "blocked": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/BlockedUpdate"
             },
-            "type": "array",
             "title": "Blocked",
-            "default": []
+            "type": "array"
           },
           "up_to_date": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Up To Date",
-            "default": []
+            "type": "array"
           },
           "incompatible": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/IncompatibleMod"
             },
-            "type": "array",
             "title": "Incompatible",
-            "default": []
+            "type": "array"
           },
           "skipped": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "type": "array",
             "title": "Skipped",
-            "default": []
+            "type": "array"
           }
         },
-        "type": "object",
         "required": [
           "spt_version"
         ],
         "title": "UpdatesReport",
-        "description": "What ``check_updates`` found for the installed mods."
+        "type": "object"
       }
     }
   }

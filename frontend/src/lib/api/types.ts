@@ -4,26 +4,6 @@
  */
 
 export interface paths {
-    "/api/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Health
-         * @description Report that the server is up.
-         */
-        get: operations["health_api_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/list_directories": {
         parameters: {
             query?: never;
@@ -460,26 +440,6 @@ export interface paths {
         put?: never;
         /** Update Mod */
         post: operations["update_mod_api_update_mod_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Stream the progress of long-running operations
-         * @description Stream one message per progress callback of any running operation.
-         */
-        get: operations["events_api_events_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -961,18 +921,6 @@ export interface components {
             mod_id: number;
             /** Db Path */
             db_path?: string | null;
-        };
-        /**
-         * HealthResponse
-         * @description Body of the health check.
-         */
-        HealthResponse: {
-            /**
-             * Status
-             * @default ok
-             * @constant
-             */
-            status: "ok";
         };
         /**
          * HistoryRequest
@@ -1461,7 +1409,7 @@ export interface components {
         };
         /**
          * ProgressEvent
-         * @description One progress message of a long-running operation, sent over SSE.
+         * @description One progress line of a long-running RPC operation on stdout.
          */
         ProgressEvent: {
             /** Operation Id */
@@ -1821,35 +1769,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    health_api_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-            /** @description Default Response */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     list_directories_api_list_directories_post: {
         parameters: {
             query?: never;
@@ -2704,26 +2623,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    events_api_events_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
                 };
             };
         };

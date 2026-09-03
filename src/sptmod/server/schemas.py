@@ -7,7 +7,6 @@ identical snake_case names for both functions and fields.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -633,7 +632,7 @@ class UpdateModResponse(UpdateResult):
 
 
 class ProgressEvent(CoreModel):
-    """One progress message of a long-running operation, sent over SSE."""
+    """One progress line of a long-running RPC operation on stdout."""
 
     operation_id: str
     step: str
@@ -666,9 +665,3 @@ class ErrorResponse(CoreModel):
     error: str
     code: str
     details: ErrorDetails = Field(default_factory=ErrorDetails)
-
-
-class HealthResponse(CoreModel):
-    """Body of the health check."""
-
-    status: Literal["ok"] = "ok"

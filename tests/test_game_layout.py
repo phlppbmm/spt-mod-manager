@@ -16,7 +16,6 @@ import struct
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from sptmod.cli import app as cli_app
@@ -33,10 +32,8 @@ from sptmod.core.game_dir import (
     store_spt_version,
 )
 from sptmod.core.repo import Repo
-from sptmod.server.app import app as fastapi_app
 
 runner = CliRunner()
-client = TestClient(fastapi_app)
 
 
 @pytest.fixture(autouse=True)
@@ -502,34 +499,25 @@ def test_set_spt_version_raises_git_error_when_not_yet_a_repository(
 
 
 # ============================================================================
-# set_spt_version API endpoint
+# set_spt_version over the rpc adapter
 # ============================================================================
 
 
-def test_api_set_spt_version_stores_and_returns_the_stripped_value(
+def test_rpc_set_spt_version_stores_and_returns_the_stripped_value(
     fake_game_dir: Path,
 ) -> None:
-    init_response = client.post(
-        "/api/init_game_dir", json={"path": str(fake_game_dir)}
-    )
-    assert init_response.status_code == 200
+    services.init_game_dir(fake_game_dir)
 
-    response = client.post(
-        "/api/set_spt_version",
-        json={"path": str(fake_game_dir), "version": "  4.1.9  "},
+    result = runner.invoke(
+        cli_app,
+        ["rpc", "set_spt_version"],
+        input=json.dumps({"path": str(fake_game_dir), "version": "  4.1.9  "}),
     )
 
-    assert response.status_code == 200
-    assert response.json() == {"spt_version": "4.1.9"}
+    lines = [json.loads(line) for line in result.stdout.splitlines() if line]
+    assert result.exit_code == 0
+    assert lines == [{"event": "result", "data": {"spt_version": "4.1.9"}}]
     assert read_stored_version(Repo(fake_game_dir)) == "4.1.9"
-
-
-# Not tested (intentional): POST /api/set_spt_version with an empty version.
-# services.set_spt_version raises a plain ValueError for that case, which is
-# neither in server/app.py's ERROR_MAPPING nor registered as an exception
-# handler (only SptmodError and NotImplementedError are), so the resulting
-# HTTP contract is unspecified by the code -- asserting a status code here
-# would pin an implementation detail the source does not commit to.
 
 
 # ============================================================================

@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from sptmod.cli import EXIT_CODES, app
 from sptmod.core import services
-from sptmod.core.errors import ForgeUnavailableError
+from sptmod.core.errors import CatalogUnavailableError, ForgeUnavailableError
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, SyncResult
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 from sptmod.core.game_dir import detect_layout
@@ -461,3 +461,48 @@ def test_cli_sync_maps_forge_unavailable_to_its_own_exit_code(
 
     assert EXIT_CODES.get(ForgeUnavailableError) == _FORGE_UNAVAILABLE_EXIT_CODE
     assert result.exit_code == _FORGE_UNAVAILABLE_EXIT_CODE
+
+
+# --- CatalogUnavailableError ------------------------------------------------
+# An unwritable/uncreatable catalog cache directory must degrade to a typed
+# error, not a raw crash (spt-mod-manager-r3a).
+
+
+def _blocked_db_path(tmp_path: Path) -> Path:
+    """A ``db_path`` whose parent cannot be created: a file sits in its place."""
+    blocked = tmp_path / "blocked-config-dir"
+    blocked.write_text("not a directory", encoding="utf-8")
+    return blocked / "catalog.db"
+
+
+def test_search_catalog_raises_catalog_unavailable_not_os_error(
+    fake_game_dir: Path, tmp_path: Path
+) -> None:
+    _clean_repo(fake_game_dir)
+
+    with pytest.raises(CatalogUnavailableError):
+        services.search_catalog(
+            fake_game_dir, query="", db_path=_blocked_db_path(tmp_path)
+        )
+
+
+def test_browse_catalog_raises_catalog_unavailable_not_os_error(
+    fake_game_dir: Path, tmp_path: Path
+) -> None:
+    _clean_repo(fake_game_dir)
+
+    with pytest.raises(CatalogUnavailableError):
+        services.browse_catalog(fake_game_dir, db_path=_blocked_db_path(tmp_path))
+
+
+def test_sync_catalog_raises_catalog_unavailable_not_os_error(
+    fake_game_dir: Path, tmp_path: Path
+) -> None:
+    # A dummy client is enough: Catalog(db_path) must fail before the client
+    # is ever used to talk to Forge.
+    _clean_repo(fake_game_dir)
+
+    with pytest.raises(CatalogUnavailableError):
+        services.sync_catalog(
+            fake_game_dir, db_path=_blocked_db_path(tmp_path), client=object()
+        )

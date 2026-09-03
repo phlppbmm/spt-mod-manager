@@ -1,4 +1,4 @@
-"""Tests for the directory-browsing endpoints of the FastAPI adapter.
+"""Tests for the directory-browsing services.
 
 ``list_directories`` lists the directories immediately below a path (or the
 user's home directory, without one) for a folder picker; ``locate_directory``
@@ -12,12 +12,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sptmod.core import services
-from sptmod.server.app import app
-
-client = TestClient(app)
 
 
 @pytest.fixture
@@ -172,68 +168,3 @@ def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator(
 ):
     with pytest.raises(services.InvalidPathError):
         services.locate_directory("a/b", [])
-
-
-# --------------------------------------------------------------------------
-# POST /api/list_directories
-# --------------------------------------------------------------------------
-
-
-def test_post_list_directories_lists_the_given_path(browse_root: Path) -> None:
-    response = client.post(
-        "/api/list_directories", json={"path": str(browse_root)}
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["path"] == str(browse_root.resolve())
-    assert [entry["name"] for entry in body["entries"]] == ["alpha", "zeta"]
-
-
-def test_post_list_directories_without_a_path_lists_the_home_directory() -> None:
-    response = client.post("/api/list_directories", json={})
-
-    assert response.status_code == 200
-    assert response.json()["path"] == str(Path.home().resolve())
-
-
-def test_post_list_directories_nonexistent_path_returns_400(tmp_path: Path) -> None:
-    response = client.post(
-        "/api/list_directories",
-        json={"path": str(tmp_path / "does-not-exist")},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["code"] == "INVALID_PATH"
-
-
-# --------------------------------------------------------------------------
-# POST /api/locate_directory
-# --------------------------------------------------------------------------
-
-
-def test_post_locate_directory_returns_the_fingerprint_matching_entry(
-    locate_root: Path,
-) -> None:
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        response = client.post(
-            "/api/locate_directory",
-            json={"name": "SPT", "fingerprint": ["BepInEx", "cache"]},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == [
-        {"path": str(locate_root / "parent_b" / "SPT"), "is_game_dir": False}
-    ]
-
-
-def test_post_locate_directory_no_match_returns_an_empty_list_not_an_error(
-    locate_root: Path,
-) -> None:
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        response = client.post(
-            "/api/locate_directory", json={"name": "NoSuchDirectoryName"}
-        )
-
-    assert response.status_code == 200
-    assert response.json() == []

@@ -61,6 +61,8 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("install_mod", schemas.InstallModRequest, schemas.InstallModResponse),
     ("check_updates", schemas.CheckUpdatesRequest, schemas.UpdatesReport),
     ("update_mod", schemas.UpdateModRequest, schemas.UpdateModResponse),
+    ("list_favorites", schemas.ListFavoritesRequest, schemas.FavoritesResponse),
+    ("set_favorite", schemas.SetFavoriteRequest, schemas.FavoritesResponse),
 ]
 
 STANDALONE: Final[list[tuple[str, Any]]] = [

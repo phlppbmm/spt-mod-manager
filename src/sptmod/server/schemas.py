@@ -558,6 +558,26 @@ class ClearCatalogCacheRequest(CoreModel):
     db_path: Path | None = None
 
 
+class ListFavoritesRequest(CoreModel):
+    """Parameters of ``list_favorites``."""
+
+    favorites_path: Path | None = None
+
+
+class SetFavoriteRequest(CoreModel):
+    """Parameters of ``set_favorite``."""
+
+    mod_id: int
+    favorite: bool
+    favorites_path: Path | None = None
+
+
+class FavoritesResponse(CoreModel):
+    """The Forge ids of all mods marked as favorites."""
+
+    mod_ids: list[int] = []
+
+
 class ModDetails(CoreModel):
     """Outcome of ``get_mod_details``: cached data plus live description."""
 

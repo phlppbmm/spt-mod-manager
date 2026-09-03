@@ -221,6 +221,14 @@ not-yet-committed files would look like manual installs.
 - Catalog-unavailable (unwritable config dir etc.) is a typed
   `CatalogUnavailableError` (`CATALOG_UNAVAILABLE`, 503); export degrades to
   a linkless list instead of failing.
+- `list_favorites` and `set_favorite(mod_id, favorite)`: Forge mod ids marked as
+  favorites, stored in `favorites.json` in the platformdirs config dir (same
+  location as the catalog SQLite db), outside every game directory. The file is
+  NOT part of the disposable cache — it survives `clear_catalog_cache` and
+  applies across all game folders. Marking is independent of the catalog: any
+  Forge id is accepted and duplicate marks are idempotent. Returns the full id
+  list. Frontend joins the favorites set with browse results by id, so a
+  favorited-but-uncached mod displays as a favorite without a catalog entry.
 
 ## Desktop app (Tauri) and RPC
 

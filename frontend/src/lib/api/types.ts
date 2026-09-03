@@ -446,6 +446,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/list_favorites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Favorites */
+        post: operations["list_favorites_api_list_favorites_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/set_favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Favorite */
+        post: operations["set_favorite_api_set_favorite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -910,6 +944,17 @@ export interface components {
             /** Content */
             content: string;
         };
+        /**
+         * FavoritesResponse
+         * @description The Forge ids of all mods marked as favorites.
+         */
+        FavoritesResponse: {
+            /**
+             * Mod Ids
+             * @default []
+             */
+            mod_ids: number[];
+        };
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
         /**
@@ -1227,6 +1272,14 @@ export interface components {
             path?: string | null;
         };
         /**
+         * ListFavoritesRequest
+         * @description Parameters of ``list_favorites``.
+         */
+        ListFavoritesRequest: {
+            /** Favorites Path */
+            favorites_path?: string | null;
+        };
+        /**
          * ListModsRequest
          * @description Parameters of ``list_mods``.
          */
@@ -1480,6 +1533,18 @@ export interface components {
             compatible_only: boolean;
             /** Db Path */
             db_path?: string | null;
+        };
+        /**
+         * SetFavoriteRequest
+         * @description Parameters of ``set_favorite``.
+         */
+        SetFavoriteRequest: {
+            /** Mod Id */
+            mod_id: number;
+            /** Favorite */
+            favorite: boolean;
+            /** Favorites Path */
+            favorites_path?: string | null;
         };
         /**
          * SetSptVersionRequest
@@ -2614,6 +2679,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateModResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_favorites_api_list_favorites_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListFavoritesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FavoritesResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_favorite_api_set_favorite_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFavoriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FavoritesResponse"];
                 };
             };
             /** @description Default Response */

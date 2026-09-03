@@ -36,7 +36,7 @@ REQUEST_ERROR_CODE: Final = "VALIDATION_ERROR"
 class RpcSpec:
     """How one service function is called and how its result is serialised.
 
-    ``wrap`` names the response field a plain string result is put under, and
+    ``wrap`` names the response field a bare result value is put under, and
     ``operation_id`` marks the responses echoing the progress operation ID.
     """
 
@@ -183,6 +183,18 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.UpdateModRequest,
         schemas.UpdateModResponse,
         operation_id=True,
+    ),
+    "list_favorites": RpcSpec(
+        services.list_favorites,
+        schemas.ListFavoritesRequest,
+        schemas.FavoritesResponse,
+        wrap="mod_ids",
+    ),
+    "set_favorite": RpcSpec(
+        services.set_favorite,
+        schemas.SetFavoriteRequest,
+        schemas.FavoritesResponse,
+        wrap="mod_ids",
     ),
 }
 

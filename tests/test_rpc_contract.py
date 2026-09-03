@@ -48,8 +48,8 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_twenty_six_entries() -> None:
-    assert len(RPC_FUNCTIONS) == 26
+def test_rpc_functions_has_exactly_twenty_eight_entries() -> None:
+    assert len(RPC_FUNCTIONS) == 28
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
@@ -196,10 +196,14 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
     }
 
 
-def test_exactly_the_wrapped_specs_wrap_a_plain_string_result() -> None:
+def test_exactly_the_wrapped_specs_wrap_a_result_under_a_named_field() -> None:
+    # Most wrapped results are plain strings; list_favorites/set_favorite wrap
+    # a plain list[int] the same way, under "mod_ids".
     wrapped = {name: spec.wrap for name, spec in RPC_FUNCTIONS.items() if spec.wrap}
 
     assert wrapped == {
         "set_spt_version": "spt_version",
         "export_mods": "content",
+        "list_favorites": "mod_ids",
+        "set_favorite": "mod_ids",
     }

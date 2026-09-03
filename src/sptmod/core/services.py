@@ -44,6 +44,11 @@ from sptmod.core.errors import (
     ProfileResidueError,
     SptVersionUnknownError,
 )
+from sptmod.core.favorites import (
+    default_favorites_path,
+    load_favorites,
+    save_favorites,
+)
 from sptmod.core.forge.catalog import (
     Catalog,
     CatalogEntry,
@@ -1443,6 +1448,51 @@ def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
     removed = cache.exists()
     cache.unlink(missing_ok=True)
     return ClearCacheResult(db_path=cache, removed=removed)
+
+
+def list_favorites(*, favorites_path: Path | None = None) -> list[int]:
+    """Return the Forge ids of the mods marked as favorites.
+
+    Args:
+        favorites_path: Favorites file; defaults to
+            :func:`default_favorites_path`.
+
+    Returns:
+        The favored Forge mod ids, sorted and without duplicates. An
+        unreadable list counts as empty.
+    """
+    return load_favorites(favorites_path or default_favorites_path())
+
+
+def set_favorite(
+    mod_id: int, favorite: bool, *, favorites_path: Path | None = None
+) -> list[int]:
+    """Mark or unmark the mod ``mod_id`` as a favorite.
+
+    Marking is independent of the catalog and of any game directory, so any id
+    is accepted and marking twice changes nothing.
+
+    Args:
+        mod_id: Forge id of the mod.
+        favorite: Whether the mod should be a favorite.
+        favorites_path: Favorites file; defaults to
+            :func:`default_favorites_path`.
+
+    Returns:
+        All favored Forge mod ids after the change, sorted.
+
+    Raises:
+        OSError: the favorites file cannot be written.
+    """
+    path = favorites_path or default_favorites_path()
+    current = set(load_favorites(path))
+    if favorite:
+        current.add(mod_id)
+    else:
+        current.discard(mod_id)
+    mod_ids = sorted(current)
+    save_favorites(path, mod_ids)
+    return mod_ids
 
 
 @dataclass(frozen=True)

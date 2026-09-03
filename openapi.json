@@ -1017,6 +1017,82 @@
           }
         }
       }
+    },
+    "/api/list_favorites": {
+      "post": {
+        "summary": "List Favorites",
+        "operationId": "list_favorites_api_list_favorites_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListFavoritesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoritesResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/set_favorite": {
+      "post": {
+        "summary": "Set Favorite",
+        "operationId": "set_favorite_api_set_favorite_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFavoriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoritesResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1979,6 +2055,21 @@
         "title": "ExportModsResponse",
         "type": "object"
       },
+      "FavoritesResponse": {
+        "description": "The Forge ids of all mods marked as favorites.",
+        "properties": {
+          "mod_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Mod Ids",
+            "type": "array"
+          }
+        },
+        "title": "FavoritesResponse",
+        "type": "object"
+      },
       "FileChange": {
         "enum": [
           "added",
@@ -2578,6 +2669,25 @@
         "title": "ListDirectoriesRequest",
         "type": "object"
       },
+      "ListFavoritesRequest": {
+        "description": "Parameters of ``list_favorites``.",
+        "properties": {
+          "favorites_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorites Path"
+          }
+        },
+        "title": "ListFavoritesRequest",
+        "type": "object"
+      },
       "ListModsRequest": {
         "description": "Parameters of ``list_mods``.",
         "properties": {
@@ -3107,6 +3217,37 @@
           "query"
         ],
         "title": "SearchCatalogRequest",
+        "type": "object"
+      },
+      "SetFavoriteRequest": {
+        "description": "Parameters of ``set_favorite``.",
+        "properties": {
+          "mod_id": {
+            "title": "Mod Id",
+            "type": "integer"
+          },
+          "favorite": {
+            "title": "Favorite",
+            "type": "boolean"
+          },
+          "favorites_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorites Path"
+          }
+        },
+        "required": [
+          "mod_id",
+          "favorite"
+        ],
+        "title": "SetFavoriteRequest",
         "type": "object"
       },
       "SetSptVersionRequest": {

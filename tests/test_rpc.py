@@ -219,6 +219,38 @@ def test_export_mods_wraps_its_plain_string_result_under_content(
     assert lines == [{"event": "result", "data": {"content": ""}}]
 
 
+def test_list_favorites_wraps_its_list_result_under_mod_ids(tmp_path: Path) -> None:
+    favorites_path = tmp_path / "favorites.json"
+
+    exit_code, lines = _invoke(
+        "list_favorites", {"favorites_path": str(favorites_path)}
+    )
+
+    assert exit_code == 0
+    assert lines == [{"event": "result", "data": {"mod_ids": []}}]
+
+
+def test_set_favorite_and_list_favorites_round_trip_through_the_rpc_layer(
+    tmp_path: Path,
+) -> None:
+    """If the body is `pass`, this fails: the second list_favorites call would
+    still see [] instead of [42], since nothing was actually written."""
+    favorites_path = tmp_path / "favorites.json"
+
+    exit_code, lines = _invoke(
+        "set_favorite",
+        {"mod_id": 42, "favorite": True, "favorites_path": str(favorites_path)},
+    )
+    assert exit_code == 0
+    assert lines == [{"event": "result", "data": {"mod_ids": [42]}}]
+
+    exit_code, lines = _invoke(
+        "list_favorites", {"favorites_path": str(favorites_path)}
+    )
+    assert exit_code == 0
+    assert lines == [{"event": "result", "data": {"mod_ids": [42]}}]
+
+
 # --------------------------------------------------------------------------
 # Error → {code, details} mapping, one case per error_details() branch.
 # --------------------------------------------------------------------------

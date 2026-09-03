@@ -1,43 +1,35 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { API_BASE_URL } from './transport';
+import { describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import { listMods } from './client';
 
-function jsonResponse(status: number, body: unknown): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json' }
-	});
-}
+vi.mock('@tauri-apps/api/core', () => ({
+	invoke: vi.fn()
+}));
 
-afterEach(() => {
-	vi.unstubAllGlobals();
-});
+const invokeMock = vi.mocked(invoke);
 
 describe('listMods', () => {
-	it('posts to /api/list_mods with the snake_case payload and returns the typed body', async () => {
+	it('calls rpc with the snake_case payload and returns the typed body', async () => {
 		const mods = [{ name: 'mod-a', version: '1.0.0' }];
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, mods));
-		vi.stubGlobal('fetch', fetchMock);
+		invokeMock.mockResolvedValue(mods);
 
 		const result = await listMods('/game', true);
 
-		expect(fetchMock).toHaveBeenCalledWith(`${API_BASE_URL}/api/list_mods`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ path: '/game', include_all: true })
+		expect(invokeMock).toHaveBeenCalledWith('rpc', {
+			name: 'list_mods',
+			payload: { path: '/game', include_all: true }
 		});
 		expect(result).toEqual(mods);
 	});
 
 	it('defaults include_all to false when not given', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []));
-		vi.stubGlobal('fetch', fetchMock);
+		invokeMock.mockResolvedValue([]);
 
 		await listMods('/game');
 
-		expect(fetchMock).toHaveBeenCalledWith(
-			`${API_BASE_URL}/api/list_mods`,
-			expect.objectContaining({ body: JSON.stringify({ path: '/game', include_all: false }) })
-		);
+		expect(invokeMock).toHaveBeenCalledWith('rpc', {
+			name: 'list_mods',
+			payload: { path: '/game', include_all: false }
+		});
 	});
 });

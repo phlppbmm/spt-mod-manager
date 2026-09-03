@@ -1,12 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, API_BASE_URL, call, subscribe, type ErrorDetails } from './transport';
+import { describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { ApiError, call, subscribe, type ErrorDetails } from './transport';
 
-function jsonResponse(status: number, body: unknown): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json' }
-	});
-}
+vi.mock('@tauri-apps/api/core', () => ({
+	invoke: vi.fn()
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+	listen: vi.fn()
+}));
+
+const invokeMock = vi.mocked(invoke);
+const listenMock = vi.mocked(listen);
 
 const sampleDetails: ErrorDetails = {
 	conflicts: [],
@@ -21,56 +27,40 @@ const sampleDetails: ErrorDetails = {
 	api_status: 0
 };
 
-afterEach(() => {
-	vi.unstubAllGlobals();
-});
-
 describe('call', () => {
-	it('returns the parsed JSON body on a 2xx response', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { mods: ['a', 'b'] }));
-		vi.stubGlobal('fetch', fetchMock);
+	it('returns the resolved value of invoke as-is', async () => {
+		invokeMock.mockResolvedValue({ mods: ['a', 'b'] });
 
 		const result = await call<{ mods: string[] }>('list_mods', { path: '/game' });
 
 		expect(result).toEqual({ mods: ['a', 'b'] });
 	});
 
-	it('posts to /api/<name> with the JSON-encoded payload', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}));
-		vi.stubGlobal('fetch', fetchMock);
+	it('invokes the "rpc" command with name and payload forwarded', async () => {
+		invokeMock.mockResolvedValue({});
 
 		await call('list_mods', { path: '/game', include_all: true });
 
-		expect(fetchMock).toHaveBeenCalledWith(`${API_BASE_URL}/api/list_mods`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ path: '/game', include_all: true })
+		expect(invokeMock).toHaveBeenCalledWith('rpc', {
+			name: 'list_mods',
+			payload: { path: '/game', include_all: true }
 		});
 	});
 
-	it('sends an empty object body when no payload is given', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}));
-		vi.stubGlobal('fetch', fetchMock);
+	it('defaults the payload to an empty object when none is given', async () => {
+		invokeMock.mockResolvedValue({});
 
 		await call('status');
 
-		expect(fetchMock).toHaveBeenCalledWith(
-			`${API_BASE_URL}/api/status`,
-			expect.objectContaining({ body: JSON.stringify({}) })
-		);
+		expect(invokeMock).toHaveBeenCalledWith('rpc', { name: 'status', payload: {} });
 	});
 
-	it('rejects with an ApiError built from the error body on a well-formed failure response', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				jsonResponse(409, {
-					error: 'Mod conflicts with another mod.',
-					code: 'conflict',
-					details: sampleDetails
-				})
-			)
-		);
+	it('rejects with an ApiError built from a structured error response', async () => {
+		invokeMock.mockRejectedValue({
+			error: 'Mod conflicts with another mod.',
+			code: 'conflict',
+			details: sampleDetails
+		});
 
 		const promise = call('remove_mod', { path: '/game', name: 'x' });
 
@@ -82,121 +72,71 @@ describe('call', () => {
 		});
 	});
 
-	it('rejects with an http_<status> code when the error body has no JSON content', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response('not json', { status: 500, headers: { 'content-type': 'text/plain' } })
-			)
-		);
+	it('leaves details undefined when the structured error response omits it', async () => {
+		invokeMock.mockRejectedValue({ error: 'Not found', code: 'not_found' });
 
-		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
-			code: 'http_500'
+		const promise = call('status', { path: '/game' });
+
+		await expect(promise).rejects.toMatchObject({
+			message: 'Not found',
+			code: 'not_found',
+			details: undefined
 		});
 	});
 
-	it('rejects with an http_<status> code when the error body is JSON but not shaped like ErrorResponse', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(400, { unexpected: 'shape' })));
-
-		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
-			code: 'http_400'
-		});
-	});
-
-	it('rejects with an http_<status> code when the error body is JSON but missing the code field', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(jsonResponse(422, { error: 'Bad request' }))
-		);
-
-		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
-			code: 'http_422'
-		});
-	});
-
-	it('rejects with code "unreachable" and appends the failure cause when fetch itself rejects', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+	it('rejects with code "unreachable" and the stringified cause for an Error rejection', async () => {
+		invokeMock.mockRejectedValue(new Error('network down'));
 
 		const promise = call('status', { path: '/game' });
 
 		await expect(promise).rejects.toBeInstanceOf(ApiError);
 		await expect(promise).rejects.toMatchObject({
 			code: 'unreachable',
-			message: `Cannot reach the sptmod server: network down`
+			message: 'Error: network down'
 		});
 	});
 
-	it('stringifies a non-Error rejection cause into the message', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue('offline'));
+	it('rejects with code "unreachable" for a plain string rejection', async () => {
+		invokeMock.mockRejectedValue('offline');
 
 		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
 			code: 'unreachable',
-			message: `Cannot reach the sptmod server: offline`
+			message: 'offline'
+		});
+	});
+
+	it('rejects with code "unreachable" for a plain object rejection without a code field', async () => {
+		invokeMock.mockRejectedValue({ unexpected: 'shape' });
+
+		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
+			code: 'unreachable',
+			message: '[object Object]'
 		});
 	});
 });
 
-class FakeEventSource {
-	static instances: FakeEventSource[] = [];
-	url: string;
-	closed = false;
-	private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
-
-	constructor(url: string) {
-		this.url = url;
-		FakeEventSource.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
-		if (!this.listeners.has(type)) {
-			this.listeners.set(type, new Set());
-		}
-		this.listeners.get(type)!.add(listener);
-	}
-
-	removeEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
-		this.listeners.get(type)?.delete(listener);
-	}
-
-	close(): void {
-		this.closed = true;
-	}
-
-	emit(type: string, data: unknown): void {
-		const message = new MessageEvent(type, { data: JSON.stringify(data) });
-		for (const listener of this.listeners.get(type) ?? []) {
-			listener(message);
-		}
-	}
-
-	listenerCount(type: string): number {
-		return this.listeners.get(type)?.size ?? 0;
-	}
-}
-
 describe('subscribe', () => {
-	afterEach(() => {
-		FakeEventSource.instances = [];
-	});
-
-	it('opens an EventSource against the events endpoint', async () => {
-		vi.stubGlobal('EventSource', FakeEventSource);
+	it('registers a listener on the "progress" event exactly once', async () => {
+		listenMock.mockResolvedValue(() => {});
 
 		await subscribe('op-1', () => {});
 
-		expect(FakeEventSource.instances).toHaveLength(1);
-		expect(FakeEventSource.instances[0].url).toBe(`${API_BASE_URL}/api/events`);
+		expect(listenMock).toHaveBeenCalledTimes(1);
+		expect(listenMock).toHaveBeenCalledWith('progress', expect.any(Function));
 	});
 
-	it('invokes the handler only for events whose operation_id matches', async () => {
-		vi.stubGlobal('EventSource', FakeEventSource);
+	it('forwards only events whose payload operation_id matches, passing the payload itself', async () => {
+		let emit: (message: { payload: ReturnType<typeof structuredClone> }) => void = () => {};
+		listenMock.mockImplementation(async (_event, callback) => {
+			emit = callback as typeof emit;
+			return () => {};
+		});
 		const handler = vi.fn();
 
 		await subscribe('op-1', handler);
-		const source = FakeEventSource.instances[0];
 
-		source.emit('message', { operation_id: 'op-2', step: 'x', percent: 10, message: 'other' });
-		source.emit('message', { operation_id: 'op-1', step: 'copy', percent: 50, message: 'copying' });
+		emit({ payload: { operation_id: 'op-2', step: 'x', percent: 10, message: 'other' } });
+		emit({ payload: { operation_id: 'op-1', step: 'copy', percent: 50, message: 'copying' } });
 
 		expect(handler).toHaveBeenCalledTimes(1);
 		expect(handler).toHaveBeenCalledWith({
@@ -207,20 +147,14 @@ describe('subscribe', () => {
 		});
 	});
 
-	it('unsubscribe removes the listener and closes the source', async () => {
-		vi.stubGlobal('EventSource', FakeEventSource);
-		const handler = vi.fn();
+	it('resolves to the unlisten function returned by listen', async () => {
+		const unlisten = vi.fn();
+		listenMock.mockResolvedValue(unlisten);
 
-		const unsubscribe = await subscribe('op-1', handler);
-		const source = FakeEventSource.instances[0];
-		expect(source.listenerCount('message')).toBe(1);
+		const returned = await subscribe('op-1', () => {});
+		returned();
 
-		unsubscribe();
-
-		expect(source.listenerCount('message')).toBe(0);
-		expect(source.closed).toBe(true);
-
-		source.emit('message', { operation_id: 'op-1', step: 'x', percent: 100, message: 'done' });
-		expect(handler).not.toHaveBeenCalled();
+		expect(returned).toBe(unlisten);
+		expect(unlisten).toHaveBeenCalledTimes(1);
 	});
 });

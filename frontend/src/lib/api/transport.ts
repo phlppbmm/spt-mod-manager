@@ -1,16 +1,12 @@
 /**
- * The only module allowed to use `fetch` or `EventSource`. Under Tauri the
- * bodies of `call` and `subscribe` become `invoke` and Tauri events; every
- * other module keeps importing them unchanged.
+ * The only module allowed to talk to the Tauri backend. Every other module
+ * imports `call` and `subscribe` from here and stays transport-agnostic.
  */
+
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 import type { components } from './types';
-
-/**
- * Empty: requests go to the origin the app is served from. The dev and preview
- * servers proxy `/api` to the sptmod server (see `vite.config.ts`).
- */
-export const API_BASE_URL = '';
 
 export type ProgressEvent = components['schemas']['ProgressEvent'];
 export type ErrorDetails = components['schemas']['ErrorDetails'];
@@ -29,67 +25,29 @@ export class ApiError extends Error {
 }
 
 export async function call<T>(name: string, payload?: unknown): Promise<T> {
-	let response: Response;
 	try {
-		response = await fetch(`${API_BASE_URL}/api/${name}`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(payload ?? {})
-		});
+		return await invoke<T>('rpc', { name, payload: payload ?? {} });
 	} catch (cause) {
-		const reason = cause instanceof Error ? cause.message : String(cause);
-		throw new ApiError(
-			`Cannot reach the sptmod server: ${reason}`,
-			'unreachable'
-		);
+		if (isErrorResponse(cause)) {
+			throw new ApiError(cause.error, cause.code, cause.details);
+		}
+		throw new ApiError(String(cause), 'unreachable');
 	}
-	if (!response.ok) {
-		throw await errorOf(response);
-	}
-	return (await response.json()) as T;
 }
 
 /**
  * Route the progress events of `operationId` to `handler` until the resolved
- * unsubscribe function is called. The promise is awaited by callers because
- * the Tauri `listen()` of stage 2 is async; the SSE implementation resolves
- * it immediately, once the source is subscribed.
+ * unsubscribe function is called.
  */
 export function subscribe(
 	operationId: string,
 	handler: (event: ProgressEvent) => void
 ): Promise<() => void> {
-	const source = new EventSource(`${API_BASE_URL}/api/events`);
-	const listener = (message: MessageEvent<string>): void => {
-		const event = JSON.parse(message.data) as ProgressEvent;
-		if (event.operation_id === operationId) {
-			handler(event);
+	return listen<ProgressEvent>('progress', (message) => {
+		if (message.payload.operation_id === operationId) {
+			handler(message.payload);
 		}
-	};
-	source.addEventListener('message', listener);
-	return Promise.resolve(() => {
-		source.removeEventListener('message', listener);
-		source.close();
 	});
-}
-
-async function errorOf(response: Response): Promise<ApiError> {
-	let body: unknown;
-	try {
-		body = await response.json();
-	} catch {
-		return new ApiError(
-			`The sptmod server answered ${response.status} without an error body.`,
-			`http_${response.status}`
-		);
-	}
-	if (!isErrorResponse(body)) {
-		return new ApiError(
-			`The sptmod server answered ${response.status} with an unexpected body.`,
-			`http_${response.status}`
-		);
-	}
-	return new ApiError(body.error, body.code, body.details);
 }
 
 function isErrorResponse(body: unknown): body is ErrorResponse {

@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { open, save } from '@tauri-apps/plugin-dialog';
+	import { writeTextFile } from '@tauri-apps/plugin-fs';
+	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 	import {
 		clearCatalogCache,
 		exportMods,
@@ -31,11 +34,6 @@
 	let cacheNote = $state('');
 	let cacheError = $state('');
 
-	let downloadHref = $derived.by(
-		() =>
-			`data:${format === 'json' ? 'application/json' : 'text/plain'};charset=utf-8,${encodeURIComponent(exported)}`
-	);
-
 	onMount(() => {
 		path = loadGameDir();
 	});
@@ -63,10 +61,39 @@
 
 	async function copyExport(): Promise<void> {
 		try {
-			await navigator.clipboard.writeText(exported);
+			await writeText(exported);
 			copyNote = 'Copied to the clipboard.';
 		} catch (cause) {
 			copyNote = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function saveExport(): Promise<void> {
+		exportError = '';
+		try {
+			const target = await save({ defaultPath: format === 'json' ? 'mods.json' : 'mods.txt' });
+			if (target === null) {
+				return;
+			}
+			await writeTextFile(target, exported);
+			copyNote = `Saved to ${target}.`;
+		} catch (cause) {
+			exportError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function pickListFile(): Promise<void> {
+		importError = '';
+		try {
+			const picked = await open({
+				multiple: false,
+				filters: [{ name: 'Mod list', extensions: ['txt', 'json'] }]
+			});
+			if (picked !== null) {
+				listFile = picked;
+			}
+		} catch (cause) {
+			importError = cause instanceof Error ? cause.message : String(cause);
 		}
 	}
 
@@ -166,17 +193,17 @@
 		<textarea readonly rows="10" aria-label="Exported mod list" value={exported}></textarea>
 		<div class="row">
 			<button type="button" onclick={() => void copyExport()}>Copy</button>
-			<a href={downloadHref} download={format === 'json' ? 'mods.json' : 'mods.txt'}>
-				Download {format === 'json' ? 'JSON' : 'text'}
-			</a>
+			<button type="button" onclick={() => void saveExport()}>
+				Save as {format === 'json' ? 'JSON' : 'text'}
+			</button>
 			{#if copyNote !== ''}<span class="note">{copyNote}</span>{/if}
 		</div>
 	{/if}
 
 	<h2>Import a mod list</h2>
 	<p class="note">
-		Either name a file the server can read or paste the list itself. Pasted content wins over
-		the file path.
+		Either name a file sptmod can read or paste the list itself. Pasted content wins over the
+		file path.
 	</p>
 	<div class="row">
 		<input
@@ -185,6 +212,7 @@
 			aria-label="Mod list file"
 			bind:value={listFile}
 		/>
+		<button type="button" onclick={() => void pickListFile()}>Choose file…</button>
 	</div>
 	<div class="row">
 		<textarea
@@ -241,7 +269,7 @@
 	<h2>Catalog cache</h2>
 	<p class="note">
 		The Forge catalog is cached in <code>forge-catalog.db</code> inside the sptmod configuration
-		directory of the machine running the server, never inside the game directory.
+		directory, never inside the game directory.
 	</p>
 	<div class="row">
 		<button type="button" disabled={clearing} onclick={() => void clearCache()}>

@@ -76,7 +76,7 @@
 </script>
 
 {#if phase === 'checking'}
-	<p class="notice">Contacting the sptmod server…</p>
+	<p class="notice">Starting the sptmod backend…</p>
 {:else if phase === 'unreachable'}
 	<div class="notice">
 		<p>{error}</p>

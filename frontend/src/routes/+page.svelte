@@ -32,6 +32,9 @@
 			await status(stored);
 			path = stored;
 			phase = 'ready';
+			// Keep the catalog fresh on every app start; delta syncs are cheap
+			// and the list refreshes when it finishes.
+			void sync();
 		} catch (cause) {
 			if (cause instanceof ApiError && cause.code === 'NOT_A_GAME_DIR') {
 				forgetGameDir();

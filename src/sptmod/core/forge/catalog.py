@@ -25,6 +25,11 @@ from sptmod.core.modmeta import UnsupportedRangeError, version_matches
 APP_NAME: Final = "sptmod"
 DB_FILE_NAME: Final = "forge-catalog.db"
 WATERMARK_KEY: Final = "mods_updated_at"
+DATA_VERSION_KEY: Final = "data_version"
+# Bump when a sync starts caching NEW per-mod data (e.g. added columns):
+# caches synced under an older data version force their next sync to run
+# full, so existing rows pick the new fields up without a manual --full.
+DATA_VERSION: Final = "2"
 SYNC_OVERLAP_DAYS: Final = 1
 
 SCHEMA: Final = """
@@ -523,6 +528,9 @@ class Catalog:
                 previous contents.
             ForgeApiError: The API answered with an error envelope.
         """
+        if self._stored_data_version() != DATA_VERSION:
+            # The cache predates newly cached fields; refresh every row once.
+            full = True
         watermark = self.last_synced_at()
         updated_between = (
             None if full or watermark is None else _delta_filter(watermark)
@@ -570,6 +578,7 @@ class Catalog:
                 page_number += 1
             if updated_between is None and seen:
                 self._prune(seen)
+            self._store_data_version()
         except BaseException:
             self._db.rollback()
             raise
@@ -857,6 +866,18 @@ class Catalog:
             ),
         )
         return "new" if existing is None else "updated"
+
+    def _stored_data_version(self) -> str | None:
+        row = self._db.execute(
+            "SELECT value FROM sync_state WHERE key = ?", (DATA_VERSION_KEY,)
+        ).fetchone()
+        return None if row is None else row["value"]
+
+    def _store_data_version(self) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)",
+            (DATA_VERSION_KEY, DATA_VERSION),
+        )
 
     def _advance_watermark(self, updated_at: str | None) -> None:
         if not updated_at:

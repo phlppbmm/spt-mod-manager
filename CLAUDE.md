@@ -58,20 +58,59 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 <!-- END BEADS INTEGRATION -->
 
 
+
+## Project Context
+
+**Read `docs/ARCHITECTURE.md` first in any fresh session** — it is the
+authoritative current state, including every verified deviation from the
+original spec. `docs/FORGE_API.md` is the verified API contract;
+`docs/HANDOFF.md` is the original (German, partially superseded) spec.
+
+sptmod: a git-based mod manager for Single Player Tarkov. Python core +
+typer CLI + FastAPI server + Svelte 5 frontend (stage 1); stage 2 will port
+core+CLI to Rust and host the frontend with Tauri — the pytest suite is the
+specification for that port.
+
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+uv sync                              # Python env
+uv run pytest                        # full suite (~740 tests)
+uv run ruff check src
+uv run mypy --strict src
+cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
+
+# after changing server schemas (the API contract):
+uv run python -m sptmod.server.dump_openapi openapi.json
+cd frontend && pnpm gen:api          # regenerates src/lib/api/types.ts
+
+# run the app (serves the built frontend at / when frontend/build exists):
+uv run sptmod serve                  # 127.0.0.1:8787
 ```
 
-## Architecture Overview
+## Architecture in five lines
 
-_Add a brief overview of your project architecture_
+- `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
+  progress callbacks; it knows neither CLI nor HTTP.
+- `subprocess` ONLY in `core/repo.py`; `httpx` ONLY in `core/forge/client.py`.
+- One contract, three transports: service function ↔ `POST /api/<name>` ↔
+  client.ts wrapper — guarded by route-per-function and schema-parity tests.
+- `frontend/src/lib/api/transport.ts` is the only fetch/EventSource site;
+  `types.ts` is generated, never hand-edited.
+- Git never surfaces in user-facing language (auto-snapshot handles dirty
+  profiles; errors speak plain language).
 
-## Conventions & Patterns
+## Conventions & hard-won rules
 
-_Add your project-specific conventions here_
+- Tests are the Rust-port spec: black-box, behavior-focused; don't weaken
+  them to make an implementation fit.
+- The Forge moved to `https://sp-mod.com/api/v0` (no auth exists; env
+  override `SPTMOD_FORGE_URL`). Never hit the real API from tests (respx).
+- Game layouts: `SPT_Runtime/` (4.1+) and `SPT/` (4.0) via
+  `game_dir.detect_layout`; never hardcode `SPT/` paths.
+- Mod identity: the install-commit `Mod:` trailer (from the mod's own
+  package.json) ≠ the Forge display name; link rows by Forge id.
+- Catalog cache is disposable; schema evolves via the ALTER list in
+  `catalog._MOD_COLUMN_MIGRATIONS`.
+- Line length 88 (ruff E501) — including docstrings.
+- Real-mod corpus for manual verification lives untracked in `_data/mods/`.

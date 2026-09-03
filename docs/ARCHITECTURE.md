@@ -135,6 +135,11 @@ changed profiles/configs are secured in an AUTOMATIC snapshot commit and the
 operation proceeds (that state is the normal aftermath of playing). Only
 unmanaged files (manual mod copies, tampered tracked files) block, with a
 plain-language message suggesting adopt. `_ensure_installable` in services.py.
+Untracked files an active mod writes inside its own directory (settings a mod
+generates while playing) are runtime data: `status` leaves them out of the
+report, so they never block and are never snapshotted. `remove` and `disable`
+delete them together with the mod, because a leftover file would otherwise
+keep the directory alive and resurface as a foreign manual install.
 
 ## Parallel operations (the apply lock)
 

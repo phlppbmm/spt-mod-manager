@@ -84,23 +84,42 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
     """If check_updates's body is `pass`, this fails: returns None instead of
     an UpdatesReport with the mods sorted into their four buckets."""
     install_commit(
-        clean_repo, "Available Mod", "1.0.0", mod_type="server",
+        clean_repo,
+        "Available Mod",
+        "1.0.0",
+        mod_type="server",
         **{"Mod-Forge-Id": "10"},
     )
     install_commit(
-        clean_repo, "Blocked Mod", "1.5.0", mod_type="server", minute=2,
+        clean_repo,
+        "Blocked Mod",
+        "1.5.0",
+        mod_type="server",
+        minute=2,
         **{"Mod-Forge-Id": "20"},
     )
     install_commit(
-        clean_repo, "Uptodate Mod", "2.0.0", mod_type="server", minute=3,
+        clean_repo,
+        "Uptodate Mod",
+        "2.0.0",
+        mod_type="server",
+        minute=3,
         **{"Mod-Forge-Id": "40"},
     )
     install_commit(
-        clean_repo, "Incompat Mod", "0.9.0", mod_type="server", minute=4,
+        clean_repo,
+        "Incompat Mod",
+        "0.9.0",
+        mod_type="server",
+        minute=4,
         **{"Mod-Forge-Id": "30"},
     )
     install_commit(
-        clean_repo, "Ghost Mod", "1.0.0", mod_type="server", minute=5,
+        clean_repo,
+        "Ghost Mod",
+        "1.0.0",
+        mod_type="server",
+        minute=5,
         **{"Mod-Forge-Id": ""},
     )
     _mock_updates(
@@ -110,8 +129,11 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
             "updates": [
                 {
                     "current_version": _current_version(
-                        id=100, mod_id=10, name="Available Mod",
-                        version="1.0.0", slug="available-mod",
+                        id=100,
+                        mod_id=10,
+                        name="Available Mod",
+                        version="1.0.0",
+                        slug="available-mod",
                     ),
                     "recommended_version": {
                         "id": 200,
@@ -127,7 +149,10 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
             "blocked_updates": [
                 {
                     "current_version": _current_version(
-                        id=101, mod_id=20, name="Blocked Mod", version="1.5.0",
+                        id=101,
+                        mod_id=20,
+                        name="Blocked Mod",
+                        version="1.5.0",
                     ),
                     "latest_version": {
                         "id": 201,
@@ -229,7 +254,11 @@ def test_check_updates_ambiguous_name_raises_ambiguous_mod(
         clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
     )
     install_commit(
-        clean_repo, "coolmod", "2.0.0", mod_type="server", minute=2,
+        clean_repo,
+        "coolmod",
+        "2.0.0",
+        mod_type="server",
+        minute=2,
         **{"Mod-Forge-Id": "2"},
     )
     client = client_factory()
@@ -285,7 +314,10 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
             "updates": [
                 {
                     "current_version": _current_version(
-                        id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                        id=100,
+                        mod_id=10,
+                        name="CoolMod",
+                        version="1.0.0",
                         slug="coolmod",
                     ),
                     "recommended_version": {
@@ -347,15 +379,14 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
     assert "BepInEx/config/CoolMod.cfg" not in changes
 
 
-def test_update_mod_with_a_pre_existing_untracked_file_raises_dirty_tree_error(
+def test_update_mod_with_a_foreign_untracked_mod_folder_raises_dirty_tree_error(
     clean_repo: Repo,
     client_factory,
     db_path: Path,
     install_commit,
 ) -> None:
-    """§4b requires a clean tree before update, same as install: an untracked
-    file inside the mod folder must abort with DirtyTreeError rather than
-    being silently clobbered."""
+    """§4b requires a clean tree before update, same as install: a manually
+    copied mod folder nothing manages must abort with DirtyTreeError."""
     install_commit(
         clean_repo,
         "CoolMod",
@@ -368,16 +399,101 @@ def test_update_mod_with_a_pre_existing_untracked_file_raises_dirty_tree_error(
         },
         **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
     )
-    colliding = clean_repo.path / "SPT/user/mods/CoolMod/new_file.txt"
-    colliding.write_text("manually placed", encoding="utf-8")
+    foreign = clean_repo.path / "SPT/user/mods/Foreign/x.txt"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("manually placed", encoding="utf-8")
     client = client_factory()
     commits_before = len(clean_repo.log())
 
     with pytest.raises(DirtyTreeError):
         services.update_mod(clean_repo.path, "CoolMod", db_path=db_path, client=client)
 
-    assert colliding.read_text() == "manually placed"
+    assert foreign.read_text() == "manually placed"
     assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+    make_archive,
+) -> None:
+    """A mod writing its own settings file into its folder must not turn its
+    update into a dirty-tree error, and the file must survive untouched."""
+    install_commit(
+        clean_repo,
+        "CoolMod",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
+            ),
+            "SPT/user/mods/CoolMod/old_only.txt": "old text",
+        },
+        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+    )
+    runtime_file = clean_repo.path / "SPT/user/mods/CoolMod/new_file.txt"
+    runtime_file.write_text("written while playing", encoding="utf-8")
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "2.0.0", "author": "Acme"}
+            ),
+            "SPT/user/mods/CoolMod/new_only.txt": "new text",
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/coolmod-2.0.0.zip"
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [
+                {
+                    "current_version": _current_version(
+                        id=100,
+                        mod_id=10,
+                        name="CoolMod",
+                        version="1.0.0",
+                        slug="coolmod",
+                    ),
+                    "recommended_version": {
+                        "id": 200,
+                        "version": "2.0.0",
+                        "link": link,
+                        "content_length": len(body),
+                        "fika_compatibility": "unknown",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "update_reason": "newer version available",
+                }
+            ],
+            "blocked_updates": [],
+            "up_to_date": [],
+            "incompatible_with_spt": [],
+        },
+    )
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    client = client_factory()
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.version == "2.0.0"
+    assert runtime_file.read_text() == "written while playing"
+    assert (clean_repo.path / "SPT/user/mods/CoolMod/new_only.txt").exists()
+    assert "SPT/user/mods/CoolMod/new_file.txt" not in {
+        file.path.as_posix() for file in result.files
+    }
 
 
 def test_update_mod_with_no_update_available_is_a_friendly_noop(
@@ -441,7 +557,10 @@ def test_update_mod_blocked_update_is_a_noop_with_notice(
             "blocked_updates": [
                 {
                     "current_version": _current_version(
-                        id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                        id=100,
+                        mod_id=10,
+                        name="CoolMod",
+                        version="1.0.0",
                     ),
                     "latest_version": {
                         "id": 200,
@@ -532,7 +651,10 @@ def _available_update_data(link: str, content_length: int) -> dict:
         "updates": [
             {
                 "current_version": _current_version(
-                    id=100, mod_id=10, name="CoolMod", version="1.0.0",
+                    id=100,
+                    mod_id=10,
+                    name="CoolMod",
+                    version="1.0.0",
                     slug="coolmod",
                 ),
                 "recommended_version": {

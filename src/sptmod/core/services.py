@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 from sptmod.core.archive import (
+    CLIENT_PATCHERS_TARGET,
     SERVER_MODS_TARGET,
     ArchiveLayout,
     extract,
@@ -916,6 +917,7 @@ def remove_mod(path: Path, name: str, force: bool = False) -> RemoveResult:
             )
         except GitError as error:
             raise _sequencer_conflict(repo, mod, error, "remove") from error
+        _drop_runtime_data(repo, commit_hash, detect_layout(path))
 
     return RemoveResult(
         name=mod.name,
@@ -1107,6 +1109,7 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
             )
         except GitError as error:
             raise _sequencer_conflict(repo, mod, error, "disable") from error
+        _drop_runtime_data(repo, commit_hash, detect_layout(path))
 
     return ToggleResult(
         name=mod.name,
@@ -1273,14 +1276,17 @@ def status(path: Path) -> StatusReport:
     folder as manual installs a caller can offer to :func:`adopt_mod`; all
     other untracked files are reported as they are. Untracked files below the
     profile and config paths join the modified ones there, because a
-    :func:`snapshot` commits them together.
+    :func:`snapshot` commits them together. Untracked files an active mod
+    writes inside its own directory are runtime data and are left out of the
+    report entirely.
 
     Raises:
         NotAGameDirError: ``path`` is no SPT game directory.
         GitError: git failed.
     """
     layout = detect_layout(path)
-    raw = Repo(path).status()
+    repo = Repo(path)
+    raw = repo.status()
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
     other_modified: list[Path] = []
@@ -1292,7 +1298,10 @@ def status(path: Path) -> StatusReport:
             entry, layout, modified_profiles, modified_configs, other_modified
         )
 
+    owned = _active_mod_dirs(repo, raw.untracked, layout)
     for entry in raw.untracked:
+        if _owning_mod_dir(entry, layout) in owned:
+            continue
         prefix = _mod_prefix_of(entry, layout)
         if prefix is not None:
             top = prefix / entry.relative_to(prefix).parts[0]
@@ -2135,7 +2144,7 @@ def _apply_update(
             for directory in sorted(
                 {(path / file).parent for file in removed}, reverse=True
             ):
-                _prune_empty(path, directory, game_layout)
+                _prune_empty(path, directory, _mod_prefixes(game_layout))
 
             _report(
                 reporter, "commit", f"committing {mod.name} {candidate.new_version}"
@@ -2355,14 +2364,53 @@ def _remove_copied(root: Path, files: Sequence[Path], layout: GameLayout) -> Non
     for file in files:
         (root / file).unlink(missing_ok=True)
     for directory in sorted({(root / file).parent for file in files}, reverse=True):
-        _prune_empty(root, directory, layout)
+        _prune_empty(root, directory, _mod_prefixes(layout))
 
 
-def _prune_empty(root: Path, directory: Path, layout: GameLayout) -> None:
+def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None:
+    """Delete the runtime data left in the directories ``commit_hash`` emptied.
+
+    A mod that is removed or disabled must leave nothing behind, but the files
+    it wrote itself while the game ran were never recorded and therefore
+    survive the revert. Only untracked files go; another mod's content in the
+    same directory stays. The cleanup is best-effort: whatever cannot be
+    deleted simply stays in place.
+    """
+    boundary = _owned_prefixes(layout)
+    try:
+        directories = {
+            directory
+            for mod_file in repo.show_files(commit_hash)
+            if (directory := _owning_mod_dir(mod_file.path, layout)) is not None
+        }
+    except GitError:
+        return
+    for directory in directories:
+        if not (repo.path / directory).is_dir():
+            continue
+        try:
+            leftovers = repo.untracked_under(directory)
+        except GitError:
+            continue
+        parents: set[Path] = set()
+        for leftover in leftovers:
+            try:
+                (repo.path / leftover).unlink(missing_ok=True)
+            except OSError:
+                continue
+            parents.add((repo.path / leftover).parent)
+        for parent in sorted(parents, reverse=True):
+            try:
+                _prune_empty(repo.path, parent, boundary)
+            except OSError:
+                continue
+
+
+def _prune_empty(root: Path, directory: Path, boundary: tuple[Path, ...]) -> None:
     current = directory
     while (
         current != root
-        and current.relative_to(root) not in _mod_prefixes(layout)
+        and current.relative_to(root) not in boundary
         and current.is_dir()
         and not any(current.iterdir())
     ):
@@ -2383,20 +2431,29 @@ def _ensure_installable(repo: Repo) -> None:
     if repo.is_clean():
         return
     report = status(repo.path)
-    blockers = [str(mod.path) for mod in report.manual_mods]
-    blockers += [str(p) for p in report.other_modified + report.other_untracked]
-    if blockers:
-        listed = ", ".join(blockers[:5]) + (" …" if len(blockers) > 5 else "")
-        raise DirtyTreeError(
-            "there are files in the game folder sptmod does not manage: "
-            f"{listed}. If these are mods you installed manually, add them "
-            "via adopt; otherwise move them out of the game folder."
-        )
+    _reject_unmanaged(report)
+    if not (report.modified_profiles or report.modified_configs):
+        return
     _snapshot(repo.path, "automatic snapshot before changing mods")
-    if not repo.is_clean():
+    report = status(repo.path)
+    _reject_unmanaged(report)
+    if report.modified_profiles or report.modified_configs:
         raise DirtyTreeError(
             f"{repo.path} still has unexpected changes after snapshotting"
         )
+
+
+def _reject_unmanaged(report: StatusReport) -> None:
+    blockers = [str(mod.path) for mod in report.manual_mods]
+    blockers += [str(p) for p in report.other_modified + report.other_untracked]
+    if not blockers:
+        return
+    listed = ", ".join(blockers[:5]) + (" …" if len(blockers) > 5 else "")
+    raise DirtyTreeError(
+        "there are files in the game folder sptmod does not manage: "
+        f"{listed}. If these are mods you installed manually, add them "
+        "via adopt; otherwise move them out of the game folder."
+    )
 
 
 def _for_game_layout(layout: ArchiveLayout, game_layout: GameLayout) -> ArchiveLayout:
@@ -2843,6 +2900,49 @@ def _parse_mod_list_text(source: str, raw: str) -> list[ExportEntry]:
 def _mod_prefixes(layout: GameLayout) -> tuple[Path, ...]:
     """Return the game-dir-relative paths mod content lives under."""
     return (layout.mods_dir, PLUGINS_DIR)
+
+
+def _owned_prefixes(layout: GameLayout) -> tuple[Path, ...]:
+    """Return every game-dir-relative path a mod may own a directory under."""
+    return (*_mod_prefixes(layout), CLIENT_PATCHERS_TARGET)
+
+
+def _owning_mod_dir(entry: Path, layout: GameLayout) -> Path | None:
+    """Return the mod directory ``entry`` lies inside, or ``None``.
+
+    A file directly below a mod path -- a loose DLL in ``BepInEx/plugins/`` --
+    belongs to no directory and yields ``None``.
+    """
+    for prefix in _owned_prefixes(layout):
+        if not entry.is_relative_to(prefix):
+            continue
+        top = prefix / entry.relative_to(prefix).parts[0]
+        return top if top != entry else None
+    return None
+
+
+def _active_mod_dirs(
+    repo: Repo, entries: Sequence[Path], layout: GameLayout
+) -> set[Path]:
+    """Return the directories among ``entries`` an active mod provides.
+
+    Mods write runtime data -- editor defaults, generated overrides -- into
+    their own directory while the game runs. Those files are neither a manual
+    install nor tampering, so callers drop them.
+    """
+    candidates = {
+        directory
+        for entry in entries
+        if (directory := _owning_mod_dir(entry, layout)) is not None
+    }
+    if not candidates:
+        return candidates
+    active = {mod.name for mod in _current_mods(repo) if mod.state in ACTIVE_STATES}
+    return {
+        directory
+        for directory in candidates
+        if _last_touching_mod(repo, directory) in active
+    }
 
 
 def _mod_prefix_of(entry: Path, layout: GameLayout) -> Path | None:

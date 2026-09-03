@@ -20,11 +20,10 @@ back as one. Git is the only source of truth about the installation — there
 is no separate registry. Targets Linux and Windows; git must never surface in
 user-facing language (the Windows audience does not know git).
 
-Stage 1 (this repo): Python core + typer CLI + FastAPI server + Svelte 5
-frontend. Stage 2 (not started): port core+CLI to Rust, host the unchanged
-frontend build with Tauri. **The pytest suite is the specification for that
-port** — this is why tests are strict, black-box, and more important than any
-individual implementation choice.
+Stage 1 (this repo): Python core + typer CLI + Tauri desktop app (RPC) + Svelte 5
+frontend. Stage 2 (not started): port core+CLI to Rust. **The pytest suite is
+the specification for that port** — this is why tests are strict, black-box,
+and more important than any individual implementation choice.
 
 ## Repository layout
 
@@ -47,14 +46,22 @@ src/sptmod/
       resolve.py        install plans over /mods/dependencies
   cli.py                typer adapter; exceptions -> exit codes; rich tables
   server/
-    app.py              FastAPI; exactly ONE endpoint per public service function
+    rpc.py              hidden CLI command `sptmod rpc <name>` (RPC stdin/stdout)
     schemas.py          Pydantic mirror of the core dataclasses (THE contract)
-    events.py           SSE progress broker (thread-safe, operation_id-scoped)
+    errors.py           RPC error mapping and exit codes
     dump_openapi.py     python -m sptmod.server.dump_openapi openapi.json
+src-tauri/              Tauri v2 desktop app
+  src/
+    rpc.rs              #[tauri::command] generic invoke handler
+    driver.rs           spawns `sptmod rpc <name>` as child process
+  tests/
+    rpc_driver_tests.rs   with mocked subprocess
+    rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
+Cargo.toml              workspace (members: src-tauri)
 frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
-  src/lib/api/transport.ts   the ONLY file using fetch/EventSource
+  src/lib/api/transport.ts   uses Tauri `invoke()` and `listen()` (not fetch)
   src/lib/api/types.ts       GENERATED from openapi.json — never hand-edit
-  src/lib/api/client.ts      typed wrappers per endpoint
+  src/lib/api/client.ts      typed wrappers per RPC function
   src/lib/modfilter.ts       pure tab/search/sort logic (unit-tested)
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog
   src/routes/                / (setup or mods), /history, /profile, /settings
@@ -69,14 +76,14 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 - `subprocess` only in `core/repo.py`; raw git, no GitPython.
 - `httpx` only in `core/forge/client.py` (download.py drives `client.stream`).
 - Core raises typed exceptions only; no print/logging outside cli.py/server/.
-- One API contract, three transports: service function ↔ POST `/api/<name>`
-  ↔ camelCase wrapper in client.ts. Guarded by tests: route-per-function and
-  a 19-pair dataclass↔schema field-parity check in `tests/test_api_contract.py`.
+- One API contract, four transports: service function ↔ `sptmod rpc <name>`
+  ↔ Tauri `#[tauri::command] rpc()` ↔ camelCase wrapper in client.ts. Guarded
+  by tests: route-per-function, schema-parity, error-mapping completeness in
+  `tests/test_rpc_contract.py`; contract drift detection in `tests/test_dump_openapi.py`.
 - Contract change loop: edit schemas → `uv run python -m sptmod.server.dump_openapi
   openapi.json` → `pnpm gen:api` in frontend/ → fix client.ts/test literals.
-- Frontend transport: same-origin `/api/...` (Vite dev proxy → 127.0.0.1:8787);
-  `subscribe()` returns `Promise<unsubscribe>` so the stage-2 Tauri swap
-  (async `listen()`) changes only transport.ts.
+- Frontend transport: async Tauri `invoke()` and `listen()` (progress events);
+  `subscribe()` returns `Promise<unsubscribe>` for future extensibility.
 - All paths via pathlib; no Linux-only assumptions.
 - English in every generated artifact.
 - User-facing text never uses git vocabulary (see auto-snapshot below).
@@ -191,33 +198,40 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
   `CatalogUnavailableError` (`CATALOG_UNAVAILABLE`, 503); export degrades to
   a linkless list instead of failing.
 
-## Server and frontend
+## Desktop app (Tauri) and RPC
 
-- `sptmod serve`: uvicorn on 127.0.0.1:8787; serves the built frontend at `/`
-  (SPA fallback, traversal-guarded) resolved via `--static-dir` >
-  `SPTMOD_STATIC_DIR` > `cwd/frontend/build`; `/api/*` always wins.
-- Error body `{error, code, details}`; details carry structured payloads
-  (conflicts, residues, installed, candidates, conflicting_paths). SSE
-  `/api/events` streams `{operation_id, step, percent, message}`; long ops
-  accept and echo an `operation_id`. Handlers are sync `def` → threadpool,
-  keeping the event loop free.
-- Setup flow is ONE step (path — no login). Folder picking: native browser
-  folder dialog → name+fingerprint → server-side `locate_directory` search;
-  click-through `list_directories` browser as fallback; text input always
-  works. `ALREADY_INITIALIZED` proceeds straight in.
+- The Tauri v2 desktop app runs `sptmod rpc <name>` as a child process,
+  marshaling JSON request/response over stdin/stdout. Exit code 0 = success;
+  1 = core exception mapped to RPC error code and details; 2 = request error
+  (validation, unknown function). Child binary from env `SPTMOD_CLI` (default:
+  `sptmod` on PATH; `uv tool install --editable .`).
+- RPC response envelope: `{event:"result",data:T}` or `{event:"error",data:{error,code,details}}`.
+  Long ops emit zero or more `{event:"progress",...}` lines (ProgressEvent fields);
+  `operation_id` is generated and echoed back. Progress and final result/error lines
+  are NDJSON on stdout; stderr carries only free-form diagnostics (tracebacks) and
+  is never parsed.
+- Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
+  (binary not found / spawn failed), `bad_output` (no parseable final result line).
+- Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
+  clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
+- Setup flow is ONE step (path — no login). Folder picking: native OS dialog
+  via Tauri plugin → name+fingerprint → `locate_directory` search; fallback
+  `list_directories` browser; text input always works. `ALREADY_INITIALIZED`
+  proceeds straight in.
 - Mods view: three tabs + search + compatible-only (default ON, filter logic
   pure in modfilter.ts), sortable column headers, thumbnails/teaser, install
-  plan confirmation (mod + deps + sizes), inline SSE progress, force-retry
-  dialogs rendering conflicts/residues/partial installs. Rows are linked to
-  installed mods BY FORGE ID first (trailer name ≠ catalog display name!),
+  plan confirmation (mod + deps + sizes), RPC progress via Tauri event listener,
+  force-retry dialogs rendering conflicts/residues/partial installs. Rows linked
+  to installed mods BY FORGE ID first (trailer name ≠ catalog display name!),
   name fallback; all actions use the installed trailer name.
 - Detail dialog (click the mod name): stats, category/flag tags, license and
   source links, dates, description, version table.
 
 ## Testing
 
-- `uv run pytest` (~740 tests), `uv run ruff check src`, `uv run mypy --strict src`;
-  frontend `pnpm check` / `pnpm test` / `pnpm build`.
+- Python: `uv run pytest` (~740 tests), `uv run ruff check src`, `uv run mypy --strict src`.
+- Rust: `cargo build && cargo test` from repo root.
+- Frontend: `pnpm check` / `pnpm test` / `pnpm build` from `frontend/`.
 - Fixtures in tests/conftest.py: `fake_game_dir` (4.0 `SPT/` layout — the
   bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
   `clean_repo`, `install_commit`, `make_archive` (zip/7z; rar cannot be
@@ -226,8 +240,10 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
   suite NEVER hits the network. Live verification happens manually against
   sp-mod.com (full pipeline verified 2026-09-02: sync 1862 mods, SAIN install
   with dependency commits, update flow).
-- SSE cannot be consumed via TestClient — the SSE test drives a live uvicorn
-  in a thread.
+- RPC tests: `tests/test_rpc_contract.py` (route-per-function, schema-parity,
+  error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
+  Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
+  `src-tauri/tests/rpc_e2e_ignored.rs` (real CLI, `#[ignore]`).
 - Guards worth knowing before "simple" changes: route-per-function,
   dataclass↔schema parity, exact whitelist behavior, trailer roundtrips.
 
@@ -236,13 +252,12 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
 | Variable | Effect |
 |---|---|
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
-| `SPTMOD_STATIC_DIR` | frontend build dir served by `sptmod serve` |
+| `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
 
 ## Known limitations / open points
 
-- Stage 2 (Rust + Tauri) not started; the test suite is its spec. transport.ts
-  and the native-folder-dialog seam in SetupScreen are the swap points.
+- Stage 2 (Rust core) not started; the pytest suite is its spec.
 - Client-DLL metadata (version/GUID) is not extracted from assemblies (by
   design); `--file` installs without metadata are versionless unless
   `--version` is given (CLI prints a hint).
@@ -250,4 +265,6 @@ plain-language message suggesting adopt. `_ensure_installable` in services.py.
 - sp-mod.com deviates from the old forge source in category/license/
   dependency-embed shapes — the client parses the LIVE shapes (with
   tolerant fallbacks); resolve uses `/mods/dependencies`, which matches.
-- No CORS middleware on the server — dev uses the Vite proxy instead.
+- No per-game-dir mutex in the Tauri driver (stage-2 option); Windows
+  `CREATE_NO_WINDOW` process handling is a follow-up; no read timeout on
+  child stdout. Linux-only verified (Windows build untested).

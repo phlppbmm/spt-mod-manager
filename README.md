@@ -65,22 +65,27 @@ sptmod list
 `sptmod status` explains what changed since the last commit, `sptmod history` shows the commit
 log, `sptmod files NAME` the files of a single mod.
 
-## First run (web UI)
+## First run (Tauri desktop app)
+
+Build and run the Tauri v2 app:
 
 ```sh
-sptmod serve
+uv tool install --editable .         # install sptmod CLI
+cargo tauri dev                       # dev mode with hot reload
 ```
 
-The server binds to `127.0.0.1:8787` only and exposes the API (`/api/...`, `/api/events` for
-progress, `/openapi.json`, `/docs`). When a built UI exists in `frontend/build` (or is named by
-`--static-dir` or `SPTMOD_STATIC_DIR`), `sptmod serve` also serves it at `/`. The user interface
-is the SvelteKit app in `frontend/`; it
-calls the API with same-origin `/api/...` paths, and the Vite dev and preview servers proxy
-`/api` to `127.0.0.1:8787`, so run `pnpm dev` (or `pnpm build && pnpm preview`) while `sptmod
-serve` is running. The UI asks for the game directory once, runs `init` (with a list of pre-existing mods
+Or build a distributable binary:
+
+```sh
+cargo build
+cargo tauri build --debug             # or `--release`
+```
+
+The app uses native dialogs (folder picking, file operations) and communicates with `sptmod rpc`
+commands. The UI asks for the game directory once, runs `init` (with a list of pre-existing mods
 to adopt), then shows the mod list with the tabs *All*, *Installed*, *Not installed*, plus the
 side views *History*, *Profiles* and *Settings*. The import section of *Settings* takes a
-pasted mod list as well as the path of a list file the server can read.
+pasted mod list as well as a local file path.
 
 ## Migrating an existing modded installation
 
@@ -138,7 +143,6 @@ reset it, delete the file and run `sptmod sync` again.
 | `sptmod sync [--full]` | Refresh the local Forge catalog cache. |
 | `sptmod search QUERY [--compatible]` | Search the cached catalog. |
 | `sptmod browse [--installed\|--available\|--all] [--compatible]` | List the cached catalog with the installed state. |
-| `sptmod serve [--port] [--open-browser] [--static-dir]` | Serve the API and the built web UI on `127.0.0.1`. |
 | `sptmod version` | Print the version. |
 
 ## Known limitation
@@ -149,6 +153,8 @@ them without a version unless you pass `--version`.
 
 ## Development
 
+Python:
+
 ```sh
 uv sync
 uv run ruff check
@@ -156,17 +162,25 @@ uv run mypy --strict src
 uv run pytest
 ```
 
+Rust (Tauri desktop app):
+
+```sh
+cargo build
+cargo test
+cargo tauri dev                       # dev mode with hot reload
+```
+
 Frontend (SvelteKit, Svelte 5 runes, TypeScript, static adapter):
 
 ```sh
 cd frontend
 pnpm install
-pnpm dev        # dev server on :5173, proxies /api to the running `sptmod serve`
+pnpm dev        # dev server on :5173
 pnpm check      # svelte-check
 pnpm test       # vitest
 pnpm build
 ```
 
-The API types in `frontend/src/lib/api/types.ts` are generated from the server's OpenAPI
-schema; regenerate them with `pnpm gen:api` after changing the server, and keep `fetch` and
-`EventSource` confined to `frontend/src/lib/api/transport.ts`.
+The API types in `frontend/src/lib/api/types.ts` are generated from the RPC schemas; regenerate
+them with `pnpm gen:api` after changing service functions or request/response models, and keep
+`invoke` and `listen` confined to `frontend/src/lib/api/transport.ts`.

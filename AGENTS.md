@@ -110,9 +110,9 @@ original spec. `docs/FORGE_API.md` is the verified API contract;
 `docs/HANDOFF.md` is the original (German, partially superseded) spec.
 
 sptmod: a git-based mod manager for Single Player Tarkov. Python core +
-typer CLI + FastAPI server + Svelte 5 frontend (stage 1); stage 2 will port
-core+CLI to Rust and host the frontend with Tauri — the pytest suite is the
-specification for that port.
+typer CLI + Tauri v2 desktop app (RPC) + Svelte 5 frontend (stage 1); stage 2
+will port core+CLI to Rust — the pytest suite is the specification for that
+port.
 
 ## Build & Test
 
@@ -122,13 +122,15 @@ uv run pytest                        # full suite (~740 tests)
 uv run ruff check src
 uv run mypy --strict src
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
+cargo build && cargo test            # Rust (Tauri, src-tauri/)
 
-# after changing server schemas (the API contract):
+# after changing service functions or request/response schemas:
 uv run python -m sptmod.server.dump_openapi openapi.json
 cd frontend && pnpm gen:api          # regenerates src/lib/api/types.ts
 
-# run the app (serves the built frontend at / when frontend/build exists):
-uv run sptmod serve                  # 127.0.0.1:8787
+# run the app (Tauri desktop):
+uv tool install --editable .         # install sptmod CLI
+cargo tauri dev                      # hot reload during development
 ```
 
 ## Architecture in five lines
@@ -136,9 +138,10 @@ uv run sptmod serve                  # 127.0.0.1:8787
 - `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
   progress callbacks; it knows neither CLI nor HTTP.
 - `subprocess` ONLY in `core/repo.py`; `httpx` ONLY in `core/forge/client.py`.
-- One contract, three transports: service function ↔ `POST /api/<name>` ↔
-  client.ts wrapper — guarded by route-per-function and schema-parity tests.
-- `frontend/src/lib/api/transport.ts` is the only fetch/EventSource site;
+- One contract, four transports: service function ↔ `sptmod rpc <name>` ↔
+  Tauri `#[tauri::command] rpc()` ↔ client.ts wrapper — guarded by
+  route-per-function and schema-parity tests.
+- `frontend/src/lib/api/transport.ts` is the only invoke/listen site;
   `types.ts` is generated, never hand-edited.
 - Git never surfaces in user-facing language (auto-snapshot handles dirty
   profiles; errors speak plain language).

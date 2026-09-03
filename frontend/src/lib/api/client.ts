@@ -217,12 +217,12 @@ export function checkUpdates(path: string, names: string[] = []): Promise<Update
 	} satisfies Schemas['CheckUpdatesRequest']);
 }
 
-export type ModDescription = Schemas['ModDescription'];
+export type ModDetails = Schemas['ModDetails'];
 
-export function getModDescription(modId: number): Promise<ModDescription> {
-	return call<ModDescription>('get_mod_description', {
+export function getModDetails(modId: number): Promise<ModDetails> {
+	return call<ModDetails>('get_mod_details', {
 		mod_id: modId
-	} satisfies Schemas['GetModDescriptionRequest']);
+	} satisfies Schemas['GetModDetailsRequest']);
 }
 
 export function clearCatalogCache(): Promise<ClearCacheResult> {

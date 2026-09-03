@@ -1,6 +1,7 @@
 """Local Forge catalog: SQLite cache with sync, search, resolve and browse."""
 
 import contextlib
+import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -40,11 +41,41 @@ CREATE TABLE IF NOT EXISTS mods (
     detail_url TEXT NOT NULL DEFAULT '',
     published_at TEXT,
     created_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    favourites_count INTEGER NOT NULL DEFAULT 0,
+    endorsements_count INTEGER NOT NULL DEFAULT 0,
+    fika_compatibility INTEGER,
+    featured INTEGER NOT NULL DEFAULT 0,
+    contains_ads INTEGER NOT NULL DEFAULT 0,
+    contains_ai_content INTEGER NOT NULL DEFAULT 0,
+    category TEXT,
+    license_name TEXT,
+    license_link TEXT,
+    source_links TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS mods_name_idx ON mods (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_author_idx ON mods (author COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_updated_at_idx ON mods (updated_at);
+"""  # noqa: E501 - continued below
+
+# Columns added after the first release; applied via ALTER TABLE on open so
+# existing caches keep working (the cache is disposable, this is the only
+# schema evolution mechanism).
+_MOD_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = (
+    "thumbnail TEXT",
+    "favourites_count INTEGER NOT NULL DEFAULT 0",
+    "endorsements_count INTEGER NOT NULL DEFAULT 0",
+    "fika_compatibility INTEGER",
+    "featured INTEGER NOT NULL DEFAULT 0",
+    "contains_ads INTEGER NOT NULL DEFAULT 0",
+    "contains_ai_content INTEGER NOT NULL DEFAULT 0",
+    "category TEXT",
+    "license_name TEXT",
+    "license_link TEXT",
+    "source_links TEXT NOT NULL DEFAULT '[]'",
+)
+
+_VERSIONS_SCHEMA: Final = """
 
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY,
@@ -67,7 +98,9 @@ CREATE TABLE IF NOT EXISTS sync_state (
 
 _MOD_COLUMNS: Final = (
     "id, hub_id, guid, name, slug, teaser, thumbnail, author, downloads,"
-    " detail_url, published_at, created_at, updated_at"
+    " detail_url, published_at, created_at, updated_at, favourites_count,"
+    " endorsements_count, fika_compatibility, featured, contains_ads,"
+    " contains_ai_content, category, license_name, license_link, source_links"
 )
 _VERSION_COLUMNS: Final = (
     "id, mod_id, version, link, content_length, spt_version_constraint,"
@@ -111,6 +144,24 @@ class CatalogMod:
     published_at: str | None
     created_at: str | None
     updated_at: str | None
+    favourites_count: int = 0
+    endorsements_count: int = 0
+    fika_compatibility: bool | None = None
+    featured: bool = False
+    contains_ads: bool = False
+    contains_ai_content: bool = False
+    category: str | None = None
+    license_name: str | None = None
+    license_link: str | None = None
+    source_links: tuple["CatalogSourceLink", ...] = ()
+
+
+@dataclass(frozen=True)
+class CatalogSourceLink:
+    """A labeled source-code link of a catalog mod."""
+
+    url: str
+    label: str
 
 
 @dataclass(frozen=True)
@@ -206,7 +257,42 @@ def _mod_from_row(row: sqlite3.Row) -> CatalogMod:
         published_at=row["published_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        favourites_count=row["favourites_count"],
+        endorsements_count=row["endorsements_count"],
+        fika_compatibility=(
+            None
+            if row["fika_compatibility"] is None
+            else bool(row["fika_compatibility"])
+        ),
+        featured=bool(row["featured"]),
+        contains_ads=bool(row["contains_ads"]),
+        contains_ai_content=bool(row["contains_ai_content"]),
+        category=row["category"],
+        license_name=row["license_name"],
+        license_link=row["license_link"],
+        source_links=_links_from_json(row["source_links"]),
     )
+
+
+def _links_from_json(raw: str | None) -> tuple[CatalogSourceLink, ...]:
+    """Decode the JSON-encoded source links column, tolerating junk."""
+    try:
+        data = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(data, list):
+        return ()
+    return tuple(
+        CatalogSourceLink(
+            url=str(item.get("url", "")), label=str(item.get("label", ""))
+        )
+        for item in data
+        if isinstance(item, dict) and item.get("url")
+    )
+
+
+def _links_to_json(links: tuple[CatalogSourceLink, ...]) -> str:
+    return json.dumps([{"url": link.url, "label": link.label} for link in links])
 
 
 def _version_from_row(row: sqlite3.Row) -> CatalogVersion:
@@ -238,6 +324,19 @@ def _mod_from_forge(mod: ForgeMod) -> CatalogMod:
         published_at=mod.published_at,
         created_at=mod.created_at,
         updated_at=mod.updated_at,
+        favourites_count=mod.favourites_count,
+        endorsements_count=mod.endorsements_count,
+        fika_compatibility=mod.fika_compatibility,
+        featured=mod.featured,
+        contains_ads=mod.contains_ads,
+        contains_ai_content=mod.contains_ai_content,
+        category=None if mod.category is None else mod.category.title,
+        license_name=None if mod.license is None else mod.license.name,
+        license_link=None if mod.license is None else mod.license.link,
+        source_links=tuple(
+            CatalogSourceLink(url=link.url, label=link.label)
+            for link in mod.source_code_links
+        ),
     )
 
 
@@ -354,11 +453,13 @@ class Catalog:
         try:
             self._db.row_factory = sqlite3.Row
             self._db.executescript(SCHEMA)
+            self._db.executescript(_VERSIONS_SCHEMA)
             # Lightweight migration for caches created before the thumbnail
             # column existed; the cache is disposable, so this is the only
             # schema evolution mechanism.
-            with contextlib.suppress(sqlite3.OperationalError):
-                self._db.execute("ALTER TABLE mods ADD COLUMN thumbnail TEXT")
+            for column in _MOD_COLUMN_MIGRATIONS:
+                with contextlib.suppress(sqlite3.OperationalError):
+                    self._db.execute(f"ALTER TABLE mods ADD COLUMN {column}")
             self._db.commit()
         except BaseException:
             self._db.close()
@@ -444,7 +545,7 @@ class Catalog:
                 page = client.mods(
                     filters=filters,
                     sort="-updated_at",
-                    include=["versions"],
+                    include=["versions", "license", "category", "source_code_links"],
                     page=page_number,
                     per_page=MAX_PER_PAGE,
                 )
@@ -698,7 +799,8 @@ class Catalog:
             return "unchanged"
         self._db.execute(
             f"INSERT OR REPLACE INTO mods ({_MOD_COLUMNS})"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 mod.id,
                 mod.hub_id,
@@ -713,6 +815,20 @@ class Catalog:
                 mod.published_at,
                 mod.created_at,
                 mod.updated_at,
+                mod.favourites_count,
+                mod.endorsements_count,
+                (
+                    None
+                    if mod.fika_compatibility is None
+                    else int(mod.fika_compatibility)
+                ),
+                int(mod.featured),
+                int(mod.contains_ads),
+                int(mod.contains_ai_content),
+                mod.category,
+                mod.license_name,
+                mod.license_link,
+                _links_to_json(mod.source_links),
             ),
         )
         return "new" if existing is None else "updated"

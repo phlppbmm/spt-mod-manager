@@ -34,6 +34,7 @@ from sptmod.core.errors import (
     ConflictError,
     DependencyError,
     DirtyTreeError,
+    ForgeUnavailableError,
     GitError,
     InvalidPathError,
     ModNotFoundError,
@@ -45,6 +46,8 @@ from sptmod.core.errors import (
 from sptmod.core.forge.catalog import (
     Catalog,
     CatalogEntry,
+    CatalogMod,
+    CatalogVersion,
     SyncResult,
     default_db_path,
 )
@@ -1406,11 +1409,15 @@ def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
 
 
 @dataclass(frozen=True)
-class ModDescription:
-    """The detail text of a catalog mod, fetched live from the Forge."""
+class ModDetails:
+    """Everything the detail view shows about a catalog mod.
 
-    mod_id: int
-    name: str
+    ``mod`` and ``versions`` come from the local cache; the description is
+    fetched live from the Forge because it is large and changes freely.
+    """
+
+    mod: CatalogMod | None
+    versions: list[CatalogVersion]
     description: str
 
 
@@ -1446,28 +1453,42 @@ def _html_to_text(html: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
-def get_mod_description(
-    mod_id: int, *, client: ForgeClient | None = None
-) -> ModDescription:
-    """Fetch a mod's full description text from the Forge detail endpoint.
+def get_mod_details(
+    mod_id: int,
+    *,
+    db_path: Path | None = None,
+    client: ForgeClient | None = None,
+) -> ModDetails:
+    """Return everything the detail view shows about a catalog mod.
 
-    The Forge serves the description as HTML; it is reduced to plain text
-    with paragraph breaks so callers can render it without trusting markup.
-
-    Raises:
-        ForgeUnavailableError: the Forge cannot be reached.
-        ForgeApiError: the mod does not exist or the API rejected the call.
+    The cached mod row and its versions come from the local catalog (version
+    details are fetched once when the cache only holds summaries); the
+    description is fetched live from the Forge detail endpoint and reduced
+    from HTML to plain text so callers can render it without trusting markup.
+    An unreachable Forge degrades to the cached data with an empty
+    description instead of failing the whole view.
     """
-    if client is not None:
-        mod = client.mod(mod_id)
-    else:
-        with ForgeClient() as owned:
-            mod = owned.mod(mod_id)
-    return ModDescription(
-        mod_id=mod.id,
-        name=mod.name,
-        description=_html_to_text(mod.description or ""),
-    )
+    cached: CatalogMod | None = None
+    versions: list[CatalogVersion] = []
+    with _open_catalog(db_path) as catalog:
+        cached = catalog.get_mod(mod_id)
+        versions = catalog.get_versions(mod_id)
+        description = ""
+        try:
+            if client is not None:
+                mod = client.mod(mod_id)
+                if not any(v.link for v in versions):
+                    versions = catalog.fetch_versions(client, mod_id)
+            else:
+                with ForgeClient() as owned:
+                    mod = owned.mod(mod_id)
+                    if not any(v.link for v in versions):
+                        versions = catalog.fetch_versions(owned, mod_id)
+            description = _html_to_text(mod.description or "")
+        except ForgeUnavailableError:
+            if cached is None:
+                raise
+    return ModDetails(mod=cached, versions=versions, description=description)
 
 
 def plan_mod_install(

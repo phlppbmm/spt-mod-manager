@@ -857,15 +857,15 @@
         }
       }
     },
-    "/api/get_mod_description": {
+    "/api/get_mod_details": {
       "post": {
-        "summary": "Get Mod Description",
-        "operationId": "get_mod_description_api_get_mod_description_post",
+        "summary": "Get Mod Details",
+        "operationId": "get_mod_details_api_get_mod_details_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GetModDescriptionRequest"
+                "$ref": "#/components/schemas/GetModDetailsRequest"
               }
             }
           },
@@ -877,7 +877,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModDescription"
+                  "$ref": "#/components/schemas/ModDetails"
                 }
               }
             }
@@ -1357,6 +1357,83 @@
               }
             ],
             "title": "Updated At"
+          },
+          "favourites_count": {
+            "type": "integer",
+            "title": "Favourites Count",
+            "default": 0
+          },
+          "endorsements_count": {
+            "type": "integer",
+            "title": "Endorsements Count",
+            "default": 0
+          },
+          "fika_compatibility": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fika Compatibility"
+          },
+          "featured": {
+            "type": "boolean",
+            "title": "Featured",
+            "default": false
+          },
+          "contains_ads": {
+            "type": "boolean",
+            "title": "Contains Ads",
+            "default": false
+          },
+          "contains_ai_content": {
+            "type": "boolean",
+            "title": "Contains Ai Content",
+            "default": false
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "license_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License Name"
+          },
+          "license_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License Link"
+          },
+          "source_links": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogSourceLink"
+            },
+            "type": "array",
+            "title": "Source Links",
+            "default": []
           }
         },
         "type": "object",
@@ -1377,6 +1454,25 @@
         ],
         "title": "CatalogMod",
         "description": "A mod as cached in the local Forge catalog."
+      },
+      "CatalogSourceLink": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "label"
+        ],
+        "title": "CatalogSourceLink",
+        "description": "A labeled source-code link of a catalog mod."
       },
       "CatalogState": {
         "type": "string",
@@ -1939,19 +2035,31 @@
           "deleted"
         ]
       },
-      "GetModDescriptionRequest": {
+      "GetModDetailsRequest": {
         "properties": {
           "mod_id": {
             "type": "integer",
             "title": "Mod Id"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "path"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
           }
         },
         "type": "object",
         "required": [
           "mod_id"
         ],
-        "title": "GetModDescriptionRequest",
-        "description": "Parameters of ``get_mod_description``."
+        "title": "GetModDetailsRequest",
+        "description": "Parameters of ``get_mod_details``."
       },
       "HealthResponse": {
         "properties": {
@@ -2617,15 +2725,24 @@
         "title": "ManualMod",
         "description": "Untracked files below a mod path, grouped by their mod folder."
       },
-      "ModDescription": {
+      "ModDetails": {
         "properties": {
-          "mod_id": {
-            "type": "integer",
-            "title": "Mod Id"
+          "mod": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogMod"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "name": {
-            "type": "string",
-            "title": "Name"
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogVersion"
+            },
+            "type": "array",
+            "title": "Versions"
           },
           "description": {
             "type": "string",
@@ -2634,12 +2751,12 @@
         },
         "type": "object",
         "required": [
-          "mod_id",
-          "name",
+          "mod",
+          "versions",
           "description"
         ],
-        "title": "ModDescription",
-        "description": "Outcome of ``get_mod_description``: plain-text detail of a mod."
+        "title": "ModDetails",
+        "description": "Outcome of ``get_mod_details``: cached data plus live description."
       },
       "ModFile": {
         "properties": {

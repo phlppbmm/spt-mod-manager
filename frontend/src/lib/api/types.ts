@@ -381,7 +381,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/get_mod_description": {
+    "/api/get_mod_details": {
         parameters: {
             query?: never;
             header?: never;
@@ -390,8 +390,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Get Mod Description */
-        post: operations["get_mod_description_api_get_mod_description_post"];
+        /** Get Mod Details */
+        post: operations["get_mod_details_api_get_mod_details_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -608,6 +608,54 @@ export interface components {
             created_at: string | null;
             /** Updated At */
             updated_at: string | null;
+            /**
+             * Favourites Count
+             * @default 0
+             */
+            favourites_count: number;
+            /**
+             * Endorsements Count
+             * @default 0
+             */
+            endorsements_count: number;
+            /** Fika Compatibility */
+            fika_compatibility?: boolean | null;
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
+            /**
+             * Contains Ads
+             * @default false
+             */
+            contains_ads: boolean;
+            /**
+             * Contains Ai Content
+             * @default false
+             */
+            contains_ai_content: boolean;
+            /** Category */
+            category?: string | null;
+            /** License Name */
+            license_name?: string | null;
+            /** License Link */
+            license_link?: string | null;
+            /**
+             * Source Links
+             * @default []
+             */
+            source_links: components["schemas"]["CatalogSourceLink"][];
+        };
+        /**
+         * CatalogSourceLink
+         * @description A labeled source-code link of a catalog mod.
+         */
+        CatalogSourceLink: {
+            /** Url */
+            url: string;
+            /** Label */
+            label: string;
         };
         /** @enum {string} */
         CatalogState: "installed" | "update_available" | "available";
@@ -905,12 +953,14 @@ export interface components {
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
         /**
-         * GetModDescriptionRequest
-         * @description Parameters of ``get_mod_description``.
+         * GetModDetailsRequest
+         * @description Parameters of ``get_mod_details``.
          */
-        GetModDescriptionRequest: {
+        GetModDetailsRequest: {
             /** Mod Id */
             mod_id: number;
+            /** Db Path */
+            db_path?: string | null;
         };
         /**
          * HealthResponse
@@ -1287,14 +1337,13 @@ export interface components {
             files: string[];
         };
         /**
-         * ModDescription
-         * @description Outcome of ``get_mod_description``: plain-text detail of a mod.
+         * ModDetails
+         * @description Outcome of ``get_mod_details``: cached data plus live description.
          */
-        ModDescription: {
-            /** Mod Id */
-            mod_id: number;
-            /** Name */
-            name: string;
+        ModDetails: {
+            mod: components["schemas"]["CatalogMod"] | null;
+            /** Versions */
+            versions: components["schemas"]["CatalogVersion"][];
             /** Description */
             description: string;
         };
@@ -2494,7 +2543,7 @@ export interface operations {
             };
         };
     };
-    get_mod_description_api_get_mod_description_post: {
+    get_mod_details_api_get_mod_details_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2503,7 +2552,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GetModDescriptionRequest"];
+                "application/json": components["schemas"]["GetModDetailsRequest"];
             };
         };
         responses: {
@@ -2513,7 +2562,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ModDescription"];
+                    "application/json": components["schemas"]["ModDetails"];
                 };
             };
             /** @description Default Response */

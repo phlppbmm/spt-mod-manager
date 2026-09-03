@@ -94,10 +94,8 @@ def test_mod_unwraps_success_envelope(
         updated_at="2025-06-01T00:00:00Z",
         description="Full description.",
         custom_ai_disclosure="Uses AI for translation.",
-        license=ForgeLicense(id=1, name="MIT License", short_name="MIT"),
-        category=ForgeCategory(
-            id=5, name="Weapons", slug="weapons", color_class="text-red"
-        ),
+        license=ForgeLicense(id=1, name="MIT License", link="https://mit.example"),
+        category=ForgeCategory(id=5, title="Weapons", slug="weapons"),
         versions=[
             ForgeVersionSummary(
                 id=900,

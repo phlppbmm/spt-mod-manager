@@ -59,7 +59,7 @@ class ForgeLicense:
 
     id: int
     name: str
-    short_name: str
+    link: str
 
 
 @dataclass(frozen=True)
@@ -67,9 +67,8 @@ class ForgeCategory:
     """The category shape delivered by ``include=category``."""
 
     id: int
-    name: str
+    title: str
     slug: str
-    color_class: str
 
 
 @dataclass(frozen=True)
@@ -103,6 +102,7 @@ class ForgeMod:
     updated_at: str | None
     description: str | None = None
     custom_ai_disclosure: str | None = None
+    endorsements_count: int = 0
     license: ForgeLicense | None = None
     category: ForgeCategory | None = None
     versions: list[ForgeVersionSummary] = field(default_factory=list)
@@ -407,7 +407,7 @@ def _parse_license(data: Mapping[str, object] | None) -> ForgeLicense | None:
     return ForgeLicense(
         id=_number(data.get("id")),
         name=_text(data.get("name")),
-        short_name=_text(data.get("short_name")),
+        link=_text(data.get("link")),
     )
 
 
@@ -416,9 +416,9 @@ def _parse_category(data: Mapping[str, object] | None) -> ForgeCategory | None:
         return None
     return ForgeCategory(
         id=_number(data.get("id")),
-        name=_text(data.get("name")),
+        # The live API names the field "title"; older payloads used "name".
+        title=_text(data.get("title") or data.get("name")),
         slug=_text(data.get("slug")),
-        color_class=_text(data.get("color_class")),
     )
 
 
@@ -434,6 +434,7 @@ def _parse_mod(data: Mapping[str, object]) -> ForgeMod:
         thumbnail=_optional_text(data.get("thumbnail")),
         downloads=_number(data.get("downloads")),
         favourites_count=_number(data.get("favourites_count")),
+        endorsements_count=_number(data.get("endorsements_count")),
         owner=None if owner is None else _parse_user(owner),
         additional_authors=[
             _parse_user(item) for item in _mappings(data.get("additional_authors"))

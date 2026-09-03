@@ -167,13 +167,8 @@ def mod_json_full(**overrides: Any) -> dict[str, Any]:
     data = mod_json_minimal(
         description="Full description.",
         custom_ai_disclosure="Uses AI for translation.",
-        license={"id": 1, "name": "MIT License", "short_name": "MIT"},
-        category={
-            "id": 5,
-            "name": "Weapons",
-            "slug": "weapons",
-            "color_class": "text-red",
-        },
+        license={"id": 1, "name": "MIT License", "link": "https://mit.example"},
+        category={"id": 5, "title": "Weapons", "slug": "weapons"},
         versions=[
             {
                 "id": 900,

@@ -3,7 +3,7 @@
 	import {
 		disableMod,
 		enableMod,
-		getModDescription,
+		getModDetails,
 		installMod,
 		modFiles,
 		planModInstall,
@@ -12,7 +12,7 @@
 		type CatalogEntry,
 		type Conflict,
 		type InstallPlan,
-		type ModDescription,
+		type ModDetails,
 		type ModFile,
 		type ModInfo,
 		type ProfileResidue
@@ -131,13 +131,13 @@
 		return installed?.name ?? entry.mod.name;
 	}
 
-	let description: ModDescription | null = $state(null);
+	let details: ModDetails | null = $state(null);
 
-	async function showDescription(): Promise<void> {
+	async function showDetails(): Promise<void> {
 		busy = true;
 		errorMessage = '';
 		try {
-			description = await getModDescription(entry.mod.id);
+			details = await getModDetails(entry.mod.id);
 		} catch (cause) {
 			errorMessage = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -171,7 +171,9 @@
 			<img class="thumb" src={entry.mod.thumbnail} alt="" loading="lazy" />
 		{/if}
 		<div class="name-text">
-			<strong>{entry.mod.name}</strong>
+			<button class="name-link" onclick={() => void showDetails()}>
+				<strong>{entry.mod.name}</strong>
+			</button>
 			<span class="author">{entry.mod.author}</span>
 			{#if entry.mod.teaser}
 				<span class="teaser" title={entry.mod.teaser}>{entry.mod.teaser}</span>
@@ -250,7 +252,7 @@
 					<li><button type="button" onclick={() => void showFiles()}>Files</button></li>
 				{/if}
 				<li>
-					<button type="button" onclick={() => void showDescription()}>Details</button>
+					<button type="button" onclick={() => void showDetails()}>Details</button>
 				</li>
 				<li>
 					<a href={entry.mod.detail_url} target="_blank" rel="noreferrer">Open Forge page</a>
@@ -331,12 +333,67 @@
 	</Dialog>
 {/if}
 
-{#if description !== null}
-	<Dialog title={description.name} onclose={() => (description = null)}>
-		{#if entry.mod.thumbnail}
-			<img class="detail-thumb" src={entry.mod.thumbnail} alt="" />
+{#if details !== null}
+	<Dialog title={entry.mod.name} onclose={() => (details = null)}>
+		<div class="detail-head">
+			{#if entry.mod.thumbnail}
+				<img class="detail-thumb" src={entry.mod.thumbnail} alt="" />
+			{/if}
+			<div class="detail-meta">
+				<div>by {entry.mod.author}</div>
+				{#if details.mod}
+					<div class="detail-stats">
+						<span>{details.mod.downloads.toLocaleString()} downloads</span>
+						<span>{details.mod.favourites_count.toLocaleString()} favourites</span>
+						{#if details.mod.endorsements_count > 0}
+							<span>{details.mod.endorsements_count.toLocaleString()} endorsements</span>
+						{/if}
+					</div>
+					<div class="detail-tags">
+						{#if details.mod.category}<span class="tag">{details.mod.category}</span>{/if}
+						{#if details.mod.featured}<span class="tag">featured</span>{/if}
+						{#if details.mod.fika_compatibility}<span class="tag">Fika</span>{/if}
+						{#if details.mod.contains_ads}<span class="tag warn">contains ads</span>{/if}
+						{#if details.mod.contains_ai_content}<span class="tag warn">AI content</span>{/if}
+					</div>
+					<div class="detail-links">
+						{#if details.mod.license_link}
+							<a href={details.mod.license_link} target="_blank" rel="noreferrer">
+								{details.mod.license_name ?? 'License'}
+							</a>
+						{:else if details.mod.license_name}
+							<span>{details.mod.license_name}</span>
+						{/if}
+						{#each details.mod.source_links ?? [] as link (link.url)}
+							<a href={link.url} target="_blank" rel="noreferrer">{link.label || 'Source'}</a>
+						{/each}
+						<a href={entry.mod.detail_url} target="_blank" rel="noreferrer">Forge page</a>
+					</div>
+					{#if details.mod.updated_at}
+						<div class="detail-dates">last updated {details.mod.updated_at.slice(0, 10)}</div>
+					{/if}
+				{/if}
+			</div>
+		</div>
+		<p class="description">{details.description || 'No description available.'}</p>
+		{#if details.versions.length > 0}
+			<h3>Versions</h3>
+			<table class="versions">
+				<thead>
+					<tr><th>Version</th><th>SPT</th><th>Downloads</th><th>Released</th></tr>
+				</thead>
+				<tbody>
+					{#each details.versions as version (version.id)}
+						<tr>
+							<td>{version.version}</td>
+							<td>{version.spt_version_constraint || '—'}</td>
+							<td>{version.downloads.toLocaleString()}</td>
+							<td>{version.published_at ? version.published_at.slice(0, 10) : '—'}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
 		{/if}
-		<p class="description">{description.description || 'No description available.'}</p>
 	</Dialog>
 {/if}
 
@@ -446,6 +503,75 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.name-link {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.name-link:hover strong {
+		text-decoration: underline;
+	}
+
+	.detail-head {
+		display: flex;
+		gap: 0.8rem;
+		margin-bottom: 0.6rem;
+	}
+
+	.detail-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.85rem;
+	}
+
+	.detail-stats,
+	.detail-links {
+		display: flex;
+		gap: 0.7rem;
+		flex-wrap: wrap;
+	}
+
+	.detail-tags {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	.tag {
+		background: #2c333b;
+		border-radius: 999px;
+		padding: 0.05rem 0.55rem;
+		font-size: 0.75rem;
+	}
+
+	.tag.warn {
+		background: #4a3a25;
+	}
+
+	.detail-dates {
+		color: #98a2ad;
+		font-size: 0.78rem;
+	}
+
+	.versions {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.85rem;
+	}
+
+	.versions th,
+	.versions td {
+		text-align: left;
+		padding: 0.25rem 0.6rem 0.25rem 0;
+		border-bottom: 1px solid #3a4048;
 	}
 
 	.detail-thumb {

@@ -269,11 +269,11 @@ def clear_catalog_cache(
     return services.clear_catalog_cache(request.db_path)
 
 
-@router.post("/get_mod_description", response_model=schemas.ModDescription)
-def get_mod_description(
-    request: schemas.GetModDescriptionRequest,
-) -> services.ModDescription:
-    return services.get_mod_description(request.mod_id)
+@router.post("/get_mod_details", response_model=schemas.ModDetails)
+def get_mod_details(
+    request: schemas.GetModDetailsRequest,
+) -> services.ModDetails:
+    return services.get_mod_details(request.mod_id, db_path=request.db_path)
 
 
 @router.post("/plan_mod_install", response_model=schemas.InstallPlan)

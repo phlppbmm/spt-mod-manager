@@ -104,6 +104,23 @@ class CatalogMod(CoreModel):
     published_at: str | None
     created_at: str | None
     updated_at: str | None
+    favourites_count: int = 0
+    endorsements_count: int = 0
+    fika_compatibility: bool | None = None
+    featured: bool = False
+    contains_ads: bool = False
+    contains_ai_content: bool = False
+    category: str | None = None
+    license_name: str | None = None
+    license_link: str | None = None
+    source_links: list["CatalogSourceLink"] = []
+
+
+class CatalogSourceLink(CoreModel):
+    """A labeled source-code link of a catalog mod."""
+
+    url: str
+    label: str
 
 
 class CatalogVersion(CoreModel):
@@ -542,18 +559,19 @@ class ClearCatalogCacheRequest(CoreModel):
     db_path: Path | None = None
 
 
-class ModDescription(CoreModel):
-    """Outcome of ``get_mod_description``: plain-text detail of a mod."""
+class ModDetails(CoreModel):
+    """Outcome of ``get_mod_details``: cached data plus live description."""
 
-    mod_id: int
-    name: str
+    mod: CatalogMod | None
+    versions: list[CatalogVersion]
     description: str
 
 
-class GetModDescriptionRequest(CoreModel):
-    """Parameters of ``get_mod_description``."""
+class GetModDetailsRequest(CoreModel):
+    """Parameters of ``get_mod_details``."""
 
     mod_id: int
+    db_path: Path | None = None
 
 
 class PlanModInstallRequest(CoreModel):

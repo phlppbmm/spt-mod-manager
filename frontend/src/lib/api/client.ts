@@ -226,8 +226,12 @@ export function getModDetails(modId: number): Promise<ModDetails> {
 	} satisfies Schemas['GetModDetailsRequest']);
 }
 
-export function clearCatalogCache(): Promise<ClearCacheResult> {
-	return call<ClearCacheResult>('clear_catalog_cache', {} satisfies Schemas['ClearCatalogCacheRequest']);
+export function clearCatalogCache(
+	request: { downloads?: boolean } = {}
+): Promise<ClearCacheResult> {
+	return call<ClearCacheResult>('clear_catalog_cache', {
+		downloads: request.downloads ?? false
+	} satisfies Schemas['ClearCatalogCacheRequest']);
 }
 
 export function listFavorites(): Promise<FavoritesResponse> {

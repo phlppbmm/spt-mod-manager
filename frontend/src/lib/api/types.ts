@@ -733,6 +733,13 @@ export interface components {
             db_path: string;
             /** Removed */
             removed: boolean;
+            /** Downloads Path */
+            downloads_path?: string | null;
+            /**
+             * Downloads Freed Bytes
+             * @default 0
+             */
+            downloads_freed_bytes: number;
         };
         /**
          * ClearCatalogCacheRequest
@@ -741,6 +748,11 @@ export interface components {
         ClearCatalogCacheRequest: {
             /** Db Path */
             db_path?: string | null;
+            /**
+             * Downloads
+             * @default false
+             */
+            downloads: boolean;
         };
         /**
          * CommitInfo

@@ -126,20 +126,27 @@
 		return listFile.trim() !== '' || listContent.trim() !== '';
 	}
 
-	async function clearCache(): Promise<void> {
+	async function clearCache(downloads: boolean): Promise<void> {
 		clearing = true;
 		cacheNote = '';
 		cacheError = '';
 		try {
-			const result = await clearCatalogCache();
-			cacheNote = result.removed
+			const result = await clearCatalogCache({ downloads });
+			const catalog = result.removed
 				? `Removed ${result.db_path}. Run a catalog sync to rebuild it.`
 				: `Nothing to remove; ${result.db_path} does not exist.`;
+			cacheNote = downloads
+				? `${catalog} Freed ${megabytes(result.downloads_freed_bytes)} of kept mod files.`
+				: catalog;
 		} catch (cause) {
 			cacheError = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			clearing = false;
 		}
+	}
+
+	function megabytes(bytes: number): string {
+		return `${(bytes / 1_000_000).toFixed(1)} MB`;
 	}
 
 	function entries(): { title: string; rows: ImportEntry[] }[] {
@@ -272,8 +279,11 @@
 		directory, never inside the game directory.
 	</p>
 	<div class="row">
-		<button type="button" disabled={clearing} onclick={() => void clearCache()}>
+		<button type="button" disabled={clearing} onclick={() => void clearCache(false)}>
 			{clearing ? 'Clearing…' : 'Clear the catalog cache'}
+		</button>
+		<button type="button" disabled={clearing} onclick={() => void clearCache(true)}>
+			{clearing ? 'Clearing…' : 'Clear the cache and the downloaded mod files'}
 		</button>
 		{#if cacheNote !== ''}<span class="note">{cacheNote}</span>{/if}
 	</div>

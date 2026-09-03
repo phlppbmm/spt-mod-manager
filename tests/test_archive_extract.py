@@ -191,3 +191,95 @@ def test_extract_rar_roundtrip_lands_files_with_content(
 
     for relpath in RAR_SAMPLE_DIRS:
         assert (dest / relpath).is_dir()
+
+
+# --- format detection from magic bytes (regression for the WTT - Content
+# Backport bug: a Forge download link ending in a bare version segment, e.g.
+# '.../2.0.1', becomes the local file name via download()'s URL-path
+# fallback, and its trailing '.1' suffix was wrongly rejected as an
+# unsupported format) --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("fmt", "misleading_name"),
+    [
+        ("zip", "2.0.1"),
+        ("zip", "download"),
+        ("zip", "WTT-Content-Backport-2.0.1"),
+        ("zip", "mislabeled.7z"),
+        ("7z", "2.0.1"),
+        ("7z", "download"),
+        ("7z", "WTT-Content-Backport-2.0.1"),
+        ("7z", "mislabeled.zip"),
+    ],
+)
+def test_extract_detects_format_from_magic_bytes_regardless_of_file_name(
+    make_archive: MakeArchive, tmp_path: Path, fmt: str, misleading_name: str
+) -> None:
+    """Covers both a version-like/missing suffix (no dot, or a dot followed
+    by digits that collide with no known suffix) and a suffix that names the
+    *other* supported format outright. Either way extract() must dispatch on
+    the magic bytes it reads from the file, not on the name it was given.
+    """
+    marker = f"content-for-{fmt}-{misleading_name}"
+    archive = make_archive({"package.json": marker}, fmt)
+    renamed = tmp_path / misleading_name
+    renamed.write_bytes(archive.read_bytes())
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    extract(renamed, dest)
+
+    assert (dest / "package.json").read_text(encoding="utf-8") == marker
+
+
+@pytest.mark.skipif(
+    not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available"
+)
+@pytest.mark.parametrize("misleading_name", ["2.0.1", "download"])
+def test_extract_rar_detects_format_from_magic_bytes_regardless_of_file_name(
+    tmp_path: Path, misleading_name: str
+) -> None:
+    sample = Path(__file__).parent / "data" / "rar5-subdirs.rar"
+    renamed = tmp_path / misleading_name
+    renamed.write_bytes(sample.read_bytes())
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    extract(renamed, dest)
+
+    extracted = dest / "sub" / "dir1" / "file1.txt"
+    content = extracted.read_bytes()
+    assert len(content) == 6
+    assert content != b""
+
+
+def test_extract_unknown_suffix_error_names_supported_formats(tmp_path: Path) -> None:
+    archive = tmp_path / "archive.tar"
+    archive.write_bytes(b"not a real archive")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert str(excinfo.value) == (
+        "unsupported archive format '.tar' (archive.tar); "
+        "supported: .7z, .zip, .rar"
+    )
+
+
+def test_extract_non_archive_with_no_suffix_raises_archive_error(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "not-an-archive-at-all"
+    archive.write_bytes(b"just some plain bytes, no magic number here")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    message = str(excinfo.value)
+    assert "not-an-archive-at-all" in message
+    assert "supported: .7z, .zip, .rar" in message

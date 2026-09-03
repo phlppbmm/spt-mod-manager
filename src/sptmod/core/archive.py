@@ -19,6 +19,14 @@ SERVER_MODS_TARGET: Final = Path("SPT/user/mods")
 CLIENT_PLUGINS_TARGET: Final = Path("BepInEx/plugins")
 CLIENT_PATCHERS_TARGET: Final = Path("BepInEx/patchers")
 SUPPORTED_SUFFIXES: Final[tuple[str, ...]] = (".7z", ".zip", ".rar")
+_MAGIC_NUMBERS: Final[tuple[tuple[bytes, str], ...]] = (
+    (b"7z\xbc\xaf\x27\x1c", ".7z"),
+    (b"PK\x03\x04", ".zip"),
+    (b"PK\x05\x06", ".zip"),
+    (b"PK\x07\x08", ".zip"),
+    (b"Rar!\x1a\x07", ".rar"),
+)
+_MAGIC_LENGTH: Final = max(len(magic) for magic, _ in _MAGIC_NUMBERS)
 
 RAR_INSTALL_HINT: Final = (
     "no rar backend found: install 'unrar' or 'bsdtar' (libarchive) and make "
@@ -100,28 +108,43 @@ def validate_member_paths(members: Sequence[str]) -> None:
 def extract(archive_path: Path, dest_temp: Path) -> None:
     """Extract ``archive_path`` into the existing directory ``dest_temp``.
 
-    Dispatches on the suffix: ``.7z`` via py7zr, ``.zip`` via zipfile, ``.rar``
-    via rarfile. Member paths are validated for absolute paths, drive-relative
-    Windows paths, and ``.`` components before any byte is written.
+    The format is taken from the file's magic bytes, so downloads whose name
+    carries no or a misleading suffix still extract; the lowercased suffix is
+    used when the magic bytes match nothing. ``.7z`` goes via py7zr, ``.zip``
+    via zipfile, ``.rar`` via rarfile. Member paths are validated for absolute
+    paths, drive-relative Windows paths, and ``.`` components before any byte
+    is written.
 
     Raises:
-        ArchiveError: unsupported archive suffix, password-protected archive
+        ArchiveError: unsupported archive format, password-protected archive
             (named as such in the message), corrupt or unreadable archive,
             unsafe member path (path traversal), or ``.rar`` format without
             an installed backend (the message includes an installation hint).
     """
-    suffix = archive_path.suffix.lower()
-    if suffix == ".zip":
+    archive_format = _detect_format(archive_path) or archive_path.suffix.lower()
+    if archive_format == ".zip":
         _extract_zip(archive_path, dest_temp)
-    elif suffix == ".7z":
+    elif archive_format == ".7z":
         _extract_7z(archive_path, dest_temp)
-    elif suffix == ".rar":
+    elif archive_format == ".rar":
         _extract_rar(archive_path, dest_temp)
     else:
         raise ArchiveError(
-            f"unsupported archive format '{suffix}' ({archive_path.name}); "
+            f"unsupported archive format '{archive_format}' ({archive_path.name}); "
             f"supported: {', '.join(SUPPORTED_SUFFIXES)}"
         )
+
+
+def _detect_format(archive_path: Path) -> str | None:
+    try:
+        with archive_path.open("rb") as handle:
+            header = handle.read(_MAGIC_LENGTH)
+    except OSError:
+        return None
+    for magic, archive_format in _MAGIC_NUMBERS:
+        if header.startswith(magic):
+            return archive_format
+    return None
 
 
 def _extract_zip(archive_path: Path, dest_temp: Path) -> None:

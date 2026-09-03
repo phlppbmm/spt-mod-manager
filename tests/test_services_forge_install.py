@@ -376,6 +376,49 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
     assert (clean_repo.path / "SPT/user/mods/LinkMod/package.json").is_file()
 
 
+def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive,
+) -> None:
+    """Regression for the WTT - Content Backport bug: a Forge download link
+    whose final path segment is a bare version number -- no file extension,
+    and (as here) no Content-Disposition header to override it -- becomes the
+    local file name via download()'s URL-path fallback. Installation must
+    still succeed: extract() detects the archive format from magic bytes
+    rather than trusting that name.
+    """
+    archive = _package_archive(
+        make_archive, "BareVersionMod", "Bare Version Mod", "2.0.1"
+    )
+    link = "https://dl.example/2.0.1"
+    content_length = len(archive.read_bytes())
+    client = _seed_target_without_fetch_versions(
+        client_factory,
+        respx_router,
+        db_path,
+        mod_id=903,
+        name="Bare Version Mod",
+        version="2.0.1",
+        version_id=9030,
+        link=link,
+        content_length=content_length,
+    )
+    _echo_dependencies(respx_router, [])
+    _mock_download(respx_router, link, archive)
+
+    result = services.install_mod(
+        clean_repo.path, "Bare Version Mod", "2.0.1", db_path=db_path, client=client
+    )
+
+    assert [entry.mod.name for entry in result.installed] == ["Bare Version Mod"]
+    assert (
+        clean_repo.path / "SPT/user/mods/BareVersionMod/package.json"
+    ).is_file()
+
+
 def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
     clean_repo: Repo, client_factory, db_path: Path
 ) -> None:

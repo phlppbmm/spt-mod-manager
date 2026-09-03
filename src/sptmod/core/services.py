@@ -49,6 +49,7 @@ from sptmod.core.favorites import (
     load_favorites,
     save_favorites,
 )
+from sptmod.core.forge import cache as download_cache
 from sptmod.core.forge.catalog import (
     Catalog,
     CatalogEntry,
@@ -58,7 +59,7 @@ from sptmod.core.forge.catalog import (
     default_db_path,
 )
 from sptmod.core.forge.client import ForgeClient, UpdatesResult
-from sptmod.core.forge.download import download
+from sptmod.core.forge.download import download_cached
 from sptmod.core.forge.resolve import plan_install
 from sptmod.core.game_dir import (
     BEPINEX_CONFIG_DIR,
@@ -111,7 +112,12 @@ from sptmod.core.profile import (
     profile_paths,
 )
 from sptmod.core.repo import Repo
-from sptmod.core.workspace import game_lock, is_locked, staging_dir
+from sptmod.core.workspace import (
+    download_cache_dir,
+    game_lock,
+    is_locked,
+    staging_dir,
+)
 
 SPT_VERSION_TRAILER: Final = "Spt-Version"
 UNKNOWN_SPT_VERSION: Final = "unknown"
@@ -335,10 +341,14 @@ class ClearCacheResult:
     """Outcome of :func:`clear_catalog_cache`.
 
     ``removed`` is false when there was no cache file to delete.
+    ``downloads_path`` is set only when the kept mod archives were cleared
+    too, and ``downloads_freed_bytes`` says how much space that gave back.
     """
 
     db_path: Path
     removed: bool
+    downloads_path: Path | None = None
+    downloads_freed_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -1428,7 +1438,9 @@ def export_mods(
     )
 
 
-def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
+def clear_catalog_cache(
+    db_path: Path | None = None, *, downloads: bool = False
+) -> ClearCacheResult:
     """Delete the local Forge catalog cache.
 
     Removes the SQLite file the catalog lives in, so the next
@@ -1437,9 +1449,13 @@ def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
 
     Args:
         db_path: Catalog database path; defaults to :func:`default_db_path`.
+        downloads: Also remove the kept mod archives, which are downloaded
+            again when they are needed next.
 
     Returns:
-        The path that was cleared and whether a file was actually deleted.
+        The path that was cleared, whether a file was actually deleted and,
+        when ``downloads`` was asked for, the archive directory and how many
+        bytes it gave back.
 
     Raises:
         OSError: the cache file exists but cannot be deleted.
@@ -1447,7 +1463,15 @@ def clear_catalog_cache(db_path: Path | None = None) -> ClearCacheResult:
     cache = db_path or default_db_path()
     removed = cache.exists()
     cache.unlink(missing_ok=True)
-    return ClearCacheResult(db_path=cache, removed=removed)
+    if not downloads:
+        return ClearCacheResult(db_path=cache, removed=removed)
+    freed = download_cache.clear()
+    return ClearCacheResult(
+        db_path=cache,
+        removed=removed,
+        downloads_path=download_cache_dir(),
+        downloads_freed_bytes=freed,
+    )
 
 
 def list_favorites(*, favorites_path: Path | None = None) -> list[int]:
@@ -1978,24 +2002,19 @@ def _install_plan(
 ) -> InstallModResult:
     plan = _resolve_plan(path, mod_id_or_name, version, db_path, client)
     installed: list[InstallResult] = []
-    with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
-        for entry in plan.entries:
-            try:
-                installed.append(
-                    _install_entry(
-                        path, entry, force, progress, client, Path(temp_name)
-                    )
-                )
-            except Exception as error:
-                if not installed:
-                    raise
-                raise PartialInstallError(
-                    f"{entry.name} {entry.version} failed after "
-                    f"{len(installed)} of {len(plan.entries)} mods were "
-                    f"installed: {error}",
-                    installed,
-                    error,
-                ) from error
+    for entry in plan.entries:
+        try:
+            installed.append(_install_entry(path, entry, force, progress, client))
+        except Exception as error:
+            if not installed:
+                raise
+            raise PartialInstallError(
+                f"{entry.name} {entry.version} failed after "
+                f"{len(installed)} of {len(plan.entries)} mods were "
+                f"installed: {error}",
+                installed,
+                error,
+            ) from error
     return InstallModResult(plan=plan, installed=installed)
 
 
@@ -2005,12 +2024,16 @@ def _install_entry(
     force: bool,
     progress: Progress | None,
     client: ForgeClient,
-    downloads: Path,
 ) -> InstallResult:
     """Download one planned entry and install it as its own commit."""
     reporter = _prefixed(progress, f"{entry.name} {entry.version}")
     archive = _download_entry(
-        client, entry.link, entry.content_length, downloads, entry.name, reporter
+        client,
+        entry.link,
+        entry.content_length,
+        entry.version_id,
+        entry.name,
+        reporter,
     )
     return install_from_archive(
         path,
@@ -2028,18 +2051,24 @@ def _download_entry(
     client: ForgeClient,
     link: str | None,
     content_length: int | None,
-    downloads: Path,
+    version_id: int,
     name: str,
     progress: Progress | None,
 ) -> Path:
-    """Download ``link`` into ``downloads``.
+    """Download ``link`` into the download cache, reusing an earlier copy.
 
     Raises:
         ArchiveError: Forge published no download link for the mod.
     """
     if not link:
         raise ArchiveError(f"Forge publishes no download link for {name}")
-    return download(client, link, downloads, progress, content_length)
+    return download_cached(
+        client,
+        link,
+        str(version_id),
+        progress=progress,
+        expected_length=content_length,
+    )
 
 
 def _query_updates(
@@ -2160,7 +2189,12 @@ def _apply_update(
         temp = Path(temp_name)
         _report(reporter, "check", "downloading the new version")
         archive = _download_entry(
-            client, candidate.link, candidate.content_length, temp, mod.name, reporter
+            client,
+            candidate.link,
+            candidate.content_length,
+            candidate.version_id,
+            mod.name,
+            reporter,
         )
         unpacked = temp / "unpacked"
         unpacked.mkdir()

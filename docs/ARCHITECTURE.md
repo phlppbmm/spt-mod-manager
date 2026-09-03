@@ -43,7 +43,8 @@ src/sptmod/
     forge/
       client.py         the ONLY module allowed to use httpx; Forge v0 client
       catalog.py        SQLite cache (config dir), sync/search/classify
-      download.py       streaming downloads with size verification
+      cache.py          persistent archive cache (download resumption, LRU)
+      download.py       streaming downloads, cache hit/resumption, size verification
       resolve.py        install plans over /mods/dependencies
   cli.py                typer adapter; exceptions -> exit codes; rich tables
   server/
@@ -144,10 +145,10 @@ keep the directory alive and resurface as a foreign manual install.
 ## Parallel operations (the apply lock)
 
 Each RPC call is its own process, so several operations can run at once.
-Downloads and extraction are unlocked and happen in a staging directory below
-the user cache dir (`core/workspace.py`, swept after a day). Only the final
-apply step — conflict check, copy/delete, commit — holds an exclusive lock
-(`.sptmod-lock` in the game directory, ignored by the whitelist gitignore).
+Downloads land in a persistent cache (reused across runs), extraction unpacks
+into a staging directory below the user cache dir (swept after a day). Only the
+final apply step — conflict check, copy/delete, commit — holds an exclusive
+lock (`.sptmod-lock` in the game directory, ignored by the whitelist gitignore).
 The file is created once and then stays; exclusivity is an operating-system
 lock on it (`fcntl.flock`, `msvcrt.locking` on Windows), which the system
 releases when the holding process ends, so a crash leaves nothing behind that
@@ -158,6 +159,34 @@ raising `OperationInProgressError` (`OPERATION_IN_PROGRESS`); read-only calls
 never lock. `_ensure_installable` runs inside the lock; its pre-download run
 is skipped while another apply holds the lock, because that apply's
 not-yet-committed files would look like manual installs.
+
+## Download cache
+
+A persistent cache for downloaded mod archives lives sibling to the staging
+directory under `user_cache_path("sptmod")/downloads`. Each archive is keyed by
+its Forge `version_id` (globally unique object id); the download `link` is a
+redirecting CDN URL and not identity. On-disk layout: `<id>/meta.json` +
+`<id>/<archive name>` for complete files, `<id>.part` + `<id>.part.json` for
+unclaimed partials, `<id>.<token>.part` for one claimed by a process.
+
+A cache hit skips HTTP and reports "Using the downloaded file". Resume via
+`Range` header with 206 response (or 200/mismatch restarts from zero). Integrity
+is size-only because the Forge exposes `content_length` (nullable) and no hash;
+a mismatching cached file is deleted and fetched once more; a mismatching fresh
+download raises `ArchiveError`.
+
+Concurrency: no lock spanning the download — claim by atomic rename of the
+`.part`, unique work files, `os.replace` publish; a second finisher overwrites
+an identical payload. Cache I/O failures degrade to "no entry" and never surface.
+
+LRU by directory mtime (touched on reuse), default 20 GiB capacity, sweep
+after each completed download. Partials older than 7 days are swept. The archive
+keeps its real name so extraction messages stay readable.
+
+Implementation: `core/forge/cache.py` and `core/forge/download.py`. `_install_plan`
+temp dir is gone (`install_from_archive` creates its own); `update_mod` keeps its
+temp dir for extraction. `clear_catalog_cache` with `downloads: true` wipes the
+download cache.
 
 ## Archive handling (hardened by a 21-real-mod corpus)
 
@@ -258,6 +287,8 @@ not-yet-committed files would look like manual installs.
   name fallback; all actions use the installed trailer name.
 - Detail dialog (click the mod name): stats, category/flag tags, license and
   source links, dates, description, version table.
+- Settings page: export/import mod list, catalog cache management (two actions:
+  clear cache alone, or clear cache + remove downloaded mod files).
 
 ## Testing
 
@@ -276,6 +307,9 @@ not-yet-committed files would look like manual installs.
   error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
   `src-tauri/tests/rpc_e2e_ignored.rs` (real CLI, `#[ignore]`).
+- Download cache tests: `tests/test_forge_cache.py` (cache layout, claim/keep/release,
+  LRU/part sweep, env cap), `tests/test_forge_download_cache.py` (respx mocks:
+  hit/miss, resume 206/200, interruption, size mismatch, sweep).
 - Guards worth knowing before "simple" changes: route-per-function,
   dataclass↔schema parity, exact whitelist behavior, trailer roundtrips.
 
@@ -285,8 +319,9 @@ not-yet-committed files would look like manual installs.
 |---|---|
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
+| `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
-| `XDG_CACHE_HOME` | relocates the staging dir for downloads (platformdirs) |
+| `XDG_CACHE_HOME` | relocates the staging dir and download cache (platformdirs) |
 
 ## Known limitations / open points
 

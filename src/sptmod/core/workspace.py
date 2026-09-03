@@ -34,6 +34,7 @@ LOCK_FILE_NAME: Final = ".sptmod-lock"
 
 _APP_NAME: Final = "sptmod"
 _STAGING_DIR_NAME: Final = "staging"
+_DOWNLOAD_CACHE_DIR_NAME: Final = "downloads"
 _STAGING_MAX_AGE_SECONDS: Final = 24 * 60 * 60
 _LOCK_TIMEOUT_SECONDS: Final = 300.0
 _LOCK_POLL_SECONDS: Final = 0.2
@@ -52,6 +53,20 @@ def staging_dir() -> Path:
     staging.mkdir(parents=True, exist_ok=True)
     _sweep(staging)
     return staging
+
+
+def download_cache_dir() -> Path:
+    """Return the directory downloaded mod archives are kept in.
+
+    Lives next to the staging area in the user's cache directory and is
+    created on demand. Its contents survive across runs so an archive is
+    downloaded once; size is bounded by the cache's own housekeeping, not by
+    age, hence nothing is swept here.
+    """
+    path = platformdirs.user_cache_path(_APP_NAME, appauthor=False)
+    downloads = path / _DOWNLOAD_CACHE_DIR_NAME
+    downloads.mkdir(parents=True, exist_ok=True)
+    return downloads
 
 
 def is_locked(game_dir: Path) -> bool:

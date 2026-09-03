@@ -25,7 +25,13 @@ import pytest
 from sptmod.core import game_dir, services, workspace
 from sptmod.core.errors import OperationInProgressError
 from sptmod.core.repo import Repo
-from sptmod.core.workspace import LOCK_FILE_NAME, game_lock, is_locked, staging_dir
+from sptmod.core.workspace import (
+    LOCK_FILE_NAME,
+    download_cache_dir,
+    game_lock,
+    is_locked,
+    staging_dir,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +114,33 @@ def test_staging_dir_sweeps_entries_older_than_a_day_but_keeps_fresh_ones(
     result = staging_dir()
 
     assert sorted(entry.name for entry in result.iterdir()) == ["fresh.txt"]
+
+
+# --- download_cache_dir -----------------------------------------------
+
+
+def test_download_cache_dir_honors_xdg_cache_home_and_is_created_on_demand(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache_home = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    assert not cache_home.exists()
+
+    result = download_cache_dir()
+
+    assert result == cache_home / "sptmod" / "downloads"
+    assert result.is_dir()
+
+
+def test_download_cache_dir_is_a_sibling_of_staging_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+    downloads = download_cache_dir()
+    staging = staging_dir()
+
+    assert downloads.parent == staging.parent
 
 
 # --- is_locked -------------------------------------------------------------

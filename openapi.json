@@ -1685,6 +1685,23 @@
           "removed": {
             "title": "Removed",
             "type": "boolean"
+          },
+          "downloads_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloads Path"
+          },
+          "downloads_freed_bytes": {
+            "default": 0,
+            "title": "Downloads Freed Bytes",
+            "type": "integer"
           }
         },
         "required": [
@@ -1708,6 +1725,11 @@
               }
             ],
             "title": "Db Path"
+          },
+          "downloads": {
+            "default": false,
+            "title": "Downloads",
+            "type": "boolean"
           }
         },
         "title": "ClearCatalogCacheRequest",

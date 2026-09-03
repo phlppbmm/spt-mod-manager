@@ -18,6 +18,7 @@ DEFAULT_RATE_PER_MINUTE: Final = 200
 DEFAULT_MAX_RETRIES: Final = 4
 DEFAULT_TIMEOUT: Final = 30.0
 DEFAULT_CHUNK_SIZE: Final = 65536
+RANGE_NOT_SATISFIABLE: Final = 416
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_MAX_SECONDS: Final = 60.0
 
@@ -322,6 +323,7 @@ class DependencyNode:
 class DownloadStream:
     """An open streaming response for an arbitrary download URL."""
 
+    status_code: int
     headers: Mapping[str, str]
     chunks: Iterator[bytes]
 
@@ -1154,7 +1156,11 @@ class ForgeClient:
 
     @contextmanager
     def stream(
-        self, url: str, *, chunk_size: int = DEFAULT_CHUNK_SIZE
+        self,
+        url: str,
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        headers: Mapping[str, str] | None = None,
     ) -> Iterator[DownloadStream]:
         """Stream an arbitrary download URL without envelope handling or throttling.
 
@@ -1167,17 +1173,29 @@ class ForgeClient:
         Args:
             url: Absolute or relative URL to download from.
             chunk_size: Bytes per chunk (default: 65536).
+            headers: Request headers to send, for example a ``Range`` header
+                continuing an interrupted download.
 
         Yields:
-            A DownloadStream with headers and an iterator of byte chunks.
+            A DownloadStream with the response status, its headers and an
+            iterator of byte chunks.
 
         Raises:
-            ForgeUnavailableError: On network error or HTTP error status.
+            ForgeUnavailableError: On network error or HTTP error status. A 416
+                answer to a ``Range`` request is passed on unraised so the
+                caller can drop its unusable partial file and start over.
         """
         try:
-            with self._http.stream("GET", url) as response:
-                response.raise_for_status()
+            with self._http.stream("GET", url, headers=headers) as response:
+                rejected_range = (
+                    response.status_code == RANGE_NOT_SATISFIABLE
+                    and headers is not None
+                    and "Range" in headers
+                )
+                if not rejected_range:
+                    response.raise_for_status()
                 yield DownloadStream(
+                    status_code=response.status_code,
                     headers=response.headers,
                     chunks=response.iter_bytes(chunk_size),
                 )

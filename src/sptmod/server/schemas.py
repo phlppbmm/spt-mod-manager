@@ -550,12 +550,15 @@ class ClearCacheResult(CoreModel):
 
     db_path: Path
     removed: bool
+    downloads_path: Path | None = None
+    downloads_freed_bytes: int = 0
 
 
 class ClearCatalogCacheRequest(CoreModel):
     """Parameters of ``clear_catalog_cache``."""
 
     db_path: Path | None = None
+    downloads: bool = False
 
 
 class ListFavoritesRequest(CoreModel):

@@ -832,13 +832,54 @@ def test_clear_catalog_cache_deletes_the_db_file_and_reports_removed_false_on_re
     exit_code, lines = _invoke("clear_catalog_cache", {"db_path": str(db)})
 
     assert exit_code == 0
-    assert lines[0]["data"] == {"db_path": str(db), "removed": True}
+    assert lines[0]["data"] == {
+        "db_path": str(db),
+        "removed": True,
+        "downloads_path": None,
+        "downloads_freed_bytes": 0,
+    }
     assert not db.exists()
 
     second_exit, second_lines = _invoke("clear_catalog_cache", {"db_path": str(db)})
 
     assert second_exit == 0
     assert second_lines[0]["data"]["removed"] is False
+
+
+def test_clear_catalog_cache_with_downloads_also_clears_the_archive_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``downloads`` flag must reach ``clear_catalog_cache`` and its
+    return value must carry the archive directory and the bytes it freed --
+    not just clear the catalog db as the ``downloads=False`` default does.
+    """
+    from sptmod.core.workspace import download_cache_dir
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    db = tmp_path / "forge-cache.db"
+    with Catalog(db):
+        pass
+    cache_dir = download_cache_dir()
+    entry = cache_dir / "555"
+    entry.mkdir(parents=True)
+    payload = b"cached archive bytes"
+    (entry / "mod.zip").write_bytes(payload)
+    meta = json.dumps({"name": "mod.zip", "size": len(payload), "url": "unused"})
+    (entry / "meta.json").write_text(meta, encoding="utf-8")
+    expected_freed = len(payload) + len(meta.encode("utf-8"))
+
+    exit_code, lines = _invoke(
+        "clear_catalog_cache", {"db_path": str(db), "downloads": True}
+    )
+
+    assert exit_code == 0
+    assert lines[0]["data"] == {
+        "db_path": str(db),
+        "removed": True,
+        "downloads_path": str(cache_dir),
+        "downloads_freed_bytes": expected_freed,
+    }
+    assert not entry.exists()
 
 
 # --------------------------------------------------------------------------

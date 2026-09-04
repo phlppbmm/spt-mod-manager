@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
-	import { status, syncCatalog, updateMod } from '$lib/api/client';
+	import { status, syncCatalog, updateMod, type SyncCatalogResponse } from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
 	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
@@ -14,6 +14,7 @@
 	let error = $state('');
 	let syncProgress: ProgressEvent | null = $state(null);
 	let syncNote = $state('');
+	let syncNoteSuccess = $state(false);
 	let syncing = $state(false);
 	let refreshKey = $state(0);
 	let candidates: UpdateTarget[] = $state([]);
@@ -63,19 +64,41 @@
 		void sync();
 	}
 
+	function syncSummary(result: SyncCatalogResponse): string {
+		const parts: string[] = [];
+		if (result.new_mods > 0) {
+			parts.push(`${result.new_mods} new`);
+		}
+		if (result.updated_mods > 0) {
+			parts.push(`${result.updated_mods} changed`);
+		}
+		const versions = result.new_versions + result.updated_versions;
+		if (versions > 0) {
+			parts.push(versions === 1 ? '1 version update' : `${versions} version updates`);
+		}
+		if (parts.length === 0) {
+			return 'Catalog is up to date';
+		}
+		return `Catalog updated · ${parts.join(', ')}`;
+	}
+
 	async function sync(): Promise<void> {
 		syncing = true;
 		syncNote = '';
+		syncNoteSuccess = false;
+		syncProgress = null;
 		const operationId = crypto.randomUUID();
 		const unsubscribe = await subscribe(operationId, (event) => {
 			syncProgress = event;
 		});
 		try {
 			const result = await syncCatalog(path, false, operationId);
-			syncNote = `Catalog synced: ${result.new_mods} new mods, ${result.updated_mods} updated.`;
+			syncNote = syncSummary(result);
+			syncNoteSuccess = true;
 			refreshKey += 1;
 		} catch (cause) {
 			syncNote = cause instanceof Error ? cause.message : String(cause);
+			syncNoteSuccess = false;
 		} finally {
 			unsubscribe();
 			syncProgress = null;
@@ -87,6 +110,7 @@
 		const targets = candidates;
 		updatingAll = true;
 		syncNote = '';
+		syncNoteSuccess = false;
 		const result = await runUpdates(targets, {
 			update: updateOne,
 			onProgress: (index, total, name) => {
@@ -131,6 +155,23 @@
 	<header>
 		<h1>sptmod</h1>
 		<span class="path" title={path}>{path}</span>
+		{#if syncing}
+			<div class="sync-slot">
+				<progress max="100" value={syncProgress?.percent ?? 0}></progress>
+				<span
+					>Updating the mod catalog…{#if syncProgress !== null}
+						{Math.round(syncProgress.percent)}% — {syncProgress.message}
+					{/if}</span
+				>
+			</div>
+		{:else if updatingAll}
+			<div class="sync-slot">
+				<progress max="100" value={updateProgress?.percent ?? 0}></progress>
+				<span>Updating {updateName} ({updateIndex} of {updateTotal})</span>
+			</div>
+		{:else if syncNote !== ''}
+			<p class="sync-slot note" class:success={syncNoteSuccess}>{syncNote}</p>
+		{/if}
 		<button type="button" disabled={syncing || updatingAll} onclick={() => void sync()}>
 			{syncing ? 'Syncing…' : 'Sync catalog'}
 		</button>
@@ -143,19 +184,6 @@
 			{updatingAll ? 'Updating…' : `Update all (${candidates.length})`}
 		</button>
 	</header>
-	{#if syncProgress !== null}
-		<div class="sync">
-			<progress max="100" value={syncProgress.percent}></progress>
-			<span>{syncProgress.step}: {syncProgress.message}</span>
-		</div>
-	{:else if updatingAll}
-		<div class="sync">
-			<progress max="100" value={updateProgress?.percent ?? 0}></progress>
-			<span>Updating {updateName} ({updateIndex} of {updateTotal})</span>
-		</div>
-	{:else if syncNote !== ''}
-		<p class="sync-note">{syncNote}</p>
-	{/if}
 	<ModsView
 		{path}
 		{refreshKey}
@@ -195,19 +223,37 @@
 		padding: 2rem;
 	}
 
-	.sync {
+	.sync-slot {
 		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		padding: 0.5rem 1rem;
-		font-size: 0.9em;
+		flex-direction: column;
+		gap: 0.2rem;
+		align-self: center;
+		max-width: 25%;
+		min-width: 0;
+		margin: 0;
+		font-size: 0.85em;
 		color: #98a2ad;
 	}
 
-	.sync-note {
-		padding: 0.2rem 1rem;
-		margin: 0;
-		font-size: 0.9em;
-		color: #98a2ad;
+	.sync-slot progress {
+		width: 100%;
+	}
+
+	.sync-slot span,
+	.sync-slot.note {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.sync-slot.note {
+		padding: 0.2rem 0.4rem;
+	}
+
+	.sync-slot.note.success {
+		border-left: 2px solid #4ba36a;
+		border-radius: 3px;
+		background: #1c2a21;
+		color: #b6d9c1;
 	}
 </style>

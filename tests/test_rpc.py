@@ -59,9 +59,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _clean_repo(path: Path) -> Repo:
     repo = Repo.init(detect_layout(path))
-    repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
 
 
@@ -288,9 +286,7 @@ def test_conflict_error_details_carry_only_the_conflicts_list(
 def test_dependency_error_details_carry_only_the_conflicts_list(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
-    conflict = Conflict(
-        kind="missing-dependency", severity="error", message="needs Y"
-    )
+    conflict = Conflict(kind="missing-dependency", severity="error", message="needs Y")
     inject_error("status", DependencyError("boom", conflicts=[conflict]))
 
     exit_code, lines = _invoke("status", {"path": "/whatever"})
@@ -447,40 +443,34 @@ def test_unexpected_exception_maps_to_internal_error_with_a_well_formed_line(
 # --------------------------------------------------------------------------
 
 
-def test_malformed_json_on_stdin_exits_two_with_validation_error() -> None:
-    result = runner.invoke(app, ["rpc", "status"], input="{not json")
+@pytest.mark.parametrize(
+    ("name", "stdin", "expected_substring"),
+    [
+        ("status", "{not json", None),
+        ("status", "", None),
+        ("not_a_real_function", "{}", "not_a_real_function"),
+        # StatusRequest requires "path"; omitting it triggers pydantic
+        # validation, not a core error.
+        ("status", "{}", None),
+    ],
+    ids=[
+        "malformed-json",
+        "empty-stdin",
+        "unknown-function",
+        "missing-required-field",
+    ],
+)
+def test_request_errors_exit_two_with_validation_error(
+    name: str, stdin: str, expected_substring: str | None
+) -> None:
+    result = runner.invoke(app, ["rpc", name], input=stdin)
 
     assert result.exit_code == 2
     doc = json.loads(result.stdout)
     assert doc["event"] == "error"
     assert doc["data"]["code"] == "VALIDATION_ERROR"
-
-
-def test_empty_stdin_exits_two_with_validation_error() -> None:
-    result = runner.invoke(app, ["rpc", "status"], input="")
-
-    assert result.exit_code == 2
-    doc = json.loads(result.stdout)
-    assert doc["data"]["code"] == "VALIDATION_ERROR"
-
-
-def test_unknown_function_name_exits_two_with_validation_error() -> None:
-    result = runner.invoke(app, ["rpc", "not_a_real_function"], input="{}")
-
-    assert result.exit_code == 2
-    doc = json.loads(result.stdout)
-    assert doc["data"]["code"] == "VALIDATION_ERROR"
-    assert "not_a_real_function" in doc["data"]["error"]
-
-
-def test_request_failing_pydantic_validation_exits_two_with_validation_error() -> None:
-    # StatusRequest requires "path"; omitting it triggers pydantic validation,
-    # not a core error.
-    result = runner.invoke(app, ["rpc", "status"], input="{}")
-
-    assert result.exit_code == 2
-    doc = json.loads(result.stdout)
-    assert doc["data"]["code"] == "VALIDATION_ERROR"
+    if expected_substring is not None:
+        assert expected_substring in doc["data"]["error"]
 
 
 # --------------------------------------------------------------------------
@@ -547,14 +537,25 @@ def test_rpc_output_does_not_depend_on_the_current_working_directory(
 # --------------------------------------------------------------------------
 
 
-def test_locate_directory_returns_only_the_fingerprint_matching_directory(
+def test_locate_directory_serialises_every_matched_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = tmp_path / "locate-root"
-    (root / "parent_a" / "SPT").mkdir(parents=True)
-    (root / "parent_b" / "SPT" / "BepInEx").mkdir(parents=True)
-    (root / "parent_b" / "SPT" / "cache").mkdir(parents=True)
-    monkeypatch.setattr(services, "_locate_roots", lambda: [root])
+    """The route renders the service's result list as JSON objects.
+
+    Which directories the search finds is pinned at the service level; here
+    the dispatched function is swapped for a stub returning known matches so
+    that only the transport is under test.
+    """
+    matches = [
+        services.LocatedDirectory(path=tmp_path / "games" / "SPT", is_game_dir=True),
+        services.LocatedDirectory(path=tmp_path / "backup" / "SPT", is_game_dir=False),
+    ]
+    original = rpc.RPC_FUNCTIONS["locate_directory"]
+    monkeypatch.setitem(
+        rpc.RPC_FUNCTIONS,
+        "locate_directory",
+        dataclasses.replace(original, function=lambda **_kwargs: matches),
+    )
 
     exit_code, lines = _invoke(
         "locate_directory", {"name": "SPT", "fingerprint": ["BepInEx", "cache"]}
@@ -565,7 +566,8 @@ def test_locate_directory_returns_only_the_fingerprint_matching_directory(
         {
             "event": "result",
             "data": [
-                {"path": str(root / "parent_b" / "SPT"), "is_game_dir": False}
+                {"path": str(tmp_path / "games" / "SPT"), "is_game_dir": True},
+                {"path": str(tmp_path / "backup" / "SPT"), "is_game_dir": False},
             ],
         }
     ]
@@ -664,9 +666,7 @@ def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
     assert listed_lines[0]["data"] == []
 
 
-def test_enable_mod_restores_a_disabled_mod(
-    clean_repo: Repo, install_commit
-) -> None:
+def test_enable_mod_restores_a_disabled_mod(clean_repo: Repo, install_commit) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
     _invoke("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
@@ -1148,9 +1148,7 @@ def test_check_updates_reports_an_available_update(
         "incompatible_with_spt": [],
     }
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
-        router.get("/mods/updates").respond(
-            200, json={"success": True, "data": data}
-        )
+        router.get("/mods/updates").respond(200, json={"success": True, "data": data})
 
         exit_code, lines = _invoke(
             "check_updates",
@@ -1218,9 +1216,7 @@ def test_update_mod_applies_the_recommended_version(
         "incompatible_with_spt": [],
     }
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
-        router.get("/mods/updates").respond(
-            200, json={"success": True, "data": data}
-        )
+        router.get("/mods/updates").respond(200, json={"success": True, "data": data})
         router.get(link).respond(
             200, content=body, headers={"Content-Length": str(len(body))}
         )

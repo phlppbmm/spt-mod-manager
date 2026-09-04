@@ -55,63 +55,47 @@ describe('call', () => {
 		expect(invokeMock).toHaveBeenCalledWith('rpc', { name: 'status', payload: {} });
 	});
 
-	it('rejects with an ApiError built from a structured error response', async () => {
-		invokeMock.mockRejectedValue({
-			error: 'Mod conflicts with another mod.',
-			code: 'conflict',
-			details: sampleDetails
-		});
-
-		const promise = call('remove_mod', { path: '/game', name: 'x' });
-
-		await expect(promise).rejects.toBeInstanceOf(ApiError);
-		await expect(promise).rejects.toMatchObject({
-			message: 'Mod conflicts with another mod.',
-			code: 'conflict',
-			details: sampleDetails
-		});
-	});
-
-	it('leaves details undefined when the structured error response omits it', async () => {
-		invokeMock.mockRejectedValue({ error: 'Not found', code: 'not_found' });
+	it.each([
+		{
+			id: 'structured error response with details',
+			rejection: {
+				error: 'Mod conflicts with another mod.',
+				code: 'conflict',
+				details: sampleDetails
+			},
+			expected: {
+				message: 'Mod conflicts with another mod.',
+				code: 'conflict',
+				details: sampleDetails
+			}
+		},
+		{
+			id: 'structured error response without details',
+			rejection: { error: 'Not found', code: 'not_found' },
+			expected: { message: 'Not found', code: 'not_found', details: undefined }
+		},
+		{
+			id: 'Error rejection',
+			rejection: new Error('network down'),
+			expected: { message: 'Error: network down', code: 'unreachable', details: undefined }
+		},
+		{
+			id: 'plain string rejection',
+			rejection: 'offline',
+			expected: { message: 'offline', code: 'unreachable', details: undefined }
+		},
+		{
+			id: 'plain object rejection without a code field',
+			rejection: { unexpected: 'shape' },
+			expected: { message: '[object Object]', code: 'unreachable', details: undefined }
+		}
+	])('rejects with an ApiError for a $id', async ({ rejection, expected }) => {
+		invokeMock.mockRejectedValue(rejection);
 
 		const promise = call('status', { path: '/game' });
 
-		await expect(promise).rejects.toMatchObject({
-			message: 'Not found',
-			code: 'not_found',
-			details: undefined
-		});
-	});
-
-	it('rejects with code "unreachable" and the stringified cause for an Error rejection', async () => {
-		invokeMock.mockRejectedValue(new Error('network down'));
-
-		const promise = call('status', { path: '/game' });
-
 		await expect(promise).rejects.toBeInstanceOf(ApiError);
-		await expect(promise).rejects.toMatchObject({
-			code: 'unreachable',
-			message: 'Error: network down'
-		});
-	});
-
-	it('rejects with code "unreachable" for a plain string rejection', async () => {
-		invokeMock.mockRejectedValue('offline');
-
-		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
-			code: 'unreachable',
-			message: 'offline'
-		});
-	});
-
-	it('rejects with code "unreachable" for a plain object rejection without a code field', async () => {
-		invokeMock.mockRejectedValue({ unexpected: 'shape' });
-
-		await expect(call('status', { path: '/game' })).rejects.toMatchObject({
-			code: 'unreachable',
-			message: '[object Object]'
-		});
+		await expect(promise).rejects.toMatchObject(expected);
 	});
 });
 

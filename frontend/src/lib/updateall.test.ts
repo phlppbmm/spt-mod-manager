@@ -188,68 +188,75 @@ describe('updatableFromCatalog', () => {
 		expect(updatableFromCatalog([], [])).toEqual([]);
 	});
 
-	it('includes only rows whose row state is update_available, and the count matches', () => {
-		const updateEntry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Updatable' }),
-			state: 'update_available',
-			installed_version: '1.0.0',
-			latest_version: makeCatalogVersion({ version: '2.0.0' })
-		});
-		const upToDateEntry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Current' }),
-			state: 'installed',
-			installed_version: '1.0.0',
-			latest_version: makeCatalogVersion({ version: '1.0.0' })
-		});
-		const notInstalledEntry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Uninstalled' }),
-			state: 'available',
-			installed_version: null,
-			latest_version: makeCatalogVersion({ version: '1.0.0' })
-		});
+	it.each([
+		{
+			id: 'a mixed list keeps only the update_available row',
+			entries: [
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Updatable' }),
+					state: 'update_available',
+					installed_version: '1.0.0',
+					latest_version: makeCatalogVersion({ version: '2.0.0' })
+				}),
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Current' }),
+					state: 'installed',
+					installed_version: '1.0.0',
+					latest_version: makeCatalogVersion({ version: '1.0.0' })
+				}),
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Uninstalled' }),
+					state: 'available',
+					installed_version: null,
+					latest_version: makeCatalogVersion({ version: '1.0.0' })
+				})
+			],
+			installed: [makeModInfo({ name: 'Current', state: 'installed' })],
+			expectedNames: ['Updatable']
+		},
+		{
+			id: 'an entry with a newer version whose installed mod is disabled is excluded',
+			entries: [
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Disabled Mod' }),
+					state: 'update_available',
+					installed_version: '1.0.0',
+					latest_version: makeCatalogVersion({ version: '2.0.0' })
+				})
+			],
+			installed: [makeModInfo({ name: 'Disabled Mod', state: 'disabled' })],
+			expectedNames: []
+		},
+		{
+			id: 'an installed, up-to-date entry (state "installed") is excluded',
+			entries: [
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Current' }),
+					state: 'installed',
+					installed_version: '1.0.0',
+					latest_version: makeCatalogVersion({ version: '1.0.0' })
+				})
+			],
+			installed: [makeModInfo({ name: 'Current', state: 'installed' })],
+			expectedNames: []
+		},
+		{
+			id: 'a not-installed entry (state "available") is excluded',
+			entries: [
+				makeCatalogEntry({
+					mod: makeCatalogMod({ name: 'Never Installed' }),
+					state: 'available',
+					installed_version: null,
+					latest_version: makeCatalogVersion({ version: '1.0.0' })
+				})
+			],
+			installed: [],
+			expectedNames: []
+		}
+	])('$id', ({ entries, installed, expectedNames }) => {
+		const result = updatableFromCatalog(entries, installed);
 
-		const result = updatableFromCatalog(
-			[updateEntry, upToDateEntry, notInstalledEntry],
-			[makeModInfo({ name: 'Current', state: 'installed' })]
-		);
-
-		expect(result).toHaveLength(1);
-		expect(result[0].name).toBe('Updatable');
-	});
-
-	it('excludes an entry with a newer version when the installed mod is disabled', () => {
-		const entry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Disabled Mod' }),
-			state: 'update_available',
-			installed_version: '1.0.0',
-			latest_version: makeCatalogVersion({ version: '2.0.0' })
-		});
-		const installed = [makeModInfo({ name: 'Disabled Mod', state: 'disabled' })];
-
-		expect(updatableFromCatalog([entry], installed)).toEqual([]);
-	});
-
-	it('excludes an installed, up-to-date entry (state "installed")', () => {
-		const entry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Current' }),
-			state: 'installed',
-			installed_version: '1.0.0',
-			latest_version: makeCatalogVersion({ version: '1.0.0' })
-		});
-		const installed = [makeModInfo({ name: 'Current', state: 'installed' })];
-
-		expect(updatableFromCatalog([entry], installed)).toEqual([]);
-	});
-
-	it('excludes a not-installed entry (state "available")', () => {
-		const entry = makeCatalogEntry({
-			mod: makeCatalogMod({ name: 'Never Installed' }),
-			state: 'available',
-			installed_version: null,
-			latest_version: makeCatalogVersion({ version: '1.0.0' })
-		});
-
-		expect(updatableFromCatalog([entry], [])).toEqual([]);
+		expect(result.map((target) => target.name)).toEqual(expectedNames);
 	});
 
 	it('resolves the target name by Forge id, taking precedence over a name match', () => {
@@ -479,19 +486,24 @@ describe('runUpdates', () => {
 });
 
 describe('summarize', () => {
-	it('reports "up to date" wording when total is 0', () => {
-		const result: UpdateAllResult = { total: 0, done: [], failed: [] };
-		expect(summarize(result)).toBe('Everything is up to date.');
-	});
-
-	it('uses singular wording for exactly one successful update', () => {
-		const result: UpdateAllResult = { total: 1, done: ['Alpha'], failed: [] };
-		expect(summarize(result)).toBe('Updated 1 mod.');
-	});
-
-	it('uses plural wording for more than one successful update', () => {
-		const result: UpdateAllResult = { total: 2, done: ['Alpha', 'Beta'], failed: [] };
-		expect(summarize(result)).toBe('Updated 2 mods.');
+	it.each([
+		{
+			id: 'reports "up to date" wording when total is 0',
+			result: { total: 0, done: [], failed: [] } as UpdateAllResult,
+			expected: 'Everything is up to date.'
+		},
+		{
+			id: 'uses singular wording for exactly one successful update',
+			result: { total: 1, done: ['Alpha'], failed: [] } as UpdateAllResult,
+			expected: 'Updated 1 mod.'
+		},
+		{
+			id: 'uses plural wording for more than one successful update',
+			result: { total: 2, done: ['Alpha', 'Beta'], failed: [] } as UpdateAllResult,
+			expected: 'Updated 2 mods.'
+		}
+	])('$id', ({ result, expected }) => {
+		expect(summarize(result)).toBe(expected);
 	});
 
 	it('uses plural wording for zero successful updates out of a non-empty target list', () => {

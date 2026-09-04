@@ -69,77 +69,83 @@ function makeEntry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
 }
 
 describe('isCompatible', () => {
-	it('is true when the entry carries a latest_version', () => {
-		const entry = makeEntry({ latest_version: makeVersion() });
-		expect(isCompatible(entry)).toBe(true);
-	});
-
-	it('is false when latest_version is null', () => {
-		const entry = makeEntry({ latest_version: null });
-		expect(isCompatible(entry)).toBe(false);
+	it.each([
+		{ id: 'a latest_version is present', latestVersion: makeVersion(), expected: true },
+		{ id: 'latest_version is null', latestVersion: null, expected: false }
+	])('is $expected when $id', ({ latestVersion, expected }) => {
+		const entry = makeEntry({ latest_version: latestVersion });
+		expect(isCompatible(entry)).toBe(expected);
 	});
 });
 
 describe('isInstalled', () => {
-	it('is true for state "installed"', () => {
-		expect(isInstalled(makeEntry({ state: 'installed' }))).toBe(true);
-	});
-
-	it('is true for state "update_available"', () => {
-		expect(isInstalled(makeEntry({ state: 'update_available' }))).toBe(true);
-	});
-
-	it('is false for state "available"', () => {
-		expect(isInstalled(makeEntry({ state: 'available' }))).toBe(false);
+	it.each([
+		{ state: 'installed' as const, expected: true },
+		{ state: 'update_available' as const, expected: true },
+		{ state: 'available' as const, expected: false }
+	])('is $expected for state "$state"', ({ state, expected }) => {
+		expect(isInstalled(makeEntry({ state }))).toBe(expected);
 	});
 });
 
 describe('isFavorite', () => {
-	it('is true when the entry mod id is in the favorites set', () => {
+	it.each([
+		{ id: 'the entry mod id is in the favorites set', favorites: [47], expected: true },
+		{ id: 'the entry mod id is not in the favorites set', favorites: [50], expected: false },
+		{ id: 'the favorites set is empty', favorites: [], expected: false }
+	])('is $expected when $id', ({ favorites, expected }) => {
 		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
-		expect(isFavorite(entry, new Set([47]))).toBe(true);
-	});
-
-	it('is false when the entry mod id is not in the favorites set', () => {
-		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
-		expect(isFavorite(entry, new Set([50]))).toBe(false);
-	});
-
-	it('is false for an empty favorites set', () => {
-		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
-		expect(isFavorite(entry, new Set())).toBe(false);
+		expect(isFavorite(entry, new Set(favorites))).toBe(expected);
 	});
 });
 
 describe('matchesSearch', () => {
-	it('matches on mod name, case-insensitively', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Realistic Sound Mod', author: 'Zed' }) });
-		expect(matchesSearch(entry, 'realistic')).toBe(true);
-	});
-
-	it('matches on author, case-insensitively', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Something', author: 'Waffle.Lord' }) });
-		expect(matchesSearch(entry, 'WAFFLE')).toBe(true);
-	});
-
-	it('trims surrounding whitespace from the query before matching', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Realistic Sound Mod', author: 'Zed' }) });
-		expect(matchesSearch(entry, '  realistic  ')).toBe(true);
-	});
-
-	it('treats an empty query as matching everything', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Anything', author: 'Anyone' }) });
-		expect(matchesSearch(entry, '')).toBe(true);
-	});
-
-	it('treats a whitespace-only query as matching everything', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Anything', author: 'Anyone' }) });
-		expect(matchesSearch(entry, '   ')).toBe(true);
-	});
-
-	it('returns false when neither name nor author contains the query', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Realistic Sound Mod', author: 'Zed' }) });
-		expect(matchesSearch(entry, 'graphics')).toBe(false);
+	it.each([
+		{
+			id: 'the query matches the mod name case-insensitively',
+			name: 'Realistic Sound Mod',
+			author: 'Zed',
+			query: 'realistic',
+			expected: true
+		},
+		{
+			id: 'the query matches the author case-insensitively',
+			name: 'Something',
+			author: 'Waffle.Lord',
+			query: 'WAFFLE',
+			expected: true
+		},
+		{
+			id: 'the query has surrounding whitespace, which is trimmed',
+			name: 'Realistic Sound Mod',
+			author: 'Zed',
+			query: '  realistic  ',
+			expected: true
+		},
+		{
+			id: 'the query is empty',
+			name: 'Anything',
+			author: 'Anyone',
+			query: '',
+			expected: true
+		},
+		{
+			id: 'the query is whitespace only',
+			name: 'Anything',
+			author: 'Anyone',
+			query: '   ',
+			expected: true
+		},
+		{
+			id: 'neither name nor author contains the query',
+			name: 'Realistic Sound Mod',
+			author: 'Zed',
+			query: 'graphics',
+			expected: false
+		}
+	])('is $expected when $id', ({ name, author, query, expected }) => {
+		const entry = makeEntry({ mod: makeMod({ name, author }) });
+		expect(matchesSearch(entry, query)).toBe(expected);
 	});
 });
 
@@ -310,56 +316,76 @@ describe('filterEntries', () => {
 });
 
 describe('rowState', () => {
-	it('is "disabled" for an installed mod whose name is in disabledMods', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Foo Bar' }), state: 'installed' });
-		expect(rowState(entry, ['Foo Bar'])).toBe('disabled');
-	});
-
-	it('"disabled" takes precedence over "update_available"', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Foo Bar' }), state: 'update_available' });
-		expect(rowState(entry, ['Foo Bar'])).toBe('disabled');
-	});
-
-	it('"disabled" name matching is case-insensitive', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Foo Bar' }), state: 'installed' });
-		expect(rowState(entry, ['fOO bAR'])).toBe('disabled');
-	});
-
-	it('"update_available" takes precedence over "active" when not disabled', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Not Disabled' }), state: 'update_available' });
-		expect(rowState(entry, [])).toBe('update_available');
-	});
-
-	it('is "active" for an installed entry that is not disabled and has no update', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Not Disabled' }), state: 'installed' });
-		expect(rowState(entry, [])).toBe('active');
-	});
-
-	it('is "incompatible" for an available entry with no latest_version', () => {
+	it.each([
+		{
+			id: 'an installed mod whose name is in disabledMods',
+			state: 'installed' as const,
+			latestVersion: makeVersion(),
+			disabledMods: ['Foo Bar'],
+			expected: 'disabled'
+		},
+		{
+			id: 'a disabled mod that also has an update available',
+			state: 'update_available' as const,
+			latestVersion: makeVersion(),
+			disabledMods: ['Foo Bar'],
+			expected: 'disabled'
+		},
+		{
+			id: 'a disabledMods name differing only in case',
+			state: 'installed' as const,
+			latestVersion: makeVersion(),
+			disabledMods: ['fOO bAR'],
+			expected: 'disabled'
+		},
+		{
+			id: 'an update-available mod that is not disabled',
+			state: 'update_available' as const,
+			latestVersion: makeVersion(),
+			disabledMods: [],
+			expected: 'update_available'
+		},
+		{
+			id: 'an installed mod that is not disabled and has no update',
+			state: 'installed' as const,
+			latestVersion: makeVersion(),
+			disabledMods: [],
+			expected: 'active'
+		},
+		{
+			id: 'an available entry with no latest_version',
+			state: 'available' as const,
+			latestVersion: null,
+			disabledMods: [],
+			expected: 'incompatible'
+		},
+		{
+			id: 'an available entry with a latest_version',
+			state: 'available' as const,
+			latestVersion: makeVersion(),
+			disabledMods: [],
+			expected: 'available'
+		},
+		{
+			id: 'an installed mod with only an unrelated name in disabledMods',
+			state: 'installed' as const,
+			latestVersion: makeVersion(),
+			disabledMods: ['Some Other Mod'],
+			expected: 'active'
+		},
+		{
+			id: 'an installed mod with an empty disabledMods list',
+			state: 'installed' as const,
+			latestVersion: makeVersion(),
+			disabledMods: [],
+			expected: 'active'
+		}
+	])('is "$expected" for $id', ({ state, latestVersion, disabledMods, expected }) => {
 		const entry = makeEntry({
-			mod: makeMod({ name: 'Not Disabled' }),
-			state: 'available',
-			latest_version: null
+			mod: makeMod({ name: 'Foo Bar' }),
+			state,
+			latest_version: latestVersion
 		});
-		expect(rowState(entry, [])).toBe('incompatible');
-	});
-
-	it('is "available" for an available entry with a latest_version', () => {
-		const entry = makeEntry({
-			mod: makeMod({ name: 'Not Disabled' }),
-			state: 'available',
-			latest_version: makeVersion()
-		});
-		expect(rowState(entry, [])).toBe('available');
-	});
-
-	it('an unrelated disabled-mods entry does not mark the row disabled', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Foo Bar' }), state: 'installed' });
-		expect(rowState(entry, ['Some Other Mod'])).toBe('active');
-	});
-
-	it('an empty disabledMods list never marks a row disabled', () => {
-		const entry = makeEntry({ mod: makeMod({ name: 'Foo Bar' }), state: 'installed' });
-		expect(rowState(entry, [])).toBe('active');
+		expect(rowState(entry, disabledMods)).toBe(expected);
 	});
 });

@@ -3,9 +3,10 @@ import {
 	categoryLabel,
 	characterLabel,
 	formatProfileList,
-	groupRemovalsByProfile
+	groupRemovalsByProfile,
+	groupResiduesByProfile
 } from './cleanup';
-import type { ProfileResidue } from './api/client';
+import type { ProfileResidue, ProfileSummary } from './api/client';
 
 type ResidueCategory = ProfileResidue['category'];
 
@@ -121,5 +122,71 @@ describe('formatProfileList', () => {
 		expect(formatProfileList(['bob', 'alice', 'carol'])).toBe(
 			'bob.json, alice.json and carol.json'
 		);
+	});
+});
+
+function makeSummary(overrides: Partial<ProfileSummary> = {}): ProfileSummary {
+	return {
+		file: 'bob.json',
+		profile_id: 'bob',
+		nickname: 'Bob',
+		level: 5,
+		side: 'Usec',
+		modified: '2026-01-02T03:04:05+00:00',
+		readable: true,
+		error: '',
+		...overrides
+	};
+}
+
+describe('groupResiduesByProfile', () => {
+	it('returns one group per profile, in the order the profiles come in', () => {
+		const profiles = [
+			makeSummary({ file: 'bob.json', profile_id: 'bob' }),
+			makeSummary({ file: 'alice.json', profile_id: 'alice' })
+		];
+
+		const groups = groupResiduesByProfile(profiles, {});
+
+		expect(groups.map((group) => group.profile.profile_id)).toEqual(['bob', 'alice']);
+		expect(groups.map((group) => group.mods)).toEqual([[], []]);
+	});
+
+	it('keeps only the residues of the profile the group belongs to', () => {
+		const profiles = [
+			makeSummary({ file: 'bob.json', profile_id: 'bob' }),
+			makeSummary({ file: 'alice.json', profile_id: 'alice' })
+		];
+		const residues = {
+			SomeMod: [
+				makeResidue({ profile: 'bob', category: 'item' }),
+				makeResidue({ profile: 'alice', category: 'quest' })
+			]
+		};
+
+		const groups = groupResiduesByProfile(profiles, residues);
+
+		expect(groups[0].mods).toEqual([
+			{ mod: 'SomeMod', residues: [makeResidue({ profile: 'bob', category: 'item' })] }
+		]);
+		expect(groups[1].mods).toEqual([
+			{ mod: 'SomeMod', residues: [makeResidue({ profile: 'alice', category: 'quest' })] }
+		]);
+	});
+
+	it('drops mods that left nothing in the profile', () => {
+		const profiles = [makeSummary({ file: 'bob.json', profile_id: 'bob' })];
+		const residues = {
+			Touching: [makeResidue({ profile: 'bob' })],
+			Elsewhere: [makeResidue({ profile: 'alice' })]
+		};
+
+		const groups = groupResiduesByProfile(profiles, residues);
+
+		expect(groups[0].mods.map((entry) => entry.mod)).toEqual(['Touching']);
+	});
+
+	it('returns no groups when there are no profiles', () => {
+		expect(groupResiduesByProfile([], { SomeMod: [makeResidue()] })).toEqual([]);
 	});
 });

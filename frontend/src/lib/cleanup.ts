@@ -1,4 +1,4 @@
-import type { ProfileResidue } from './api/client';
+import type { ProfileResidue, ProfileSummary } from './api/client';
 
 type ResidueCategory = ProfileResidue['category'];
 
@@ -71,4 +71,29 @@ export function formatProfileList(profiles: string[]): string {
 		return files.join('');
 	}
 	return `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}`;
+}
+
+export interface ModResidues {
+	mod: string;
+	residues: ProfileResidue[];
+}
+
+export interface ProfileGroup {
+	profile: ProfileSummary;
+	mods: ModResidues[];
+}
+
+export function groupResiduesByProfile(
+	profiles: ProfileSummary[],
+	residues: Record<string, ProfileResidue[]>
+): ProfileGroup[] {
+	return profiles.map((profile) => ({
+		profile,
+		mods: Object.entries(residues)
+			.map(([mod, found]) => ({
+				mod,
+				residues: found.filter((residue) => residue.profile === profile.profile_id)
+			}))
+			.filter((entry) => entry.residues.length > 0)
+	}));
 }

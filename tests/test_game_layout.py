@@ -334,20 +334,18 @@ def test_read_core_json_version_none_for_an_empty_string_value(
 # ============================================================================
 
 
-def test_read_pe_file_version_reads_file_version(tmp_path: Path) -> None:
-    exe = tmp_path / "SPT.Server.exe"
-    exe.write_bytes(_build_synthetic_exe("4.1.2", "FileVersion"))
-
-    assert read_pe_file_version(exe) == "4.1.2"
-
-
-def test_read_pe_file_version_falls_back_to_product_version(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("key_name", "version"),
+    [("FileVersion", "4.1.2"), ("ProductVersion", "4.0.9")],
+    ids=["file-version", "falls-back-to-product-version"],
+)
+def test_read_pe_file_version_reads_the_version_resource(
+    tmp_path: Path, key_name: str, version: str
 ) -> None:
     exe = tmp_path / "SPT.Server.exe"
-    exe.write_bytes(_build_synthetic_exe("4.0.9", "ProductVersion"))
+    exe.write_bytes(_build_synthetic_exe(version, key_name))
 
-    assert read_pe_file_version(exe) == "4.0.9"
+    assert read_pe_file_version(exe) == version
 
 
 def test_read_pe_file_version_none_for_garbage_bytes(tmp_path: Path) -> None:
@@ -423,41 +421,35 @@ def _build_layout_and_repo(
     return layout, repo
 
 
-def test_resolve_spt_version_prefers_core_json_over_pe_and_stored(
+@pytest.mark.parametrize(
+    ("core_version", "exe_version", "stored", "expected"),
+    [
+        ("9.9.9", "1.1.1", "2.2.2", "9.9.9"),
+        (None, "1.1.1", "2.2.2", "1.1.1"),
+        (None, None, "2.2.2", "2.2.2"),
+        (None, None, None, None),
+    ],
+    ids=[
+        "prefers-core-json",
+        "falls-back-to-pe",
+        "falls-back-to-stored",
+        "none-when-chain-empty",
+    ],
+)
+def test_resolve_spt_version_walks_the_fallback_chain(
     tmp_path: Path,
+    core_version: str | None,
+    exe_version: str | None,
+    stored: str | None,
+    expected: str | None,
 ) -> None:
     layout, repo = _build_layout_and_repo(
-        tmp_path, core_version="9.9.9", exe_version="1.1.1"
+        tmp_path, core_version=core_version, exe_version=exe_version
     )
-    store_spt_version(repo, "2.2.2")
+    if stored is not None:
+        store_spt_version(repo, stored)
 
-    assert resolve_spt_version(layout, repo) == "9.9.9"
-
-
-def test_resolve_spt_version_falls_back_to_pe_when_core_json_has_no_version(
-    tmp_path: Path,
-) -> None:
-    layout, repo = _build_layout_and_repo(tmp_path, exe_version="1.1.1")
-    store_spt_version(repo, "2.2.2")
-
-    assert resolve_spt_version(layout, repo) == "1.1.1"
-
-
-def test_resolve_spt_version_falls_back_to_stored_when_core_json_and_pe_are_absent(
-    tmp_path: Path,
-) -> None:
-    layout, repo = _build_layout_and_repo(tmp_path)
-    store_spt_version(repo, "2.2.2")
-
-    assert resolve_spt_version(layout, repo) == "2.2.2"
-
-
-def test_resolve_spt_version_none_when_the_whole_chain_is_empty(
-    tmp_path: Path,
-) -> None:
-    layout, repo = _build_layout_and_repo(tmp_path)
-
-    assert resolve_spt_version(layout, repo) is None
+    assert resolve_spt_version(layout, repo) == expected
 
 
 # ============================================================================

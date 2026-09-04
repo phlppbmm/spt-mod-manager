@@ -15,19 +15,16 @@ from sptmod.core.favorites import (
 # --- default_favorites_path ------------------------------------------------
 
 
-def test_default_favorites_path_lives_under_the_platformdirs_config_dir(
+def test_default_favorites_path_honors_xdg_config_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """If the body is `pass`, this fails: result is None, not the expected path."""
-    config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.favorites.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
+    config_home = tmp_path / "config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
 
     result = default_favorites_path()
 
-    assert result == config_dir / "favorites.json"
+    assert result == config_home / "sptmod" / "favorites.json"
 
 
 def test_favorites_file_name_constant_is_favorites_json() -> None:

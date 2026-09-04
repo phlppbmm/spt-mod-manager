@@ -37,16 +37,12 @@ def test_is_game_dir_true_for_valid_layout(tmp_path: Path) -> None:
     assert is_game_dir(game_dir) is True
 
 
-def test_is_game_dir_false_when_spt_missing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("present_dir", ["BepInEx", "SPT"])
+def test_is_game_dir_false_when_a_required_dir_is_missing(
+    tmp_path: Path, present_dir: str
+) -> None:
     game_dir = tmp_path / "game"
-    (game_dir / "BepInEx").mkdir(parents=True)
-
-    assert is_game_dir(game_dir) is False
-
-
-def test_is_game_dir_false_when_bepinex_missing(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    (game_dir / "SPT").mkdir(parents=True)
+    (game_dir / present_dir).mkdir(parents=True)
 
     assert is_game_dir(game_dir) is False
 
@@ -68,17 +64,12 @@ def test_validate_game_dir_accepts_valid_layout(tmp_path: Path) -> None:
     validate_game_dir(game_dir)  # must not raise
 
 
-def test_validate_game_dir_raises_when_spt_missing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("present_dir", ["BepInEx", "SPT"])
+def test_validate_game_dir_raises_when_a_required_dir_is_missing(
+    tmp_path: Path, present_dir: str
+) -> None:
     game_dir = tmp_path / "game"
-    (game_dir / "BepInEx").mkdir(parents=True)
-
-    with pytest.raises(NotAGameDirError):
-        validate_game_dir(game_dir)
-
-
-def test_validate_game_dir_raises_when_bepinex_missing(tmp_path: Path) -> None:
-    game_dir = tmp_path / "game"
-    (game_dir / "SPT").mkdir(parents=True)
+    (game_dir / present_dir).mkdir(parents=True)
 
     with pytest.raises(NotAGameDirError):
         validate_game_dir(game_dir)
@@ -136,9 +127,7 @@ def test_is_game_process_name_rejects_unrelated_processes(name: str) -> None:
 def test_ensure_game_not_running_passes_when_no_processes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "sptmod.core.game_dir.running_game_processes", lambda: []
-    )
+    monkeypatch.setattr("sptmod.core.game_dir.running_game_processes", lambda: [])
 
     ensure_game_not_running()  # must not raise
 

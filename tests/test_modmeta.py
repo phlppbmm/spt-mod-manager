@@ -90,49 +90,30 @@ def test_read_package_json_missing_file_raises(tmp_path: Path) -> None:
         read_package_json(mod_dir)
 
 
-def test_read_package_json_missing_name_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "NoName"
-    _write_package_json(mod_dir, {"version": "1.0.0"})
-
-    with pytest.raises(InvalidMetadataError):
-        read_package_json(mod_dir)
-
-
-def test_read_package_json_empty_name_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "EmptyName"
-    _write_package_json(mod_dir, {"name": "", "version": "1.0.0"})
-
-    with pytest.raises(InvalidMetadataError):
-        read_package_json(mod_dir)
-
-
-def test_read_package_json_non_string_name_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "NonStringName"
-    _write_package_json(mod_dir, {"name": 123, "version": "1.0.0"})
-
-    with pytest.raises(InvalidMetadataError):
-        read_package_json(mod_dir)
-
-
-def test_read_package_json_missing_version_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "NoVersion"
-    _write_package_json(mod_dir, {"name": "NoVersion"})
-
-    with pytest.raises(InvalidMetadataError):
-        read_package_json(mod_dir)
-
-
-def test_read_package_json_empty_version_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "EmptyVersion"
-    _write_package_json(mod_dir, {"name": "EmptyVersion", "version": ""})
-
-    with pytest.raises(InvalidMetadataError):
-        read_package_json(mod_dir)
-
-
-def test_read_package_json_non_string_version_raises(tmp_path: Path) -> None:
-    mod_dir = tmp_path / "NonStringVersion"
-    _write_package_json(mod_dir, {"name": "NonStringVersion", "version": 100})
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"version": "1.0.0"},
+        {"name": "", "version": "1.0.0"},
+        {"name": 123, "version": "1.0.0"},
+        {"name": "Mod"},
+        {"name": "Mod", "version": ""},
+        {"name": "Mod", "version": 100},
+    ],
+    ids=[
+        "name-missing",
+        "name-empty",
+        "name-non-string",
+        "version-missing",
+        "version-empty",
+        "version-non-string",
+    ],
+)
+def test_read_package_json_invalid_mandatory_field_raises(
+    tmp_path: Path, content: dict[str, object]
+) -> None:
+    mod_dir = tmp_path / "Mod"
+    _write_package_json(mod_dir, content)
 
     with pytest.raises(InvalidMetadataError):
         read_package_json(mod_dir)
@@ -292,46 +273,32 @@ def test_mod_info_from_commit_returns_none_for_unrelated_trailers() -> None:
     assert mod_info_from_commit(commit) is None
 
 
-def test_mod_info_from_commit_raises_on_invalid_mod_type() -> None:
+@pytest.mark.parametrize(
+    ("trailer", "value"),
+    [("Mod-Type", "not-a-type"), ("Mod-State", "not-a-state")],
+    ids=["invalid-mod-type", "invalid-mod-state"],
+)
+def test_mod_info_from_commit_raises_on_an_out_of_enum_trailer(
+    trailer: str, value: str
+) -> None:
+    trailers = {
+        "Mod": "SAIN",
+        "Mod-Version": "3.2.1",
+        "Mod-Type": "hybrid",
+        "Mod-Author": "Solarint",
+        "Mod-SPT": "~4.1.0",
+        "Mod-Source": "",
+        "Mod-Forge-Id": "",
+        "Mod-Forge-Version-Id": "",
+        "Mod-Guid": "",
+        "Mod-State": "installed",
+    }
+    trailers[trailer] = value
     commit = CommitInfo(
         hash="abc1234",
         subject="mod: SAIN 3.2.1",
         date=datetime(2026, 1, 1, tzinfo=UTC),
-        trailers={
-            "Mod": "SAIN",
-            "Mod-Version": "3.2.1",
-            "Mod-Type": "not-a-type",
-            "Mod-Author": "Solarint",
-            "Mod-SPT": "~4.1.0",
-            "Mod-Source": "",
-            "Mod-Forge-Id": "",
-            "Mod-Forge-Version-Id": "",
-            "Mod-Guid": "",
-            "Mod-State": "installed",
-        },
-    )
-
-    with pytest.raises(InvalidMetadataError):
-        mod_info_from_commit(commit)
-
-
-def test_mod_info_from_commit_raises_on_invalid_mod_state() -> None:
-    commit = CommitInfo(
-        hash="abc1234",
-        subject="mod: SAIN 3.2.1",
-        date=datetime(2026, 1, 1, tzinfo=UTC),
-        trailers={
-            "Mod": "SAIN",
-            "Mod-Version": "3.2.1",
-            "Mod-Type": "hybrid",
-            "Mod-Author": "Solarint",
-            "Mod-SPT": "~4.1.0",
-            "Mod-Source": "",
-            "Mod-Forge-Id": "",
-            "Mod-Forge-Version-Id": "",
-            "Mod-Guid": "",
-            "Mod-State": "not-a-state",
-        },
+        trailers=trailers,
     )
 
     with pytest.raises(InvalidMetadataError):
@@ -400,12 +367,19 @@ def test_build_trailers_roundtrips_with_variant_fields(
         ("1.2.2", "<=1.2.3"),
         ("1.2.2", "<1.2.3"),
         ("1.2.3", "*"),
+        ("0.0.1", "*"),
+        ("999.999.999", "*"),
         ("1.5.9", "1.x"),
+        ("1.9.9", "1.x"),
         ("1.2.3", "1.2.x"),
+        ("1.2.9", "1.2.x"),
         ("1.5.0", "1.x"),
         ("1.0.0", ">=1.0.0 <2.0.0"),
         ("1.0.0", ""),
+        ("0.0.1", ""),
         ("1.5.0", "1"),
+        ("1.0.0", "1"),
+        ("1.5.3", "1"),
         ("1.5.3", "1.5"),
     ],
 )
@@ -435,32 +409,7 @@ def test_version_matches_false_cases(version: str, range_spec: str) -> None:
     assert version_matches(version, range_spec) is False
 
 
-def test_version_matches_x_range_major_only() -> None:
-    assert version_matches("1.9.9", "1.x") is True
-    assert version_matches("2.0.0", "1.x") is False
-
-
-def test_version_matches_x_range_minor() -> None:
-    assert version_matches("1.2.9", "1.2.x") is True
-    assert version_matches("1.3.0", "1.2.x") is False
-
-
-def test_version_matches_wildcard_matches_everything() -> None:
-    assert version_matches("0.0.1", "*") is True
-    assert version_matches("999.999.999", "*") is True
-
-
-def test_version_matches_empty_range_matches_everything() -> None:
-    assert version_matches("0.0.1", "") is True
-
-
-def test_version_matches_omitted_minor_and_patch() -> None:
-    assert version_matches("1.0.0", "1") is True
-    assert version_matches("1.5.3", "1") is True
-    assert version_matches("2.0.0", "1") is False
-
-
-def test_version_matches_leading_v_on_version() -> None:
+def test_version_matches_leading_v_on_the_version_argument() -> None:
     assert version_matches("v1.2.3", "1.2.3") is True
 
 

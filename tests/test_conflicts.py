@@ -133,14 +133,13 @@ def test_check_file_conflicts_keeps_the_order_of_target_files(
 
 
 def test_check_file_conflicts_propagates_git_error(
-    clean_repo: Repo, install_commit, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo, install_commit
 ) -> None:
+    """A broken repository surfaces as an error instead of a silent finding."""
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
-
-    def _boom(path: Path) -> None:
-        raise GitError("git log failed")
-
-    monkeypatch.setattr(clean_repo, "last_touching", _boom)
+    (clean_repo.path / ".git" / "HEAD").write_text(
+        "ref: refs/heads/gone\n", encoding="utf-8"
+    )
 
     with pytest.raises(GitError):
         check_file_conflicts(clean_repo, [Path("BepInEx/plugins/ModA.dll")])
@@ -216,9 +215,7 @@ def test_check_dll_duplicates_ignores_dlls_outside_bepinex_plugins(
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"lib")
 
-    findings = check_dll_duplicates(
-        fake_game_dir, [Path("SPT/user/mods/ModC/Lib.dll")]
-    )
+    findings = check_dll_duplicates(fake_game_dir, [Path("SPT/user/mods/ModC/Lib.dll")])
 
     assert findings == []
 

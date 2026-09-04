@@ -89,7 +89,12 @@ def is_locked(game_dir: Path) -> bool:
 
 @contextmanager
 def game_lock(
-    game_dir: Path, operation: str, progress: Progress | None = None
+    game_dir: Path,
+    operation: str,
+    progress: Progress | None = None,
+    *,
+    timeout: float | None = None,
+    poll_interval: float | None = None,
 ) -> Iterator[None]:
     """Hold the exclusive right to change ``game_dir`` for the block.
 
@@ -102,12 +107,20 @@ def game_lock(
         game_dir: The game directory to guard.
         operation: The plain-language description of the current work.
         progress: Callback informed while waiting for another operation.
+        timeout: Maximum seconds to wait for another operation to finish.
+        poll_interval: Seconds between two attempts to take the lock.
 
     Raises:
         OperationInProgressError: another operation still held the game
             directory after the maximum waiting time.
     """
-    handle = _acquire(game_dir / LOCK_FILE_NAME, operation, progress)
+    handle = _acquire(
+        game_dir / LOCK_FILE_NAME,
+        operation,
+        progress,
+        _LOCK_TIMEOUT_SECONDS if timeout is None else timeout,
+        _LOCK_POLL_SECONDS if poll_interval is None else poll_interval,
+    )
     try:
         yield
     finally:
@@ -115,9 +128,15 @@ def game_lock(
         os.close(handle)
 
 
-def _acquire(lock: Path, operation: str, progress: Progress | None) -> int:
+def _acquire(
+    lock: Path,
+    operation: str,
+    progress: Progress | None,
+    timeout: float,
+    poll_interval: float,
+) -> int:
     """Take the lock, returning the open file the lock is held on."""
-    deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
     announced: float | None = None
     handle = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
@@ -138,7 +157,7 @@ def _acquire(lock: Path, operation: str, progress: Progress | None) -> int:
                     percent=0,
                     message=f"waiting for another operation to finish ({holder})",
                 )
-            time.sleep(_LOCK_POLL_SECONDS)
+            time.sleep(poll_interval)
     except BaseException:
         os.close(handle)
         raise

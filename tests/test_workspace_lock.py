@@ -11,6 +11,7 @@ read-only calls are never blocked, and the lock file never surfaces in
 ``status()``/``is_clean()``.
 """
 
+import fcntl
 import json
 import os
 import threading
@@ -22,7 +23,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from sptmod.core import game_dir, services, workspace
+from sptmod.core import game_dir, services
 from sptmod.core.errors import OperationInProgressError
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import (
@@ -59,16 +60,21 @@ def _write_lock(path: Path, *, pid: int, operation: str = "") -> Path:
 
 @contextmanager
 def _held(path: Path, raw_content: str) -> Iterator[Path]:
-    """Really hold the lock on ``path`` with ``raw_content`` in its file."""
+    """Really hold the lock on ``path`` with ``raw_content`` in its file.
+
+    Takes the same operating-system lock the production code takes, directly
+    on the lock file, so the lock content can be an attacker-chosen raw
+    string the public API would never write.
+    """
     lock = path / LOCK_FILE_NAME
     handle = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        assert workspace._try_lock(handle), "the lock was not free"
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.truncate(handle, 0)
         os.write(handle, raw_content.encode("utf-8"))
         yield lock
     finally:
-        workspace._unlock(handle)
+        fcntl.flock(handle, fcntl.LOCK_UN)
         os.close(handle)
 
 
@@ -258,9 +264,8 @@ def test_release_leaves_the_lock_file_and_its_content_in_place(
 
 
 def test_a_waiter_takes_the_lock_right_after_the_holder_releases(
-    clean_repo: Repo, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo,
 ) -> None:
-    monkeypatch.setattr(workspace, "_LOCK_POLL_SECONDS", 0.05)
     release_after = 0.3
     holder_ready = threading.Event()
 
@@ -274,7 +279,7 @@ def test_a_waiter_takes_the_lock_right_after_the_holder_releases(
     assert holder_ready.wait(timeout=1.0)
 
     started = time.monotonic()
-    with game_lock(clean_repo.path, "new run"):
+    with game_lock(clean_repo.path, "new run", poll_interval=0.05):
         elapsed = time.monotonic() - started
     holder.join(timeout=1.0)
 
@@ -291,15 +296,12 @@ def test_a_waiter_takes_the_lock_right_after_the_holder_releases(
     ids=["invalid-json", "empty-object", "json-array", "empty-file", "invalid-utf8"],
 )
 def test_invalid_or_empty_lock_content_of_a_holder_waits_then_times_out(
-    clean_repo: Repo, monkeypatch: pytest.MonkeyPatch, raw_content: str
+    clean_repo: Repo, raw_content: str
 ) -> None:
-    monkeypatch.setattr(workspace, "_LOCK_TIMEOUT_SECONDS", 0.3)
-    monkeypatch.setattr(workspace, "_LOCK_POLL_SECONDS", 0.05)
-
     with (
         _held(clean_repo.path, raw_content),
         pytest.raises(OperationInProgressError) as excinfo,
-        game_lock(clean_repo.path, "new run"),
+        game_lock(clean_repo.path, "new run", timeout=0.3, poll_interval=0.05),
     ):
         pass
 
@@ -310,15 +312,17 @@ def test_invalid_or_empty_lock_content_of_a_holder_waits_then_times_out(
 
 
 def test_timeout_error_message_names_the_blocking_operation(
-    clean_repo: Repo, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo,
 ) -> None:
-    monkeypatch.setattr(workspace, "_LOCK_TIMEOUT_SECONDS", 0.3)
-    monkeypatch.setattr(workspace, "_LOCK_POLL_SECONDS", 0.05)
-
     with (
         _held(clean_repo.path, _holder_content("installing SAIN")),
         pytest.raises(OperationInProgressError) as excinfo,
-        game_lock(clean_repo.path, "installing something else"),
+        game_lock(
+            clean_repo.path,
+            "installing something else",
+            timeout=0.3,
+            poll_interval=0.05,
+        ),
     ):
         pass
 
@@ -332,10 +336,8 @@ def test_timeout_error_message_names_the_blocking_operation(
 
 
 def test_waiting_for_a_held_lock_emits_a_progress_event(
-    clean_repo: Repo, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo,
 ) -> None:
-    monkeypatch.setattr(workspace, "_LOCK_TIMEOUT_SECONDS", 0.3)
-    monkeypatch.setattr(workspace, "_LOCK_POLL_SECONDS", 0.05)
     calls: list[tuple[str, int, str]] = []
 
     with (
@@ -347,6 +349,8 @@ def test_waiting_for_a_held_lock_emits_a_progress_event(
             progress=lambda step, percent, message: calls.append(
                 (step, percent, message)
             ),
+            timeout=0.3,
+            poll_interval=0.05,
         ),
     ):
         pass

@@ -9,7 +9,6 @@ browser folder-picker selection back to an absolute, verified path.
 
 import os
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -119,24 +118,12 @@ def locate_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_locate_directory_search_roots_are_patchable_not_hardcoded(
-    locate_root: Path,
-) -> None:
-    # Pins that services._locate_roots is the injection seam controlling
-    # where locate_directory searches, rather than a hardcoded root list:
-    # patching it away from the real filesystem must fully redirect the
-    # search to the patched roots.
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("SPT", ["BepInEx", "cache"])
-
-    assert [match.path for match in matches] == [locate_root / "parent_b" / "SPT"]
-
-
 def test_locate_directory_returns_only_the_fingerprint_matching_directory(
     locate_root: Path,
 ) -> None:
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("SPT", ["BepInEx", "cache"])
+    matches = services.locate_directory(
+        "SPT", ["BepInEx", "cache"], roots=[locate_root]
+    )
 
     assert len(matches) == 1
     assert matches[0].path == locate_root / "parent_b" / "SPT"
@@ -146,8 +133,7 @@ def test_locate_directory_returns_only_the_fingerprint_matching_directory(
 def test_locate_directory_empty_fingerprint_matches_by_name_only(
     locate_root: Path,
 ) -> None:
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("SPT", [])
+    matches = services.locate_directory("SPT", [], roots=[locate_root])
 
     assert sorted(match.path for match in matches) == sorted(
         [locate_root / "parent_a" / "SPT", locate_root / "parent_b" / "SPT"]
@@ -157,8 +143,7 @@ def test_locate_directory_empty_fingerprint_matches_by_name_only(
 def test_locate_directory_returns_an_empty_list_when_nothing_matches(
     locate_root: Path,
 ) -> None:
-    with mock.patch.object(services, "_locate_roots", return_value=[locate_root]):
-        matches = services.locate_directory("NoSuchDirectoryName", [])
+    matches = services.locate_directory("NoSuchDirectoryName", [], roots=[locate_root])
 
     assert matches == []
 

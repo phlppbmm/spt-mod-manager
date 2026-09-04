@@ -67,10 +67,12 @@ def test_spec_request_resolves_the_same_named_camel_case_request_model(
 
 # Keyword-only parameters install_from_archive accepts for internal callers
 # (install_mod fills them from the resolved plan) but does not expose on its
-# RPC request; every other function's request fields exactly match its
-# service parameters minus progress/client.
+# RPC request; locate_directory likewise accepts search roots only in-process.
+# Every other function's request fields exactly match its service parameters
+# minus progress/client.
 _INTERNAL_ONLY_PARAMS: dict[str, set[str]] = {
     "install_from_archive": {"forge_id", "forge_version_id", "source"},
+    "locate_directory": {"roots"},
 }
 
 

@@ -11,6 +11,7 @@ manual-mod blocker; a modified *tracked* file inside an owned directory still
 blocks.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -28,9 +29,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _clean_repo(path: Path) -> Repo:
     repo = Repo.init(detect_layout(path))
-    repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
 
 
@@ -201,8 +200,13 @@ def test_install_still_blocks_on_a_modified_tracked_file_inside_an_owned_dir(
 # --- remove/disable: runtime data is deleted with the mod --------------------
 
 
-def test_remove_mod_deletes_runtime_data_and_the_now_empty_directory(
-    clean_repo: Repo, install_commit
+@pytest.mark.parametrize(
+    "action",
+    [services.remove_mod, services.disable_mod],
+    ids=["remove_mod", "disable_mod"],
+)
+def test_removing_or_disabling_deletes_runtime_data_and_the_now_empty_directory(
+    action: Callable[[Path, str], object], clean_repo: Repo, install_commit
 ) -> None:
     install_commit(
         clean_repo,
@@ -220,14 +224,19 @@ def test_remove_mod_deletes_runtime_data_and_the_now_empty_directory(
     nested_runtime.parent.mkdir(parents=True)
     nested_runtime.write_text("nested leftover", encoding="utf-8")
 
-    services.remove_mod(clean_repo.path, "ClientMod")
+    action(clean_repo.path, "ClientMod")
 
     assert not (clean_repo.path / "BepInEx/plugins/ClientMod").exists()
     assert (clean_repo.path / "BepInEx/plugins").is_dir()
 
 
-def test_remove_mod_deletes_runtime_data_in_a_patcher_dir_but_keeps_patchers_root(
-    clean_repo: Repo, install_commit
+@pytest.mark.parametrize(
+    "action",
+    [services.remove_mod, services.disable_mod],
+    ids=["remove_mod", "disable_mod"],
+)
+def test_removing_or_disabling_clears_a_patcher_dir_but_keeps_the_patchers_root(
+    action: Callable[[Path, str], object], clean_repo: Repo, install_commit
 ) -> None:
     install_commit(
         clean_repo,
@@ -240,52 +249,7 @@ def test_remove_mod_deletes_runtime_data_in_a_patcher_dir_but_keeps_patchers_roo
     nested_runtime.parent.mkdir(parents=True)
     nested_runtime.write_bytes(b"nested cache data")
 
-    services.remove_mod(clean_repo.path, "PatchMod")
-
-    assert not (clean_repo.path / "BepInEx/patchers/PatchMod").exists()
-    assert (clean_repo.path / "BepInEx/patchers").is_dir()
-
-
-def test_disable_mod_deletes_runtime_data_and_the_now_empty_directory(
-    clean_repo: Repo, install_commit
-) -> None:
-    install_commit(
-        clean_repo,
-        "ClientMod",
-        files={
-            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
-            "BepInEx/plugins/ClientMod/sub/tracked.json": "tracked content",
-        },
-    )
-    runtime_file = clean_repo.path / "BepInEx/plugins/ClientMod/Editor.json"
-    runtime_file.write_text("generated", encoding="utf-8")
-    nested_runtime = (
-        clean_repo.path / "BepInEx/plugins/ClientMod/sub/other/leftover.txt"
-    )
-    nested_runtime.parent.mkdir(parents=True)
-    nested_runtime.write_text("nested leftover", encoding="utf-8")
-
-    services.disable_mod(clean_repo.path, "ClientMod")
-
-    assert not (clean_repo.path / "BepInEx/plugins/ClientMod").exists()
-    assert (clean_repo.path / "BepInEx/plugins").is_dir()
-
-
-def test_disable_mod_deletes_runtime_data_in_a_patcher_dir_but_keeps_patchers_root(
-    clean_repo: Repo, install_commit
-) -> None:
-    install_commit(
-        clean_repo,
-        "PatchMod",
-        files={"BepInEx/patchers/PatchMod/PatchMod.dll": "v1"},
-    )
-    runtime_file = clean_repo.path / "BepInEx/patchers/PatchMod/cache.bin"
-    runtime_file.write_bytes(b"binary cache data")
-    nested_runtime = clean_repo.path / "BepInEx/patchers/PatchMod/sub/nested.bin"
-    nested_runtime.parent.mkdir(parents=True)
-    nested_runtime.write_bytes(b"nested cache data")
-
-    services.disable_mod(clean_repo.path, "PatchMod")
+    action(clean_repo.path, "PatchMod")
 
     assert not (clean_repo.path / "BepInEx/patchers/PatchMod").exists()
     assert (clean_repo.path / "BepInEx/patchers").is_dir()

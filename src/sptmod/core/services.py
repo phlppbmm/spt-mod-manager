@@ -498,7 +498,12 @@ def list_directories(path: str | Path | None = None) -> DirectoryListing:
     )
 
 
-def locate_directory(name: str, fingerprint: Sequence[str]) -> list[LocatedDirectory]:
+def locate_directory(
+    name: str,
+    fingerprint: Sequence[str],
+    *,
+    roots: Sequence[Path] | None = None,
+) -> list[LocatedDirectory]:
     """Find directories named ``name`` that contain every ``fingerprint`` entry.
 
     The browser hands a folder picker's selection over as a folder name plus a
@@ -508,6 +513,8 @@ def locate_directory(name: str, fingerprint: Sequence[str]) -> list[LocatedDirec
     and notoriously deep directories. The search stops after
     :data:`_LOCATE_MAX_RESULTS` matches or :data:`_LOCATE_TIME_BUDGET` seconds.
 
+    ``roots`` replaces those default search roots with the given directories.
+
     Raises:
         InvalidPathError: ``name`` is empty or contains a path separator.
     """
@@ -516,7 +523,10 @@ def locate_directory(name: str, fingerprint: Sequence[str]) -> list[LocatedDirec
     deadline = time.monotonic() + _LOCATE_TIME_BUDGET
     found: list[LocatedDirectory] = []
     seen: set[Path] = set()
-    for root in _locate_roots():
+    search_roots = (
+        _locate_roots() if roots is None else [root for root in roots if root.is_dir()]
+    )
+    for root in search_roots:
         for candidate in _walk_for_name(root, name, deadline):
             if candidate in seen:
                 continue

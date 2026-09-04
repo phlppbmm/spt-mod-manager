@@ -5,6 +5,7 @@ Covers ``sync_catalog``, ``search_catalog`` and ``browse_catalog`` in
 commands built on top of them.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -502,34 +503,29 @@ def _blocked_db_path(tmp_path: Path) -> Path:
     return blocked / "catalog.db"
 
 
-def test_search_catalog_raises_catalog_unavailable_not_os_error(
-    fake_game_dir: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(
+            lambda path, db: services.search_catalog(path, query="", db_path=db),
+            id="search_catalog",
+        ),
+        pytest.param(
+            lambda path, db: services.browse_catalog(path, db_path=db),
+            id="browse_catalog",
+        ),
+        pytest.param(
+            # A dummy client is enough: Catalog(db_path) must fail before the
+            # client is ever used to talk to Forge.
+            lambda path, db: services.sync_catalog(path, db_path=db, client=object()),
+            id="sync_catalog",
+        ),
+    ],
+)
+def test_catalog_reads_raise_catalog_unavailable_not_os_error(
+    call: Callable[[Path, Path], object], fake_game_dir: Path, tmp_path: Path
 ) -> None:
     _clean_repo(fake_game_dir)
 
     with pytest.raises(CatalogUnavailableError):
-        services.search_catalog(
-            fake_game_dir, query="", db_path=_blocked_db_path(tmp_path)
-        )
-
-
-def test_browse_catalog_raises_catalog_unavailable_not_os_error(
-    fake_game_dir: Path, tmp_path: Path
-) -> None:
-    _clean_repo(fake_game_dir)
-
-    with pytest.raises(CatalogUnavailableError):
-        services.browse_catalog(fake_game_dir, db_path=_blocked_db_path(tmp_path))
-
-
-def test_sync_catalog_raises_catalog_unavailable_not_os_error(
-    fake_game_dir: Path, tmp_path: Path
-) -> None:
-    # A dummy client is enough: Catalog(db_path) must fail before the client
-    # is ever used to talk to Forge.
-    _clean_repo(fake_game_dir)
-
-    with pytest.raises(CatalogUnavailableError):
-        services.sync_catalog(
-            fake_game_dir, db_path=_blocked_db_path(tmp_path), client=object()
-        )
+        call(fake_game_dir, _blocked_db_path(tmp_path))

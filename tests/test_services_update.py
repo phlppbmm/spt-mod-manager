@@ -496,99 +496,82 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
     }
 
 
-def test_update_mod_with_no_update_available_is_a_friendly_noop(
-    clean_repo: Repo,
-    client_factory,
-    respx_router: respx.MockRouter,
-    db_path: Path,
-    install_commit,
-) -> None:
-    install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
-    )
-    _mock_updates(
-        respx_router,
-        {
-            "spt_version": SPT_VERSION,
-            "updates": [],
-            "blocked_updates": [],
-            "up_to_date": [
-                {
-                    "id": 100,
-                    "mod_id": 10,
-                    "guid": None,
-                    "name": "CoolMod",
-                    "version": "1.0.0",
-                    "spt_versions": [SPT_VERSION],
-                }
-            ],
-            "incompatible_with_spt": [],
-        },
-    )
-    client = client_factory()
-    commits_before = len(clean_repo.log())
-
-    result = services.update_mod(
-        clean_repo.path, "CoolMod", db_path=db_path, client=client
-    )
-
-    assert result.version == ""
-    assert result.commit == ""
-    assert result.previous_version == "1.0.0"
-    assert result.notice != ""
-    assert len(clean_repo.log()) == commits_before
-
-
-def test_update_mod_blocked_update_is_a_noop_with_notice(
-    clean_repo: Repo,
-    client_factory,
-    respx_router: respx.MockRouter,
-    db_path: Path,
-    install_commit,
-) -> None:
-    install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
-    )
-    _mock_updates(
-        respx_router,
-        {
-            "spt_version": SPT_VERSION,
-            "updates": [],
-            "blocked_updates": [
-                {
-                    "current_version": _current_version(
-                        id=100,
-                        mod_id=10,
-                        name="CoolMod",
-                        version="1.0.0",
-                    ),
-                    "latest_version": {
-                        "id": 200,
-                        "version": "2.0.0",
+@pytest.mark.parametrize(
+    ("mod_version", "payload"),
+    [
+        pytest.param(
+            "1.0.0",
+            {
+                "spt_version": SPT_VERSION,
+                "updates": [],
+                "blocked_updates": [],
+                "up_to_date": [
+                    {
+                        "id": 100,
+                        "mod_id": 10,
+                        "guid": None,
+                        "name": "CoolMod",
+                        "version": "1.0.0",
                         "spt_versions": [SPT_VERSION],
-                    },
-                    "block_reason": "Conflicting mod dependency.",
-                    "blocking_mods": [],
-                }
-            ],
-            "up_to_date": [],
-            "incompatible_with_spt": [],
-        },
-    )
-    client = client_factory()
-    commits_before = len(clean_repo.log())
-
-    result = services.update_mod(
-        clean_repo.path, "CoolMod", db_path=db_path, client=client
-    )
-
-    assert result.commit == ""
-    assert result.version == ""
-    assert result.notice != ""
-    assert len(clean_repo.log()) == commits_before
-
-
-def test_update_mod_incompatible_is_a_noop_with_notice(
+                    }
+                ],
+                "incompatible_with_spt": [],
+            },
+            id="up_to_date",
+        ),
+        pytest.param(
+            "1.0.0",
+            {
+                "spt_version": SPT_VERSION,
+                "updates": [],
+                "blocked_updates": [
+                    {
+                        "current_version": _current_version(
+                            id=100,
+                            mod_id=10,
+                            name="CoolMod",
+                            version="1.0.0",
+                        ),
+                        "latest_version": {
+                            "id": 200,
+                            "version": "2.0.0",
+                            "spt_versions": [SPT_VERSION],
+                        },
+                        "block_reason": "Conflicting mod dependency.",
+                        "blocking_mods": [],
+                    }
+                ],
+                "up_to_date": [],
+                "incompatible_with_spt": [],
+            },
+            id="blocked",
+        ),
+        pytest.param(
+            "0.9.0",
+            {
+                "spt_version": SPT_VERSION,
+                "updates": [],
+                "blocked_updates": [],
+                "up_to_date": [],
+                "incompatible_with_spt": [
+                    {
+                        "id": 100,
+                        "mod_id": 10,
+                        "guid": None,
+                        "name": "CoolMod",
+                        "version": "0.9.0",
+                        "reason": "No version for this SPT release.",
+                        "latest_compatible_version": "1.0.0",
+                    }
+                ],
+            },
+            id="incompatible",
+        ),
+    ],
+)
+def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
+    mod_version: str,
+    payload: dict[str, object],
     clean_repo: Repo,
     client_factory,
     respx_router: respx.MockRouter,
@@ -596,28 +579,9 @@ def test_update_mod_incompatible_is_a_noop_with_notice(
     install_commit,
 ) -> None:
     install_commit(
-        clean_repo, "CoolMod", "0.9.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", mod_version, mod_type="server", **{"Mod-Forge-Id": "10"}
     )
-    _mock_updates(
-        respx_router,
-        {
-            "spt_version": SPT_VERSION,
-            "updates": [],
-            "blocked_updates": [],
-            "up_to_date": [],
-            "incompatible_with_spt": [
-                {
-                    "id": 100,
-                    "mod_id": 10,
-                    "guid": None,
-                    "name": "CoolMod",
-                    "version": "0.9.0",
-                    "reason": "No version for this SPT release.",
-                    "latest_compatible_version": "1.0.0",
-                }
-            ],
-        },
-    )
+    _mock_updates(respx_router, payload)
     client = client_factory()
     commits_before = len(clean_repo.log())
 
@@ -625,8 +589,9 @@ def test_update_mod_incompatible_is_a_noop_with_notice(
         clean_repo.path, "CoolMod", db_path=db_path, client=client
     )
 
-    assert result.commit == ""
     assert result.version == ""
+    assert result.commit == ""
+    assert result.previous_version == mod_version
     assert result.notice != ""
     assert len(clean_repo.log()) == commits_before
 

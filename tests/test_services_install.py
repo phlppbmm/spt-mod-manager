@@ -252,9 +252,7 @@ def test_install_reports_progress_steps_in_order_with_monotonic_percent(
     services.install_from_archive(
         clean_repo.path,
         archive,
-        progress=lambda step, percent, message: calls.append(
-            (step, percent, message)
-        ),
+        progress=lambda step, percent, message: calls.append((step, percent, message)),
     )
 
     assert calls, "progress callback was never invoked"
@@ -405,49 +403,47 @@ def test_pure_server_real_corpus_shape_without_package_json_installs(
     assert (clean_repo.path / "SPT/user/mods/betterkeys/betterkeys.dll").is_file()
 
 
+@pytest.mark.parametrize(
+    ("archive_name", "files", "expected_name"),
+    [
+        pytest.param(
+            "SAIN.zip",
+            {
+                "BepInEx/plugins/SAIN/SAIN.dll": b"main-dll",
+                "BepInEx/plugins/SAIN/SAIN.Preset.Shared.dll": b"preset-dll",
+            },
+            "SAIN",
+            # Real-corpus shape (SAIN.4.5.0.zip): the derived name must be the
+            # archive stem "SAIN", not the alphabetically first DLL
+            # ("SAIN.Preset.Shared").
+            id="sain-real-corpus",
+        ),
+        pytest.param(
+            "Tyfon-UIFixes-6.0.2.zip",
+            {
+                "BepInEx/plugins/Tyfon.UIFixes.dll": b"main-dll",
+                "BepInEx/plugins/Tyfon.UIFixes.Net.dll": b"net-dll",
+            },
+            "UIFixes",
+            # Real-corpus shape (Tyfon-UIFixes-6.0.2.zip): the archive-stem
+            # match must resolve to "UIFixes", not the alphabetically first
+            # DLL ("Tyfon.UIFixes.Net").
+            id="tyfon-real-corpus",
+        ),
+    ],
+)
 def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem(
-    clean_repo: Repo, tmp_path: Path
+    archive_name: str,
+    files: dict[str, str | bytes],
+    expected_name: str,
+    clean_repo: Repo,
+    tmp_path: Path,
 ) -> None:
-    """Real-corpus shape (SAIN.4.5.0.zip): two DLLs ship in the plugin folder,
-    ``SAIN.dll`` and ``SAIN.Preset.Shared.dll``. The archive stem is ``SAIN``,
-    so the derived mod name must be ``SAIN`` -- not whichever DLL happens to
-    sort first alphabetically (currently ``SAIN.Preset.Shared``).
-    """
-    archive = _named_zip(
-        tmp_path,
-        "SAIN.zip",
-        {
-            "BepInEx/plugins/SAIN/SAIN.dll": b"main-dll",
-            "BepInEx/plugins/SAIN/SAIN.Preset.Shared.dll": b"preset-dll",
-        },
-    )
+    archive = _named_zip(tmp_path, archive_name, files)
 
     result = services.install_from_archive(clean_repo.path, archive)
 
-    assert result.mod.name == "SAIN"
-
-
-def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem_tyfon(
-    clean_repo: Repo, tmp_path: Path
-) -> None:
-    """Real-corpus shape (Tyfon-UIFixes-6.0.2.zip): ``Tyfon.UIFixes.dll`` and
-    ``Tyfon.UIFixes.Net.dll`` ship side by side. Per the task's acceptance
-    criteria the archive-stem match must resolve the mod name to
-    ``UIFixes`` (currently ``Tyfon.UIFixes.Net``, the alphabetically-first
-    DLL).
-    """
-    archive = _named_zip(
-        tmp_path,
-        "Tyfon-UIFixes-6.0.2.zip",
-        {
-            "BepInEx/plugins/Tyfon.UIFixes.dll": b"main-dll",
-            "BepInEx/plugins/Tyfon.UIFixes.Net.dll": b"net-dll",
-        },
-    )
-
-    result = services.install_from_archive(clean_repo.path, archive)
-
-    assert result.mod.name == "UIFixes"
+    assert result.mod.name == expected_name
 
 
 def test_install_auto_snapshots_changed_profiles_instead_of_failing(

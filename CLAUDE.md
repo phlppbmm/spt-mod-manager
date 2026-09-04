@@ -64,7 +64,8 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 **Read `docs/ARCHITECTURE.md` first in any fresh session** — it is the
 authoritative current state, including every verified deviation from the
 original spec. `docs/FORGE_API.md` is the verified API contract;
-`docs/HANDOFF.md` is the original (German, partially superseded) spec.
+`docs/HANDOFF.md` is the product specification (rewritten in English from
+the original handoff; its History section lists what changed).
 
 sptmod: a git-based mod manager for Single Player Tarkov. Python core +
 typer CLI + Tauri v2 desktop app (RPC) + Svelte 5 frontend (stage 1); stage 2
@@ -75,14 +76,14 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (~1,180 tests)
+uv run pytest                        # full suite (1194 collected)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run mypy --strict src
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
 cd frontend && pnpm vitest run --coverage  # frontend coverage (v8, 100%)
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
-cargo llvm-cov --package sptmod-desktop --lib --tests --summary-only  # Rust coverage (91%)
+cd src-tauri && cargo llvm-cov       # Rust coverage (70.54% lines)
 
 # after changing service functions or request/response schemas:
 uv run python -m sptmod.server.dump_openapi openapi.json

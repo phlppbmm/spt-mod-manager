@@ -32,7 +32,8 @@ This file supersedes the provisional endpoint/field names in docs/HANDOFF.md §3
 
 - Success: `{"success": true, "data": ...}` (+ `links`/`meta` on paginated lists).
 - Error: `{"success": false, "code": "<CODE>", "message": "<text>"}`; codes seen:
-  `VALIDATION_FAILED` (400), `NOT_FOUND` (404). 429 from throttle middleware (body shape undocumented).
+  `VALIDATION_FAILED` (400), `NOT_FOUND` (404). 429 from throttle middleware (body shape
+  undocumented); `Retry-After` is delay-seconds only (not HTTP-date form).
 - Pagination: `page`, `per_page` (default 12, server clamps to max 50). Envelope
   `links {first,last,prev,next}`, `meta {current_page,from,last_page,path,per_page,to,total}`;
   `meta.total` may lag up to 60s (cached).

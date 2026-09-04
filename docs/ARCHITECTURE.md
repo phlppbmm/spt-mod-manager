@@ -7,8 +7,9 @@ specification. Read order for a new session:
 
 1. This file (current truth).
 2. `docs/FORGE_API.md` (verified Forge API contract; supersedes HANDOFF §3a).
-3. `docs/HANDOFF.md` (the original German spec — historical intent; where it
-   conflicts with this file or FORGE_API.md, those win).
+3. `docs/HANDOFF.md` (product specification in English; History section lists
+   changes from the original German version; conflicts defer to this file or
+   FORGE_API.md).
 
 ## What sptmod is
 
@@ -40,7 +41,9 @@ src/sptmod/
     profile.py          profile residue detection from install commits (§7)
     services.py         all user-facing operations as pure functions
     workspace.py        staging dir for downloads/extraction, apply lock
+    favorites.py        list and persist per-user favorited mod IDs
     forge/
+      __init__.py       package docstring only
       client.py         the ONLY module allowed to use httpx; Forge v0 client
       catalog.py        SQLite cache (config dir), sync/search/classify
       cache.py          persistent archive cache (download resumption, LRU)
@@ -48,12 +51,15 @@ src/sptmod/
       resolve.py        install plans over /mods/dependencies
   cli.py                typer adapter; exceptions -> exit codes; rich tables
   server/
+    __init__.py         RPC and OpenAPI dispatch package
     rpc.py              hidden CLI command `sptmod rpc <name>` (RPC stdin/stdout)
     schemas.py          Pydantic mirror of the core dataclasses (THE contract)
     errors.py           RPC error mapping and exit codes
     dump_openapi.py     python -m sptmod.server.dump_openapi openapi.json
 src-tauri/              Tauri v2 desktop app
   src/
+    lib.rs              Tauri builder, plugin registration, command generation
+    main.rs             application entry point
     rpc.rs              #[tauri::command] generic invoke handler
     driver.rs           spawns `sptmod rpc <name>` as child process
   tests/
@@ -61,13 +67,16 @@ src-tauri/              Tauri v2 desktop app
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
 Cargo.toml              workspace (members: src-tauri)
 frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
+  src/lib/index.ts           re-exports of public API
+  src/lib/updateall.ts       bulk update orchestration
+  src/lib/gamedir.ts         game directory path resolution
   src/lib/api/transport.ts   uses Tauri `invoke()` and `listen()` (not fetch)
   src/lib/api/types.ts       GENERATED from openapi.json — never hand-edit
   src/lib/api/client.ts      typed wrappers per RPC function
   src/lib/modfilter.ts       pure tab/search/sort logic (unit-tested)
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog
   src/routes/                / (setup or mods), /history, /profile, /settings
-docs/HANDOFF.md         original spec (German); partially superseded
+docs/HANDOFF.md         product specification (English; History lists changes)
 docs/FORGE_API.md       verified API reference (canonical host sp-mod.com)
 openapi.json            committed contract dump; frontend types derive from it
 _data/mods/             untracked corpus of 21 real mod archives for local runs
@@ -277,6 +286,9 @@ download cache.
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
+- RPC functions: 28 service functions (declared as `FUNCTIONS: [&str; 28]` in
+  rpc.rs); the frontend client.ts has 26 camelCase wrappers (`install_from_archive`
+  and `adopt_mod` are RPC-exposed but have no wrapper or frontend caller yet).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
 - Setup flow is ONE step (path — no login). Folder picking: native OS dialog
@@ -301,19 +313,20 @@ behavior-focused; do not weaken them to make an implementation fit.
 
 ### Suite sizes and coverage
 
-- **Python:** ~1,180 tests; `uv run pytest --cov` enforces 100% coverage (line
-  and branch) on `src/sptmod` (coverage config in pyproject.toml). Run
-  `uv run pytest` without --cov for development (no speed penalty, coverage
-  excluded from default pytest addopts so single-file runs stay usable).
+- **Python:** 1194 collected (1193 passed, 1 skipped); `uv run pytest --cov`
+  enforces 100% coverage (line and branch) on `src/sptmod` (coverage config in
+  pyproject.toml). Run `uv run pytest` without --cov for development (no speed
+  penalty, coverage excluded from default pytest addopts so single-file runs
+  stay usable).
 - **Frontend:** 136 vitest cases in 5 files; `cd frontend && pnpm vitest run
   --coverage` enforces 100% statements/branches/functions/lines on `src/lib/**/*.ts`
   (minus `*.test.ts` and generated `api/types.ts`; v8 provider). Coverage directory
   ignored in git.
-- **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov
-  --package sptmod-desktop --lib --tests --summary-only` reports 91% coverage
-  in driver.rs (remaining 9% = async resume points llvm-cov cannot attribute +
-  error path in `child.wait()`; rpc.rs's `#[tauri::command] rpc()` glue is covered
-  only by the `#[ignore]` e2e test, which needs Wry display).
+- **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
+  reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume
+  points llvm-cov cannot attribute + error path in `child.wait()`). rpc.rs's
+  `#[tauri::command] rpc()` glue is covered only by the `#[ignore]` e2e test,
+  which needs Wry display.
 - Svelte components and routes have no tests (file-based, not unit-testable
   without environment setup). To add: `@testing-library/svelte` or
   vitest-browser-svelte + jsdom/happy-dom/Playwright in vite.config.ts + Tauri

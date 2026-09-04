@@ -13,8 +13,10 @@ run it against an installation you cannot afford to lose.
 ## What it is
 
 - **Git-based.** `sptmod init` turns the SPT installation into a repository with a whitelist
-  `.gitignore` (only `SPT/user/mods/`, `SPT/user/profiles/` and `BepInEx/plugins/`,
-  `BepInEx/config/` are tracked — logs, caches and game data stay out).
+  `.gitignore` that includes `<runtime>/user/mods/**`,
+  `<runtime>/user/profiles/*.json`, `BepInEx/plugins/**`, `BepInEx/config/**`,
+  and `BepInEx/patchers/**` (where `<runtime>` is detected per game version:
+  `SPT_Runtime/` for 4.1+ or `SPT/` for 4.0).
 - **Every install is revertible.** Each mod is one commit with `Mod-*` trailers; removing or
   disabling a mod is a revert, enabling it again is a cherry-pick. Nothing is moved into a
   `.disabled` folder, the history is the state.
@@ -29,7 +31,8 @@ run it against an installation you cannot afford to lose.
 
 - Python 3.12 or newer and [uv](https://docs.astral.sh/uv/)
 - `git` on the `PATH`
-- An SPT installation containing `SPT/` and `BepInEx/`
+- An SPT installation (version 4.0+) with either `SPT/` or `SPT_Runtime/` directory and
+  `BepInEx/` directory
 
 ## Install
 
@@ -127,13 +130,13 @@ cache resets and game directory switches.
 
 | Command | What it does |
 |---|---|
-| `sptmod init [PATH] [--yes]` | Validate the SPT directory, write the whitelist `.gitignore`, create the initial commit, adopt pre-existing mods. |
-| `sptmod install MOD [--version] [--force]` | Install a mod from the Forge catalog with its missing dependencies, one commit each. |
+| `sptmod init [PATH] [--yes] [--spt-version]` | Validate the SPT directory, write the whitelist `.gitignore`, create the initial commit, adopt pre-existing mods. |
+| `sptmod install MOD [--version] [--force] [--yes]` | Install a mod from the Forge catalog with its missing dependencies, one commit each. |
 | `sptmod install --file ARCHIVE [--name] [--version] [--force]` | Install mods from local `.7z`/`.zip`/`.rar` archives. |
 | `sptmod update [NAME...] [--check] [--force] [--yes]` | Update installed mods to the versions Forge recommends; `--check` only reports them. |
 | `sptmod list [--all]` | Active mods; `--all` includes disabled and removed ones. |
 | `sptmod files NAME` | Files belonging to a mod. |
-| `sptmod remove NAME [--force]` | Revert the mod's files after the profile check. |
+| `sptmod remove NAME [--force] [--yes]` | Revert the mod's files after the profile check. |
 | `sptmod disable NAME` / `sptmod enable NAME` | Take a mod out of the game directory and bring it back. |
 | `sptmod adopt PATH [--name] [--version]` | Take a manually installed mod folder or DLL into the repository. |
 | `sptmod status` | Interpret the working tree: changed profiles, changed configs, manually installed mods. |

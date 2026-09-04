@@ -525,6 +525,12 @@
 		opacity: 0.6;
 	}
 
+	@media (max-width: 1000px) {
+		.row > :nth-child(n + 5):nth-child(-n + 7) {
+			display: none;
+		}
+	}
+
 	.name {
 		display: flex;
 		align-items: center;

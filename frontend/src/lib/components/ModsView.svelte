@@ -272,9 +272,19 @@
 	}
 
 	.list {
-		--mods-grid: minmax(12rem, 3fr) 6rem 6rem 6rem 6rem 7rem 6rem 9rem minmax(12rem, auto);
+		--mods-grid: minmax(12rem, 1fr) 5rem 5rem 6rem 5.5rem 5.5rem 5rem 7.5rem 8rem;
 		border: 1px solid #2c3138;
 		border-radius: 4px;
+	}
+
+	@media (max-width: 1000px) {
+		.list {
+			--mods-grid: minmax(10rem, 1fr) 5rem 5rem 6rem 7.5rem 8rem;
+		}
+
+		.head > :nth-child(n + 5):nth-child(-n + 7) {
+			display: none;
+		}
 	}
 
 	.head {

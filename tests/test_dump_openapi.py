@@ -9,6 +9,7 @@ absence of JSON ``null`` anywhere).
 
 import inspect
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -106,6 +107,27 @@ def test_dump_openapi_run_as_a_module_writes_the_built_document(
     assert target.is_file()
     written = json.loads(target.read_text(encoding="utf-8"))
     assert written == build_openapi()
+
+
+def test_run_module_as_main_writes_the_built_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Runs the actual `if __name__ == "__main__":` guard in-process (unlike
+    # the subprocess test above, which the coverage run driving this suite
+    # cannot see into): if that guard's `sys.exit(main(sys.argv[1:]))` line
+    # were removed, running the module as __main__ would do nothing, so no
+    # file would appear and this fails.
+    target = tmp_path / "generated.json"
+    monkeypatch.setattr(sys, "argv", ["dump_openapi", str(target)])
+
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_module(
+            "sptmod.server.dump_openapi", run_name="__main__", alter_sys=True
+        )
+
+    assert exit_info.value.code == 0
+    assert target.is_file()
+    assert json.loads(target.read_text(encoding="utf-8")) == build_openapi()
 
 
 def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(

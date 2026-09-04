@@ -212,9 +212,10 @@ def find_anchor(extracted_root: Path) -> ArchiveLayout:
     precedence over bare anchors of the same kind.
 
     Raises:
-        ArchiveError: no anchor was found. The message lists the first 30
-            archive entries (or fewer if the archive is smaller); if there are
-            more, it reports the count.
+        ArchiveError: no anchor was found, or the anchored trees hold no file
+            at all. The no-anchor message lists the first 30 archive entries
+            (or fewer if the archive is smaller); if there are more, it
+            reports the count.
     """
     server_mappings, client_mappings = _find_anchors(extracted_root)
     if not server_mappings and not client_mappings:
@@ -234,6 +235,8 @@ def find_anchor(extracted_root: Path) -> ArchiveLayout:
         for path in sorted(mapping.source.rglob("*")):
             if path.is_file():
                 files.append(mapping.target / path.relative_to(mapping.source))
+    if not files:
+        raise ArchiveError("The archive contains no mod files.")
 
     return ArchiveLayout(mod_type=mod_type, mappings=mappings, files=files)
 

@@ -797,7 +797,8 @@ def install_from_archive(
         NotAGameDirError: ``path`` is no SPT game directory.
         DirtyTreeError: the working tree has uncommitted or untracked changes.
         GameRunningError: the SPT server or client is running.
-        ArchiveError: the archive is unreadable, unsafe or has no anchor.
+        ArchiveError: the archive is unreadable, unsafe, has no anchor or
+            holds no mod file.
         InvalidMetadataError: mandatory mod metadata is missing.
         ConflictError: a file or DLL conflict blocks the install and ``force``
             is not set.

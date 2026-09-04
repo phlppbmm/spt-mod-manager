@@ -171,5 +171,4 @@ cargo tauri dev                      # hot reload during development
 - Sibling cases parametrized with descriptive ids; coverage exclusions only via
   the two `exclude_also` patterns in pyproject (sys.platform, TYPE_CHECKING).
   No `# pragma: no cover`; unreachable defensive code is deleted.
-- A strict `xfail` may pin a known production bug only with a bead reference
-  (currently: spt-mod-manager-6o4).
+- A strict `xfail` may pin a known production bug only with a bead reference.

@@ -360,35 +360,17 @@ def test_install_rolls_back_copied_files_when_source_trailer_is_rejected(
     assert clean_repo.is_clean() is True
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: a file-less mod anchor (an archive folder with no files, only "
-        "given a name/version via overrides) makes layout.files empty, so "
-        "when Repo.commit then rejects the empty paths sequence, "
-        "_remove_copied(path, added=[], ...) has nothing to unlink and never "
-        "considers the copied directory itself, leaving an orphaned empty "
-        "mod folder behind -- contradicting the docstring promise that "
-        "'newly-copied files and empty parent directories are rolled back'."
-    ),
-    strict=True,
-)
-def test_install_rolls_back_when_repo_commit_itself_rejects_an_empty_path_list(
+def test_install_rejects_an_archive_whose_mod_folder_holds_no_file(
     clean_repo: Repo, make_archive
 ) -> None:
-    """Unlike the multiline-metadata test above (rejected in ``_read_meta``,
-    before anything is copied), this forces ``Repo.commit`` itself to fail
-    *after* the copy step: an archive with a trusted, file-less mod anchor
-    (only an empty directory) makes ``layout.files`` empty, and
-    ``Repo.commit`` raises GitError for an empty ``paths`` sequence
-    ("nothing to commit: no paths given"). ``name_override``/
-    ``version_override`` avoid the earlier InvalidMetadataError a file-less
-    archive would otherwise raise for missing metadata. This still exercises
-    the `except Exception: _remove_copied(...); raise` rollback path around
-    the commit call (it does re-raise correctly); the xfail below is the
-    file-less-directory gap in what that rollback actually cleans up."""
+    """A trusted anchor whose mod folder is an empty directory carries no file
+    to install, so the anchor step rejects it in plain language before
+    anything is copied: the game directory keeps no orphaned mod folder and
+    the tree stays clean. ``name_override``/``version_override`` would
+    otherwise carry such an archive past the metadata step."""
     archive = make_archive({"SPT/user/mods/EmptyMod/": b""}, "zip")
 
-    with pytest.raises(GitError):
+    with pytest.raises(ArchiveError) as error:
         services.install_from_archive(
             clean_repo.path,
             archive,
@@ -396,6 +378,7 @@ def test_install_rolls_back_when_repo_commit_itself_rejects_an_empty_path_list(
             version_override="1.0.0",
         )
 
+    assert str(error.value) == "The archive contains no mod files."
     assert not (clean_repo.path / "SPT/user/mods/EmptyMod").exists()
     assert clean_repo.is_clean() is True
 

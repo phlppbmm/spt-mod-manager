@@ -5,19 +5,93 @@
 //! in place of the real `sptmod` CLI binary, so no Python process is ever
 //! invoked here.
 
+use std::env::VarError;
+use std::ffi::OsString;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use serde_json::json;
 
 use sptmod_desktop_lib::driver::{self, ProgressEvent};
 use sptmod_desktop_lib::rpc::{RpcError, FUNCTIONS};
 
+/// Guards mutation of `driver::BINARY_ENV` (a process-global env var), so
+/// the env-var-dependent `binary_path` tests don't race each other if run
+/// concurrently.
+static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+/// Locks `ENV_GUARD`, recovering from poisoning instead of propagating it.
+/// A panic from one `assert_eq!` inside the case loop must not turn every
+/// later test in this binary into an unrelated `PoisonError` failure.
+fn lock_env_guard() -> MutexGuard<'static, ()> {
+    ENV_GUARD.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Guards every `driver::call` invocation in this suite so that at most one
+/// child process is being spawned at a time.
+///
+/// Spawning a subprocess (via `posix_spawn`/`vfork`) from multiple OS
+/// threads of the same process concurrently is subject to a known kernel/
+/// glibc race that can make an unrelated, freshly-written and already-
+/// closed script spuriously fail to exec with `ETXTBSY` ("Text file
+/// busy") — this was observed flaking this suite even after the stub
+/// script's write handle was fsync'd and closed before spawning. Since
+/// this suite's own tests are the only thing spawning processes here,
+/// serializing spawns eliminates the race without weakening what each
+/// test asserts about `driver::call`'s behavior.
+///
+/// `tokio::sync::Mutex` (rather than `std::sync::Mutex`) is used because
+/// the guard is held across `.await` points; an async-aware mutex avoids
+/// blocking the executor thread while waiting and keeps `clippy` quiet
+/// about holding a sync lock across an await.
+static SPAWN_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Restores an env var to its original value (present or absent) when
+/// dropped, even if the code between construction and drop panics.
+struct EnvVarRestore {
+    key: &'static str,
+    original: Result<OsString, VarError>,
+}
+
+impl EnvVarRestore {
+    fn capture(key: &'static str) -> Self {
+        Self {
+            key,
+            original: std::env::var_os(key).ok_or(VarError::NotPresent),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        match &self.original {
+            // SAFETY: all mutation of this env var in this test binary is
+            // serialized through `ENV_GUARD`, which is held for the whole
+            // lifetime of this guard.
+            Ok(value) => unsafe { std::env::set_var(self.key, value) },
+            Err(_) => unsafe { std::env::remove_var(self.key) },
+        }
+    }
+}
+
 /// Writes `contents` to `dir/name` and marks it executable (unix only, which
 /// matches the dev/CI environment this suite runs in).
+///
+/// The write handle is explicitly flushed, `fsync`ed and closed (via
+/// `File`'s `Drop`) *before* permissions are set and the path is handed
+/// back to a caller that may spawn it.
 fn write_script(dir: &Path, name: &str, contents: &str) -> PathBuf {
     let path = dir.join(name);
-    std::fs::write(&path, contents).expect("write stub script");
+    {
+        let mut file = std::fs::File::create(&path).expect("create stub script");
+        file.write_all(contents.as_bytes())
+            .expect("write stub script contents");
+        file.sync_all().expect("flush stub script to disk");
+        // `file` (and its write handle) is dropped/closed here, before any
+        // caller can spawn the script.
+    }
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&path, perms).unwrap();
@@ -41,6 +115,7 @@ async fn call_returns_stdin_payload_as_result_and_invokes_binary_with_rpc_and_na
     );
 
     let payload = json!({"path": "/mods/example", "recursive": true});
+    let _guard = SPAWN_GUARD.lock().await;
     let result = driver::call(&script, "list_mods", &payload, |_| {})
         .await
         .expect("stub returns Ok");
@@ -66,6 +141,7 @@ async fn call_reports_progress_events_in_order_and_ignores_interleaved_junk_line
     );
 
     let mut events = Vec::new();
+    let _guard = SPAWN_GUARD.lock().await;
     let result = driver::call(&script, "install_mod", &json!({}), |event| {
         events.push(event);
     })
@@ -104,6 +180,7 @@ async fn call_returns_rpc_error_with_details_preserved_on_error_line_and_exit_1(
          exit 1\n",
     );
 
+    let _guard = SPAWN_GUARD.lock().await;
     let error = driver::call(&script, "install_from_archive", &json!({}), |_| {})
         .await
         .expect_err("stub emits an error line");
@@ -125,6 +202,7 @@ async fn call_error_line_without_details_field_defaults_details_to_empty_object(
          exit 1\n",
     );
 
+    let _guard = SPAWN_GUARD.lock().await;
     let error = driver::call(&script, "install_mod", &json!({}), |_| {})
         .await
         .expect_err("stub emits an error line");
@@ -148,6 +226,7 @@ async fn call_returns_bad_output_with_exit_status_and_last_20_stderr_lines_on_ga
          exit 3\n",
     );
 
+    let _guard = SPAWN_GUARD.lock().await;
     let error = driver::call(&script, "status", &json!({}), |_| {})
         .await
         .expect_err("no parseable final line means bad_output");
@@ -180,6 +259,7 @@ async fn call_returns_bad_output_on_empty_stdout_with_exit_0() {
         "#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n",
     );
 
+    let _guard = SPAWN_GUARD.lock().await;
     let error = driver::call(&script, "status", &json!({}), |_| {})
         .await
         .expect_err("empty stdout produces no final line");
@@ -197,6 +277,7 @@ async fn call_returns_unreachable_when_binary_does_not_exist() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("no-such-sptmod-binary");
 
+    let _guard = SPAWN_GUARD.lock().await;
     let error = driver::call(&missing, "status", &json!({}), |_| {})
         .await
         .expect_err("spawning a missing binary must fail");
@@ -207,6 +288,80 @@ async fn call_returns_unreachable_when_binary_does_not_exist() {
         "message should name the binary path, got: {}",
         error.error
     );
+}
+
+#[tokio::test]
+async fn call_ignores_ndjson_line_with_unrecognized_event_value_and_still_finds_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = write_script(
+        dir.path(),
+        "stub.sh",
+        "#!/usr/bin/env bash\n\
+         cat >/dev/null\n\
+         echo '{\"event\":\"unknown\",\"anything\":true}'\n\
+         echo '{\"event\":\"result\",\"data\":42}'\n",
+    );
+
+    let mut events = Vec::new();
+    let _guard = SPAWN_GUARD.lock().await;
+    let result = driver::call(&script, "status", &json!({}), |event| {
+        events.push(event);
+    })
+    .await
+    .expect("stub returns Ok despite the unrecognized-event line");
+
+    assert_eq!(
+        events,
+        Vec::<ProgressEvent>::new(),
+        "a valid-JSON line with an unrecognized event value must not be reported as progress"
+    );
+    assert_eq!(result, json!(42));
+}
+
+#[test]
+fn binary_path_reads_sptmod_cli_env_var_or_falls_back_to_default_when_unset_or_empty() {
+    let _guard = lock_env_guard();
+    let _restore = EnvVarRestore::capture(driver::BINARY_ENV);
+
+    struct Case {
+        id: &'static str,
+        env_value: Option<&'static str>,
+        expected: &'static str,
+    }
+    let cases = [
+        Case {
+            id: "custom path set",
+            env_value: Some("/opt/custom/sptmod-cli"),
+            expected: "/opt/custom/sptmod-cli",
+        },
+        Case {
+            id: "unset",
+            env_value: None,
+            expected: driver::DEFAULT_BINARY,
+        },
+        Case {
+            id: "set to empty string",
+            env_value: Some(""),
+            expected: driver::DEFAULT_BINARY,
+        },
+    ];
+
+    for case in cases {
+        match case.env_value {
+            // SAFETY: serialized by ENV_GUARD; no other code in this test
+            // binary reads or writes SPTMOD_CLI concurrently.
+            Some(value) => unsafe { std::env::set_var(driver::BINARY_ENV, value) },
+            None => unsafe { std::env::remove_var(driver::BINARY_ENV) },
+        }
+        assert_eq!(
+            driver::binary_path(),
+            PathBuf::from(case.expected),
+            "case: {}",
+            case.id
+        );
+    }
+    // `_restore` (dropped here) restores the original SPTMOD_CLI value even
+    // if one of the assertions above had panicked.
 }
 
 #[test]

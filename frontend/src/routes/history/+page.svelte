@@ -15,6 +15,7 @@
 	} from '$lib/api/client';
 	import { ApiError } from '$lib/api/transport';
 	import { loadGameDir } from '$lib/gamedir';
+	import { cached, invalidate } from '$lib/viewcache';
 
 	const UNDOABLE_STATES: ModInfo['state'][] = ['installed', 'updated', 'enabled'];
 
@@ -29,6 +30,7 @@
 	let commits: CommitInfo[] = $state([]);
 	let modStates: Map<string, ModInfo['state']> = $state(new Map());
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let expanded: string | null = $state(null);
 	let files: ModFile[] = $state([]);
@@ -53,17 +55,33 @@
 		void load(stored);
 	});
 
+	function apply(log: CommitInfo[], mods: ModInfo[]): void {
+		commits = log;
+		modStates = new Map(mods.map((mod) => [mod.name.toLowerCase(), mod.state] as const));
+	}
+
 	async function load(gameDir: string): Promise<void> {
-		loading = true;
+		const historyView = cached(gameDir, 'history', [], () => history(gameDir));
+		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
+		const historyHit = historyView.value;
+		const modsHit = modsView.value;
+		if (historyHit !== undefined && modsHit !== undefined) {
+			apply(historyHit, modsHit);
+			loading = false;
+			refreshing = true;
+		} else {
+			loading = true;
+			refreshing = false;
+		}
 		error = '';
 		try {
-			const [log, mods] = await Promise.all([history(gameDir), listMods(gameDir, true)]);
-			commits = log;
-			modStates = new Map(mods.map((mod) => [mod.name.toLowerCase(), mod.state] as const));
+			const [log, mods] = await Promise.all([historyView.refresh(), modsView.refresh()]);
+			apply(log, mods);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -124,6 +142,7 @@
 			} else {
 				await disableMod(path, name);
 			}
+			invalidate(path);
 			await load(path);
 		} catch (cause) {
 			if (cause instanceof ApiError) {
@@ -151,6 +170,10 @@
 	{:else}
 		{#if error !== ''}
 			<p class="error">{error}</p>
+		{/if}
+
+		{#if refreshing}
+			<p class="hint">Refreshing…</p>
 		{/if}
 
 		<ul class="commits">
@@ -369,6 +392,12 @@
 	.kind {
 		color: #98a2ad;
 		margin-right: 0.4rem;
+	}
+
+	.hint {
+		margin: 0 0 0.4rem;
+		color: #98a2ad;
+		font-size: 0.85em;
 	}
 
 	.empty,

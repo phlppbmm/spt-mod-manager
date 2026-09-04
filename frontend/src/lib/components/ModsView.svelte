@@ -17,6 +17,7 @@
 		type SortKey
 	} from '$lib/modfilter';
 	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
+	import { cached, invalidate } from '$lib/viewcache';
 
 	interface Props {
 		path: string;
@@ -45,9 +46,11 @@
 	let entries: CatalogEntry[] = $state([]);
 	let mods: ModInfo[] = $state([]);
 	let loading = $state(false);
+	let refreshing = $state(false);
 	let error = $state('');
 	let reload = $state(0);
 	let requestId = 0;
+	let seenMutations: string | null = null;
 
 	let disabledMods = $derived(
 		mods.filter((mod) => mod.state === 'disabled').map((mod) => mod.name)
@@ -95,8 +98,30 @@
 	}
 
 	$effect(() => {
+		// Any mutating action bumps `reload` (mod rows) or `refreshKey` (page
+		// level), so the cached views for this game directory are stale then.
+		const mutations = `${refreshKey}:${reload}`;
+		if (seenMutations !== null && seenMutations !== mutations) {
+			invalidate(path);
+		}
+		seenMutations = mutations;
 		void load(path, compatibleOnly, search, refreshKey, reload);
 	});
+
+	function apply(
+		catalog: CatalogEntry[],
+		installed: ModInfo[],
+		favored: number[],
+		query: string
+	): void {
+		entries = catalog;
+		mods = installed;
+		favorites = favored;
+		// The update count must come from the full mod list, not from search results.
+		if (query === '') {
+			onupdatable(updatableFromCatalog(catalog, installed));
+		}
+	}
 
 	async function load(
 		gameDir: string,
@@ -106,26 +131,42 @@
 		_reload: number
 	): Promise<void> {
 		const request = ++requestId;
-		loading = true;
+		const trimmed = query.trim();
+		const catalogView =
+			trimmed === ''
+				? cached(gameDir, 'browse_catalog', [compatible], () =>
+						browseCatalog(gameDir, 'all', compatible)
+					)
+				: cached(gameDir, 'search_catalog', [trimmed, compatible], () =>
+						searchCatalog(gameDir, query, compatible)
+					);
+		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
+		const favoritesView = cached(gameDir, 'list_favorites', [], async () => {
+			const favored = await listFavorites();
+			return favored.mod_ids;
+		});
+		const catalogHit = catalogView.value;
+		const modsHit = modsView.value;
+		const favoritesHit = favoritesView.value;
+		if (catalogHit !== undefined && modsHit !== undefined && favoritesHit !== undefined) {
+			apply(catalogHit, modsHit, favoritesHit, trimmed);
+			loading = false;
+			refreshing = true;
+		} else {
+			loading = true;
+			refreshing = false;
+		}
 		error = '';
 		try {
 			const [catalog, installed, favored] = await Promise.all([
-				query.trim() === ''
-					? browseCatalog(gameDir, 'all', compatible)
-					: searchCatalog(gameDir, query, compatible),
-				listMods(gameDir, true),
-				listFavorites()
+				catalogView.refresh(),
+				modsView.refresh(),
+				favoritesView.refresh()
 			]);
 			if (request !== requestId) {
 				return;
 			}
-			entries = catalog;
-			mods = installed;
-			favorites = favored.mod_ids;
-			// The update count must come from the full mod list, not from search results.
-			if (query.trim() === '') {
-				onupdatable(updatableFromCatalog(catalog, installed));
-			}
+			apply(catalog, installed, favored, trimmed);
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
@@ -133,8 +174,14 @@
 		} finally {
 			if (request === requestId) {
 				loading = false;
+				refreshing = false;
 			}
 		}
+	}
+
+	function onFavorites(ids: number[]): void {
+		favorites = ids;
+		void cached(path, 'list_favorites', [], () => Promise.resolve(ids)).refresh();
 	}
 
 	function onRowBusy(modId: number, busy: boolean): void {
@@ -185,6 +232,10 @@
 		<p class="error">{error}</p>
 	{/if}
 
+	{#if refreshing}
+		<p class="hint">Refreshing…</p>
+	{/if}
+
 	<div class="list">
 		<div class="head">
 			<div class="index">#</div>
@@ -215,7 +266,7 @@
 					null}
 				{locked}
 				favorite={favoriteIds.has(entry.mod.id)}
-				onfavorite={(ids) => (favorites = ids)}
+				onfavorite={onFavorites}
 				onchanged={() => (reload += 1)}
 				onbusy={onRowBusy}
 			/>
@@ -320,6 +371,12 @@
 	.empty {
 		padding: 1rem;
 		color: #98a2ad;
+	}
+
+	.hint {
+		margin: 0 0 0.4rem;
+		color: #98a2ad;
+		font-size: 0.85em;
 	}
 
 	.error {

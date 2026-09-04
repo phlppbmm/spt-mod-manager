@@ -30,7 +30,6 @@
 	let commits: CommitInfo[] = $state([]);
 	let modStates: Map<string, ModInfo['state']> = $state(new Map());
 	let loading = $state(true);
-	let refreshing = $state(false);
 	let error = $state('');
 	let expanded: string | null = $state(null);
 	let files: ModFile[] = $state([]);
@@ -68,10 +67,8 @@
 		if (historyHit !== undefined && modsHit !== undefined) {
 			apply(historyHit, modsHit);
 			loading = false;
-			refreshing = true;
 		} else {
 			loading = true;
-			refreshing = false;
 		}
 		error = '';
 		try {
@@ -81,7 +78,6 @@
 			error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			loading = false;
-			refreshing = false;
 		}
 	}
 
@@ -170,10 +166,6 @@
 	{:else}
 		{#if error !== ''}
 			<p class="error">{error}</p>
-		{/if}
-
-		{#if refreshing}
-			<p class="hint">Refreshing…</p>
 		{/if}
 
 		<ul class="commits">
@@ -392,12 +384,6 @@
 	.kind {
 		color: #98a2ad;
 		margin-right: 0.4rem;
-	}
-
-	.hint {
-		margin: 0 0 0.4rem;
-		color: #98a2ad;
-		font-size: 0.85em;
 	}
 
 	.empty,

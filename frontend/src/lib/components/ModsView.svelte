@@ -46,7 +46,6 @@
 	let entries: CatalogEntry[] = $state([]);
 	let mods: ModInfo[] = $state([]);
 	let loading = $state(false);
-	let refreshing = $state(false);
 	let error = $state('');
 	let reload = $state(0);
 	let requestId = 0;
@@ -151,10 +150,8 @@
 		if (catalogHit !== undefined && modsHit !== undefined && favoritesHit !== undefined) {
 			apply(catalogHit, modsHit, favoritesHit, trimmed);
 			loading = false;
-			refreshing = true;
 		} else {
 			loading = true;
-			refreshing = false;
 		}
 		error = '';
 		try {
@@ -174,7 +171,6 @@
 		} finally {
 			if (request === requestId) {
 				loading = false;
-				refreshing = false;
 			}
 		}
 	}
@@ -230,10 +226,6 @@
 
 	{#if error !== ''}
 		<p class="error">{error}</p>
-	{/if}
-
-	{#if refreshing}
-		<p class="hint">Refreshing…</p>
 	{/if}
 
 	<div class="list">
@@ -371,12 +363,6 @@
 	.empty {
 		padding: 1rem;
 		color: #98a2ad;
-	}
-
-	.hint {
-		margin: 0 0 0.4rem;
-		color: #98a2ad;
-		font-size: 0.85em;
 	}
 
 	.error {

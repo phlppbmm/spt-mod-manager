@@ -496,3 +496,38 @@ def test_version_matches_uppercase_x_wildcard() -> None:
 def test_version_matches_prerelease_version_argument_raises() -> None:
     with pytest.raises(UnsupportedRangeError):
         version_matches("1.2.3-beta", "1.2.3")
+
+
+# --- edge cases in the numeric-part / comparator / caret parsing -----------
+
+
+@pytest.mark.parametrize(
+    ("version", "range_spec"),
+    [("v", "1.2.3"), ("1.2.3", "v")],
+    ids=["bare-v-as-version", "bare-v-as-range-token"],
+)
+def test_version_matches_bare_v_with_nothing_after_it_raises(
+    version: str, range_spec: str
+) -> None:
+    with pytest.raises(UnsupportedRangeError):
+        version_matches(version, range_spec)
+
+
+def test_version_matches_bare_equals_comparator_true() -> None:
+    assert version_matches("1.2.3", "=1.2.3") is True
+
+
+def test_version_matches_bare_equals_comparator_false() -> None:
+    assert version_matches("1.2.4", "=1.2.3") is False
+
+
+def test_version_matches_caret_with_no_numeric_parts_matches_everything() -> None:
+    # "^x" reduces to zero numeric parts, which _token_matches treats the
+    # same as an unconstrained caret range.
+    assert version_matches("5.3.1", "^x") is True
+    assert version_matches("0.0.0", "^x") is True
+
+
+def test_version_matches_bare_wildcard_version_argument_raises() -> None:
+    with pytest.raises(UnsupportedRangeError):
+        version_matches("x", "1.2.3")

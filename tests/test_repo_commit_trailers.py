@@ -179,3 +179,22 @@ def test_commit_rejecting_an_injected_trailer_value_does_not_create_extra_traile
 
     # The commit must not have gone through at all (no injected 'Mod-State').
     assert initialized_repo.log() == []
+
+
+def test_commit_raises_git_error_when_git_itself_refuses_the_commit(
+    initialized_repo: Repo,
+) -> None:
+    """A generic git-detected commit failure, distinct from the ``paths=[]``
+    and trailer-newline guards: here a pre-commit hook rejects the commit."""
+    _add_mod_file(initialized_repo)
+    hook = initialized_repo.path / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\necho 'custom rejection message' >&2\nexit 1\n", encoding="utf-8"
+    )
+    hook.chmod(0o755)
+
+    with pytest.raises(GitError) as exc_info:
+        initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
+
+    assert "custom rejection message" in str(exc_info.value)
+    assert initialized_repo.log() == []

@@ -223,6 +223,42 @@ def test_revert_rejects_extra_trailer_values_containing_newlines(
         )
 
 
+def test_revert_without_extra_trailers_still_succeeds(initialized_repo: Repo) -> None:
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+
+    revert_hash = initialized_repo.revert(add_hash)
+
+    assert revert_hash != ""
+    assert revert_hash != add_hash
+    assert not (initialized_repo.path / relative).exists()
+    commits = {c.hash: c for c in initialized_repo.log()}
+    # No amend happened: the revert commit carries none of the trailers a
+    # caller-supplied Mod-State would have added.
+    assert "Mod-State" not in commits[revert_hash].trailers
+
+
+def test_revert_when_the_abort_itself_fails_names_the_abort_failure(
+    initialized_repo: Repo,
+) -> None:
+    """A stale ``index.lock`` (e.g. left behind by a crashed git process)
+    makes both the revert attempt and its own ``--abort`` fail for the same
+    reason, exercising the "conflicted and the abort failed" path distinct
+    from a plain conflict (where the abort itself succeeds)."""
+    relative = Path("SPT/user/mods/ModA/file.txt")
+    add_hash = _add_and_commit(
+        initialized_repo, relative, "content-v1\n", "mod: ModA install"
+    )
+    (initialized_repo.path / ".git" / "index.lock").touch()
+
+    with pytest.raises(GitError) as exc_info:
+        initialized_repo.revert(add_hash)
+
+    assert "abort failed" in str(exc_info.value)
+
+
 def test_cherry_pick_conflict_raises_git_error_and_leaves_clean_tree(
     initialized_repo: Repo,
 ) -> None:

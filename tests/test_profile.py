@@ -172,6 +172,50 @@ def test_collect_mod_ids_raises_git_error_for_an_unknown_commit(
         collect_mod_ids(clean_repo, "0" * 40, detect_layout(clean_repo.path))
 
 
+def test_collect_mod_ids_trader_folder_non_base_file_registers_only_the_folder(
+    clean_repo: Repo, install_commit
+) -> None:
+    folder_name = "customtrader"
+    files = {
+        f"SPT/user/mods/ServerMod/db/traders/{folder_name}/questassort.json": (
+            json.dumps({"started": {TRADER_ID: "quest-one"}})
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    # The trader folder name is registered, but questassort.json is not
+    # base.json, so its content is never scanned for a trader _id.
+    assert result.traders == {folder_name}
+
+
+def test_collect_mod_ids_malformed_quest_entries_are_skipped_without_crashing(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/quests/quests.json": json.dumps(
+            [
+                {"_id": "quest-one"},
+                "not-a-dict",
+                {"no_id_field": True},
+                {"_id": ""},
+                {"_id": "quest-two"},
+            ]
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.quests == {"quest-one", "quest-two"}
+    assert result.warnings == []
+
+
 # --------------------------------------------------------------------------
 # find_residues
 # --------------------------------------------------------------------------
@@ -325,6 +369,65 @@ def test_find_residues_returns_empty_list_for_a_missing_profile(
     profile = tmp_path / "missing.json"
 
     assert find_residues(profile, ModIds(items={ITEM_A})) == []
+
+
+def test_find_residues_returns_empty_list_for_a_valid_json_non_object_root(
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / "array-root.json"
+    profile.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+
+    assert find_residues(profile, ModIds(items={ITEM_A})) == []
+
+
+def test_find_residues_malformed_inventory_items_is_ignored_without_crashing(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = "not-a-list"
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+def test_find_residues_skips_non_dict_entries_in_inventory_items(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        "not-a-dict",
+        {"_id": "x1", "tpl": ITEM_A},
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(profile="player1", category="item", ids=[ITEM_A], count=1)
+    ]
+
+
+def test_find_residues_skips_non_dict_entries_in_quests_but_counts_the_rest(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(quests={"quest-one"})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Quests"] = [
+        "not-a-dict",
+        {"qid": "some-other-quest", "status": 1},
+        {"qid": "quest-one", "status": 4},
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1", category="quest", ids=["quest-one"], count=1
+        )
+    ]
 
 
 # --------------------------------------------------------------------------

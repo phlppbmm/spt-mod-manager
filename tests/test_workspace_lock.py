@@ -122,6 +122,27 @@ def test_staging_dir_sweeps_entries_older_than_a_day_but_keeps_fresh_ones(
     assert sorted(entry.name for entry in result.iterdir()) == ["fresh.txt"]
 
 
+def test_staging_dir_sweep_skips_an_unstattable_entry_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A dangling symlink makes ``Path.stat()`` raise ``FileNotFoundError``
+    (an ``OSError``) for that one entry; the sweep must not crash and must
+    still remove the other, genuinely stale entry."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    staging = staging_dir()
+    broken_link = staging / "broken-link"
+    broken_link.symlink_to(staging / "does-not-exist-as-a-target")
+    old_file = staging / "old-leftover.txt"
+    old_file.write_text("stale", encoding="utf-8")
+    day_and_a_half_ago = time.time() - (36 * 60 * 60)
+    os.utime(old_file, (day_and_a_half_ago, day_and_a_half_ago))
+
+    result = staging_dir()
+
+    assert broken_link.is_symlink()
+    assert sorted(entry.name for entry in result.iterdir()) == ["broken-link"]
+
+
 # --- download_cache_dir -----------------------------------------------
 
 
@@ -165,6 +186,17 @@ def test_is_locked_true_while_another_operation_holds_the_lock(
 
 def test_is_locked_false_for_a_lock_file_nobody_holds(fake_game_dir: Path) -> None:
     _write_lock(fake_game_dir, pid=os.getpid(), operation="crashed run")
+
+    assert is_locked(fake_game_dir) is False
+
+
+def test_is_locked_false_when_the_lock_path_cannot_be_opened(
+    fake_game_dir: Path,
+) -> None:
+    """A directory at the lock path (instead of a regular file) makes the
+    ``os.open(..., os.O_RDWR)`` call itself fail with ``OSError``, a
+    different path than "no lock file at all" or "lock file, but free"."""
+    (fake_game_dir / LOCK_FILE_NAME).mkdir()
 
     assert is_locked(fake_game_dir) is False
 
@@ -309,6 +341,33 @@ def test_invalid_or_empty_lock_content_of_a_holder_waits_then_times_out(
     assert message == "Another operation is still running. Try again when it finishes."
     assert "git" not in message.lower()
     assert "commit" not in message.lower()
+
+
+def test_timeout_message_omits_the_operation_when_the_lock_file_vanishes_mid_wait(
+    clean_repo: Repo,
+) -> None:
+    """If the lock file disappears between two poll attempts (a narrow but
+    real race), ``_holder`` must degrade to "no name" rather than raise an
+    unhandled ``OSError`` while trying to read it."""
+    with _held(clean_repo.path, _holder_content("installing SAIN")) as lock:
+
+        def _delete_soon() -> None:
+            time.sleep(0.1)
+            lock.unlink()
+
+        deleter = threading.Thread(target=_delete_soon)
+        deleter.start()
+
+        with (
+            pytest.raises(OperationInProgressError) as excinfo,
+            game_lock(clean_repo.path, "new run", timeout=0.6, poll_interval=0.02),
+        ):
+            pass
+        deleter.join(timeout=1.0)
+
+    assert str(excinfo.value) == (
+        "Another operation is still running. Try again when it finishes."
+    )
 
 
 def test_timeout_error_message_names_the_blocking_operation(

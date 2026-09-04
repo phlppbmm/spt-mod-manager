@@ -83,36 +83,65 @@ def _build_version_resource(version: str, key_name: str) -> bytes:
     )
 
 
-def _build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
-    """Build a minimal PE32+ image whose VS_VERSION_INFO carries ``key_name``."""
-    version_data = _build_version_resource(version, key_name)
+# Fixed layout constants shared between the builder and the corruption tests
+# below: the builder always places a single ".rsrc" section with exactly one
+# RT_VERSION/name/language resource-directory chain (level1/level2/level3),
+# one IMAGE_RESOURCE_DATA_ENTRY and the VS_VERSION_INFO bytes, in that exact
+# order, at these fixed file offsets -- so a corruption test can flip a few
+# known bytes of an otherwise-valid image instead of hand-building a whole
+# malformed PE from scratch.
+_SECTION_ALIGNMENT, _FILE_ALIGNMENT, _HEADERS_SIZE = 0x1000, 0x200, 0x400
+_RSRC_RVA, _RSRC_RAW_OFFSET = _SECTION_ALIGNMENT, _HEADERS_SIZE
+_LEVEL_SIZE, _DATA_ENTRY_SIZE = 24, 16
+_HEADER_TOTAL = 3 * _LEVEL_SIZE + _DATA_ENTRY_SIZE
+_LEVEL1_FILE_OFFSET = _RSRC_RAW_OFFSET
+_LEVEL2_FILE_OFFSET = _LEVEL1_FILE_OFFSET + _LEVEL_SIZE
+_LEVEL3_FILE_OFFSET = _LEVEL2_FILE_OFFSET + _LEVEL_SIZE
+_DATA_ENTRY_FILE_OFFSET = _LEVEL3_FILE_OFFSET + _LEVEL_SIZE
+_VERSION_DATA_FILE_OFFSET = _RSRC_RAW_OFFSET + _HEADER_TOTAL
+# Within each 24-byte resource-directory level, the id/target II pair sits
+# at local offset 16 (id) / 20 (target); "target" carries the subdirectory
+# flag (0x80000000) when it points at another directory level rather than
+# an IMAGE_RESOURCE_DATA_ENTRY.
+_LEVEL_TARGET_LOCAL_OFFSET = 20
+_COFF_FILE_OFFSET = 64
+_OPTIONAL_FILE_OFFSET = _COFF_FILE_OFFSET + 24
+_SIZE_OF_OPTIONAL_HEADER_FILE_OFFSET = _COFF_FILE_OFFSET + 20
+# _DATA_DIRECTORY_OFFSETS[0x20B] (PE32+) == 112, resource entry is index 2.
+_RESOURCE_DIRECTORY_RVA_FILE_OFFSET = _OPTIONAL_FILE_OFFSET + 112 + 2 * 8
 
-    level1_size, level2_size, level3_size, data_entry_size = 24, 24, 24, 16
-    header_total = level1_size + level2_size + level3_size + data_entry_size
+
+def _build_pe_around_version_data(version_data: bytes) -> bytes:
+    """Build a minimal, structurally valid PE32+ image around ``version_data``.
+
+    ``version_data`` is embedded as the leaf of a normal, single-entry
+    RT_VERSION/name/language resource-directory chain; the caller may pass
+    perfectly valid VS_VERSIONINFO bytes (as :func:`_build_version_resource`
+    produces), or deliberately malformed ones, to test how the string table
+    is parsed once the surrounding PE/resource-directory navigation has
+    already succeeded.
+    """
     padded_version = _pad4(version_data)
-
-    section_alignment, file_alignment, headers_size = 0x1000, 0x200, 0x400
-    rsrc_rva, rsrc_raw_offset = section_alignment, headers_size
-    data_rva = rsrc_rva + header_total
+    data_rva = _RSRC_RVA + _HEADER_TOTAL
 
     level1 = struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1) + struct.pack(
-        "<II", 16, 0x80000000 | level1_size
+        "<II", 16, 0x80000000 | _LEVEL_SIZE
     )
     level2 = struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1) + struct.pack(
-        "<II", 1, 0x80000000 | (level1_size + level2_size)
+        "<II", 1, 0x80000000 | (2 * _LEVEL_SIZE)
     )
     level3 = struct.pack("<IIHHHH", 0, 0, 0, 0, 0, 1) + struct.pack(
-        "<II", 1033, level1_size + level2_size + level3_size
+        "<II", 1033, 3 * _LEVEL_SIZE
     )
     data_entry = struct.pack("<IIII", data_rva, len(version_data), 0, 0)
     rsrc_section = level1 + level2 + level3 + data_entry + padded_version
-    rsrc_raw_size = ((len(rsrc_section) + file_alignment - 1) // file_alignment) * (
-        file_alignment
-    )
+    rsrc_raw_size = (
+        (len(rsrc_section) + _FILE_ALIGNMENT - 1) // _FILE_ALIGNMENT
+    ) * _FILE_ALIGNMENT
     rsrc_padded = rsrc_section + b"\0" * (rsrc_raw_size - len(rsrc_section))
-    image_size = rsrc_rva + (
-        (len(rsrc_section) + section_alignment - 1) // section_alignment
-    ) * section_alignment
+    image_size = _RSRC_RVA + (
+        (len(rsrc_section) + _SECTION_ALIGNMENT - 1) // _SECTION_ALIGNMENT
+    ) * _SECTION_ALIGNMENT
 
     dos = bytearray(64)
     dos[0:2] = b"MZ"
@@ -123,28 +152,40 @@ def _build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
     optional = struct.pack(
         "<HBBIIIIIQIIHHHHHHIIIIHHQQQQII",
         0x20B, 14, 0, 0x200, 0, 0, 0, 0x1000, 0x140000000,
-        section_alignment, file_alignment, 6, 0, 1, 0, 6, 0, 0,
-        image_size, headers_size, 0, 3, 0,
+        _SECTION_ALIGNMENT, _FILE_ALIGNMENT, 6, 0, 1, 0, 6, 0, 0,
+        image_size, _HEADERS_SIZE, 0, 3, 0,
         0x100000, 0x1000, 0x100000, 0x1000, 0, 16,
     )
     data_dirs = bytearray(16 * 8)
-    struct.pack_into("<II", data_dirs, 2 * 8, rsrc_rva, len(rsrc_section))
+    struct.pack_into("<II", data_dirs, 2 * 8, _RSRC_RVA, len(rsrc_section))
     optional += bytes(data_dirs)
 
     section_header = struct.pack(
         "<8sIIIIIIHHI",
         b".rsrc\0\0\0",
         len(rsrc_section),
-        rsrc_rva,
+        _RSRC_RVA,
         rsrc_raw_size,
-        rsrc_raw_offset,
+        _RSRC_RAW_OFFSET,
         0, 0, 0, 0,
         0x40000040,
     )
 
     header_blob = bytes(dos) + coff + optional + section_header
-    header_blob += b"\0" * (headers_size - len(header_blob))
+    header_blob += b"\0" * (_HEADERS_SIZE - len(header_blob))
     return header_blob + rsrc_padded
+
+
+def _build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
+    """Build a minimal PE32+ image whose VS_VERSION_INFO carries ``key_name``."""
+    return _build_pe_around_version_data(_build_version_resource(version, key_name))
+
+
+def _patched(data: bytes, offset: int, replacement: bytes) -> bytes:
+    """Return ``data`` with ``replacement`` written at byte ``offset``."""
+    patched = bytearray(data)
+    patched[offset : offset + len(replacement)] = replacement
+    return bytes(patched)
 
 
 def _write_server_exe(root: Path, runtime_dir_name: str, version: str) -> Path:
@@ -163,6 +204,243 @@ class TestSyntheticExeBuilderSanityCheck:
         exe.write_bytes(_build_synthetic_exe("4.1.2"))
 
         assert read_pe_file_version(exe) == "4.1.2"
+
+
+# ============================================================================
+# read_pe_file_version: malformed/truncated PE and resource-directory data
+#
+# Each corruption below starts from a structurally valid synthetic exe and
+# flips (or truncates) exactly the bytes needed to trigger one specific
+# defensive guard inside the best-effort PE/VS_VERSIONINFO parser; every one
+# of them must degrade to ``None`` rather than raise or read garbage.
+# ============================================================================
+
+
+def _corrupt_coff_header_truncated(data: bytes) -> bytes:
+    """Cuts the file inside the COFF header itself (a short read)."""
+    return data[:70]
+
+
+def _corrupt_optional_header_truncated(data: bytes) -> bytes:
+    """Cuts the file inside the optional header (a short read)."""
+    return data[:138]
+
+
+def _corrupt_optional_header_bad_magic(data: bytes) -> bytes:
+    """Neither the PE32 (0x10B) nor the PE32+ (0x20B) magic."""
+    return _patched(data, _OPTIONAL_FILE_OFFSET, struct.pack("<H", 0x0107))
+
+
+def _corrupt_optional_header_too_small_for_resource_entry(data: bytes) -> bytes:
+    """A declared ``SizeOfOptionalHeader`` too small to reach data-directory
+    entry 2 (the resource directory)."""
+    return _patched(data, _SIZE_OF_OPTIONAL_HEADER_FILE_OFFSET, struct.pack("<H", 120))
+
+
+def _corrupt_resource_directory_rva_absent(data: bytes) -> bytes:
+    """No resource directory at all (RVA zeroed)."""
+    return _patched(data, _RESOURCE_DIRECTORY_RVA_FILE_OFFSET, struct.pack("<I", 0))
+
+
+def _corrupt_resource_directory_rva_unmatched_by_any_section(data: bytes) -> bytes:
+    """A resource RVA no section's address range actually covers."""
+    return _patched(
+        data, _RESOURCE_DIRECTORY_RVA_FILE_OFFSET, struct.pack("<I", 0xFFFF000)
+    )
+
+
+def _corrupt_section_headers_truncated(data: bytes) -> bytes:
+    """Cuts the file mid-way through the (single) section header."""
+    return data[:338]
+
+
+def _corrupt_data_entry_rva_out_of_section_bounds(data: bytes) -> bytes:
+    """A resource data entry whose ``data_rva`` resolves before the section
+    start, so the sliced-out version bytes would start at a negative offset."""
+    return _patched(data, _DATA_ENTRY_FILE_OFFSET, struct.pack("<I", 0))
+
+
+def _corrupt_level1_target_not_subdirectory_flagged(data: bytes) -> bytes:
+    """The RT_VERSION entry points straight at data instead of the expected
+    name-level subdirectory."""
+    return _patched(
+        data,
+        _LEVEL1_FILE_OFFSET + _LEVEL_TARGET_LOCAL_OFFSET,
+        struct.pack("<I", _LEVEL_SIZE),
+    )
+
+
+def _corrupt_level3_target_still_subdirectory_flagged(data: bytes) -> bytes:
+    """The language-level entry is itself flagged as another subdirectory,
+    so the fixed 3-level walk never finds a leaf."""
+    return _patched(
+        data,
+        _LEVEL3_FILE_OFFSET + _LEVEL_TARGET_LOCAL_OFFSET,
+        struct.pack("<I", 0x80000000 | (3 * _LEVEL_SIZE)),
+    )
+
+
+def _corrupt_leaf_offset_out_of_bounds(data: bytes) -> bytes:
+    """The located leaf offset points past the end of the resource data."""
+    return _patched(
+        data,
+        _LEVEL3_FILE_OFFSET + _LEVEL_TARGET_LOCAL_OFFSET,
+        struct.pack("<I", 0x7FFFFFF0),
+    )
+
+
+def _corrupt_resource_directory_offset_out_of_bounds(data: bytes) -> bytes:
+    """The name-level subdirectory offset itself is past the end of the
+    resource data, so even its own header cannot be read."""
+    return _patched(
+        data,
+        _LEVEL1_FILE_OFFSET + _LEVEL_TARGET_LOCAL_OFFSET,
+        struct.pack("<I", 0x80000000 | 500),
+    )
+
+
+def _corrupt_resource_entry_scan_runs_past_the_buffer(data: bytes) -> bytes:
+    """A directory that claims far more entries than actually fit, none of
+    which match the wanted RT_VERSION id, so the scan itself runs off the
+    end of the resource data."""
+    patched = _patched(data, _LEVEL1_FILE_OFFSET + 14, struct.pack("<H", 100))
+    return _patched(patched, _LEVEL1_FILE_OFFSET + 16, struct.pack("<I", 999))
+
+
+def _corrupt_resource_entry_scan_finds_no_match_within_bounds(data: bytes) -> bytes:
+    """A directory with a couple of extra, non-matching but in-bounds
+    entries: the scan exhausts every entry without ever going out of
+    bounds, unlike :func:`_corrupt_resource_entry_scan_runs_past_the_buffer`."""
+    patched = _patched(data, _LEVEL1_FILE_OFFSET + 14, struct.pack("<H", 3))
+    return _patched(patched, _LEVEL1_FILE_OFFSET + 16, struct.pack("<I", 999))
+
+
+def _corrupt_string_file_info_table_child_is_unparseable(data: bytes) -> bytes:
+    """The ``StringFileInfo`` node itself parses fine, but its only child
+    (the language/codepage table) declares an impossible length, so walking
+    its children stops immediately with none found."""
+    return _patched(
+        data, _VERSION_DATA_FILE_OFFSET + 128, struct.pack("<H", 0xFFFF)
+    )
+
+
+def _corrupt_version_block_too_short_to_have_a_header(data: bytes) -> bytes:
+    """The data entry declares a size too small for even the 6-byte
+    VS_VERSIONINFO node header."""
+    return _patched(data, _DATA_ENTRY_FILE_OFFSET + 4, struct.pack("<I", 2))
+
+
+def _corrupt_version_block_declares_an_impossible_length(data: bytes) -> bytes:
+    """The VS_VERSIONINFO node's own ``length`` field claims far more bytes
+    than the (correctly-sized) sliced-out block actually has."""
+    return _patched(data, _VERSION_DATA_FILE_OFFSET, struct.pack("<H", 0xFFFF))
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        _corrupt_coff_header_truncated,
+        _corrupt_optional_header_truncated,
+        _corrupt_optional_header_bad_magic,
+        _corrupt_optional_header_too_small_for_resource_entry,
+        _corrupt_resource_directory_rva_absent,
+        _corrupt_resource_directory_rva_unmatched_by_any_section,
+        _corrupt_section_headers_truncated,
+        _corrupt_data_entry_rva_out_of_section_bounds,
+        _corrupt_level1_target_not_subdirectory_flagged,
+        _corrupt_level3_target_still_subdirectory_flagged,
+        _corrupt_leaf_offset_out_of_bounds,
+        _corrupt_resource_directory_offset_out_of_bounds,
+        _corrupt_resource_entry_scan_runs_past_the_buffer,
+        _corrupt_resource_entry_scan_finds_no_match_within_bounds,
+        _corrupt_string_file_info_table_child_is_unparseable,
+        _corrupt_version_block_too_short_to_have_a_header,
+        _corrupt_version_block_declares_an_impossible_length,
+    ],
+    ids=lambda fn: fn.__name__.removeprefix("_corrupt_"),
+)
+def test_read_pe_file_version_none_for_a_malformed_resource_section(
+    tmp_path: Path, corrupt
+) -> None:
+    exe = tmp_path / "SPT.Server.exe"
+    exe.write_bytes(corrupt(_build_synthetic_exe("1.2.3")))
+
+    assert read_pe_file_version(exe) is None
+
+
+def test_read_pe_file_version_none_when_neither_file_nor_product_version_present(
+    tmp_path: Path,
+) -> None:
+    exe = tmp_path / "SPT.Server.exe"
+    exe.write_bytes(_build_synthetic_exe("1.2.3", key_name="Comments"))
+
+    assert read_pe_file_version(exe) is None
+
+
+def test_read_pe_file_version_none_when_string_file_info_is_absent(
+    tmp_path: Path,
+) -> None:
+    """A VS_VERSION_INFO whose only child is ``VarFileInfo`` (a real, common
+    sibling of ``StringFileInfo``, just never both together here): the
+    string-table walk must skip it and end up with nothing, not crash."""
+    fixed_file_info = struct.pack(
+        "<13I", 0xFEEF04BD, 0x10000, 0, 0, 0, 0, 0x3F, 0, 4, 1, 0, 0, 0
+    )
+    var_table = _version_block("Translation", 2, struct.pack("<HH", 0x0409, 0x04B0))
+    var_file_info = _version_block("VarFileInfo", 0, b"", var_table)
+    version_data = _version_block(
+        "VS_VERSION_INFO", len(fixed_file_info) // 2, fixed_file_info, var_file_info
+    )
+    exe = tmp_path / "SPT.Server.exe"
+    exe.write_bytes(_build_pe_around_version_data(version_data))
+
+    assert read_pe_file_version(exe) is None
+
+
+def _version_block_typed(
+    key: str,
+    value_word_count: int,
+    value: bytes,
+    value_type: int,
+    children: bytes = b"",
+) -> bytes:
+    """Like ``_version_block``, but with an explicit ``wType`` field (0 =
+    binary, 1 = text) instead of always claiming text."""
+    key_bytes = _utf16z(key)
+    head = struct.pack("<HHH", 0, value_word_count, value_type) + key_bytes
+    body = _pad4(head) + _pad4(value) if value else _pad4(head)
+    total = body + children
+    return (
+        struct.pack("<HHH", len(total), value_word_count, value_type)
+        + key_bytes
+        + total[len(head) :]
+    )
+
+
+def test_read_pe_file_version_skips_a_binary_typed_string_entry_and_finds_the_next(
+    tmp_path: Path,
+) -> None:
+    """A ``StringFileInfo`` table entry declared as binary (``wType=0``) must
+    not be decoded as UTF-16 text (it stays empty), and must not stop the
+    walk from finding a normal, correctly text-typed ``FileVersion`` sibling."""
+    fixed_file_info = struct.pack(
+        "<13I", 0xFEEF04BD, 0x10000, 0, 0, 0, 0, 0x3F, 0, 4, 1, 0, 0, 0
+    )
+    binary_entry = _version_block_typed(
+        "BinaryData", 2, b"\x01\x02\x03\x04", value_type=0
+    )
+    text_entry = _version_block("FileVersion", 6, _utf16z("1.2.3"))
+    string_table = _version_block(
+        "040904B0", 0, b"", binary_entry + text_entry
+    )
+    string_file_info = _version_block("StringFileInfo", 0, b"", string_table)
+    version_data = _version_block(
+        "VS_VERSION_INFO", len(fixed_file_info) // 2, fixed_file_info, string_file_info
+    )
+    exe = tmp_path / "SPT.Server.exe"
+    exe.write_bytes(_build_pe_around_version_data(version_data))
+
+    assert read_pe_file_version(exe) == "1.2.3"
 
 
 # ============================================================================
@@ -329,6 +607,15 @@ def test_read_core_json_version_none_for_an_empty_string_value(
     assert read_core_json_version(layout) is None
 
 
+def test_read_core_json_version_none_for_a_valid_json_non_object_root(
+    tmp_path: Path,
+) -> None:
+    layout = _layout(tmp_path)
+    _write_core_json(layout, json.dumps([1, 2, 3]))
+
+    assert read_core_json_version(layout) is None
+
+
 # ============================================================================
 # read_pe_file_version
 # ============================================================================
@@ -379,6 +666,20 @@ def test_config_set_overwrites_an_existing_value(initialized_repo: Repo) -> None
     initialized_repo.config_set("sptmod.testkey", "second")
 
     assert initialized_repo.config_get("sptmod.testkey") == "second"
+
+
+def test_config_get_raises_git_error_for_a_reason_other_than_an_unset_key(
+    initialized_repo: Repo,
+) -> None:
+    """A corrupted ``.git/config`` makes git refuse to read *any* key, which
+    is a different failure than the plain "key unset" (returncode 1) case
+    every other config_get test exercises."""
+    config_file = initialized_repo.path / ".git" / "config"
+    with config_file.open("a", encoding="utf-8") as handle:
+        handle.write("not a valid config line at all\n")
+
+    with pytest.raises(GitError):
+        initialized_repo.config_get("sptmod.testkey")
 
 
 # ============================================================================

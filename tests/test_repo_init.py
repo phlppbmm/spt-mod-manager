@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from sptmod.core.errors import GitError
-from sptmod.core.game_dir import detect_layout
+from sptmod.core.errors import GitError, NotAGameDirError
+from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.repo import COMMITTER_EMAIL, COMMITTER_NAME, Repo, gitignore_whitelist
 
 
@@ -94,3 +94,39 @@ def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
 
     with pytest.raises(GitError):
         Repo.init(layout)
+
+
+def test_init_raises_not_a_game_dir_error_when_layout_root_is_not_a_directory(
+    tmp_path: Path,
+) -> None:
+    not_a_dir = tmp_path / "not-a-directory"
+    not_a_dir.write_text("x", encoding="utf-8")
+    layout = GameLayout(root=not_a_dir, runtime_dir_name="SPT")
+
+    with pytest.raises(NotAGameDirError):
+        Repo.init(layout)
+
+
+def test_init_raises_not_a_game_dir_error_when_layout_root_is_missing(
+    tmp_path: Path,
+) -> None:
+    layout = GameLayout(root=tmp_path / "does-not-exist", runtime_dir_name="SPT")
+
+    with pytest.raises(NotAGameDirError):
+        Repo.init(layout)
+
+
+def test_configure_called_again_does_not_overwrite_an_existing_gitignore(
+    fake_game_dir: Path,
+) -> None:
+    """Resuming a half-finished init must not clobber a manually edited
+    ``.gitignore`` (or one this same init already wrote)."""
+    layout = detect_layout(fake_game_dir)
+    repo = Repo.init(layout)
+    sentinel = "# sentinel: hand-edited whitelist, must survive\n"
+    (repo.path / ".gitignore").write_text(sentinel, encoding="utf-8")
+
+    repo.configure(layout)
+
+    assert (repo.path / ".gitignore").read_text(encoding="utf-8") == sentinel
+    assert _git(repo.path, "config", "--local", "--get", "user.name") == COMMITTER_NAME

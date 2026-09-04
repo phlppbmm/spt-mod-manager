@@ -8,12 +8,15 @@ two rar cases applies depends on whether this machine actually has a rar
 backend, via rar_backend_available().
 """
 
+import contextlib
+import os
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import rarfile
 
-from sptmod.core.archive import extract, rar_backend_available
+from sptmod.core.archive import RAR_INSTALL_HINT, extract, rar_backend_available
 from sptmod.core.errors import ArchiveError
 
 MakeArchive = Callable[[dict[str, str | bytes], str], Path]
@@ -269,6 +272,56 @@ def test_extract_unknown_suffix_error_names_supported_formats(tmp_path: Path) ->
     )
 
 
+def test_extract_rar_without_backend_on_path_raises_archive_error_naming_the_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PATH is the real process-environment boundary rarfile's tool
+    discovery reads; emptying it and forcing rediscovery reproduces "no
+    backend installed" without needing to actually uninstall anything, even
+    on a machine (like this sandbox) that normally has one."""
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    # Forcing rediscovery with an empty PATH is expected to find nothing.
+    with contextlib.suppress(rarfile.RarCannotExec):
+        rarfile.tool_setup(force=True)
+    try:
+        assert rar_backend_available() is False
+
+        archive = Path(__file__).parent / "data" / "rar5-subdirs.rar"
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        with pytest.raises(ArchiveError) as excinfo:
+            extract(archive, dest)
+
+        assert RAR_INSTALL_HINT in str(excinfo.value)
+    finally:
+        # Restore PATH before forcing rediscovery, so later tests (and the
+        # rest of the suite) see the real backend again.
+        monkeypatch.undo()
+        rarfile.tool_setup(force=True)
+
+
+@pytest.mark.skipif(
+    not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available"
+)
+def test_extract_rar_raises_archive_error_when_the_destination_is_read_only(
+    tmp_path: Path,
+) -> None:
+    archive = Path(__file__).parent / "data" / "rar5-subdirs.rar"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    os.chmod(dest, 0o500)
+    try:
+        with pytest.raises(ArchiveError) as excinfo:
+            extract(archive, dest)
+
+        assert "rar5-subdirs.rar" in str(excinfo.value)
+    finally:
+        os.chmod(dest, 0o700)
+
+
 def test_extract_non_archive_with_no_suffix_raises_archive_error(
     tmp_path: Path,
 ) -> None:
@@ -283,3 +336,55 @@ def test_extract_non_archive_with_no_suffix_raises_archive_error(
     message = str(excinfo.value)
     assert "not-an-archive-at-all" in message
     assert "supported: .7z, .zip, .rar" in message
+
+
+# --- unreadable archive_path: magic-byte sniffing and the extractor's own
+# open both fail with OSError, not a format-specific parse error -------------
+
+
+def test_extract_zip_named_directory_raises_archive_error_naming_the_directory(
+    tmp_path: Path,
+) -> None:
+    """``archive_path`` cannot even be opened for magic-byte sniffing (it is
+    a directory): ``_detect_format`` falls back to the ``.zip`` suffix, and
+    ``zipfile.ZipFile`` then fails to open it too -- both via the ``OSError``
+    branch, not the format-specific error branches covered elsewhere."""
+    archive = tmp_path / "archive.zip"
+    archive.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert "cannot read zip archive" in str(excinfo.value)
+
+
+def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "archive.zip"
+    archive.write_bytes(b"PK\x03\x04" + b"not a real zip central directory" * 4)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert "cannot read zip archive" in str(excinfo.value)
+
+
+def test_extract_corrupt_7z_with_valid_magic_bytes_raises_archive_error(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "archive.7z"
+    archive.write_bytes(
+        b"7z\xbc\xaf\x27\x1c" + b"not a real 7z header or body" * 4
+    )
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert "cannot read 7z archive" in str(excinfo.value)

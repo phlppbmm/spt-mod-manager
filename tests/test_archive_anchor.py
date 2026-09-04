@@ -236,6 +236,22 @@ def test_find_anchor_raises_on_empty_directory(tmp_path: Path) -> None:
         find_anchor(extracted_root)
 
 
+def test_find_anchor_raises_message_truncated_with_a_count_past_thirty_entries(
+    tmp_path: Path,
+) -> None:
+    extracted_root = tmp_path / "extracted"
+    extracted_root.mkdir()
+    _write_tree(
+        extracted_root, {f"junk/file-{i:02d}.txt": "junk" for i in range(35)}
+    )
+
+    with pytest.raises(ArchiveError) as excinfo:
+        find_anchor(extracted_root)
+
+    message = str(excinfo.value)
+    assert "and 6 more" in message
+
+
 # The three cases below guard against false anchors: a directory that merely
 # happens to be *named* "plugins" or end in "user/mods" is not automatically
 # a client/server anchor -- only such a directory reachable from the

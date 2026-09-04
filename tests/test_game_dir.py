@@ -11,6 +11,7 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 
 from pathlib import Path
 
+import psutil
 import pytest
 
 from sptmod.core.errors import GameRunningError, NotAGameDirError
@@ -18,6 +19,7 @@ from sptmod.core.game_dir import (
     ensure_game_not_running,
     is_game_dir,
     is_game_process_name,
+    running_game_processes,
     validate_game_dir,
 )
 
@@ -142,6 +144,39 @@ def test_ensure_game_not_running_raises_when_processes_found(
 
     with pytest.raises(GameRunningError):
         ensure_game_not_running()
+
+
+def test_running_game_processes_scans_the_real_process_table_without_crashing() -> None:
+    """Exercises the real, non-monkeypatched implementation: this sandboxed
+    test environment never runs SPT.Server or EscapeFromTarkov, so none of
+    the real processes on this machine are ever reported."""
+    names = running_game_processes()
+
+    assert isinstance(names, list)
+    assert all(is_game_process_name(name) for name in names)
+
+
+class _VanishedProcess:
+    """A stand-in for a real ``psutil.Process`` that died mid-scan."""
+
+    def name(self) -> str:
+        raise psutil.NoSuchProcess(pid=999999)
+
+
+def test_running_game_processes_skips_a_process_that_vanishes_mid_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``psutil.process_iter()`` is the real OS process-table boundary this
+    module reads (mirroring how the test suite mocks the HTTP/subprocess
+    boundaries elsewhere); a process that exits between being listed and
+    ``.name()`` being called on it raises a genuine ``psutil.Error``, which
+    ``running_game_processes`` must swallow rather than propagate."""
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_VanishedProcess()]),
+    )
+
+    assert running_game_processes() == []
 
 
 def test_ensure_game_not_running_message_names_the_processes(

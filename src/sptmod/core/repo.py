@@ -347,7 +347,7 @@ class Repo:
             code, path = entry[:2], Path(entry[3:])
             if code == "??":
                 untracked.append(path)
-            elif code != "  ":
+            else:
                 modified.append(path)
         return RepoStatus(modified=modified, untracked=untracked)
 

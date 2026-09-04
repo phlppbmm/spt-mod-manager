@@ -90,6 +90,11 @@ to adopt), then shows the mod list with the tabs *All*, *Installed*, *Not instal
 side views *History*, *Profiles* and *Settings*. The import section of *Settings* takes a
 pasted mod list as well as a local file path.
 
+From the *Profiles* tab, you can launch the game with any readable profile. sptmod starts the SPT
+server, waits until it is ready, signs you in, and launches the game client. The *Mods* view shows
+a banner while the game is running and locks mod changes until you close it. The *Settings* page
+has a checkbox to control whether the server shuts down when the game closes (default on).
+
 ## Migrating an existing modded installation
 
 `sptmod init` finds mods that are already installed and offers to adopt each one, so they

@@ -34,6 +34,8 @@ src/sptmod/
     errors.py           typed exception hierarchy (single source of failures)
     models.py           shared dataclasses, trailer key constants, Progress protocol
     game_dir.py         GameLayout detection, SPT version chain, process check
+    launch.py           server/client process start, state file, game watcher
+    sptserver.py        local SPT server's launcher API (address, ping, login)
     repo.py             THE git layer; the ONLY module allowed to use subprocess
     archive.py          extraction (.7z/.zip/.rar), traversal guard, anchor search
     modmeta.py          package.json parsing, trailer mapping, npm-style semver
@@ -49,6 +51,7 @@ src/sptmod/
       cache.py          persistent archive cache (download resumption, LRU)
       download.py       streaming downloads, cache hit/resumption, size verification
       resolve.py        install plans over /mods/dependencies
+  watch.py              process entry for detached game watcher
   cli.py                typer adapter; exceptions -> exit codes; rich tables
   server/
     __init__.py         RPC and OpenAPI dispatch package
@@ -70,6 +73,7 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/index.ts           re-exports of public API
   src/lib/updateall.ts       bulk update orchestration
   src/lib/gamedir.ts         game directory path resolution
+  src/lib/launch.ts          game launch UI logic (localStorage toggle, buttons, poll cadence)
   src/lib/api/transport.ts   uses Tauri `invoke()` and `listen()` (not fetch)
   src/lib/api/types.ts       GENERATED from openapi.json — never hand-edit
   src/lib/api/client.ts      typed wrappers per RPC function
@@ -84,8 +88,12 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 
 ## Hard invariants (enforced by review and tests)
 
-- `subprocess` only in `core/repo.py`; raw git, no GitPython.
-- `httpx` only in `core/forge/client.py` (download.py drives `client.stream`).
+- `subprocess` only in `core/repo.py` (git operations, always captured and
+  waited) and `core/launch.py` (detached game/server processes that outlive the
+  call) — one module per concern.
+- `httpx` only in `core/forge/client.py` (read-only Forge API with throttling)
+  and `core/sptserver.py` (local SPT server, loopback, self-signed cert, zlib) —
+  one module per remote service.
 - Core raises typed exceptions only; no print/logging outside cli.py/server/.
 - One API contract, four transports: service function ↔ `sptmod rpc <name>`
   ↔ Tauri `#[tauri::command] rpc()` ↔ camelCase wrapper in client.ts. Guarded
@@ -381,6 +389,94 @@ download cache.
   list. Frontend joins the favorites set with browse results by id, so a
   favorited-but-uncached mod displays as a favorite without a catalog entry.
 
+## Launching the game
+
+All three game-launch service functions (`launch_profile`, `launch_status`,
+`stop_game`) delegate to `core/launch.py` and `core/sptserver.py`. The sequence
+is: port probe via GET `/launcher/v2/ping` → start `SPT.Server.*` if the port is
+free → poll readiness every 1 second with a 120-second bound → PUT
+`/launcher/v2/login` (zlib-compressed body, `responsecompressed: 0` header) →
+spawn the game client with the exact argv, cwd and environment from the official
+launcher's logic → spawn a detached watcher that polls the client's `(pid,
+started_at)` pair every 3 seconds and closes the server when the game closes (if
+configured).
+
+**State file:** `<game dir>/.sptmod-launch.json` holds the running process
+identities (server, client, watcher) along with `profile_id` and
+`stop_server_on_exit`. It is read and written atomically (mkstemp + os.replace,
+the `favorites.save_favorites` pattern) and is a hint only — the process table
+is the source of truth. Located in the game directory because every short-lived
+process involved (launch call, status call, watcher) learns about the game
+directory alone.
+
+**Watcher:** Started as `python -m sptmod.watch <game directory>` (detached,
+never awaited), it lives as long as the game does. Uses `sys.executable` so no
+PATH or environment lookup is needed. Polls the client pid with 3-second
+intervals; when gone, closes the server (if the launch set `stop_server_on_exit`
+and the server was started by sptmod, not reused) and clears the state file.
+
+**Server reuse:** `launch_profile` will reuse a server that is already running
+unless it fails to answer or the port is held by a different program. An
+already-running server is never stopped by the watcher (only one started by sptmod
+is). This allows testing or background server runs.
+
+**Client arguments (identical on both platforms):**
+```
+-force-gfx-jobs native -token=<profile_id>
+-config={'BackendUrl':'<base_url>','Version':'live','MatchingVersion':'live'}
+```
+
+The profile ID is the profile file's stem (== `info.id` in the profile JSON); the
+login username is read from `info.username`; the display name for progress is
+`characters.pmc.Info.Nickname`.
+
+**Linux spawn:** via umu with environment variables from `LauncherSettings.json`
+(`WINEPREFIX`, `PROTONPATH`, env vars from `LaunchSettings` tokens and
+`DefaultEnv`, plus `__NV_DISABLE_EXPLICIT_SYNC=1` which the official launcher
+sets process-wide). The working directory is the game root; client exe is always
+`EscapeFromTarkov.exe`. If `LauncherSettings.json` is missing or unusable on
+Linux, `LauncherSettingsError` is raised (Windows has no equivalent check).
+
+**Windows spawn:** plain `EscapeFromTarkov.exe` with the working directory as the
+game root. Process flags are `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+CREATE_NO_WINDOW` so nothing blocks and the process does not outlive the parent
+console window.
+
+**Detached spawn:** Both platforms spawn with all standard streams as DEVNULL so
+no reader is needed. On POSIX, `start_new_session=True` (setsid) puts the child
+in its own session; on Windows, the flags above have the same effect. This means
+the game survives the exit of the short-lived RPC process and never receives
+signals bound to that process group.
+
+**Known limitation:** Process name detection on Wine/Proton for the fallback
+name scan (`game_dir.game_processes()`) relies on a Proton process named
+`EscapeFromTarkov.exe`. This is unverified — the official launcher's own code
+comments "TODO: this might not work for linux". Primary detection uses the
+recorded `(pid, started_at)` of the spawned process, which is certain; the name
+scan is only the fallback for games started by the official launcher or another
+path.
+
+**What sptmod deliberately does not do:** Pre-launch cleanup (the launcher
+deletes `BattlEye/`, `Logs/`, `ConsistencyInfo`, and others before every start;
+a user must run the official launcher once to set up `LauncherSettings.json`
+anyway, so cleanup can be done outside sptmod). Server log tailing or console
+capture. Profile management beyond login. Multi-server support. The `LauncherSettings.json`
+field `Servers[]` is ignored; only the local server is addressed.
+
+**Error codes:** Four new exceptions map to four RPC codes — `LaunchError`
+(`LAUNCH_FAILED`, server/binary missing, spawn failed, readiness timeout,
+profile file unusable), `ServerPortBusyError` (`SERVER_PORT_BUSY`, port held by
+a non-SPT program), `LoginFailedError` (`LOGIN_FAILED`, server does not know the
+profile), `LauncherSettingsError` (`LAUNCHER_SETTINGS_MISSING`, launcher settings
+missing or unreadable, Linux only). "Game already running" reuses the existing
+`GameRunningError` (`GAME_RUNNING`).
+
+**Frontend:** Three new routes in the Profiles tab (Launch/Stop buttons per
+readable profile with phase-progress display) and the Mods view (running-game
+banner, mod-row lock while game is up). Settings page gains a "Game" section with
+one checkbox: "Stop the server when the game closes" (persisted in localStorage,
+default true, passed as a parameter to each launch call).
+
 ## Desktop app (Tauri) and RPC
 
 - The Tauri v2 desktop app runs `sptmod rpc <name>` as a child process,
@@ -395,9 +491,9 @@ download cache.
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 30 service functions (declared as `FUNCTIONS: [&str; 30]` in
-  rpc.rs); the frontend client.ts has 28 camelCase wrappers (`install_from_archive`
-  and `adopt_mod` are RPC-exposed but have no wrapper or frontend caller yet).
+- RPC functions: 34 service functions (declared as `FUNCTIONS: [&str; 34]` in
+  rpc.rs); the frontend client.ts has 31 camelCase wrappers (`adopt_mod` is
+  RPC-exposed but has no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
 - Setup flow is ONE step (path — no login). Folder picking: native OS dialog
@@ -445,12 +541,19 @@ behavior-focused; do not weaken them to make an implementation fit.
 
 - Fixtures in tests/conftest.py: `fake_game_dir` (4.0 `SPT/` layout — the
   bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
-  `clean_repo`, `install_commit`, `make_archive` (zip/7z; rar cannot be
-  created — real samples in `tests/data/`, plus an encrypted zip).
+  `fake_launchable_dir` (4.1 layout + server/client stub scripts + launcher
+  settings + profile with login credentials), `clean_repo`, `install_commit`,
+  `make_archive` (zip/7z; rar cannot be created — real samples in `tests/data/`,
+  plus an encrypted zip).
 - All Forge tests run against respx mocks shaped by docs/FORGE_API.md; the
   suite NEVER hits the network. Live verification happens manually against
   sp-mod.com (full pipeline verified 2026-09-02: sync 1862 mods, SAIN install
   with dependency commits, update flow).
+- Launch tests: `tests/test_sptserver.py` (respx mocks: probe states, login
+  true/false, zlib decode fallback), `tests/test_launch.py` (black-box: exact
+  client argv/cwd/env, readiness poll, server reuse, profile credentials),
+  `tests/test_launch_watch.py` (watcher: client pid poll, server lifecycle,
+  `started_by_sptmod` flag).
 - RPC tests: `tests/test_rpc_contract.py` (route-per-function, schema-parity,
   error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
@@ -489,5 +592,9 @@ behavior-focused; do not weaken them to make an implementation fit.
   cleanup. They are reported in `cleanup.untouched` and may indicate issues
   with the db file collection or be unrelated id references (skill names,
   locale keys, mod paths).
-- Windows `CREATE_NO_WINDOW` process handling is a follow-up; no read timeout
-  on child stdout. Linux-only verified (Windows build untested).
+- Game launch on Windows is untested (Linux build verified; the Proton client
+  process name detection fallback is unverified and flagged as "TODO" by the
+  official launcher as well — primary detection uses the recorded `(pid,
+  started_at)` of the spawned process).
+- Pre-launch cleanup and patching (which the official launcher does) are out of
+  scope; sptmod starts the game as-is.

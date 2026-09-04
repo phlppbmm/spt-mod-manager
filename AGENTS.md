@@ -86,7 +86,7 @@ cargo tauri dev                      # hot reload during development
 
 - `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
   progress callbacks; it knows neither CLI nor HTTP.
-- `subprocess` ONLY in `core/repo.py`; `httpx` ONLY in `core/forge/client.py`.
+- `subprocess` ONLY in `core/repo.py` and `core/launch.py`; `httpx` ONLY in `core/forge/client.py` and `core/sptserver.py`.
 - One contract, four transports: service function ↔ `sptmod rpc <name>` ↔
   Tauri `#[tauri::command] rpc()` ↔ client.ts wrapper — guarded by
   route-per-function and schema-parity tests.

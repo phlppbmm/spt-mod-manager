@@ -7,10 +7,12 @@
 		installMod,
 		modFiles,
 		planModInstall,
+		planProfileCleanup,
 		removeMod,
 		setFavorite,
 		updateMod,
 		type CatalogEntry,
+		type CleanupPlan,
 		type Conflict,
 		type InstallPlan,
 		type ModDetails,
@@ -19,6 +21,7 @@
 		type ProfileResidue
 	} from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
+	import { groupRemovalsByProfile } from '$lib/cleanup';
 	import type { RowState } from '$lib/modfilter';
 
 	interface Props {
@@ -74,6 +77,37 @@
 	let errorInstalled: string[] = $state([]);
 	let retryLabel = $state('');
 	let retry: (() => void) | null = $state(null);
+	let cleanupPlan: CleanupPlan | null = $state(null);
+	let planningCleanup = $state(false);
+	let cleanupPlanFailed = $state(false);
+	let cleanProfiles = $state(false);
+
+	let cleanupGroups = $derived.by(() => groupRemovalsByProfile(cleanupPlan?.removals ?? []));
+
+	let cleanupPlanGeneration = 0;
+
+	async function openRemove(): Promise<void> {
+		const generation = ++cleanupPlanGeneration;
+		confirmation = 'remove';
+		cleanupPlan = null;
+		cleanupPlanFailed = false;
+		cleanProfiles = false;
+		planningCleanup = true;
+		try {
+			const planned = await planProfileCleanup(path, installedName());
+			if (generation === cleanupPlanGeneration) {
+				cleanupPlan = planned;
+			}
+		} catch {
+			if (generation === cleanupPlanGeneration) {
+				cleanupPlanFailed = true;
+			}
+		} finally {
+			if (generation === cleanupPlanGeneration) {
+				planningCleanup = false;
+			}
+		}
+	}
 
 	async function perform(
 		action: (force: boolean) => Promise<unknown>,
@@ -299,7 +333,11 @@
 				{/if}
 				{#if modState !== 'available' && modState !== 'incompatible'}
 					<li>
-						<button type="button" disabled={locked || busy} onclick={() => (confirmation = 'remove')}>
+						<button
+							type="button"
+							disabled={locked || busy || planningCleanup}
+							onclick={() => void openRemove()}
+						>
 							Remove
 						</button>
 					</li>
@@ -351,18 +389,59 @@
 	>
 		<p>
 			{confirmation === 'remove'
-				? 'The mod files are reverted; the history keeps them.'
+				? 'The mod files leave the game directory; the history keeps them.'
 				: 'The mod files leave the game directory until you enable the mod again.'}
 		</p>
+		{#if confirmation === 'remove'}
+			<label class="clean">
+				<input
+					type="checkbox"
+					bind:checked={cleanProfiles}
+					disabled={planningCleanup || cleanupGroups.length === 0}
+				/>
+				Also clean the player profiles
+			</label>
+			{#if planningCleanup}
+				<p class="hint">Looking through the player profiles…</p>
+			{:else if cleanupPlanFailed}
+				<p class="hint">sptmod could not look through the player profiles.</p>
+			{:else if cleanupGroups.length === 0}
+				<p class="hint">The player profiles hold nothing of this mod.</p>
+			{:else}
+				<ul class="findings">
+					{#each cleanupGroups as group (group.profile)}
+						<li>
+							<span class="kind">{group.file}</span>
+							{group.entries}
+							{group.entries === 1 ? 'entry' : 'entries'} in {group.places}
+							{group.places === 1 ? 'place' : 'places'}
+						</li>
+					{/each}
+				</ul>
+				{#if (cleanupPlan?.untouched.length ?? 0) > 0}
+					<p class="hint">
+						{cleanupPlan?.untouched.length}
+						{(cleanupPlan?.untouched.length ?? 0) === 1 ? 'reference' : 'references'} sptmod cannot
+						identify stay untouched.
+					</p>
+				{/if}
+				<p class="hint">Quest and achievement progress tied to this mod is removed as well.</p>
+				<p class="hint">
+					A copy of each profile is saved in the game's own backups folder first, and the change
+					shows up in History as a snapshot.
+				</p>
+			{/if}
+		{/if}
 		{#snippet actions()}
 			<button
 				type="button"
 				onclick={() => {
 					const kind = confirmation;
+					const clean = cleanProfiles;
 					confirmation = null;
 					if (kind === 'remove') {
 						void perform(
-							(force) => removeMod(path, installedName(), force),
+							(force) => removeMod(path, installedName(), force, clean),
 							false,
 							'Remove anyway'
 						);
@@ -800,5 +879,12 @@
 	.hint {
 		color: #98a2ad;
 		font-size: 0.9em;
+	}
+
+	.clean {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0.6rem 0 0.2rem;
 	}
 </style>

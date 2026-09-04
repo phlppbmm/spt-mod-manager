@@ -42,6 +42,8 @@ LAUNCH_LOCK_FILE_NAME: Final = ".sptmod-launch.lock"
 READY_TIMEOUT: Final = 300.0
 POLL_SECONDS: Final = 1.0
 WATCH_POLL_SECONDS: Final = 3.0
+WATCH_GRACE_SECONDS: Final = 120.0
+CLIENT_NEVER_STARTED: Final = "The game did not start."
 TERMINATE_TIMEOUT: Final = 10.0
 CLIENT_ARGS_HEAD: Final[tuple[str, ...]] = ("-force-gfx-jobs", "native")
 
@@ -102,7 +104,11 @@ class _ProcessRef:
 
 @dataclass(frozen=True)
 class _LaunchState:
-    """The contents of the launch state file."""
+    """The contents of the launch state file.
+
+    ``failure`` names why the launch did not end up with a running game,
+    empty while nothing went wrong.
+    """
 
     profile_id: str = ""
     stop_server_on_exit: bool = True
@@ -110,6 +116,7 @@ class _LaunchState:
     server_started_by_sptmod: bool = False
     client: _ProcessRef | None = None
     watcher: _ProcessRef | None = None
+    failure: str = ""
 
 
 @dataclass(frozen=True)
@@ -272,8 +279,8 @@ def launch_status(path: Path) -> LaunchStatus:
     """
     state = _read_state(path)
     running = game_dir.game_processes()
-    server = _alive_pid(state.server) or _scanned_pid(running, "server")
-    client = _alive_pid(state.client) or _scanned_pid(running, "client")
+    server = _running_pid(state.server, running, "server")
+    client = _running_pid(state.client, running, "client")
     return LaunchStatus(
         server_running=server != 0,
         client_running=client != 0,
@@ -289,15 +296,18 @@ def stop_game(path: Path) -> StopResult:
     Closes the watcher first so it cannot act on a half-stopped installation,
     then the game with everything it started, then the server. A server or
     game that is running without being remembered is found in the process
-    table and closed as well.
+    table and closed as well; every game process found there is closed, not
+    only the first, because a game hosted by Wine shows up next to the
+    program that started it.
     """
     state = _read_state(path)
     running = game_dir.game_processes()
     if state.watcher is not None:
         _terminate(state.watcher)
-    client = _live_ref(state.client) or _running_ref(running, "client")
     server = _live_ref(state.server) or _running_ref(running, "server")
-    client_stopped = client is not None and _terminate(client)
+    client_stopped = False
+    for client in _client_refs(state.client, running):
+        client_stopped = _terminate(client) or client_stopped
     server_stopped = server is not None and _terminate(server)
     _clear_state(path)
     return StopResult(server_stopped=server_stopped, client_stopped=client_stopped)
@@ -307,28 +317,79 @@ def watch_game(
     path: Path,
     *,
     poll_seconds: float = WATCH_POLL_SECONDS,
+    grace_seconds: float = WATCH_GRACE_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Wait until the game of ``path`` closes, then clean up after it.
 
-    Runs in its own process for as long as the game does. When the game is
-    gone, the server is closed if the launch asked for it and sptmod started
-    that server; the remembered state is dropped either way.
+    Runs in its own process for as long as the game does. The game is looked
+    for by process name as well as by the process the launch started, because
+    on Linux that process only wraps the game and may be gone or replaced
+    while the game keeps running. When no game shows up within
+    ``grace_seconds`` and the started process is gone too, the launch failed:
+    the server is closed as it would be after a game, and the reason is
+    written to the state file. Otherwise the server is closed once the last
+    game process is gone, if the launch asked for it and sptmod started that
+    server; the remembered state is dropped either way.
+
+    Args:
+        path: The game directory.
+        poll_seconds: Seconds between two looks at the process table.
+        grace_seconds: Seconds the game has to show up after the launch.
+        sleep: Sleep function, injected for testing.
+        clock: Monotonic clock, injected for testing.
     """
     state = _read_state(path)
-    client = state.client
-    if client is None or not game_dir.process_alive(client.pid, client.started_at):
+    if state.client is None:
         return
-    while game_dir.process_alive(client.pid, client.started_at):
+    if not _await_client(
+        state.client,
+        poll_seconds=poll_seconds,
+        grace_seconds=grace_seconds,
+        sleep=sleep,
+        clock=clock,
+    ):
+        _stop_watched_server(state)
+        with suppress(OSError):
+            _write_state(path, replace(state, failure=CLIENT_NEVER_STARTED))
+        return
+    while _client_running(state.client):
         sleep(poll_seconds)
-    stop_server = (
+    _stop_watched_server(state)
+    _clear_state(path)
+
+
+def _await_client(
+    client: _ProcessRef,
+    *,
+    poll_seconds: float,
+    grace_seconds: float,
+    sleep: Callable[[float], None],
+    clock: Callable[[], float],
+) -> bool:
+    """Wait for a running game, at most ``grace_seconds`` long."""
+    started = clock()
+    while not _client_running(client):
+        if clock() - started >= grace_seconds:
+            return False
+        sleep(poll_seconds)
+    return True
+
+
+def _client_running(client: _ProcessRef | None) -> bool:
+    """Return whether a game is running, remembered or found by name."""
+    return _running_pid(client, game_dir.game_processes(), "client") != 0
+
+
+def _stop_watched_server(state: _LaunchState) -> None:
+    """Close the server of one launch when that launch asked for it."""
+    if (
         state.stop_server_on_exit
         and state.server_started_by_sptmod
         and state.server is not None
-    )
-    if stop_server and state.server is not None:
+    ):
         _terminate(state.server)
-    _clear_state(path)
 
 
 def tokenize_launch_settings(text: str) -> list[str]:
@@ -613,15 +674,16 @@ def _live_ref(reference: _ProcessRef | None) -> _ProcessRef | None:
     return reference
 
 
-def _alive_pid(reference: _ProcessRef | None) -> int:
-    """Return the process number of ``reference`` while it still runs."""
-    live = _live_ref(reference)
-    return live.pid if live is not None else 0
+def _running_pid(
+    reference: _ProcessRef | None, running: Sequence[GameProcess], kind: str
+) -> int:
+    """Return the process number of the running server or client, or ``0``.
 
-
-def _scanned_pid(running: Sequence[GameProcess], kind: str) -> int:
-    """Return the process number of the first scanned process of ``kind``."""
-    reference = _running_ref(running, kind)
+    The remembered process is the fast, certain answer; the process table is
+    asked for a process of ``kind`` when that one is gone, so a game hosted by
+    Wine is found even after the program that started it exited.
+    """
+    reference = _live_ref(reference) or _running_ref(running, kind)
     return reference.pid if reference is not None else 0
 
 
@@ -631,6 +693,23 @@ def _running_ref(running: Sequence[GameProcess], kind: str) -> _ProcessRef | Non
         if process.kind == kind:
             return _ProcessRef(pid=process.pid, started_at=process.started_at)
     return None
+
+
+def _client_refs(
+    client: _ProcessRef | None, running: Sequence[GameProcess]
+) -> list[_ProcessRef]:
+    """Return every running game process, remembered one and scanned ones."""
+    references: dict[int, _ProcessRef] = {}
+    live = _live_ref(client)
+    if live is not None:
+        references[live.pid] = live
+    for process in running:
+        if process.kind == "client":
+            references.setdefault(
+                process.pid,
+                _ProcessRef(pid=process.pid, started_at=process.started_at),
+            )
+    return list(references.values())
 
 
 def _report(progress: Progress | None, step: str, percent: int, message: str) -> None:
@@ -682,6 +761,7 @@ def _read_state(path: Path) -> _LaunchState:
         return _LaunchState()
     profile_id = payload.get("profile_id")
     server = payload.get("server")
+    failure = payload.get("failure")
     return _LaunchState(
         profile_id=profile_id if isinstance(profile_id, str) else "",
         stop_server_on_exit=payload.get("stop_server_on_exit") is not False,
@@ -690,6 +770,7 @@ def _read_state(path: Path) -> _LaunchState:
         and server.get("started_by_sptmod") is True,
         client=_reference(payload.get("client")),
         watcher=_reference(payload.get("watcher")),
+        failure=failure if isinstance(failure, str) else "",
     )
 
 
@@ -717,6 +798,7 @@ def _write_state(path: Path, state: _LaunchState) -> None:
         "stop_server_on_exit": state.stop_server_on_exit,
         "client": _reference_payload(state.client),
         "watcher": _reference_payload(state.watcher),
+        "failure": state.failure,
     }
     server = _reference_payload(state.server)
     if server is not None:

@@ -857,6 +857,29 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
     assert launch_status(tmp_path) == LaunchStatus(True, True, 333, 444, "")
 
 
+def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The Linux case: the process the launch spawned was only the wrapper and
+    # is gone, while the game itself still runs under its own name.
+    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
+    monkeypatch.setattr(
+        game_dir,
+        "game_processes",
+        lambda: [
+            GameProcess(
+                pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0
+            )
+        ],
+    )
+    _write_state_file(tmp_path, profile_id="profile-a", client=_ref(222, 2.0))
+
+    status = launch_status(tmp_path)
+
+    assert status.client_running is True
+    assert status.client_pid == 444
+
+
 def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -930,6 +953,36 @@ def test_stop_game_falls_back_to_the_scanned_process_table(
     assert result == StopResult(server_stopped=True, client_stopped=True)
     server.wait(timeout=4)
     client.wait(timeout=4)
+
+
+def test_stop_game_stops_every_scanned_game_process(
+    tmp_path: Path,
+    spawn_sleeper: Callable[[], subprocess.Popen],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A game hosted by Wine shows up more than once; leaving any of them
+    # running would keep the installation locked.
+    first = spawn_sleeper()
+    second = spawn_sleeper()
+    monkeypatch.setattr(
+        game_dir,
+        "game_processes",
+        lambda: [
+            GameProcess(
+                pid=process.pid,
+                name="EscapeFromTarkov.exe",
+                kind="client",
+                started_at=psutil.Process(process.pid).create_time(),
+            )
+            for process in (first, second)
+        ],
+    )
+
+    result = stop_game(tmp_path)
+
+    assert result.client_stopped is True
+    first.wait(timeout=4)
+    second.wait(timeout=4)
 
 
 def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(

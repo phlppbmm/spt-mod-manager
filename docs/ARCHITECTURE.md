@@ -397,13 +397,13 @@ is: port probe via GET `/launcher/v2/ping` → start `SPT.Server.*` if the port 
 free → poll readiness every 1 second with a 120-second bound → PUT
 `/launcher/v2/login` (zlib-compressed body, `responsecompressed: 0` header) →
 spawn the game client with the exact argv, cwd and environment from the official
-launcher's logic → spawn a detached watcher that polls the client's `(pid,
-started_at)` pair every 3 seconds and closes the server when the game closes (if
-configured).
+launcher's logic → spawn a detached watcher that polls the process table every
+3 seconds and closes the server when the game closes (if configured).
 
 **State file:** `<game dir>/.sptmod-launch.json` holds the running process
-identities (server, client, watcher) along with `profile_id` and
-`stop_server_on_exit`. It is read and written atomically (mkstemp + os.replace,
+identities (server, client, watcher) along with `profile_id`,
+`stop_server_on_exit` and `failure` (empty unless the watcher gave up waiting
+for the game). It is read and written atomically (mkstemp + os.replace,
 the `favorites.save_favorites` pattern) and is a hint only — the process table
 is the source of truth. Located in the game directory because every short-lived
 process involved (launch call, status call, watcher) learns about the game
@@ -411,9 +411,23 @@ directory alone.
 
 **Watcher:** Started as `python -m sptmod.watch <game directory>` (detached,
 never awaited), it lives as long as the game does. Uses `sys.executable` so no
-PATH or environment lookup is needed. Polls the client pid with 3-second
-intervals; when gone, closes the server (if the launch set `stop_server_on_exit`
-and the server was started by sptmod, not reused) and clears the state file.
+PATH or environment lookup is needed. Polls every 3 seconds and counts the game
+as running when either the recorded client `(pid, started_at)` is alive (fast
+path) or `game_dir.game_processes()` reports a process of kind `client` — the
+same rule `launch_status` uses, through the shared `_running_pid` helper. This
+matters on Linux, where the spawned pid is the umu/Proton wrapper that may exit
+or be replaced while `EscapeFromTarkov.exe` keeps running under Wine.
+
+After the launch the watcher waits up to a 120-second grace period for a game
+process to appear (both grace period and poll interval are injectable). If the
+grace period elapses with no game and the spawned pid is gone too, the launch
+counts as failed: the server is closed under the usual rules and `failure` is
+written to the state file (the file is kept, not cleared). If the spawned pid is
+still alive it *is* the game or its wrapper, so the watcher keeps waiting on it
+regardless of the grace period. Once a game has been seen, the watcher waits for
+the last game process to disappear, then closes the server (if the launch set
+`stop_server_on_exit` and the server was started by sptmod, not reused) and
+clears the state file.
 
 **Server reuse:** `launch_profile` will reuse a server that is already running
 unless it fails to answer or the port is held by a different program. An
@@ -448,13 +462,16 @@ in its own session; on Windows, the flags above have the same effect. This means
 the game survives the exit of the short-lived RPC process and never receives
 signals bound to that process group.
 
-**Known limitation:** Process name detection on Wine/Proton for the fallback
-name scan (`game_dir.game_processes()`) relies on a Proton process named
-`EscapeFromTarkov.exe`. This is unverified — the official launcher's own code
-comments "TODO: this might not work for linux". Primary detection uses the
-recorded `(pid, started_at)` of the spawned process, which is certain; the name
-scan is only the fallback for games started by the official launcher or another
-path.
+**Known limitation:** Detecting the running game on Wine/Proton relies on a
+process named `EscapeFromTarkov.exe` in the process table (matched
+case-insensitively as a substring by `game_dir.game_process_kind`). The official
+launcher's own code comments "TODO: this might not work for linux" for its own
+detection. Since the spawned pid is only the wrapper there, the name scan is not
+a fallback but the second half of the detection: if Wine ever hides the name,
+the watcher falls back to the wrapper pid and, when that is gone too, reports
+the launch as failed after the grace period instead of waiting forever.
+`stop_game` closes every scanned game process, not only the first, because a
+Wine-hosted game appears next to the program that started it.
 
 **What sptmod deliberately does not do:** Pre-launch cleanup (the launcher
 deletes `BattlEye/`, `Logs/`, `ConsistencyInfo`, and others before every start;

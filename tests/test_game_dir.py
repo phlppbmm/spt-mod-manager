@@ -9,6 +9,8 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 ``tests/test_game_layout.py::test_read_core_json_version_*``.
 """
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import psutil
@@ -192,3 +194,22 @@ def test_ensure_game_not_running_message_names_the_processes(
 
     assert "SPT.Server.exe" in str(exc_info.value)
     assert "EscapeFromTarkov.exe" in str(exc_info.value)
+
+
+def test_running_game_processes_reports_a_real_process_named_like_the_server(
+    tmp_path: Path,
+) -> None:
+    """A process whose executable is named like the SPT server is detected
+    through the real process table and blocks operations."""
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    fake_server = tmp_path / "SPT.Server.Linux"
+    shutil.copy(sleep, fake_server)
+    process = subprocess.Popen([str(fake_server), "30"])
+    try:
+        assert "SPT.Server.Linux" in running_game_processes()
+        with pytest.raises(GameRunningError):
+            ensure_game_not_running()
+    finally:
+        process.kill()
+        process.wait()

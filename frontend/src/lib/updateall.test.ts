@@ -1,10 +1,94 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runUpdates, summarize, updatableFrom } from './updateall';
+import { runUpdates, summarize, updatableFrom, updatableFromCatalog } from './updateall';
 import type { UpdateAllDeps, UpdateAllResult, UpdateTarget } from './updateall';
-import type { BlockedUpdate, UpdateCandidate, UpdatesReport } from './api/client';
+import type {
+	BlockedUpdate,
+	CatalogEntry,
+	CatalogMod,
+	CatalogVersion,
+	ModInfo,
+	UpdateCandidate,
+	UpdatesReport
+} from './api/client';
 import type { components } from './api/types';
 
 type IncompatibleMod = components['schemas']['IncompatibleMod'];
+
+let nextCatalogId = 1;
+
+function makeCatalogMod(overrides: Partial<CatalogMod> = {}): CatalogMod {
+	const id = nextCatalogId++;
+	return {
+		id,
+		hub_id: null,
+		guid: null,
+		name: `Mod ${id}`,
+		slug: `mod-${id}`,
+		teaser: null,
+		thumbnail: null,
+		favourites_count: 0,
+		endorsements_count: 0,
+		fika_compatibility: null,
+		featured: false,
+		contains_ads: false,
+		contains_ai_content: false,
+		category: null,
+		license_name: null,
+		license_link: null,
+		source_links: [],
+		author: `Author ${id}`,
+		downloads: 0,
+		detail_url: `https://example.test/mod/${id}`,
+		published_at: null,
+		created_at: null,
+		updated_at: null,
+		...overrides
+	};
+}
+
+function makeCatalogVersion(overrides: Partial<CatalogVersion> = {}): CatalogVersion {
+	const id = nextCatalogId++;
+	return {
+		id,
+		mod_id: id,
+		version: '1.0.0',
+		link: null,
+		content_length: null,
+		spt_version_constraint: '~3.9.0',
+		downloads: 0,
+		published_at: null,
+		updated_at: null,
+		...overrides
+	};
+}
+
+function makeCatalogEntry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
+	return {
+		mod: makeCatalogMod(),
+		state: 'available',
+		installed_version: null,
+		latest_version: makeCatalogVersion(),
+		...overrides
+	};
+}
+
+function makeModInfo(overrides: Partial<ModInfo> = {}): ModInfo {
+	return {
+		name: 'Some Mod',
+		version: '1.0.0',
+		mod_type: 'client',
+		author: 'Some Author',
+		spt_range: '~3.9.0',
+		state: 'installed',
+		commit: 'abc123',
+		date: '2026-01-01T00:00:00Z',
+		forge_id: '',
+		forge_version_id: '',
+		guid: 'com.example.somemod',
+		source: '',
+		...overrides
+	};
+}
 
 function makeCandidate(overrides: Partial<UpdateCandidate> = {}): UpdateCandidate {
 	return {
@@ -96,6 +180,154 @@ describe('updatableFrom', () => {
 
 	it('returns an empty list for a report with an empty available list', () => {
 		expect(updatableFrom(makeReport())).toEqual([]);
+	});
+});
+
+describe('updatableFromCatalog', () => {
+	it('returns an empty list for empty entries', () => {
+		expect(updatableFromCatalog([], [])).toEqual([]);
+	});
+
+	it('includes only rows whose row state is update_available, and the count matches', () => {
+		const updateEntry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Updatable' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const upToDateEntry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Current' }),
+			state: 'installed',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '1.0.0' })
+		});
+		const notInstalledEntry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Uninstalled' }),
+			state: 'available',
+			installed_version: null,
+			latest_version: makeCatalogVersion({ version: '1.0.0' })
+		});
+
+		const result = updatableFromCatalog(
+			[updateEntry, upToDateEntry, notInstalledEntry],
+			[makeModInfo({ name: 'Current', state: 'installed' })]
+		);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].name).toBe('Updatable');
+	});
+
+	it('excludes an entry with a newer version when the installed mod is disabled', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Disabled Mod' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const installed = [makeModInfo({ name: 'Disabled Mod', state: 'disabled' })];
+
+		expect(updatableFromCatalog([entry], installed)).toEqual([]);
+	});
+
+	it('excludes an installed, up-to-date entry (state "installed")', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Current' }),
+			state: 'installed',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '1.0.0' })
+		});
+		const installed = [makeModInfo({ name: 'Current', state: 'installed' })];
+
+		expect(updatableFromCatalog([entry], installed)).toEqual([]);
+	});
+
+	it('excludes a not-installed entry (state "available")', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Never Installed' }),
+			state: 'available',
+			installed_version: null,
+			latest_version: makeCatalogVersion({ version: '1.0.0' })
+		});
+
+		expect(updatableFromCatalog([entry], [])).toEqual([]);
+	});
+
+	it('resolves the target name by Forge id, taking precedence over a name match', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ id: 5, name: 'Catalog Display Name' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const installed = [
+			makeModInfo({ name: 'Wrong Name Match', forge_id: '999' }),
+			// Same lowercase name as the catalog entry would also match by name,
+			// but the Forge id match below must win.
+			makeModInfo({ name: 'catalog display name', forge_id: '111' }),
+			makeModInfo({ name: 'Forge Id Match', forge_id: '5' })
+		];
+
+		const result = updatableFromCatalog([entry], installed);
+
+		expect(result[0].name).toBe('Forge Id Match');
+	});
+
+	it('falls back to a case-insensitive mod-name match when no Forge id matches', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ id: 42, name: 'Some Mod' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const installed = [makeModInfo({ name: 'SOME MOD', forge_id: '' })];
+
+		const result = updatableFromCatalog([entry], installed);
+
+		expect(result[0].name).toBe('SOME MOD');
+	});
+
+	it('falls back to the catalog mod name when no installed record matches by Forge id or name', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ id: 42, name: 'Unmatched Mod' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const installed = [makeModInfo({ name: 'Different Mod', forge_id: '999' })];
+
+		const result = updatableFromCatalog([entry], installed);
+
+		expect(result[0].name).toBe('Unmatched Mod');
+	});
+
+	it('carries the catalog installed_version and latest_version, not the installed record version', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ id: 1, name: 'Versioned Mod' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: makeCatalogVersion({ version: '2.0.0' })
+		});
+		const installed = [makeModInfo({ name: 'Versioned Mod', forge_id: '1', version: '9.9.9' })];
+
+		const result = updatableFromCatalog([entry], installed);
+
+		expect(result[0].installedVersion).toBe('1.0.0');
+		expect(result[0].newVersion).toBe('2.0.0');
+	});
+
+	it('falls back to an empty string for installedVersion and newVersion when catalog data is missing', () => {
+		const entry = makeCatalogEntry({
+			mod: makeCatalogMod({ name: 'Sparse Mod' }),
+			state: 'update_available',
+			installed_version: null,
+			latest_version: null
+		});
+		const installed = [makeModInfo({ name: 'Sparse Mod' })];
+
+		const result = updatableFromCatalog([entry], installed);
+
+		expect(result[0].installedVersion).toBe('');
+		expect(result[0].newVersion).toBe('');
 	});
 });
 

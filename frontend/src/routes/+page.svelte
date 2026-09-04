@@ -2,10 +2,10 @@
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
-	import { checkUpdates, status, syncCatalog, updateMod } from '$lib/api/client';
+	import { status, syncCatalog, updateMod } from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
-	import { runUpdates, summarize, updatableFrom, type UpdateTarget } from '$lib/updateall';
+	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
 
 	type Phase = 'checking' | 'setup' | 'ready' | 'unreachable';
 
@@ -74,22 +74,12 @@
 			const result = await syncCatalog(path, false, operationId);
 			syncNote = `Catalog synced: ${result.new_mods} new mods, ${result.updated_mods} updated.`;
 			refreshKey += 1;
-			await refreshCandidates();
 		} catch (cause) {
 			syncNote = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			unsubscribe();
 			syncProgress = null;
 			syncing = false;
-		}
-	}
-
-	async function refreshCandidates(): Promise<void> {
-		try {
-			candidates = updatableFrom(await checkUpdates(path));
-			updatesChecked = true;
-		} catch {
-			// A failed check keeps the candidates of the previous check.
 		}
 	}
 
@@ -171,6 +161,10 @@
 		{refreshKey}
 		locked={updatingAll}
 		onbusy={(busy) => (rowsBusy = busy)}
+		onupdatable={(targets) => {
+			candidates = targets;
+			updatesChecked = true;
+		}}
 	/>
 {/if}
 

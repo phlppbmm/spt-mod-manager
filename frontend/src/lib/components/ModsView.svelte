@@ -16,15 +16,17 @@
 		type ModTab,
 		type SortKey
 	} from '$lib/modfilter';
+	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
 
 	interface Props {
 		path: string;
 		refreshKey: number;
 		locked: boolean;
 		onbusy: (busy: boolean) => void;
+		onupdatable: (targets: UpdateTarget[]) => void;
 	}
 
-	let { path, refreshKey, locked, onbusy }: Props = $props();
+	let { path, refreshKey, locked, onbusy, onupdatable }: Props = $props();
 
 	const busyIds = new Set<number>();
 
@@ -122,9 +124,11 @@
 			entries = catalog;
 			mods = installed;
 			favorites = favored.mod_ids;
+			onupdatable(updatableFromCatalog(catalog, installed));
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
+				onupdatable([]);
 			}
 		} finally {
 			if (request === requestId) {

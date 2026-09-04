@@ -1,4 +1,5 @@
-import type { UpdatesReport } from './api/client';
+import type { CatalogEntry, ModInfo, UpdatesReport } from './api/client';
+import { rowState } from './modfilter';
 
 export interface UpdateTarget {
 	name: string;
@@ -33,6 +34,36 @@ export function updatableFrom(report: UpdatesReport): UpdateTarget[] {
 		installedVersion: candidate.installed_version,
 		newVersion: candidate.new_version
 	}));
+}
+
+/**
+ * The same targets the rows show as updatable: the row state decides, so a
+ * disabled mod is not counted even when a newer version exists. `updateMod`
+ * addresses a mod by its install trailer name, which differs from the Forge
+ * display name for many mods.
+ */
+export function updatableFromCatalog(
+	entries: readonly CatalogEntry[],
+	installed: readonly ModInfo[]
+): UpdateTarget[] {
+	const disabledMods = installed
+		.filter((mod) => mod.state === 'disabled')
+		.map((mod) => mod.name);
+	const byForgeId = new Map(
+		installed.filter((mod) => mod.forge_id !== '').map((mod) => [mod.forge_id, mod] as const)
+	);
+	const byName = new Map(installed.map((mod) => [mod.name.toLowerCase(), mod] as const));
+	return entries
+		.filter((entry) => rowState(entry, disabledMods) === 'update_available')
+		.map((entry) => {
+			const mod =
+				byForgeId.get(String(entry.mod.id)) ?? byName.get(entry.mod.name.toLowerCase());
+			return {
+				name: mod?.name ?? entry.mod.name,
+				installedVersion: entry.installed_version ?? '',
+				newVersion: entry.latest_version?.version ?? ''
+			};
+		});
 }
 
 /**

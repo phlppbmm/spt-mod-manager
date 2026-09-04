@@ -11,6 +11,7 @@ manual-mod blocker; a modified *tracked* file inside an owned directory still
 blocks.
 """
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -324,3 +325,60 @@ def test_a_directory_owned_only_by_a_disabled_mod_resurfaces_as_manual(
     manual = report.manual_mods[0]
     assert manual.path == Path("BepInEx/plugins/ClientMod")
     assert manual.files == [Path("BepInEx/plugins/ClientMod/ReAdded.dll")]
+
+
+# --- runtime-data cleanup is best-effort under filesystem permission errors --
+
+
+def test_remove_mod_leaves_an_unremovable_leftover_in_place(
+    clean_repo: Repo, install_commit
+) -> None:
+    """A leftover the OS refuses to delete (its containing directory is not
+    writable) must not abort remove_mod; it simply stays. If the `except
+    OSError: continue` around the unlink were removed, this fails: the
+    PermissionError would propagate out of remove_mod instead."""
+    install_commit(
+        clean_repo,
+        "ClientMod",
+        files={"BepInEx/plugins/ClientMod/ClientMod.dll": "v1"},
+    )
+    locked_dir = clean_repo.path / "BepInEx/plugins/ClientMod/sub"
+    locked_dir.mkdir(parents=True)
+    leftover = locked_dir / "leftover.txt"
+    leftover.write_text("generated while playing", encoding="utf-8")
+    os.chmod(locked_dir, 0o555)
+    try:
+        services.remove_mod(clean_repo.path, "ClientMod")
+    finally:
+        os.chmod(locked_dir, 0o755)
+
+    assert leftover.exists()
+    assert leftover.read_text(encoding="utf-8") == "generated while playing"
+
+
+def test_remove_mod_leaves_a_now_empty_dir_in_place_when_its_parent_is_locked(
+    clean_repo: Repo, install_commit
+) -> None:
+    """A leftover's directory becomes deletable, but pruning the now-empty
+    directory fails because its own parent is not writable; this must not
+    abort remove_mod either. If the `except OSError: continue` around
+    _prune_empty were removed, this fails: the PermissionError from rmdir
+    would propagate out of remove_mod instead."""
+    install_commit(
+        clean_repo,
+        "ClientMod",
+        files={"BepInEx/plugins/ClientMod/ClientMod.dll": "v1"},
+    )
+    locked_dir = clean_repo.path / "BepInEx/plugins/ClientMod/sub"
+    prunable_dir = locked_dir / "subsub"
+    prunable_dir.mkdir(parents=True)
+    leftover = prunable_dir / "leftover.txt"
+    leftover.write_text("generated while playing", encoding="utf-8")
+    os.chmod(locked_dir, 0o555)
+    try:
+        services.remove_mod(clean_repo.path, "ClientMod")
+    finally:
+        os.chmod(locked_dir, 0o755)
+
+    assert not leftover.exists()
+    assert prunable_dir.is_dir()

@@ -17,6 +17,8 @@ import pytest
 
 from sptmod.core import services
 from sptmod.core.errors import GitError, SptVersionUnknownError
+from sptmod.core.game_dir import detect_layout
+from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
 
@@ -142,3 +144,41 @@ def test_init_with_pre_existing_mods_does_not_commit_them(
 
     committed = {f.path for f in Repo(fake_game_dir).show_files(result.commit)}
     assert Path("SPT/user/mods/OldServerMod/package.json") not in committed
+
+
+def test_init_adopt_true_rolls_back_the_created_repo_on_an_adoption_failure(
+    fake_game_dir: Path,
+) -> None:
+    """A pre-existing mod with no usable metadata makes the initial commit's
+    adopt step fail; init_game_dir must undo the .git it created rather than
+    leaving a half-initialized repository behind. If the rollback in
+    init_game_dir's `except Exception:` block were removed, this fails: the
+    .git directory would still exist after the raised error."""
+    mod_dir = fake_game_dir / "SPT" / "user" / "mods" / "BadMod"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "package.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(InvalidMetadataError):
+        services.init_game_dir(fake_game_dir, adopt=True)
+
+    assert not (fake_game_dir / ".git").exists()
+
+
+def test_init_adopt_true_keeps_a_pre_existing_git_dir_it_did_not_create(
+    fake_game_dir: Path,
+) -> None:
+    """A repository without any commit, left behind by an earlier interrupted
+    init, is completed rather than refused (per _open_for_init); when that
+    completion still fails, the rollback must not remove a .git it did not
+    create itself. If `if created:` were replaced with an unconditional
+    rmtree, this fails: the pre-existing .git would be deleted too."""
+    Repo.init(detect_layout(fake_game_dir))
+    assert (fake_game_dir / ".git").exists()
+    mod_dir = fake_game_dir / "SPT" / "user" / "mods" / "BadMod"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "package.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(InvalidMetadataError):
+        services.init_game_dir(fake_game_dir, adopt=True)
+
+    assert (fake_game_dir / ".git").exists()

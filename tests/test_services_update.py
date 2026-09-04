@@ -16,8 +16,14 @@ import respx
 from typer.testing import CliRunner
 
 from sptmod.cli import app as cli_app
-from sptmod.core import services
-from sptmod.core.errors import AmbiguousModError, DirtyTreeError, ModNotFoundError
+from sptmod.core import game_dir, services
+from sptmod.core.errors import (
+    AmbiguousModError,
+    ConflictError,
+    DependencyError,
+    DirtyTreeError,
+    ModNotFoundError,
+)
 from sptmod.core.forge.catalog import DB_FILE_NAME
 from sptmod.core.repo import Repo
 from test_forge_catalog_fixtures import (
@@ -34,6 +40,15 @@ __all__ = ["client_factory", "db_path", "fake_clock", "recording_sleep", "respx_
 SPT_VERSION = "4.1.0"
 
 cli_runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the OS-process check so a real SPT session on the test host
+    cannot make these tests fail with GameRunningError; mirrors the same
+    stub already used in test_services_install.py, test_services_lifecycle.py
+    and test_services_runtime_data.py."""
+    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 @pytest.fixture
@@ -605,6 +620,191 @@ def test_update_mod_unknown_name_raises_mod_not_found(
         services.update_mod(
             clean_repo.path, "Nonexistent", db_path=db_path, client=client
         )
+
+
+def test_update_mod_absent_from_every_report_list_is_a_noop_with_generic_notice(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+) -> None:
+    """Forge's four update-report lists can all omit a queried mod (an odd
+    but possible server response); update_mod must still no-op instead of
+    crashing, with the generic fallback notice. If _no_update_notice's final
+    `return` were changed to return "", this fails."""
+    install_commit(
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+    )
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [],
+            "blocked_updates": [],
+            "up_to_date": [],
+            "incompatible_with_spt": [],
+        },
+    )
+    client = client_factory()
+
+    result = services.update_mod(
+        clean_repo.path, "CoolMod", db_path=db_path, client=client
+    )
+
+    assert result.notice == "Forge reports no update for CoolMod 1.0.0"
+
+
+def _mock_update_recommendation(
+    respx_router: respx.MockRouter, link: str, content_length: int
+) -> None:
+    _mock_updates(
+        respx_router,
+        {
+            "spt_version": SPT_VERSION,
+            "updates": [
+                {
+                    "current_version": _current_version(
+                        id=100, mod_id=10, name="ModA", version="1.0.0"
+                    ),
+                    "recommended_version": {
+                        "id": 200,
+                        "version": "2.0.0",
+                        "link": link,
+                        "content_length": content_length,
+                        "fika_compatibility": "unknown",
+                        "spt_versions": [SPT_VERSION],
+                    },
+                    "update_reason": "newer version available",
+                }
+            ],
+            "blocked_updates": [],
+            "up_to_date": [],
+            "incompatible_with_spt": [],
+        },
+    )
+
+
+def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+    make_archive,
+) -> None:
+    """Mirrors install_from_archive's tracked-file conflict, but for a file
+    the *new* version of the mod being updated wants to write. If `if files:
+    raise ConflictError(...)` in _check_update_conflicts were removed, this
+    fails: the write over ModB's file would succeed and commit instead."""
+    install_commit(
+        clean_repo,
+        "ModB",
+        "1.0.0",
+        mod_type="server",
+        files={"SPT/user/mods/Shared/data.txt": "modb-content"},
+        minute=1,
+        **{"Mod-Forge-Id": "20"},
+    )
+    install_commit(
+        clean_repo,
+        "ModA",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/ModA/package.json": json.dumps(
+                {"name": "ModA", "version": "1.0.0"}
+            )
+        },
+        minute=2,
+        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+    )
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/ModA/package.json": json.dumps(
+                {"name": "ModA", "version": "2.0.0"}
+            ),
+            "SPT/user/mods/Shared/data.txt": "new-content",
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/moda-conflict-2.0.0.zip"
+    _mock_update_recommendation(respx_router, link, len(body))
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    with pytest.raises(ConflictError) as excinfo:
+        services.update_mod(clean_repo.path, "ModA", db_path=db_path, client=client)
+
+    assert "ModB" in str(excinfo.value)
+    assert any(finding.mod == "ModB" for finding in excinfo.value.conflicts)
+    assert (
+        clean_repo.path / "SPT/user/mods/Shared/data.txt"
+    ).read_text() == "modb-content"
+    assert len(clean_repo.log()) == commits_before
+
+
+def test_update_mod_missing_dependency_aborts_without_committing(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit,
+    make_archive,
+) -> None:
+    """If `if blocking: raise DependencyError(...)` in _check_update_conflicts
+    were removed, this fails: the update with an unmet dependency would
+    proceed and commit instead."""
+    install_commit(
+        clean_repo,
+        "ModA",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/ModA/package.json": json.dumps(
+                {"name": "ModA", "version": "1.0.0"}
+            )
+        },
+        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+    )
+    new_archive = make_archive(
+        {
+            "SPT/user/mods/ModA/package.json": json.dumps(
+                {
+                    "name": "ModA",
+                    "version": "2.0.0",
+                    "dependencies": {"MissingDep": ">=1.0.0"},
+                }
+            )
+        },
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/moda-dependency-2.0.0.zip"
+    _mock_update_recommendation(respx_router, link, len(body))
+    respx_router.get(link).mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"Content-Length": str(len(body))}
+        )
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+
+    with pytest.raises(DependencyError) as excinfo:
+        services.update_mod(clean_repo.path, "ModA", db_path=db_path, client=client)
+
+    assert {finding.mod for finding in excinfo.value.conflicts} == {"MissingDep"}
+    assert len(clean_repo.log()) == commits_before
+    package = json.loads(
+        (clean_repo.path / "SPT/user/mods/ModA/package.json").read_text()
+    )
+    assert package["version"] == "1.0.0"
 
 
 # --- CLI: update confirmation --------------------------------------------

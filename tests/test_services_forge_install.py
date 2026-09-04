@@ -18,7 +18,7 @@ import respx
 from typer.testing import CliRunner
 
 from sptmod.cli import app as cli_app
-from sptmod.core import services
+from sptmod.core import game_dir, services
 from sptmod.core.errors import ArchiveError, ConflictError, NotAGameDirError
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, NoCompatibleVersionError
 from sptmod.core.forge.client import DEFAULT_BASE_URL
@@ -53,6 +53,15 @@ SPT_VERSION = "4.1.0"
 SPT_CONSTRAINT = "^4.0.0"
 
 cli_runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the OS-process check so a real SPT session on the test host
+    cannot make these tests fail with GameRunningError; mirrors the same
+    stub already used in test_services_install.py, test_services_lifecycle.py
+    and test_services_runtime_data.py."""
+    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 @pytest.fixture
@@ -406,6 +415,55 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
 
     assert [entry.mod.name for entry in result.installed] == ["Link Mod"]
     assert (clean_repo.path / "SPT/user/mods/LinkMod/package.json").is_file()
+
+
+def test_install_mod_raises_archive_error_when_forge_no_longer_lists_the_version(
+    clean_repo: Repo,
+    client_factory,
+    respx_router: respx.MockRouter,
+    db_path: Path,
+) -> None:
+    """The cached version *summary* never carries a link, so _with_link must
+    call fetch_versions to resolve one; when Forge's full /mod/{id}/versions
+    listing no longer contains the exact cached version id (deleted between
+    sync and install), `_with_link`'s `if fetched is None: return entry`
+    leaves the entry link-less. If that guard were removed (KeyError/index
+    into an empty match) or `_download_entry`'s `if not link: raise
+    ArchiveError(...)` guard were removed, this fails: a crash instead of a
+    clear ArchiveError, or an attempted empty download."""
+    mod = mod_json_full(
+        id=910,
+        name="GhostLink",
+        slug="ghostlink",
+        owner=owner_json(id=9100, name="Alice"),
+        detail_url=f"{DEFAULT_BASE_URL}/mods/ghostlink",
+        versions=[
+            {
+                "id": 9100,
+                "version": "1.0.0",
+                "spt_version_constraint": SPT_CONSTRAINT,
+                "downloads": 1,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+        ],
+    )
+    page = page_envelope([mod], current_page=1, last_page=1, total=1, next_url=None)
+    respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page))
+    client = client_factory()
+    with Catalog(db_path) as cat:
+        cat.sync(client, full=True)
+    empty_versions = page_envelope(
+        [], current_page=1, last_page=1, total=0, next_url=None
+    )
+    respx_router.get("/mod/910/versions").mock(
+        return_value=httpx.Response(200, json=empty_versions)
+    )
+    _echo_dependencies(respx_router, [])
+
+    with pytest.raises(ArchiveError):
+        services.install_mod(
+            clean_repo.path, "GhostLink", "1.0.0", db_path=db_path, client=client
+        )
 
 
 def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
@@ -881,6 +939,47 @@ def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
 
     assert result.mod.forge_id == "401"
     assert result.mod.forge_version_id == "4011"
+
+
+def test_install_from_archive_forge_match_leaves_ids_empty_when_the_version_is_unknown(
+    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path,
+    make_archive,
+) -> None:
+    """One mod matches the name unambiguously, but the installed archive's
+    version has no matching cached version at all: `_catalog_match`'s `if
+    len(versions) != 1: return "", ""` guard, distinct from the len(mods)
+    ambiguity above. If that guard were removed (IndexError on
+    versions[0]), this fails."""
+    _seed_simple_catalog(
+        client_factory,
+        respx_router,
+        db_path,
+        [
+            mod_json_full(
+                id=403,
+                name="CoolMod",
+                slug="coolmod",
+                owner=owner_json(id=4030, name="Alice"),
+                versions=[
+                    {
+                        "id": 4031,
+                        "version": "1.2.3",
+                        "spt_version_constraint": SPT_CONSTRAINT,
+                        "downloads": 1,
+                        "published_at": "2025-01-02T00:00:00Z",
+                    }
+                ],
+            )
+        ],
+    )
+    archive = _package_archive(make_archive, "CoolMod", "CoolMod", "9.9.9")
+
+    result = services.install_from_archive(
+        clean_repo.path, archive, forge_match=True, db_path=db_path
+    )
+
+    assert result.mod.forge_id == ""
+    assert result.mod.forge_version_id == ""
 
 
 def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(

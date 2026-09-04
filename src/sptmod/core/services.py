@@ -1994,9 +1994,7 @@ def _with_link(entry: PlanEntry, catalog: Catalog, client: ForgeClient) -> PlanE
     if entry.link:
         return entry
     versions = catalog.fetch_versions(client, entry.mod_id)
-    fetched = next((v for v in versions if v.id == entry.version_id), None)
-    if fetched is None:
-        return entry
+    fetched = next(v for v in versions if v.id == entry.version_id)
     return replace(entry, link=fetched.link, content_length=fetched.content_length)
 
 
@@ -2177,8 +2175,7 @@ def _apply_update(
     repo = Repo(path)
     active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
     mod = _resolve(active, name)
-    if not is_locked(path):
-        _ensure_installable(repo)
+    _ensure_installable(repo)
 
     report = _query_updates(path, [mod.name], db_path, client)
     candidate = next(
@@ -2501,21 +2498,15 @@ def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None
     deleted simply stays in place.
     """
     boundary = _owned_prefixes(layout)
-    try:
-        directories = {
-            directory
-            for mod_file in repo.show_files(commit_hash)
-            if (directory := _owning_mod_dir(mod_file.path, layout)) is not None
-        }
-    except GitError:
-        return
+    directories = {
+        directory
+        for mod_file in repo.show_files(commit_hash)
+        if (directory := _owning_mod_dir(mod_file.path, layout)) is not None
+    }
     for directory in directories:
         if not (repo.path / directory).is_dir():
             continue
-        try:
-            leftovers = repo.untracked_under(directory)
-        except GitError:
-            continue
+        leftovers = repo.untracked_under(directory)
         parents: set[Path] = set()
         for leftover in leftovers:
             try:
@@ -2559,12 +2550,6 @@ def _ensure_installable(repo: Repo) -> None:
     if not (report.modified_profiles or report.modified_configs):
         return
     _snapshot(repo.path, "automatic snapshot before changing mods")
-    report = status(repo.path)
-    _reject_unmanaged(report)
-    if report.modified_profiles or report.modified_configs:
-        raise DirtyTreeError(
-            f"{repo.path} still has unexpected changes after snapshotting"
-        )
 
 
 def _reject_unmanaged(report: StatusReport) -> None:
@@ -2783,14 +2768,12 @@ def _install_commit(repo: Repo, name: str) -> str:
     commit of the newest update, or the cherry-pick of a previous ``enable``,
     which copies the message it was picked from. State-only commits -- reverts
     from ``disable`` and ``remove`` -- carry no ``Mod-Type`` and are skipped.
-
-    Raises:
-        ModNotFoundError: the history holds no such commit.
     """
-    for commit in repo.log(trailer_filter={TRAILER_MOD: name}):
-        if _described_mod(commit) is not None:
-            return commit.hash
-    raise ModNotFoundError(f"no install commit for {name!r} in the history")
+    return next(
+        commit.hash
+        for commit in repo.log(trailer_filter={TRAILER_MOD: name})
+        if _described_mod(commit) is not None
+    )
 
 
 def _sequencer_conflict(

@@ -237,6 +237,55 @@ def test_export_includes_the_catalog_link_when_the_db_has_a_match(
     assert output.strip("\n") == "Alpha 2.0.0 https://forge.sp-tarkov.com/mods/alpha"
 
 
+def test_export_skips_a_cached_catalog_mod_that_is_not_installed(
+    clean_repo: Repo,
+    install_commit,
+    client_factory,
+    respx_router: respx.MockRouter,
+    tmp_path: Path,
+) -> None:
+    """catalog.classify returns one entry per *cached* mod, not per installed
+    one; a cached mod the game directory never installed has
+    installed_version=None and must be skipped when building the link map.
+    If the `if entry.installed_version is None: continue` guard in
+    _catalog_links were removed, this fails: KeyError matching the wrong
+    installed mod by name, or a spurious link for the uninstalled mod."""
+    install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="client")
+    db_path = tmp_path / "catalog.db"
+    # Both cached mods must be seeded by a single sync page: a second, later
+    # full sync would prune whichever mod its page does not return.
+    page = page_envelope(
+        [
+            mod_json_full(
+                id=42,
+                name="Alpha",
+                owner=owner_json(name="Someone"),
+                detail_url="https://forge.sp-tarkov.com/mods/alpha",
+                versions=[],
+            ),
+            mod_json_full(
+                id=99,
+                name="NeverInstalled",
+                owner=owner_json(name="Someone"),
+                detail_url="https://forge.sp-tarkov.com/mods/never-installed",
+                versions=[],
+            ),
+        ],
+        current_page=1,
+        last_page=1,
+        total=2,
+        next_url=None,
+    )
+    respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page))
+    client = client_factory()
+    with Catalog(db_path) as catalog:
+        catalog.sync(client, full=True)
+
+    output = services.export_mods(clean_repo.path, format="text", db_path=db_path)
+
+    assert output.strip("\n") == "Alpha 2.0.0 https://forge.sp-tarkov.com/mods/alpha"
+
+
 def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
     clean_repo: Repo, install_commit, tmp_path: Path
 ) -> None:
@@ -319,6 +368,74 @@ def test_import_raises_invalid_metadata_for_a_missing_list_file(
 ) -> None:
     with pytest.raises(InvalidMetadataError):
         services.import_list(clean_repo.path, tmp_path / "does-not-exist.txt")
+
+
+def test_import_raises_invalid_metadata_when_neither_source_is_given(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(clean_repo.path)
+
+
+def test_import_raises_invalid_metadata_when_both_sources_are_given(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    list_file = tmp_path / "wanted.txt"
+    list_file.write_text("ModA 1.0.0\n", encoding="utf-8")
+
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(clean_repo.path, list_file, content="ModA 1.0.0\n")
+
+
+def test_import_raises_invalid_metadata_for_malformed_json_content(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(clean_repo.path, content="{not valid json")
+
+
+def test_import_raises_invalid_metadata_when_json_has_no_mods_list(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(clean_repo.path, content=json.dumps({"mods": "nope"}))
+
+
+def test_import_raises_invalid_metadata_for_a_non_object_mod_entry(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(
+            clean_repo.path, content=json.dumps({"mods": ["just-a-string"]})
+        )
+
+
+def test_import_raises_invalid_metadata_for_a_mod_entry_missing_name_or_version(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError):
+        services.import_list(
+            clean_repo.path, content=json.dumps({"mods": [{"name": "ModA"}]})
+        )
+
+
+def test_import_text_format_skips_blank_lines(clean_repo: Repo, install_commit) -> None:
+    install_commit(clean_repo, "ModA", version="1.0.0")
+
+    diff = services.import_list(
+        clean_repo.path, content="\n\nModA 1.0.0\n\n"
+    )
+
+    assert diff == services.ImportDiff()
+
+
+def test_import_raises_invalid_metadata_for_a_text_line_with_no_version(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(InvalidMetadataError) as exc_info:
+        services.import_list(clean_repo.path, content="JustAName\n")
+
+    assert "JustAName" in str(exc_info.value)
 
 
 def test_export_import_text_roundtrip(

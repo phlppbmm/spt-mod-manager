@@ -153,3 +153,75 @@ def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator(
 ):
     with pytest.raises(services.InvalidPathError):
         services.locate_directory("a/b", [])
+
+
+def test_locate_directory_deduplicates_a_root_passed_more_than_once(
+    locate_root: Path,
+) -> None:
+    matches = services.locate_directory(
+        "SPT", ["BepInEx", "cache"], roots=[locate_root, locate_root]
+    )
+
+    assert len(matches) == 1
+
+
+def test_locate_directory_caps_results_at_ten(tmp_path: Path) -> None:
+    root = tmp_path / "many-matches"
+    for i in range(11):
+        (root / f"parent_{i}" / "SPT").mkdir(parents=True)
+
+    matches = services.locate_directory("SPT", [], roots=[root])
+
+    assert len(matches) == 10
+
+
+def test_locate_directory_without_roots_searches_the_home_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    marker = home / "SptModManagerLocateMarker9f3"
+    marker.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    matches = services.locate_directory("SptModManagerLocateMarker9f3", [])
+
+    assert marker in [match.path for match in matches]
+
+
+def test_locate_directory_skips_an_unreadable_subdirectory_without_raising(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "with-unreadable"
+    unreadable = root / "no-access"
+    unreadable.mkdir(parents=True)
+    (root / "SPT").mkdir()
+    os.chmod(unreadable, 0o000)
+    try:
+        matches = services.locate_directory("SPT", [], roots=[root])
+    finally:
+        os.chmod(unreadable, 0o755)
+
+    assert [match.path for match in matches] == [root / "SPT"]
+
+
+def test_locate_directory_skips_directories_in_the_skip_list(tmp_path: Path) -> None:
+    root = tmp_path / "with-node-modules"
+    (root / "node_modules" / "SPT").mkdir(parents=True)
+
+    matches = services.locate_directory("SPT", [], roots=[root])
+
+    assert matches == []
+
+
+def test_locate_directory_does_not_descend_past_the_max_depth(tmp_path: Path) -> None:
+    root = tmp_path / "deep"
+    # Five path segments below root are reached on the fifth (last) walk
+    # iteration; a sixth segment is one level too deep to ever be visited.
+    within_depth = root / "a" / "b" / "c" / "d" / "SPT"
+    beyond_depth = root / "a" / "b" / "c" / "d" / "e" / "SPT"
+    within_depth.mkdir(parents=True)
+    beyond_depth.mkdir(parents=True)
+
+    matches = services.locate_directory("SPT", [], roots=[root])
+
+    assert [match.path for match in matches] == [within_depth]

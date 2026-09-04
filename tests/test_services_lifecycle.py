@@ -99,6 +99,35 @@ def test_disable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> 
         services.disable_mod(clean_repo.path, "Ghost")
 
 
+def test_disable_mod_conflict_with_an_unowned_later_change_names_no_mod(
+    clean_repo: Repo, install_commit
+) -> None:
+    """A conflicting path whose last-touching commit carries no ``Mod``
+    trailer (a manual/foreign commit, unlike another mod's install commit)
+    cannot be blamed on a mod name; the message falls back to naming just
+    the files. If `if name:` (skipping the empty owner) or the final `if not
+    blockers: return ConflictError(...)` branch were removed, this fails:
+    the message would wrongly claim the file 'is now provided by' nothing,
+    or KeyError on an empty-named blocker group."""
+    install_commit(
+        clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1
+    )
+    (clean_repo.path / "BepInEx/plugins/shared.dll").write_text(
+        "manually-edited", encoding="utf-8"
+    )
+    clean_repo.commit(
+        "chore: manual edit", paths=[Path("BepInEx/plugins/shared.dll")]
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        services.disable_mod(clean_repo.path, "ModA")
+
+    message = str(exc_info.value)
+    assert "later changes to" in message
+    assert "BepInEx/plugins/shared.dll" in message
+    assert "is now provided by" not in message
+
+
 def test_disable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
     clean_repo: Repo, install_commit
 ) -> None:
@@ -173,6 +202,65 @@ def test_enabling_an_active_mod_is_a_no_op_with_a_notice(
     assert result.files == []
     assert result.state == "installed"
     assert [c.hash for c in clean_repo.log()] == commits_before
+
+
+def test_enable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
+    clean_repo: Repo, install_commit
+) -> None:
+    """Mirrors the disable_mod/remove_mod conflict tests: enabling a mod
+    whose install commit's cherry-pick collides with a file a later mod now
+    provides must raise ConflictError instead of leaving a mid-cherry-pick
+    tree. If the `except GitError: raise _sequencer_conflict(...)` in
+    enable_mod were removed, this fails: the underlying GitError would
+    propagate uncaught, or a conflicted tree would be left behind."""
+    install_commit(
+        clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1
+    )
+    services.disable_mod(clean_repo.path, "ModA")
+    install_commit(
+        clean_repo,
+        "ModB",
+        files={"BepInEx/plugins/shared.dll": "overwritten-by-modb"},
+        minute=2,
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        services.enable_mod(clean_repo.path, "ModA")
+
+    assert "ModB" in str(exc_info.value)
+    assert clean_repo.is_clean() is True
+    assert (clean_repo.path / "BepInEx/plugins/shared.dll").read_text(
+        encoding="utf-8"
+    ) == "overwritten-by-modb"
+
+
+def test_enable_mod_conflict_with_no_conflicting_paths_still_raises_plainly(
+    clean_repo: Repo, install_commit
+) -> None:
+    """A cherry-pick can fail with *no* merge conflict at all: here the
+    working tree already has byte-identical content (restored by an
+    unrelated commit), so the cherry-pick's diff is empty and git refuses it
+    outright -- `error.conflicting_paths` is then empty, distinct from the
+    'later mod' test above. `_sequencer_conflict`'s `if not
+    error.conflicting_paths: return ConflictError(...)` branch must still
+    turn this into a plain ConflictError. If that guard were removed, this
+    fails: `blockers` would stay empty and the function would fall through
+    to the 'later changes ... conflict' message with an empty path list, or
+    the raw GitError would need to be handled some other way."""
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
+    services.disable_mod(clean_repo.path, "ModA")
+    dll = clean_repo.path / "BepInEx/plugins/ModA.dll"
+    dll.parent.mkdir(parents=True, exist_ok=True)
+    dll.write_text("content", encoding="utf-8")
+    clean_repo.commit(
+        "chore: manual restore", paths=[Path("BepInEx/plugins/ModA.dll")]
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        services.enable_mod(clean_repo.path, "ModA")
+
+    assert "cannot enable ModA" in str(exc_info.value)
+    assert clean_repo.is_clean() is True
 
 
 # --- adopt_mod ---------------------------------------------------------------
@@ -269,6 +357,36 @@ def test_adopt_mod_raises_conflict_error_for_an_already_tracked_folder(
         services.adopt_mod(clean_repo.path, Path("SPT/user/mods/ModA"))
 
 
+def test_adopt_mod_raises_conflict_error_for_a_path_that_is_part_of_spt_itself(
+    clean_repo: Repo,
+) -> None:
+    with pytest.raises(ConflictError) as exc_info:
+        services.adopt_mod(clean_repo.path, Path("BepInEx/plugins/spt"))
+
+    assert "part of SPT itself" in str(exc_info.value)
+
+
+def test_adopt_mod_raises_conflict_error_when_the_target_holds_no_untracked_files(
+    clean_repo: Repo,
+) -> None:
+    """A target that is already fully tracked but owned by no active mod
+    (a plain commit carrying no ``Mod`` trailer, unlike an install commit)
+    must be reported through the 'holds no untracked files' ConflictError,
+    distinct from the 'already provided by <mod>' one above."""
+    mod_dir = clean_repo.path / "BepInEx" / "plugins" / "TrackedMod"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "TrackedMod.dll").write_bytes(b"already-tracked-bytes")
+    clean_repo.commit(
+        "chore: track TrackedMod manually",
+        paths=[Path("BepInEx/plugins/TrackedMod/TrackedMod.dll")],
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        services.adopt_mod(clean_repo.path, mod_dir)
+
+    assert "no untracked files" in str(exc_info.value)
+
+
 def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_mod_paths(
     clean_repo: Repo,
 ) -> None:
@@ -281,6 +399,18 @@ def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_mod_paths(
 def test_adopt_mod_raises_mod_not_found_for_a_missing_target(clean_repo: Repo) -> None:
     with pytest.raises(ModNotFoundError):
         services.adopt_mod(clean_repo.path, Path("SPT/user/mods/DoesNotExist"))
+
+
+def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_the_game_dir(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+
+    with pytest.raises(NotAGameDirError) as exc_info:
+        services.adopt_mod(clean_repo.path, outside)
+
+    assert "lies outside the game directory" in str(exc_info.value)
 
 
 def test_adopt_mod_of_a_partially_tracked_folder_raises_conflict(

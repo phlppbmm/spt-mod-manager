@@ -100,6 +100,31 @@ def test_list_mods_include_all_also_returns_disabled_and_removed(
     assert by_name["ModD"].state == "removed"
 
 
+def test_list_mods_excludes_a_mod_trailer_with_no_descriptive_commit(
+    clean_repo: Repo, install_commit
+) -> None:
+    """A ``Mod`` trailer only ever exists with the full trailer set on a real
+    install commit; a history written by hand can carry a bare ``Mod``
+    trailer without one (no descriptive commit ever existed for that name).
+    Such a "ghost" mod must not surface through list_mods at all. If the
+    `if detail is None: continue` guard in _current_mods were removed, this
+    fails: AttributeError building a ModInfo from field-less trailers, or a
+    ghost entry with empty/garbage fields."""
+    install_commit(clean_repo, "ModA", minute=1)
+    ghost_file = clean_repo.path / "BepInEx/plugins/GhostMod/Ghost.dll"
+    ghost_file.parent.mkdir(parents=True)
+    ghost_file.write_bytes(b"ghost-bytes")
+    clean_repo.commit(
+        "chore: hand-written history",
+        trailers={"Mod": "GhostMod"},
+        paths=[Path("BepInEx/plugins/GhostMod/Ghost.dll")],
+    )
+
+    result = services.list_mods(clean_repo.path, include_all=True)
+
+    assert {mod.name for mod in result} == {"ModA"}
+
+
 def test_list_mods_reflects_the_youngest_commit_of_each_mod(
     clean_repo: Repo, install_commit
 ) -> None:

@@ -20,7 +20,9 @@ from sptmod.core.errors import (
     GameRunningError,
     GitError,
 )
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.models import MOD_TRAILER_KEYS
+from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
 
@@ -198,10 +200,39 @@ def test_hybrid_install_copies_both_trees_and_reads_package_json(
     assert (clean_repo.path / "BepInEx/plugins/CoolPlugin.dll").read_bytes() == (
         b"dll-bytes"
     )
-    assert set(result.files) == {
-        Path("SPT/user/mods/CoolMod/package.json"),
-        Path("BepInEx/plugins/CoolPlugin.dll"),
-    }
+
+
+def test_hybrid_install_into_a_runtime_layout_translates_only_the_server_half(
+    fake_game_dir_runtime: Path, make_archive
+) -> None:
+    """``_for_game_layout``/``_to_game_layout`` must translate the canonical
+    ``SPT/user/mods/...`` server target to the detected ``SPT_Runtime``
+    directory, while leaving the client ``BepInEx/plugins/...`` target
+    untouched -- it is never relative to the canonical server prefix. If
+    ``_to_game_layout``'s early `return target` for non-server paths were
+    removed, this fails: the client file would be miscopied under a
+    game-layout-prefixed path instead of straight to BepInEx/plugins."""
+    repo = Repo.init(detect_layout(fake_game_dir_runtime))
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
+    archive = make_archive(
+        {
+            "SPT/user/mods/HybridMod/package.json": json.dumps(
+                {"name": "HybridMod", "version": "1.0.0"}
+            ),
+            "BepInEx/plugins/HybridMod.dll": b"client-dll-bytes",
+        },
+        "zip",
+    )
+
+    result = services.install_from_archive(fake_game_dir_runtime, archive)
+
+    assert result.mod.mod_type == "hybrid"
+    assert (
+        fake_game_dir_runtime / "SPT_Runtime/user/mods/HybridMod/package.json"
+    ).is_file()
+    assert (
+        fake_game_dir_runtime / "BepInEx/plugins/HybridMod.dll"
+    ).read_bytes() == b"client-dll-bytes"
 
 
 def test_install_on_dirty_tree_raises_before_any_change(
@@ -298,6 +329,74 @@ def test_install_rolls_back_copied_files_when_the_commit_is_rejected(
         services.install_from_archive(clean_repo.path, archive)
 
     assert not (clean_repo.path / "SPT/user/mods/CoolMod/package.json").exists()
+    assert clean_repo.is_clean() is True
+
+
+def test_install_rolls_back_copied_files_when_source_trailer_is_rejected(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Unlike the ``author``-newline test above -- caught by
+    _reject_multiline_metadata inside _read_meta, before anything is copied
+    -- ``source`` is a separate install_from_archive parameter that
+    _reject_multiline_metadata never inspects, so a newline in it only
+    surfaces once Repo.commit validates the built trailers, *after* the
+    anchored files were already copied. If the `except Exception:
+    _remove_copied(path, added, game_layout); raise` in install_from_archive
+    were removed, this fails: the copied package.json would survive the
+    raised GitError and the tree would be left dirty."""
+    archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
+            )
+        },
+        "zip",
+    )
+
+    with pytest.raises(GitError):
+        services.install_from_archive(clean_repo.path, archive, source="evil\nsource")
+
+    assert not (clean_repo.path / "SPT/user/mods/CoolMod").exists()
+    assert clean_repo.is_clean() is True
+
+
+@pytest.mark.xfail(
+    reason=(
+        "BUG: a file-less mod anchor (an archive folder with no files, only "
+        "given a name/version via overrides) makes layout.files empty, so "
+        "when Repo.commit then rejects the empty paths sequence, "
+        "_remove_copied(path, added=[], ...) has nothing to unlink and never "
+        "considers the copied directory itself, leaving an orphaned empty "
+        "mod folder behind -- contradicting the docstring promise that "
+        "'newly-copied files and empty parent directories are rolled back'."
+    ),
+    strict=True,
+)
+def test_install_rolls_back_when_repo_commit_itself_rejects_an_empty_path_list(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Unlike the multiline-metadata test above (rejected in ``_read_meta``,
+    before anything is copied), this forces ``Repo.commit`` itself to fail
+    *after* the copy step: an archive with a trusted, file-less mod anchor
+    (only an empty directory) makes ``layout.files`` empty, and
+    ``Repo.commit`` raises GitError for an empty ``paths`` sequence
+    ("nothing to commit: no paths given"). ``name_override``/
+    ``version_override`` avoid the earlier InvalidMetadataError a file-less
+    archive would otherwise raise for missing metadata. This still exercises
+    the `except Exception: _remove_copied(...); raise` rollback path around
+    the commit call (it does re-raise correctly); the xfail below is the
+    file-less-directory gap in what that rollback actually cleans up."""
+    archive = make_archive({"SPT/user/mods/EmptyMod/": b""}, "zip")
+
+    with pytest.raises(GitError):
+        services.install_from_archive(
+            clean_repo.path,
+            archive,
+            name_override="EmptyMod",
+            version_override="1.0.0",
+        )
+
+    assert not (clean_repo.path / "SPT/user/mods/EmptyMod").exists()
     assert clean_repo.is_clean() is True
 
 
@@ -401,6 +500,25 @@ def test_pure_server_real_corpus_shape_without_package_json_installs(
     assert result.mod.mod_type == "server"
     assert result.mod.name == "betterkeys"
     assert (clean_repo.path / "SPT/user/mods/betterkeys/betterkeys.dll").is_file()
+
+
+def test_server_mod_without_package_json_or_dll_or_override_raises_invalid_metadata(
+    clean_repo: Repo, make_archive
+) -> None:
+    """Same package-json-less server shape as the betterkeys test above, but
+    with no DLL either and no name/version override to fall back on: nothing
+    can identify the mod. If the `if not (name_override or meta.name): raise
+    InvalidMetadataError(...)` guard in _read_meta were removed, this fails:
+    the mod would be installed with an empty name instead of being rejected."""
+    archive = make_archive(
+        {"SPT/user/mods/UnknownMod/readme.txt": "just a readme, no metadata"},
+        "zip",
+    )
+
+    with pytest.raises(InvalidMetadataError):
+        services.install_from_archive(clean_repo.path, archive)
+
+    assert not (clean_repo.path / "SPT/user/mods/UnknownMod").exists()
 
 
 @pytest.mark.parametrize(

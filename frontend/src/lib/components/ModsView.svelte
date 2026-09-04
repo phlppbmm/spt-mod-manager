@@ -33,12 +33,11 @@
 	const TABS: { id: ModTab; label: string }[] = [
 		{ id: 'all', label: 'All' },
 		{ id: 'installed', label: 'Installed' },
-		{ id: 'available', label: 'Not installed' }
+		{ id: 'favorited', label: 'Favorited' }
 	];
 
 	let tab: ModTab = $state('all');
 	let compatibleOnly = $state(true);
-	let favoritesOnly = $state(false);
 	let favorites: number[] = $state([]);
 	let searchInput = $state('');
 	let search = $state('');
@@ -72,7 +71,6 @@
 			filterEntries(entries, {
 				tab,
 				compatibleOnly,
-				favoritesOnly,
 				favorites: favoriteIds,
 				search
 			}),
@@ -178,10 +176,6 @@
 		<label class="compat">
 			<input type="checkbox" bind:checked={compatibleOnly} />
 			Only compatible with my SPT version
-		</label>
-		<label class="compat">
-			<input type="checkbox" bind:checked={favoritesOnly} />
-			Favorites only
 		</label>
 	</div>
 

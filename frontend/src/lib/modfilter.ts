@@ -1,13 +1,12 @@
 import type { CatalogEntry } from './api/client';
 
-export type ModTab = 'all' | 'installed' | 'available';
+export type ModTab = 'all' | 'installed' | 'favorited';
 
 export type RowState = 'active' | 'disabled' | 'update_available' | 'incompatible' | 'available';
 
 export interface ModFilter {
 	tab: ModTab;
 	compatibleOnly: boolean;
-	favoritesOnly: boolean;
 	favorites: ReadonlySet<number>;
 	search: string;
 }
@@ -46,13 +45,10 @@ export function filterEntries(entries: readonly CatalogEntry[], filter: ModFilte
 		if (filter.tab === 'installed' && !isInstalled(entry)) {
 			return false;
 		}
-		if (filter.tab === 'available' && isInstalled(entry)) {
+		if (filter.tab === 'favorited' && !isFavorite(entry, filter.favorites)) {
 			return false;
 		}
 		if (filter.compatibleOnly && !isCompatible(entry)) {
-			return false;
-		}
-		if (filter.favoritesOnly && !isFavorite(entry, filter.favorites)) {
 			return false;
 		}
 		return matchesSearch(entry, filter.search);

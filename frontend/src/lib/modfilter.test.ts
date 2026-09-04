@@ -5,7 +5,8 @@ import {
 	isFavorite,
 	isInstalled,
 	matchesSearch,
-	rowState
+	rowState,
+	sortEntries
 } from './modfilter';
 import type { CatalogEntry, CatalogMod, CatalogVersion } from './api/client';
 
@@ -169,82 +170,96 @@ describe('filterEntries', () => {
 	});
 	const entries = [entryA, entryB, entryC, entryD];
 
+	// Favorites: A (installed, compatible) and D (not installed, incompatible).
+	const favorites = new Set([entryA.mod.id, entryD.mod.id]);
+
 	it.each([
 		{ tab: 'all' as const, compatibleOnly: false, expected: [entryA, entryB, entryC, entryD] },
 		{ tab: 'all' as const, compatibleOnly: true, expected: [entryA, entryC] },
 		{ tab: 'installed' as const, compatibleOnly: false, expected: [entryA, entryB] },
 		{ tab: 'installed' as const, compatibleOnly: true, expected: [entryA] },
-		{ tab: 'available' as const, compatibleOnly: false, expected: [entryC, entryD] },
-		{ tab: 'available' as const, compatibleOnly: true, expected: [entryC] }
+		{ tab: 'favorited' as const, compatibleOnly: false, expected: [entryA, entryD] },
+		{ tab: 'favorited' as const, compatibleOnly: true, expected: [entryA] }
 	])('tab=$tab compatibleOnly=$compatibleOnly', ({ tab, compatibleOnly, expected }) => {
 		const result = filterEntries(entries, {
 			tab,
 			compatibleOnly,
-			favoritesOnly: false,
-			favorites: new Set<number>(),
-			search: ''
-		});
-		expect(result).toEqual(expected);
-	});
-
-	// Favorites: A (installed, compatible) and D (available, incompatible).
-	const favorites = new Set([entryA.mod.id, entryD.mod.id]);
-
-	it.each([
-		{ tab: 'all' as const, expected: [entryA, entryD] },
-		{ tab: 'installed' as const, expected: [entryA] },
-		{ tab: 'available' as const, expected: [entryD] }
-	])('favoritesOnly=true keeps only favorited entries on tab=$tab', ({ tab, expected }) => {
-		const result = filterEntries(entries, {
-			tab,
-			compatibleOnly: false,
-			favoritesOnly: true,
 			favorites,
 			search: ''
 		});
 		expect(result).toEqual(expected);
 	});
 
-	it('favoritesOnly=false ignores a non-empty favorites set', () => {
+	it('the favorited tab keeps favorited entries regardless of install state', () => {
+		// A is installed, D is not; both are favorited.
+		const result = filterEntries(entries, {
+			tab: 'favorited',
+			compatibleOnly: false,
+			favorites,
+			search: ''
+		});
+		expect(result).toEqual([entryA, entryD]);
+	});
+
+	it('the favorited tab hides entries that are not favorited', () => {
+		const result = filterEntries(entries, {
+			tab: 'favorited',
+			compatibleOnly: false,
+			favorites,
+			search: ''
+		});
+		expect(result).not.toContain(entryB);
+		expect(result).not.toContain(entryC);
+	});
+
+	it('the favorited tab is empty for an empty favorites set', () => {
+		const result = filterEntries(entries, {
+			tab: 'favorited',
+			compatibleOnly: false,
+			favorites: new Set<number>(),
+			search: ''
+		});
+		expect(result).toEqual([]);
+	});
+
+	it('tabs other than favorited ignore a non-empty favorites set', () => {
 		const result = filterEntries(entries, {
 			tab: 'all',
 			compatibleOnly: false,
-			favoritesOnly: false,
 			favorites,
 			search: ''
 		});
 		expect(result).toEqual([entryA, entryB, entryC, entryD]);
 	});
 
-	it('favoritesOnly combines with compatibleOnly', () => {
-		// D is a favorite but incompatible, so compatibleOnly drops it, leaving A.
+	it('the favorited tab combines with search', () => {
+		// Both A and D are favorited, but only D's name matches "delta".
 		const result = filterEntries(entries, {
-			tab: 'all',
-			compatibleOnly: true,
-			favoritesOnly: true,
-			favorites,
-			search: ''
-		});
-		expect(result).toEqual([entryA]);
-	});
-
-	it('favoritesOnly combines with search', () => {
-		// Both A and D are favorites, but only D's name matches "delta".
-		const result = filterEntries(entries, {
-			tab: 'all',
+			tab: 'favorited',
 			compatibleOnly: false,
-			favoritesOnly: true,
 			favorites,
 			search: 'delta'
 		});
 		expect(result).toEqual([entryD]);
 	});
 
+	it('sorting still applies within the favorited tab', () => {
+		const result = sortEntries(
+			filterEntries(entries, {
+				tab: 'favorited',
+				compatibleOnly: false,
+				favorites,
+				search: ''
+			}),
+			{ key: 'name', descending: true }
+		);
+		expect(result).toEqual([entryD, entryA]);
+	});
+
 	it('applies the search filter on top of the tab and compatibility filters', () => {
 		const result = filterEntries(entries, {
 			tab: 'all',
 			compatibleOnly: false,
-			favoritesOnly: false,
 			favorites: new Set<number>(),
 			search: 'AL'
 		});
@@ -255,10 +270,9 @@ describe('filterEntries', () => {
 
 	it('matches search against the author field within the active tab', () => {
 		const result = filterEntries(entries, {
-			tab: 'available',
+			tab: 'favorited',
 			compatibleOnly: false,
-			favoritesOnly: false,
-			favorites: new Set<number>(),
+			favorites,
 			search: 'dana'
 		});
 		expect(result).toEqual([entryD]);
@@ -268,7 +282,6 @@ describe('filterEntries', () => {
 		const result = filterEntries(entries, {
 			tab: 'all',
 			compatibleOnly: false,
-			favoritesOnly: false,
 			favorites: new Set<number>(),
 			search: '  gamma  '
 		});
@@ -279,7 +292,6 @@ describe('filterEntries', () => {
 		const result = filterEntries(entries, {
 			tab: 'installed',
 			compatibleOnly: false,
-			favoritesOnly: false,
 			favorites: new Set<number>(),
 			search: 'gamma'
 		});
@@ -290,7 +302,6 @@ describe('filterEntries', () => {
 		const result = filterEntries([], {
 			tab: 'all',
 			compatibleOnly: false,
-			favoritesOnly: false,
 			favorites: new Set<number>(),
 			search: ''
 		});

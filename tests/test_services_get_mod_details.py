@@ -1,9 +1,10 @@
 """Tests for ``services.get_mod_details``.
 
-The cached mod row and its versions come from the local catalog; the
-description is fetched live from the Forge detail endpoint and reduced from
-HTML to plain text. An unreachable Forge degrades to the cached data with an
-empty description, unless nothing is cached at all, in which case it raises.
+The cached mod row, its versions and the description come from the local
+catalog; the description is fetched from the Forge detail endpoint and reduced
+from HTML to plain text whenever the mod row moved on to a newer ``updated_at``
+than the stored text. An unreachable Forge degrades to the stored description
+or an empty one, unless nothing is cached at all, in which case it raises.
 """
 
 from pathlib import Path
@@ -110,9 +111,7 @@ def test_get_mod_details_strips_html_and_fetches_missing_version_links(
     respx_router.get("/mod/1").mock(
         return_value=httpx.Response(
             200,
-            json=success_envelope(
-                _mod_detail_json(1, "Alpha Mod", _DESCRIPTION_HTML)
-            ),
+            json=success_envelope(_mod_detail_json(1, "Alpha Mod", _DESCRIPTION_HTML)),
         )
     )
     respx_router.get("/mod/1/versions").mock(
@@ -249,3 +248,126 @@ def test_get_mod_details_reraises_when_nothing_is_cached_and_forge_is_unreachabl
 
     with pytest.raises(ForgeUnavailableError):
         services.get_mod_details(999, db_path=db_path, client=client)
+
+
+def _detail_route(
+    respx_router: respx.MockRouter, mod_id: int, name: str, html: str
+) -> respx.Route:
+    """Mock the /mod/{id} detail endpoint returning ``html`` as description."""
+    return respx_router.get(f"/mod/{mod_id}").mock(
+        return_value=httpx.Response(
+            200, json=success_envelope(_mod_detail_json(mod_id, name, html))
+        )
+    )
+
+
+def _versions_route(
+    respx_router: respx.MockRouter, mod_id: int, link: str | None
+) -> respx.Route:
+    """Mock the /mod/{id}/versions endpoint returning one version."""
+    return respx_router.get(f"/mod/{mod_id}/versions").mock(
+        return_value=httpx.Response(
+            200,
+            json=page_envelope(
+                [version_json(id=mod_id * 100, link=link)],
+                current_page=1,
+                last_page=1,
+                total=1,
+                next_url=None,
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])
+def test_get_mod_details_serves_the_stored_description_without_a_request(
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+    use_client: bool,
+) -> None:
+    """If the description were not stored, this fails: the second call would
+    hit the detail endpoint again instead of reading the catalog."""
+    client = client_factory()
+    _seed(db_path, client, respx_router, [_mod_summary_json(5, "Epsilon Mod")])
+    detail = _detail_route(respx_router, 5, "Epsilon Mod", _DESCRIPTION_HTML)
+    versions = _versions_route(respx_router, 5, "https://cdn.example/eps.zip")
+    call_client = client if use_client else None
+    first = services.get_mod_details(5, db_path=db_path, client=call_client)
+
+    second = services.get_mod_details(5, db_path=db_path, client=call_client)
+
+    assert second.description == first.description == _DESCRIPTION_TEXT
+    assert [version.link for version in second.versions] == [
+        "https://cdn.example/eps.zip"
+    ]
+    assert detail.call_count == 1
+    assert versions.call_count == 1
+
+
+def test_get_mod_details_refetches_once_after_a_sync_changed_the_mod(
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+) -> None:
+    """If the stored stamp were ignored, this fails: the description would
+    stay the outdated one and the detail endpoint would never be hit again."""
+    client = client_factory()
+    _seed(db_path, client, respx_router, [_mod_summary_json(6, "Zeta Mod")])
+    detail = _detail_route(respx_router, 6, "Zeta Mod", "<p>Old text.</p>")
+    _versions_route(respx_router, 6, "https://cdn.example/zeta.zip")
+    services.get_mod_details(6, db_path=db_path, client=client)
+    changed = _mod_summary_json(6, "Zeta Mod")
+    changed["updated_at"] = "2026-01-01T00:00:00Z"
+    _seed(db_path, client, respx_router, [changed])
+    _detail_route(respx_router, 6, "Zeta Mod", "<p>New text.</p>")
+
+    refetched = services.get_mod_details(6, db_path=db_path, client=client)
+    again = services.get_mod_details(6, db_path=db_path, client=client)
+
+    assert refetched.description == "New text."
+    assert again.description == "New text."
+    assert detail.call_count == 2
+
+
+def test_get_mod_details_refetches_only_versions_while_the_description_stands(
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+) -> None:
+    """If the stored description were not reused, this fails: fetching the
+    still-missing version links would refetch the description with them."""
+    client = client_factory()
+    _seed(db_path, client, respx_router, [_mod_summary_json(7, "Eta Mod")])
+    detail = _detail_route(respx_router, 7, "Eta Mod", "<p>Text.</p>")
+    versions = _versions_route(respx_router, 7, None)
+    services.get_mod_details(7, db_path=db_path, client=client)
+
+    result = services.get_mod_details(7, db_path=db_path, client=client)
+
+    assert result.description == "Text."
+    assert [version.link for version in result.versions] == [None]
+    assert detail.call_count == 1
+    assert versions.call_count == 2
+
+
+def test_get_mod_details_falls_back_to_the_stored_description_when_forge_is_down(
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+) -> None:
+    """If the fallback ignored the catalog, this fails: an outdated stamp plus
+    an unreachable Forge would degrade to an empty description."""
+    client = client_factory()
+    _seed(db_path, client, respx_router, [_mod_summary_json(8, "Theta Mod")])
+    _detail_route(respx_router, 8, "Theta Mod", "<p>Stored text.</p>")
+    _versions_route(respx_router, 8, "https://cdn.example/theta.zip")
+    services.get_mod_details(8, db_path=db_path, client=client)
+    changed = _mod_summary_json(8, "Theta Mod")
+    changed["updated_at"] = "2026-01-01T00:00:00Z"
+    _seed(db_path, client, respx_router, [changed])
+    respx_router.get("/mod/8").mock(side_effect=httpx.ConnectError("boom"))
+
+    result = services.get_mod_details(8, db_path=db_path, client=client)
+
+    assert result.description == "Stored text."

@@ -1533,8 +1533,9 @@ def set_favorite(
 class ModDetails:
     """Everything the detail view shows about a catalog mod.
 
-    ``mod`` and ``versions`` come from the local cache; the description is
-    fetched live from the Forge because it is large and changes freely.
+    ``mod``, ``versions`` and the description all come from the local cache;
+    the description is refreshed from the Forge whenever the cached mod row
+    moved on to a newer ``updated_at`` than the stored text.
     """
 
     mod: CatalogMod | None
@@ -1574,6 +1575,35 @@ def _html_to_text(html: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def _load_mod_details(
+    catalog: Catalog,
+    client: ForgeClient,
+    mod_id: int,
+    versions: list[CatalogVersion],
+    description: str | None,
+    stamp: str | None,
+) -> tuple[list[CatalogVersion], str]:
+    """Fetch what the cache is missing: the description and version links.
+
+    Args:
+        catalog: The open catalog cache to store the description in.
+        client: The Forge API client to read from.
+        mod_id: The numeric Forge mod ID.
+        versions: The cached versions; refetched when none carries a link.
+        description: The stored description, or None when it must be fetched.
+        stamp: The cached mod's ``updated_at``, stored with the description.
+
+    Returns:
+        The versions to show and the plain-text description.
+    """
+    if description is None:
+        description = _html_to_text(client.mod(mod_id).description or "")
+        catalog.store_description(mod_id, description, stamp)
+    if not any(version.link for version in versions):
+        versions = catalog.fetch_versions(client, mod_id)
+    return versions, description
+
+
 def get_mod_details(
     mod_id: int,
     *,
@@ -1583,33 +1613,43 @@ def get_mod_details(
     """Return everything the detail view shows about a catalog mod.
 
     The cached mod row and its versions come from the local catalog (version
-    details are fetched once when the cache only holds summaries); the
-    description is fetched live from the Forge detail endpoint and reduced
-    from HTML to plain text so callers can render it without trusting markup.
-    An unreachable Forge degrades to the cached data with an empty
-    description instead of failing the whole view.
+    details are fetched once when the cache only holds summaries). The
+    description is reduced from HTML to plain text so callers can render it
+    without trusting markup, and stored in the catalog with the mod's
+    ``updated_at``: it is served from disk until a sync moves that stamp on,
+    then fetched from the Forge detail endpoint once. An unreachable Forge
+    degrades to the stored description, or to an empty one when nothing was
+    stored yet, instead of failing the whole view.
     """
     cached: CatalogMod | None = None
     versions: list[CatalogVersion] = []
     with _open_catalog(db_path) as catalog:
         cached = catalog.get_mod(mod_id)
         versions = catalog.get_versions(mod_id)
-        description = ""
+        stamp = None if cached is None else cached.updated_at
+        stored = catalog.get_description(mod_id)
+        description: str | None = None
+        if stored is not None and stored.updated_at == stamp:
+            description = stored.text
+            if any(version.link for version in versions):
+                return ModDetails(
+                    mod=cached, versions=versions, description=description
+                )
         try:
             if client is not None:
-                mod = client.mod(mod_id)
-                if not any(v.link for v in versions):
-                    versions = catalog.fetch_versions(client, mod_id)
+                versions, description = _load_mod_details(
+                    catalog, client, mod_id, versions, description, stamp
+                )
             else:
                 with ForgeClient() as owned:
-                    mod = owned.mod(mod_id)
-                    if not any(v.link for v in versions):
-                        versions = catalog.fetch_versions(owned, mod_id)
-            description = _html_to_text(mod.description or "")
+                    versions, description = _load_mod_details(
+                        catalog, owned, mod_id, versions, description, stamp
+                    )
         except ForgeUnavailableError:
             if cached is None:
                 raise
-    return ModDetails(mod=cached, versions=versions, description=description)
+            description = None if stored is None else stored.text
+    return ModDetails(mod=cached, versions=versions, description=description or "")
 
 
 def plan_mod_install(

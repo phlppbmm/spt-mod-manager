@@ -510,3 +510,71 @@ def test_resolve_version_error_names_the_spt_version(
         catalog.resolve_version("Boss Notifier", spt_version="4.1.3")
 
     assert str(error.value) == "No version of 'Boss Notifier' supports SPT 4.1.3."
+
+
+def test_get_description_returns_none_for_an_unknown_mod(catalog: Catalog) -> None:
+    assert catalog.get_description(99999) is None
+
+
+def test_get_description_returns_none_before_a_description_is_stored(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    _seed_search_mods(client_factory, respx_router, catalog)
+
+    assert catalog.get_description(1) is None
+
+
+@pytest.mark.parametrize(
+    "stamp", ["2025-06-01T00:00:00Z", None], ids=["stamped", "unstamped"]
+)
+def test_store_description_round_trips_text_and_stamp(
+    catalog: Catalog,
+    client_factory,
+    respx_router: respx.MockRouter,
+    stamp: str | None,
+) -> None:
+    _seed_search_mods(client_factory, respx_router, catalog)
+
+    catalog.store_description(1, "Plain text.", stamp)
+
+    stored = catalog.get_description(1)
+    assert stored is not None
+    assert stored.text == "Plain text."
+    assert stored.updated_at == stamp
+
+
+def test_store_description_for_an_unknown_mod_stores_nothing(
+    catalog: Catalog,
+) -> None:
+    catalog.store_description(99999, "Plain text.", "2025-06-01T00:00:00Z")
+
+    assert catalog.get_description(99999) is None
+
+
+def test_store_description_survives_a_later_sync_of_the_same_mod(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    _seed_search_mods(client_factory, respx_router, catalog)
+    catalog.store_description(1, "Plain text.", "2025-06-01T00:00:00Z")
+    updated = mod_json_full(
+        id=1,
+        name="Alpha Mod Renamed",
+        slug="alpha-mod",
+        owner=owner_json(name="Alice"),
+        updated_at="2025-07-01T00:00:00Z",
+        versions=[],
+    )
+    respx_router.get("/mods").mock(
+        return_value=httpx.Response(
+            200,
+            json=page_envelope(
+                [updated], current_page=1, last_page=1, total=1, next_url=None
+            ),
+        )
+    )
+    catalog.sync(client_factory(), full=True)
+
+    stored = catalog.get_description(1)
+    assert stored is not None
+    assert stored.text == "Plain text."
+    assert stored.updated_at == "2025-06-01T00:00:00Z"

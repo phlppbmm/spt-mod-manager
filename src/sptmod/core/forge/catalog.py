@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS mods (
     category TEXT,
     license_name TEXT,
     license_link TEXT,
-    source_links TEXT NOT NULL DEFAULT '[]'
+    source_links TEXT NOT NULL DEFAULT '[]',
+    description TEXT,
+    description_updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS mods_name_idx ON mods (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_author_idx ON mods (author COLLATE NOCASE);
@@ -78,6 +80,8 @@ _MOD_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = (
     "license_name TEXT",
     "license_link TEXT",
     "source_links TEXT NOT NULL DEFAULT '[]'",
+    "description TEXT",
+    "description_updated_at TEXT",
 )
 
 _VERSIONS_SCHEMA: Final = """
@@ -111,6 +115,7 @@ _VERSION_COLUMNS: Final = (
     "id, mod_id, version, link, content_length, spt_version_constraint,"
     " downloads, published_at, updated_at"
 )
+_DESCRIPTION_COLUMNS: Final = "description, description_updated_at"
 
 type CatalogState = Literal["installed", "update_available", "available"]
 
@@ -186,6 +191,19 @@ class CatalogVersion:
     spt_version_constraint: str
     downloads: int
     published_at: str | None
+    updated_at: str | None
+
+
+@dataclass(frozen=True)
+class CachedDescription:
+    """A stored mod description and the mod state it was fetched for.
+
+    ``updated_at`` is the ``updated_at`` the mod row carried when the
+    description was stored; a differing mod ``updated_at`` means the stored
+    text is outdated.
+    """
+
+    text: str
     updated_at: str | None
 
 
@@ -627,6 +645,33 @@ class Catalog:
         ).fetchone()
         return None if row is None else _mod_from_row(row)
 
+    def get_description(self, mod_id: int) -> CachedDescription | None:
+        """Return the stored description of ``mod_id``, or None if unstored."""
+        row = self._db.execute(
+            f"SELECT {_DESCRIPTION_COLUMNS} FROM mods WHERE id = ?", (mod_id,)
+        ).fetchone()
+        if row is None or row["description"] is None:
+            return None
+        return CachedDescription(
+            text=str(row["description"]), updated_at=row["description_updated_at"]
+        )
+
+    def store_description(
+        self, mod_id: int, description: str, updated_at: str | None
+    ) -> None:
+        """Store the reduced description of a cached mod.
+
+        Args:
+            mod_id: The numeric Forge mod ID; unknown IDs store nothing.
+            description: The description reduced to plain text.
+            updated_at: The mod's ``updated_at`` the description belongs to.
+        """
+        self._db.execute(
+            "UPDATE mods SET description = ?, description_updated_at = ? WHERE id = ?",
+            (description, updated_at, mod_id),
+        )
+        self._db.commit()
+
     def find_mod(self, name: str) -> CatalogMod | None:
         """Return the cached mod whose name matches ``name`` case-insensitively.
 
@@ -806,10 +851,11 @@ class Catalog:
         existing = self.get_mod(mod.id)
         if existing == mod:
             return "unchanged"
+        stored = self.get_description(mod.id)
         self._db.execute(
-            f"INSERT OR REPLACE INTO mods ({_MOD_COLUMNS})"
+            f"INSERT OR REPLACE INTO mods ({_MOD_COLUMNS}, {_DESCRIPTION_COLUMNS})"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 mod.id,
                 mod.hub_id,
@@ -838,6 +884,8 @@ class Catalog:
                 mod.license_name,
                 mod.license_link,
                 _links_to_json(mod.source_links),
+                None if stored is None else stored.text,
+                None if stored is None else stored.updated_at,
             ),
         )
         return "new" if existing is None else "updated"

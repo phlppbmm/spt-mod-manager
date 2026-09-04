@@ -223,7 +223,8 @@ download cache.
   Schema evolution = `_MOD_COLUMN_MIGRATIONS` ALTER list applied on open;
   the cache is disposable. Cached per mod: thumbnail, teaser, favourites,
   endorsements, category title, license name+link, source links (JSON
-  column), fika/featured/ads/AI flags. Delta sync via
+  column), fika/featured/ads/AI flags, the reduced description plus the
+  `updated_at` it was fetched for. Delta sync via
   `filter[updated_between]` (one-day overlap, idempotent upserts); a FULL
   sync prunes rows the API no longer returns — but never on an empty
   response. Unicode-correct casefold search; `%`/`_` literal.
@@ -244,9 +245,12 @@ download cache.
 - `update_mod`: ONE commit replacing the tracked files, subject
   `mod: NAME OLD → NEW`, `Mod-Previous-Version`, `BepInEx/config/` untouched,
   clean-tree guard runs before the Forge query.
-- `get_mod_details`: cached mod + versions plus the LIVE description
-  (HTML stripped to text server-side — never render Forge HTML). Degrades to
-  cache-only when the Forge is down.
+- `get_mod_details`: cached mod + versions + description (HTML stripped to
+  text server-side — never render Forge HTML). The description is served from
+  the cache while its stored stamp equals the mod row's `updated_at`, so a
+  restart costs no request; a sync that moved the mod on triggers exactly one
+  refetch. Degrades to the stored (or empty) description when the Forge is
+  down.
 - Catalog-unavailable (unwritable config dir etc.) is a typed
   `CatalogUnavailableError` (`CATALOG_UNAVAILABLE`, 503); export degrades to
   a linkless list instead of failing.

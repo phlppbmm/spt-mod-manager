@@ -42,6 +42,9 @@ export type DirectoryListing = Schemas['DirectoryListing'];
 export type DirectoryEntry = Schemas['DirectoryEntry'];
 export type LocatedDirectory = Schemas['LocatedDirectory'];
 export type FavoritesResponse = Schemas['FavoritesResponse'];
+export type LaunchProfileResponse = Schemas['LaunchProfileResponse'];
+export type LaunchStatus = Schemas['LaunchStatus'];
+export type StopResult = Schemas['StopResult'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -288,4 +291,26 @@ export function importList(
 		content: source.content ?? null,
 		apply
 	} satisfies Schemas['ImportListRequest']);
+}
+
+export function launchProfile(
+	path: string,
+	profileId: string,
+	stopServerOnExit: boolean = true,
+	operationId: string | null = null
+): Promise<LaunchProfileResponse> {
+	return call<LaunchProfileResponse>('launch_profile', {
+		path,
+		profile_id: profileId,
+		stop_server_on_exit: stopServerOnExit,
+		operation_id: operationId
+	} satisfies Schemas['LaunchProfileRequest']);
+}
+
+export function launchStatus(path: string): Promise<LaunchStatus> {
+	return call<LaunchStatus>('launch_status', { path } satisfies Schemas['LaunchStatusRequest']);
+}
+
+export function stopGame(path: string): Promise<StopResult> {
+	return call<StopResult>('stop_game', { path } satisfies Schemas['StopGameRequest']);
 }

@@ -14,6 +14,8 @@ import {
 	importList,
 	initGameDir,
 	installMod,
+	launchProfile,
+	launchStatus,
 	listDirectories,
 	listFavorites,
 	listMods,
@@ -28,6 +30,7 @@ import {
 	setSptVersion,
 	snapshot,
 	status,
+	stopGame,
 	syncCatalog,
 	updateMod
 } from './client';
@@ -382,6 +385,40 @@ const wrapperCases: Array<{
 		call: () => importList('/game', { listFile: 'list.txt', content: 'data' }, true),
 		command: 'import_list',
 		payload: { path: '/game', list_file: 'list.txt', content: 'data', apply: true }
+	},
+	{
+		id: 'launchProfile defaults stopServerOnExit to true and operationId to null',
+		call: () => launchProfile('/game', 'profile-1'),
+		command: 'launch_profile',
+		payload: {
+			path: '/game',
+			profile_id: 'profile-1',
+			stop_server_on_exit: true,
+			operation_id: null
+		}
+	},
+	{
+		id: 'launchProfile forwards an explicit stopServerOnExit and operationId',
+		call: () => launchProfile('/game', 'profile-1', false, 'op-4'),
+		command: 'launch_profile',
+		payload: {
+			path: '/game',
+			profile_id: 'profile-1',
+			stop_server_on_exit: false,
+			operation_id: 'op-4'
+		}
+	},
+	{
+		id: 'launchStatus forwards path',
+		call: () => launchStatus('/game'),
+		command: 'launch_status',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'stopGame forwards path',
+		call: () => stopGame('/game'),
+		command: 'stop_game',
+		payload: { path: '/game' }
 	}
 ];
 

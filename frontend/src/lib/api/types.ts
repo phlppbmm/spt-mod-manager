@@ -531,6 +531,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/launch_profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Launch Profile */
+        post: operations["launch_profile_api_launch_profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/launch_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Launch Status */
+        post: operations["launch_status_api_launch_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stop_game": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Game */
+        post: operations["stop_game_api_stop_game_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1408,6 +1459,74 @@ export interface components {
             warnings: components["schemas"]["Conflict"][];
         };
         /**
+         * LaunchProfileRequest
+         * @description Parameters of ``launch_profile``.
+         *
+         *     ``operation_id`` names the progress stream of this launch; a generated one
+         *     is used and echoed back when the caller sends none.
+         */
+        LaunchProfileRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * Stop Server On Exit
+             * @default true
+             */
+            stop_server_on_exit: boolean;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * LaunchProfileResponse
+         * @description Outcome of ``launch_profile`` plus its progress operation ID.
+         */
+        LaunchProfileResponse: {
+            /** Profile Id */
+            profile_id: string;
+            /** Nickname */
+            nickname: string;
+            /** Server Pid */
+            server_pid: number;
+            /** Client Pid */
+            client_pid: number;
+            /** Server Started */
+            server_started: boolean;
+            /** Operation Id */
+            operation_id: string;
+        };
+        /**
+         * LaunchStatus
+         * @description What of the installation is running right now.
+         */
+        LaunchStatus: {
+            /** Server Running */
+            server_running: boolean;
+            /** Client Running */
+            client_running: boolean;
+            /** Server Pid */
+            server_pid: number;
+            /** Client Pid */
+            client_pid: number;
+            /** Profile Id */
+            profile_id: string;
+        };
+        /**
+         * LaunchStatusRequest
+         * @description Parameters of ``launch_status``.
+         */
+        LaunchStatusRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+        };
+        /**
          * ListDirectoriesRequest
          * @description Parameters of ``list_directories``.
          */
@@ -1860,6 +1979,27 @@ export interface components {
              * Format: path
              */
             path: string;
+        };
+        /**
+         * StopGameRequest
+         * @description Parameters of ``stop_game``.
+         */
+        StopGameRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+        };
+        /**
+         * StopResult
+         * @description What stopping the game closed.
+         */
+        StopResult: {
+            /** Server Stopped */
+            server_stopped: boolean;
+            /** Client Stopped */
+            client_stopped: boolean;
         };
         /**
          * SyncCatalogRequest
@@ -3077,6 +3217,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FavoritesResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    launch_profile_api_launch_profile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LaunchProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaunchProfileResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    launch_status_api_launch_status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LaunchStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaunchStatus"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_game_api_stop_game_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopGameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopResult"];
                 };
             };
             /** @description Default Response */

@@ -2,9 +2,17 @@
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
-	import { status, syncCatalog, updateMod, type SyncCatalogResponse } from '$lib/api/client';
+	import {
+		launchStatus,
+		status,
+		syncCatalog,
+		updateMod,
+		type LaunchStatus,
+		type SyncCatalogResponse
+	} from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
+	import { bannerText, isGameUp, nextPollDelay } from '$lib/launch';
 	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
 
 	type Phase = 'checking' | 'setup' | 'ready' | 'unreachable';
@@ -25,10 +33,22 @@
 	let updateIndex = $state(0);
 	let updateTotal = $state(0);
 	let rowsBusy = $state(false);
+	let gameStatus: LaunchStatus | null = $state(null);
+	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
 		void detect();
+		return () => clearTimeout(pollTimer);
 	});
+
+	async function pollGameStatus(gameDir: string): Promise<void> {
+		try {
+			gameStatus = await launchStatus(gameDir);
+		} catch {
+			gameStatus = null;
+		}
+		pollTimer = setTimeout(() => void pollGameStatus(gameDir), nextPollDelay(gameStatus));
+	}
 
 	async function detect(): Promise<void> {
 		phase = 'checking';
@@ -42,6 +62,7 @@
 			await status(stored);
 			path = stored;
 			phase = 'ready';
+			void pollGameStatus(stored);
 			// Keep the catalog fresh on every app start; delta syncs are cheap
 			// and the list refreshes when it finishes.
 			void sync();
@@ -61,6 +82,7 @@
 		saveGameDir(gameDir);
 		path = gameDir;
 		phase = 'ready';
+		void pollGameStatus(gameDir);
 		void sync();
 	}
 
@@ -184,10 +206,13 @@
 			{updatingAll ? 'Updating…' : `Update all (${candidates.length})`}
 		</button>
 	</header>
+	{#if bannerText(gameStatus) !== ''}
+		<p class="banner">{bannerText(gameStatus)}</p>
+	{/if}
 	<ModsView
 		{path}
 		{refreshKey}
-		locked={updatingAll}
+		locked={updatingAll || isGameUp(gameStatus)}
 		onbusy={(busy) => (rowsBusy = busy)}
 		onupdatable={(targets) => {
 			candidates = targets;
@@ -221,6 +246,14 @@
 
 	.notice {
 		padding: 2rem;
+	}
+
+	.banner {
+		margin: 0;
+		padding: 0.5rem 1rem;
+		border-bottom: 1px solid #2c3138;
+		background: #2a2419;
+		color: #f0cf7d;
 	}
 
 	.sync-slot {

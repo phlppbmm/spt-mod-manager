@@ -13,8 +13,10 @@
 		type ImportEntry
 	} from '$lib/api/client';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
+	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
 
 	let path: string | null = $state(null);
+	let stopServerOnExit = $state(true);
 
 	let format: ExportFormat = $state('text');
 	let clientOnly = $state(false);
@@ -36,7 +38,13 @@
 
 	onMount(() => {
 		path = loadGameDir();
+		stopServerOnExit = loadStopServerOnExit();
 	});
+
+	function changeStopServerOnExit(value: boolean): void {
+		stopServerOnExit = value;
+		saveStopServerOnExit(value);
+	}
 
 	function changePath(): void {
 		forgetGameDir();
@@ -175,6 +183,22 @@
 		</p>
 		<button type="button" onclick={changePath}>Change path</button>
 	{/if}
+
+	<h2>Launching</h2>
+	<div class="row">
+		<label>
+			<input
+				type="checkbox"
+				checked={stopServerOnExit}
+				onchange={(event) => changeStopServerOnExit(event.currentTarget.checked)}
+			/>
+			Stop the server when the game closes
+		</label>
+	</div>
+	<p class="note">
+		Applies to games started from the Profiles page. A server that was already running when
+		the game started stays running.
+	</p>
 
 	<h2>Export the mod list</h2>
 	<div class="row">

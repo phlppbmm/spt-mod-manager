@@ -81,90 +81,60 @@ def test_download_progress_stays_at_zero_while_total_size_is_unknown(
     assert all(p == 0 for p in percents)
 
 
-def test_download_filename_from_quoted_content_disposition(
-    client_factory, dest_dir: Path
+@pytest.mark.parametrize(
+    ("content_disposition", "url", "expected_name"),
+    [
+        (
+            'attachment; filename="cool-mod-v2.0.zip"',
+            DOWNLOAD_URL,
+            "cool-mod-v2.0.zip",
+        ),
+        (None, DOWNLOAD_URL, "mod-archive.zip"),
+        (
+            'attachment; filename="../../../../etc/passwd.zip"',
+            DOWNLOAD_URL,
+            "passwd.zip",
+        ),
+        # ".." sanitizes to nothing, and a bare-root URL path ("/") has no
+        # trailing segment either: both candidate sources are unusable, so
+        # the module's own fallback name must be used.
+        (
+            'attachment; filename=".."',
+            "https://cdn.example.com/",
+            FALLBACK_FILE_NAME,
+        ),
+    ],
+    ids=[
+        "quoted-content-disposition",
+        "url-path-fallback",
+        "sanitized-traversal",
+        "module-default-name",
+    ],
+)
+def test_download_derives_the_file_name_from_header_url_or_fallback(
+    client_factory,
+    dest_dir: Path,
+    content_disposition: str | None,
+    url: str,
+    expected_name: str,
 ) -> None:
     body = b"archive-bytes"
+    headers = (
+        {}
+        if content_disposition is None
+        else {"Content-Disposition": content_disposition}
+    )
     with respx.mock() as router:
-        router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200,
-                content=body,
-                headers={
-                    "Content-Disposition": 'attachment; filename="cool-mod-v2.0.zip"',
-                    "Content-Length": str(len(body)),
-                },
-            )
+        router.get(url).mock(
+            return_value=httpx.Response(200, content=body, headers=headers)
         )
         client = client_factory()
 
-        result = download(client, DOWNLOAD_URL, dest_dir)
+        result = download(client, url, dest_dir)
 
-    assert result == dest_dir / "cool-mod-v2.0.zip"
+    assert result == dest_dir / expected_name
     assert result.read_bytes() == body
-
-
-def test_download_filename_falls_back_to_url_path_when_no_content_disposition(
-    client_factory, dest_dir: Path
-) -> None:
-    body = b"archive-bytes"
-    with respx.mock() as router:
-        router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
-        client = client_factory()
-
-        result = download(client, DOWNLOAD_URL, dest_dir)
-
-    assert result == dest_dir / "mod-archive.zip"
-    assert result.read_bytes() == body
-
-
-def test_download_sanitizes_a_traversal_hostile_content_disposition_filename(
-    client_factory, dest_dir: Path
-) -> None:
-    body = b"archive-bytes"
-    with respx.mock() as router:
-        router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200,
-                content=body,
-                headers={
-                    "Content-Disposition": (
-                        'attachment; filename="../../../../etc/passwd.zip"'
-                    )
-                },
-            )
-        )
-        client = client_factory()
-
-        result = download(client, DOWNLOAD_URL, dest_dir)
-
-    assert result.parent == dest_dir
-    assert ".." not in result.name
-    assert "/" not in result.name
     assert list(dest_dir.iterdir()) == [result]
-
-
-def test_download_falls_back_to_module_default_name_when_both_sources_sanitize_empty(
-    client_factory, dest_dir: Path
-) -> None:
-    # ".." sanitizes to nothing, and a bare-root URL path ("/") has no
-    # trailing segment either: both candidate sources are unusable, so the
-    # module's own fallback name must be used.
-    body = b"archive-bytes"
-    root_url = "https://cdn.example.com/"
-    with respx.mock() as router:
-        router.get(root_url).mock(
-            return_value=httpx.Response(
-                200,
-                content=body,
-                headers={"Content-Disposition": 'attachment; filename=".."'},
-            )
-        )
-        client = client_factory()
-
-        result = download(client, root_url, dest_dir)
-
-    assert result == dest_dir / FALLBACK_FILE_NAME
 
 
 def test_download_size_match_succeeds_and_returns_final_path(

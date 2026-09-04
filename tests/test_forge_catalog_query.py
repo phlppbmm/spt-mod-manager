@@ -343,77 +343,59 @@ def _sync_single_mod_with_versions(
     catalog.sync(client, full=True)
 
 
-def test_resolve_version_default_prefers_semantic_order_over_published_at(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
-) -> None:
-    # 2.0.0 was published *before* the 1.9.1 hotfix; get_versions() is
-    # explicitly published_at-ordered (not semantic), but resolve_version's
-    # default pick must be the semantically newest version, 2.0.0.
-    _sync_single_mod_with_versions(
-        client_factory,
-        respx_router,
-        catalog,
-        mod_id=1,
-        name="Alpha Mod",
-        versions=[
-            {
-                "id": 401,
-                "version": "2.0.0",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-01-01T00:00:00Z",
-            },
-            {
-                "id": 402,
-                "version": "1.9.1",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-02-01T00:00:00Z",
-            },
-        ],
-    )
-
-    version = catalog.resolve_version(1)
-
-    assert version.version == "2.0.0"
+def _version_row(version_id: int, version: str, published_at: str) -> dict[str, object]:
+    return {
+        "id": version_id,
+        "version": version,
+        "spt_version_constraint": "^3.8.0",
+        "downloads": 1,
+        "published_at": published_at,
+    }
 
 
-def test_resolve_version_default_ignores_unparseable_when_parseable_exists(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
-) -> None:
-    # "nightly-build" cannot be compared semantically and is published after
-    # 2.0.0; the parseable highest version must still win.
-    _sync_single_mod_with_versions(
-        client_factory,
-        respx_router,
-        catalog,
-        mod_id=1,
-        name="Alpha Mod",
-        versions=[
-            {
-                "id": 501,
-                "version": "2.0.0",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-01-01T00:00:00Z",
-            },
-            {
-                "id": 502,
-                "version": "nightly-build",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-03-01T00:00:00Z",
-            },
-        ],
-    )
-
-    version = catalog.resolve_version(1)
-
-    assert version.version == "2.0.0"
-
-
-def test_resolve_version_default_falls_back_to_published_at_when_all_unparseable(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+@pytest.mark.parametrize(
+    ("versions", "expected_id"),
+    [
+        # 2.0.0 was published *before* the 1.9.1 hotfix; get_versions() is
+        # explicitly published_at-ordered (not semantic), but resolve_version's
+        # default pick must be the semantically newest version, 2.0.0.
+        (
+            [
+                _version_row(401, "2.0.0", "2025-01-01T00:00:00Z"),
+                _version_row(402, "1.9.1", "2025-02-01T00:00:00Z"),
+            ],
+            401,
+        ),
+        # "nightly-build" cannot be compared semantically and is published
+        # after 2.0.0; the parseable highest version must still win.
+        (
+            [
+                _version_row(501, "2.0.0", "2025-01-01T00:00:00Z"),
+                _version_row(502, "nightly-build", "2025-03-01T00:00:00Z"),
+            ],
+            501,
+        ),
+        # Nothing is parseable, so the newest published_at wins.
+        (
+            [
+                _version_row(601, "nightly-a", "2025-01-01T00:00:00Z"),
+                _version_row(602, "nightly-b", "2025-02-01T00:00:00Z"),
+            ],
+            602,
+        ),
+    ],
+    ids=[
+        "semantic-order-beats-published-at",
+        "unparseable-ignored-when-parseable-exists",
+        "published-at-fallback-when-all-unparseable",
+    ],
+)
+def test_resolve_version_default_pick(
+    catalog: Catalog,
+    client_factory,
+    respx_router: respx.MockRouter,
+    versions: list[dict[str, object]],
+    expected_id: int,
 ) -> None:
     _sync_single_mod_with_versions(
         client_factory,
@@ -421,27 +403,12 @@ def test_resolve_version_default_falls_back_to_published_at_when_all_unparseable
         catalog,
         mod_id=1,
         name="Alpha Mod",
-        versions=[
-            {
-                "id": 601,
-                "version": "nightly-a",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-01-01T00:00:00Z",
-            },
-            {
-                "id": 602,
-                "version": "nightly-b",
-                "spt_version_constraint": "^3.8.0",
-                "downloads": 1,
-                "published_at": "2025-02-01T00:00:00Z",
-            },
-        ],
+        versions=versions,
     )
 
     version = catalog.resolve_version(1)
 
-    assert version.id == 602
+    assert version.id == expected_id
 
 
 def test_search_matches_unicode_name_and_author_via_casefold(

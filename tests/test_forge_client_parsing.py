@@ -329,12 +329,17 @@ def test_dependencies_omits_unresolvable_pairs_and_keeps_empty_list_for_no_deps(
 
 
 @pytest.mark.parametrize(
-    "raw_conflict", ["true", 1, None], ids=["string", "int", "null"]
+    ("raw_conflict", "expected"),
+    [("true", True), (1, True), (None, True), (False, False)],
+    ids=["string", "int", "null", "false"],
 )
-def test_dependencies_conflict_fails_safe_for_any_non_false_value(
-    client_factory, respx_router: respx.MockRouter, raw_conflict: object
+def test_dependencies_conflict_flag_fails_safe_for_any_non_false_value(
+    client_factory,
+    respx_router: respx.MockRouter,
+    raw_conflict: object,
+    expected: bool,
 ) -> None:
-    """Anything that is not JSON ``false`` must be treated as a conflict."""
+    """Only JSON ``false`` clears the conflict flag; anything else sets it."""
     node = {
         "id": 1,
         "guid": "com.example.dep",
@@ -351,26 +356,4 @@ def test_dependencies_conflict_fails_safe_for_any_non_false_value(
 
     result = client.dependencies(mods=[("5", "1.0.0")], spt_version="3.11.5")
 
-    assert result["5:1.0.0"][0].conflict is True
-
-
-def test_dependencies_conflict_false_stays_false(
-    client_factory, respx_router: respx.MockRouter
-) -> None:
-    node = {
-        "id": 1,
-        "guid": "com.example.dep",
-        "name": "Dep",
-        "slug": "dep",
-        "latest_compatible_version": None,
-        "conflict": False,
-        "dependencies": [],
-    }
-    respx_router.get("/mods/dependencies").mock(
-        return_value=httpx.Response(200, json=success_envelope({"5:1.0.0": [node]}))
-    )
-    client = client_factory()
-
-    result = client.dependencies(mods=[("5", "1.0.0")], spt_version="3.11.5")
-
-    assert result["5:1.0.0"][0].conflict is False
+    assert result["5:1.0.0"][0].conflict is expected

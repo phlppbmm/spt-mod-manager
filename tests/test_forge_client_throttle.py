@@ -101,33 +101,23 @@ def test_429_honors_retry_after_header(
     assert recording_sleep.calls[0] >= 5.0
 
 
-def test_persistent_429_exhausts_retries_and_raises_forge_unavailable(
-    client_factory, respx_router: respx.MockRouter
+@pytest.mark.parametrize(
+    ("side_effect", "client_kwargs"),
+    [
+        (lambda request: httpx.Response(429), {"max_retries": 3}),
+        (lambda request: httpx.Response(500), {}),
+        (httpx.ConnectError("boom"), {}),
+    ],
+    ids=["429", "500", "connection-error"],
+)
+def test_persistent_failure_exhausts_retries_and_raises_forge_unavailable(
+    client_factory,
+    respx_router: respx.MockRouter,
+    side_effect: object,
+    client_kwargs: dict[str, int],
 ) -> None:
-    route = respx_router.get("/mods").mock(return_value=httpx.Response(429))
-    client = client_factory(max_retries=3)
-
-    with pytest.raises(ForgeUnavailableError):
-        client.mods()
-
-    assert route.call_count > 1
-
-
-def test_connection_error_raises_forge_unavailable(
-    client_factory, respx_router: respx.MockRouter
-) -> None:
-    respx_router.get("/mods").mock(side_effect=httpx.ConnectError("boom"))
-    client = client_factory()
-
-    with pytest.raises(ForgeUnavailableError):
-        client.mods()
-
-
-def test_persistent_500_raises_forge_unavailable(
-    client_factory, respx_router: respx.MockRouter
-) -> None:
-    route = respx_router.get("/mods").mock(return_value=httpx.Response(500))
-    client = client_factory()
+    route = respx_router.get("/mods").mock(side_effect=side_effect)
+    client = client_factory(**client_kwargs)
 
     with pytest.raises(ForgeUnavailableError):
         client.mods()

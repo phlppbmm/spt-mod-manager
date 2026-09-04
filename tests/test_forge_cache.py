@@ -86,18 +86,17 @@ def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> N
     assert cache.max_bytes() == DEFAULT_MAX_BYTES
 
 
-def test_max_bytes_reads_an_integer_gb_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(MAX_GB_ENV_VAR, "5")
-
-    assert cache.max_bytes() == 5 * 1024**3
-
-
-def test_max_bytes_reads_a_fractional_gb_value(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("5", 5 * 1024**3), ("1.5", int(1.5 * 1024**3))],
+    ids=["integer", "fractional"],
+)
+def test_max_bytes_reads_a_valid_gb_value(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: int
 ) -> None:
-    monkeypatch.setenv(MAX_GB_ENV_VAR, "1.5")
+    monkeypatch.setenv(MAX_GB_ENV_VAR, raw)
 
-    assert cache.max_bytes() == int(1.5 * 1024**3)
+    assert cache.max_bytes() == expected
 
 
 @pytest.mark.parametrize(

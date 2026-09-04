@@ -201,14 +201,27 @@ def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
     assert result.read_bytes() == full_payload
 
 
-def test_a_206_with_mismatched_content_range_total_restarts_from_zero(
-    client_factory, cache_dir: Path
+@pytest.mark.parametrize(
+    ("key", "range_status", "range_headers"),
+    [
+        # Reports a different total than the recorded expected_length.
+        ("44", 206, {"Content-Range": "bytes 10-19/999"}),
+        ("54", 416, {}),
+    ],
+    ids=["206-with-mismatched-content-range-total", "416"],
+)
+def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
+    client_factory,
+    cache_dir: Path,
+    key: str,
+    range_status: int,
+    range_headers: dict[str, str],
 ) -> None:
     total = 40
     full_payload = bytes(range(total))
     offset = 10
-    (cache_dir / "44.part").write_bytes(full_payload[:offset])
-    (cache_dir / "44.part.json").write_text(
+    (cache_dir / f"{key}.part").write_bytes(full_payload[:offset])
+    (cache_dir / f"{key}.part.json").write_text(
         json.dumps(
             {"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}
         ),
@@ -219,10 +232,9 @@ def test_a_206_with_mismatched_content_range_total_restarts_from_zero(
             DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}
         ).mock(
             return_value=httpx.Response(
-                206,
+                range_status,
                 content=b"irrelevant-mismatched-body",
-                # Reports a different total than the recorded expected_length.
-                headers={"Content-Range": f"bytes {offset}-19/999"},
+                headers=range_headers,
             )
         )
         plain_route = router.get(DOWNLOAD_URL).mock(
@@ -235,7 +247,7 @@ def test_a_206_with_mismatched_content_range_total_restarts_from_zero(
         result = download_cached(
             client,
             DOWNLOAD_URL,
-            key="44",
+            key=key,
             expected_length=total,
             cache_dir=cache_dir,
         )
@@ -437,43 +449,6 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
 
 
 # --- resume rejected with 416 ---------------------------------------------
-
-
-def test_a_416_answer_to_a_resume_restarts_without_a_range_header(
-    client_factory, cache_dir: Path
-) -> None:
-    total = 40
-    full_payload = bytes(range(total))
-    offset = 10
-    (cache_dir / "54.part").write_bytes(full_payload[:offset])
-    (cache_dir / "54.part.json").write_text(
-        json.dumps(
-            {"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}
-        ),
-        encoding="utf-8",
-    )
-    with respx.mock() as router:
-        range_route = router.get(
-            DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}
-        ).mock(return_value=httpx.Response(416))
-        plain_route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200, content=full_payload, headers={"Content-Length": str(total)}
-            )
-        )
-        client = client_factory()
-
-        result = download_cached(
-            client,
-            DOWNLOAD_URL,
-            key="54",
-            expected_length=total,
-            cache_dir=cache_dir,
-        )
-
-    assert range_route.call_count == 1
-    assert plain_route.call_count == 1
-    assert result.read_bytes() == full_payload
 
 
 def test_a_fresh_download_answered_with_416_raises_forge_unavailable(

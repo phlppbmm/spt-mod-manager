@@ -37,6 +37,11 @@ export default defineConfig({
 	],
 	test: {
 		include: ['src/lib/**/*.test.ts'],
-		environment: 'node'
+		environment: 'node',
+		coverage: {
+			provider: 'v8',
+			include: ['src/lib/**/*.ts'],
+			exclude: ['src/lib/**/*.test.ts', 'src/lib/api/types.ts']
+		}
 	}
 });

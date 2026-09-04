@@ -389,3 +389,85 @@ describe('rowState', () => {
 		expect(rowState(entry, disabledMods)).toBe(expected);
 	});
 });
+
+describe('sortEntries', () => {
+	it('returns entries in their original order, unmodified, when sort is null', () => {
+		const entries = [
+			makeEntry({ mod: makeMod({ name: 'Zebra' }) }),
+			makeEntry({ mod: makeMod({ name: 'Alpha' }) }),
+			makeEntry({ mod: makeMod({ name: 'Mango' }) })
+		];
+
+		expect(sortEntries(entries, null)).toEqual(entries);
+	});
+
+	it.each([
+		{ descending: false, expected: ['Alpha', 'Mango', 'Zebra'] },
+		{ descending: true, expected: ['Zebra', 'Mango', 'Alpha'] }
+	])('sorts by name with descending=$descending', ({ descending, expected }) => {
+		const entries = [
+			makeEntry({ mod: makeMod({ name: 'Zebra' }) }),
+			makeEntry({ mod: makeMod({ name: 'Alpha' }) }),
+			makeEntry({ mod: makeMod({ name: 'Mango' }) })
+		];
+
+		const result = sortEntries(entries, { key: 'name', descending });
+
+		expect(result.map((entry) => entry.mod.name)).toEqual(expected);
+	});
+
+	it('keeps entries with an equal sort value in their original relative order', () => {
+		const first = makeEntry({ mod: makeMod({ name: 'First', downloads: 10 }) });
+		const second = makeEntry({ mod: makeMod({ name: 'Second', downloads: 10 }) });
+
+		const result = sortEntries([second, first], { key: 'downloads', descending: false });
+
+		expect(result).toEqual([second, first]);
+	});
+
+	it('sorts by downloads numerically', () => {
+		const low = makeEntry({ mod: makeMod({ name: 'Low', downloads: 5 }) });
+		const high = makeEntry({ mod: makeMod({ name: 'High', downloads: 50 }) });
+
+		const result = sortEntries([high, low], { key: 'downloads', descending: false });
+
+		expect(result).toEqual([low, high]);
+	});
+
+	it.each([
+		{
+			id: 'installed: a missing installed_version sorts before a present one',
+			key: 'installed' as const,
+			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), installed_version: null }),
+			withValue: makeEntry({ mod: makeMod({ name: 'With' }), installed_version: '1.0.0' })
+		},
+		{
+			id: 'latest: a null latest_version sorts before a present version',
+			key: 'latest' as const,
+			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
+			withValue: makeEntry({
+				mod: makeMod({ name: 'With' }),
+				latest_version: makeVersion({ version: '2.0.0' })
+			})
+		},
+		{
+			id: 'spt: a null latest_version sorts before a present spt_version_constraint',
+			key: 'spt' as const,
+			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
+			withValue: makeEntry({
+				mod: makeMod({ name: 'With' }),
+				latest_version: makeVersion({ spt_version_constraint: '~3.9.0' })
+			})
+		},
+		{
+			id: 'updated: a null updated_at sorts before a present timestamp',
+			key: 'updated' as const,
+			withoutValue: makeEntry({ mod: makeMod({ name: 'Without', updated_at: null }) }),
+			withValue: makeEntry({ mod: makeMod({ name: 'With', updated_at: '2024-01-01' }) })
+		}
+	])('$id', ({ key, withoutValue, withValue }) => {
+		const result = sortEntries([withValue, withoutValue], { key, descending: false });
+
+		expect(result).toEqual([withoutValue, withValue]);
+	});
+});

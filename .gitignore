@@ -17,3 +17,7 @@ dist/
 # Rust / Tauri
 target/
 src-tauri/gen/
+
+# coverage artifacts
+.coverage
+frontend/coverage/

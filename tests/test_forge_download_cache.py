@@ -207,8 +207,20 @@ def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
         # Reports a different total than the recorded expected_length.
         ("44", 206, {"Content-Range": "bytes 10-19/999"}),
         ("54", 416, {}),
+        # A 206 answer that omits Content-Range entirely cannot be trusted.
+        ("45", 206, {}),
+        # Content-Range starts somewhere other than the requested offset.
+        ("46", 206, {"Content-Range": "bytes 5-19/40"}),
+        # Content-Range whose start segment is not a number.
+        ("47", 206, {"Content-Range": "bytes abc-19/40"}),
     ],
-    ids=["206-with-mismatched-content-range-total", "416"],
+    ids=[
+        "206-with-mismatched-content-range-total",
+        "416",
+        "206-missing-content-range",
+        "206-wrong-start-offset",
+        "206-malformed-content-range",
+    ],
 )
 def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
     client_factory,

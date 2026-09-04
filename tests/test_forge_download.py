@@ -81,6 +81,28 @@ def test_download_progress_stays_at_zero_while_total_size_is_unknown(
     assert all(p == 0 for p in percents)
 
 
+def test_download_progress_stays_at_zero_when_content_length_is_malformed(
+    client_factory, dest_dir: Path
+) -> None:
+    body = b"z" * 200_000
+    with respx.mock() as router:
+        router.get(DOWNLOAD_URL).mock(
+            return_value=httpx.Response(
+                200, content=body, headers={"Content-Length": "not-a-number"}
+            )
+        )
+        client = client_factory()
+        progress = RecordingProgress()
+
+        download(
+            client, DOWNLOAD_URL, dest_dir, progress=progress, expected_length=None
+        )
+
+    percents = [percent for _step, percent, _message in progress.calls]
+    assert percents
+    assert all(p == 0 for p in percents)
+
+
 @pytest.mark.parametrize(
     ("content_disposition", "url", "expected_name"),
     [

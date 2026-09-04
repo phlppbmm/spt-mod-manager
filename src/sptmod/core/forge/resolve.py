@@ -139,14 +139,18 @@ def plan_install(
         ForgeUnavailableError: The Forge API is unreachable.
         ForgeApiError: The Forge API answered with an error envelope.
     """
-    version = catalog.resolve_version(
-        mod_id_or_name, wanted=wanted_version, spt_version=spt_version
+    mod = (
+        catalog.get_mod(mod_id_or_name)
+        if isinstance(mod_id_or_name, int)
+        else catalog.find_mod(mod_id_or_name)
     )
-    mod = catalog.get_mod(version.mod_id)
     if mod is None:
         raise NoCompatibleVersionError(
             f"{mod_id_or_name!r} is not in the local catalog"
         )
+    version = catalog.resolve_version(
+        mod.id, wanted=wanted_version, spt_version=spt_version
+    )
 
     pair = f"{mod.id}:{version.version}"
     trees = client.dependencies([(str(mod.id), version.version)], spt_version)

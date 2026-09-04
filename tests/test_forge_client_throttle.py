@@ -5,6 +5,7 @@ import pytest
 import respx
 
 from sptmod.core.errors import ForgeUnavailableError
+from sptmod.core.forge.client import BACKOFF_BASE_SECONDS
 from test_forge_client_fixtures import (
     FakeClock,
     RecordingSleep,
@@ -99,6 +100,31 @@ def test_429_honors_retry_after_header(
     client.mods()
 
     assert recording_sleep.calls[0] >= 5.0
+
+
+def test_429_with_a_malformed_retry_after_falls_back_to_exponential_backoff(
+    client_factory,
+    recording_sleep: RecordingSleep,
+    respx_router: respx.MockRouter,
+) -> None:
+    """An HTTP-date (or otherwise non-numeric) Retry-After is not honoured;
+    the first retry sleeps the base exponential-backoff duration instead."""
+    attempts = {"n": 0}
+
+    def side_effect(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(
+                429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}
+            )
+        return httpx.Response(200, json=page_envelope([]))
+
+    respx_router.get("/mods").mock(side_effect=side_effect)
+    client = client_factory()
+
+    client.mods()
+
+    assert recording_sleep.calls[0] == BACKOFF_BASE_SECONDS
 
 
 @pytest.mark.parametrize(

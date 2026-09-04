@@ -2,6 +2,7 @@
 when the Forge API is unreachable.
 """
 
+import sqlite3
 from pathlib import Path
 
 import httpx
@@ -475,3 +476,132 @@ def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
 
     assert catalog.get_mod(1) is None
     assert catalog.last_synced_at() is None
+
+
+def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    route = _mods_route_queue(
+        respx_router,
+        [
+            httpx.Response(
+                200,
+                json=page_envelope(
+                    [_alpha_mod(updated_at="not-a-date")],
+                    current_page=1,
+                    last_page=1,
+                    total=1,
+                    next_url=None,
+                ),
+            )
+        ],
+    )
+    client = client_factory()
+    catalog.sync(client, full=True)
+    assert catalog.last_synced_at() == "not-a-date"
+
+    route.side_effect = None
+    route.return_value = httpx.Response(
+        200, json=page_envelope([], current_page=1, last_page=1, total=0, next_url=None)
+    )
+    catalog.sync(client, full=False)
+
+    delta_call = route.calls[-1]
+    assert "filter[updated_between]" not in delta_call.request.url.params
+
+
+def test_full_sync_with_no_updated_at_on_any_mod_leaves_the_watermark_unset(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    respx_router.get("/mods").mock(
+        return_value=httpx.Response(
+            200,
+            json=page_envelope(
+                [_alpha_mod(updated_at=None)],
+                current_page=1,
+                last_page=1,
+                total=1,
+                next_url=None,
+            ),
+        )
+    )
+    client = client_factory()
+
+    catalog.sync(client, full=True)
+
+    assert catalog.last_synced_at() is None
+
+
+class _RecordingProgress:
+    """A ``Progress`` callback stand-in recording every call as a tuple."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    def __call__(self, step: str, percent: int, message: str) -> None:
+        self.calls.append((step, percent, message))
+
+
+def test_sync_reports_a_page_of_a_zero_last_page_listing_as_complete(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    respx_router.get("/mods").mock(
+        return_value=httpx.Response(
+            200,
+            json=page_envelope([], current_page=1, last_page=0, total=0, next_url=None),
+        )
+    )
+    client = client_factory()
+    progress = _RecordingProgress()
+
+    catalog.sync(client, full=True, progress=progress)
+
+    assert progress.calls == [("page", 100, "page 1 of 0")]
+
+
+def test_fetch_versions_rolls_back_on_failure_and_keeps_the_prior_cache(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    _mods_route_queue(respx_router, _full_sync_pages())
+    client = client_factory()
+    catalog.sync(client, full=True)
+    versions_before = catalog.get_versions(1)
+
+    respx_router.get("/mod/1/versions").mock(side_effect=httpx.ConnectError("boom"))
+
+    with pytest.raises(ForgeUnavailableError):
+        catalog.fetch_versions(client, 1)
+
+    assert catalog.get_versions(1) == versions_before
+
+
+@pytest.mark.parametrize(
+    "raw_source_links",
+    ["not json", '{"a": 1}'],
+    ids=["malformed-json", "valid-json-non-list"],
+)
+def test_get_mod_tolerates_a_corrupted_source_links_column(
+    catalog: Catalog,
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+    raw_source_links: str,
+) -> None:
+    """The cached ``source_links`` column is disposable like the rest of the
+    catalog cache: corruption on disk degrades to an empty tuple rather than
+    raising when read back through the public API.
+    """
+    _mods_route_queue(respx_router, _full_sync_pages())
+    client = client_factory()
+    catalog.sync(client, full=True)
+
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE mods SET source_links = ? WHERE id = ?", (raw_source_links, 1)
+        )
+        db.commit()
+
+    mod = catalog.get_mod(1)
+
+    assert mod is not None
+    assert mod.source_links == ()

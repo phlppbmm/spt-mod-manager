@@ -22,6 +22,7 @@ import math
 import os
 import secrets
 import shutil
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,13 +79,10 @@ def find(
     A hit counts as a use and refreshes the entry's age.
     """
     entry = _directory(cache_dir) / key
-    archive = _archive(entry)
-    if archive is None:
+    found = _archive(entry)
+    if found is None:
         return None
-    try:
-        size = archive.stat().st_size
-    except OSError:
-        return None
+    archive, size = found
     if expected_length is not None and size != expected_length:
         _remove(entry)
         return None
@@ -285,13 +283,19 @@ def _read(path: Path) -> dict[str, object]:
     return content if isinstance(content, dict) else {}
 
 
-def _archive(entry: Path) -> Path | None:
-    """Return the archive an entry's metadata names, if it lies there."""
+def _archive(entry: Path) -> tuple[Path, int] | None:
+    """Return the archive an entry's metadata names and its size, if it lies there."""
     name = _read(entry / _META_FILE_NAME).get("name")
     if not isinstance(name, str) or name != Path(name).name:
         return None
     archive = entry / name
-    return archive if archive.is_file() else None
+    try:
+        status = archive.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(status.st_mode):
+        return None
+    return archive, status.st_size
 
 
 def _read_part(sidecar: Path) -> tuple[str | None, int | None]:
@@ -324,11 +328,11 @@ def _sweep_parts(directory: Path) -> int:
 def _entries(directory: Path) -> list[tuple[float, int, Path]]:
     entries: list[tuple[float, int, Path]] = []
     for child in _children(directory):
-        if not child.is_dir():
-            continue
         try:
-            used = child.stat().st_mtime
+            status = child.stat()
         except OSError:
             continue
-        entries.append((used, _tree_size(child), child))
+        if not stat.S_ISDIR(status.st_mode):
+            continue
+        entries.append((status.st_mtime, _tree_size(child), child))
     return entries

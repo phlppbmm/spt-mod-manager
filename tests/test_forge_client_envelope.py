@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from sptmod.core.errors import ForgeApiError
+from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
 from sptmod.core.forge.client import (
     ForgeCategory,
     ForgeLicense,
@@ -144,6 +144,18 @@ def test_mod_404_not_found_raises_forge_api_error(
     assert exc_info.value.message == "Mod not found"
     assert exc_info.value.status == 404
     assert route.call_count == 1
+
+
+def test_mods_with_a_non_json_body_raises_forge_unavailable(
+    client_factory, respx_router: respx.MockRouter
+) -> None:
+    respx_router.get("/mods").mock(
+        return_value=httpx.Response(200, content=b"not json at all")
+    )
+    client = client_factory()
+
+    with pytest.raises(ForgeUnavailableError):
+        client.mods()
 
 
 def test_ping_true_when_api_answers(

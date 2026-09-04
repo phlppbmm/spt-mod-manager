@@ -118,6 +118,51 @@ def test_iter_mods_stops_when_next_url_repeats_an_already_fetched_url(
     assert route.call_count == 2
 
 
+def test_iter_mods_stops_when_a_page_short_of_last_page_has_no_next_url(
+    client_factory, respx_router: respx.MockRouter
+) -> None:
+    """meta says there is more to fetch (current_page < last_page) but the
+    envelope's links.next is null: an inconsistent API response the client
+    cannot chase further, so iteration stops after this page's items.
+    """
+    page1 = page_envelope(
+        [mod_json_minimal(id=1, name="Mod One")],
+        current_page=1,
+        last_page=2,
+        total=2,
+        next_url=None,
+    )
+    route = respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page1))
+    client = client_factory()
+
+    items = list(client.iter_mods())
+
+    assert [m.id for m in items] == [1]
+    assert route.call_count == 1
+
+
+def test_iter_mods_stops_when_next_url_points_back_at_the_page_just_fetched(
+    client_factory, respx_router: respx.MockRouter
+) -> None:
+    """links.next pointing back at a URL already fetched (here, page 1 itself)
+    must not be re-fetched, even while meta still claims more pages remain.
+    """
+    page1 = page_envelope(
+        [mod_json_minimal(id=1, name="Mod One")],
+        current_page=1,
+        last_page=2,
+        total=2,
+        next_url="/mods",  # exactly the URL iter_mods used for this same page
+    )
+    route = respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page1))
+    client = client_factory()
+
+    items = list(client.iter_mods())
+
+    assert [m.id for m in items] == [1]
+    assert route.call_count == 1
+
+
 def test_iter_mods_stops_when_last_page_reached_despite_non_null_next(
     client_factory, respx_router: respx.MockRouter
 ) -> None:

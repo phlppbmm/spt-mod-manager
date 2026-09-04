@@ -79,6 +79,21 @@ def test_mod_versions_parses_null_content_length_and_embedded_dependency(
     ]
 
 
+def test_mod_versions_parses_incompatible_fika_compatibility(
+    client_factory, respx_router: respx.MockRouter
+) -> None:
+    respx_router.get("/mod/42/versions").mock(
+        return_value=httpx.Response(
+            200, json=page_envelope([version_json(fika_compatibility="incompatible")])
+        )
+    )
+    client = client_factory()
+
+    page = client.mod_versions(42)
+
+    assert page.items[0].fika_compatibility == "incompatible"
+
+
 def test_updates_parses_all_four_lists_with_blocked_update_quirks(
     client_factory, respx_router: respx.MockRouter
 ) -> None:

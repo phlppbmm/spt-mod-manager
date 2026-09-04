@@ -216,6 +216,23 @@ def test_find_returns_none_when_meta_names_a_file_that_does_not_exist(
     assert cache.find("k7", cache_dir=cache_dir) is None
 
 
+def test_find_returns_none_when_the_named_archive_is_a_directory_not_a_file(
+    cache_dir: Path,
+) -> None:
+    """The metadata can outlive the file it names turning into something else
+    entirely (e.g. a directory left behind by an unrelated process); find()
+    reports it missing instead of raising, and leaves the entry untouched.
+    """
+    state = cache.claim("k22", None, "http://x", cache_dir)
+    state.work.write_bytes(b"archive-bytes")
+    archive = cache.keep(state, "mod.zip", "k22", cache_dir)
+    archive.unlink()
+    archive.mkdir()
+
+    assert cache.find("k22", cache_dir=cache_dir) is None
+    assert (cache_dir / "k22" / "meta.json").exists()
+
+
 def test_find_refreshes_the_entrys_last_use_time_on_a_hit(cache_dir: Path) -> None:
     _write_entry(cache_dir, "k8", "mod.zip", b"content")
     entry = cache_dir / "k8"
@@ -413,6 +430,23 @@ def test_release_discards_a_zero_byte_work_file(cache_dir: Path) -> None:
     assert not (cache_dir / "k19.part.json").exists()
 
 
+def test_release_drops_the_unfinished_download_when_the_handback_rename_fails(
+    cache_dir: Path,
+) -> None:
+    """A release that cannot rename its work file into ``<key>.part`` gives
+    up on keeping it, rather than raising: the next run simply starts fresh.
+    """
+    state = cache.claim("k21", None, "http://x", cache_dir)
+    state.work.write_bytes(b"partial-data-that-cannot-be-handed-back")
+    os.chmod(cache_dir, 0o500)  # read+exec, no write: os.replace inside fails
+    try:
+        cache.release(state, "k21", cache_dir)
+    finally:
+        os.chmod(cache_dir, 0o755)
+
+    assert not (cache_dir / "k21.part").exists()
+
+
 # --- sweep: .part aging ------------------------------------------------
 
 
@@ -435,6 +469,39 @@ def test_sweep_removes_part_files_older_than_the_max_age_and_keeps_fresh_ones(
     assert not old_part.exists()
     assert not old_sidecar.exists()
     assert fresh_part.exists()
+
+
+def test_sweep_ignores_a_part_file_whose_stat_fails_instead_of_raising(
+    cache_dir: Path,
+) -> None:
+    """A ``.part`` entry that turns out to be a broken symlink cannot be
+    stat'd for its age; sweep leaves it alone rather than crashing.
+    """
+    ghost = cache_dir / "ghost.part"
+    ghost.symlink_to(cache_dir / "does-not-exist")
+
+    freed = cache.sweep(cache_dir=cache_dir)
+
+    assert freed == 0
+    assert ghost.is_symlink()
+
+
+def test_sweep_leaves_a_stale_part_in_place_when_it_cannot_be_removed(
+    cache_dir: Path,
+) -> None:
+    part = _write_leftover_part(cache_dir, "k99", b"stale-data")
+    sidecar = _sidecar_of(part)
+    old_time = time.time() - PART_MAX_AGE_SECONDS - 100
+    os.utime(part, (old_time, old_time))
+    os.utime(sidecar, (old_time, old_time))
+    os.chmod(cache_dir, 0o500)  # read+exec, no write: unlink inside fails
+    try:
+        freed = cache.sweep(cache_dir=cache_dir)
+    finally:
+        os.chmod(cache_dir, 0o755)
+
+    assert freed == 0
+    assert part.read_bytes() == b"stale-data"
 
 
 # --- sweep: LRU bound ----------------------------------------------------
@@ -487,6 +554,29 @@ def test_sweep_never_evicts_the_keep_key_however_large_the_cache_is(
     assert not (cache_dir / "c").exists()
 
 
+def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
+    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_entry(cache_dir, "a", "a.zip", b"1" * 30)
+    _write_entry(cache_dir, "b", "b.zip", b"2" * 20)
+    b_size = _dir_size(cache_dir / "b")
+    now = time.time()
+    os.utime(cache_dir / "a", (now - 300, now - 300))
+    os.utime(cache_dir / "b", (now - 200, now - 200))
+    # 'a' is the oldest (evicted first) but cannot actually be removed.
+    os.chmod(cache_dir / "a", 0o000)
+    monkeypatch.setattr(cache, "max_bytes", lambda: 0)
+
+    try:
+        freed = cache.sweep(cache_dir=cache_dir)
+    finally:
+        os.chmod(cache_dir / "a", 0o755)
+
+    assert freed == b_size
+    assert (cache_dir / "a").exists()
+    assert not (cache_dir / "b").exists()
+
+
 def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -530,3 +620,45 @@ def test_clear_removes_everything_and_reports_bytes_freed(cache_dir: Path) -> No
 
 def test_clear_on_an_empty_cache_frees_nothing(cache_dir: Path) -> None:
     assert cache.clear(cache_dir) == 0
+
+
+def test_clear_reports_bytes_freed_only_for_entries_it_can_actually_remove(
+    cache_dir: Path,
+) -> None:
+    _write_entry(cache_dir, "a", "a.zip", b"1" * 10)
+    _write_entry(cache_dir, "b", "b.zip", b"2" * 20)
+    b_size = _dir_size(cache_dir / "b")
+    os.chmod(cache_dir / "a", 0o000)
+
+    try:
+        freed = cache.clear(cache_dir)
+    finally:
+        os.chmod(cache_dir / "a", 0o755)
+
+    assert freed == b_size
+    assert (cache_dir / "a").exists()
+    assert not (cache_dir / "b").exists()
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda cache_dir: cache.sweep(cache_dir=cache_dir),
+        lambda cache_dir: cache.clear(cache_dir),
+    ],
+    ids=["sweep", "clear"],
+)
+def test_an_unreadable_cache_dir_frees_nothing_instead_of_raising(
+    tmp_path: Path, call
+) -> None:
+    unreadable = tmp_path / "cache"
+    unreadable.mkdir()
+    (unreadable / "leftover.part").write_bytes(b"data")
+    os.chmod(unreadable, 0o000)
+
+    try:
+        freed = call(unreadable)
+    finally:
+        os.chmod(unreadable, 0o755)
+
+    assert freed == 0

@@ -292,9 +292,31 @@ download cache.
 
 ## Testing
 
-- Python: `uv run pytest` (~740 tests), `uv run ruff check src`, `uv run mypy --strict src`.
-- Rust: `cargo build && cargo test` from repo root.
-- Frontend: `pnpm check` / `pnpm test` / `pnpm build` from `frontend/`.
+**The pytest suite is the Rust-port specification** — tests are black-box,
+behavior-focused; do not weaken them to make an implementation fit.
+
+### Suite sizes and coverage
+
+- **Python:** ~1,180 tests; `uv run pytest --cov` enforces 100% coverage (line
+  and branch) on `src/sptmod` (coverage config in pyproject.toml). Run
+  `uv run pytest` without --cov for development (no speed penalty, coverage
+  excluded from default pytest addopts so single-file runs stay usable).
+- **Frontend:** 136 vitest cases in 5 files; `cd frontend && pnpm vitest run
+  --coverage` enforces 100% statements/branches/functions/lines on `src/lib/**/*.ts`
+  (minus `*.test.ts` and generated `api/types.ts`; v8 provider). Coverage directory
+  ignored in git.
+- **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov
+  --package sptmod-desktop --lib --tests --summary-only` reports 91% coverage
+  in driver.rs (remaining 9% = async resume points llvm-cov cannot attribute +
+  error path in `child.wait()`; rpc.rs's `#[tauri::command] rpc()` glue is covered
+  only by the `#[ignore]` e2e test, which needs Wry display).
+- Svelte components and routes have no tests (file-based, not unit-testable
+  without environment setup). To add: `@testing-library/svelte` or
+  vitest-browser-svelte + jsdom/happy-dom/Playwright in vite.config.ts + Tauri
+  `invoke`/`listen` mock layer — out of scope for now.
+
+### Test details and fixtures
+
 - Fixtures in tests/conftest.py: `fake_game_dir` (4.0 `SPT/` layout — the
   bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
   `clean_repo`, `install_commit`, `make_archive` (zip/7z; rar cannot be

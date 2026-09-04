@@ -118,11 +118,14 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (~740 tests)
+uv run pytest                        # full suite (~1,180 tests)
+uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run mypy --strict src
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
+cd frontend && pnpm vitest run --coverage  # frontend coverage (v8, 100%)
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
+cargo llvm-cov --package sptmod-desktop --lib --tests --summary-only  # Rust coverage (91%)
 
 # after changing service functions or request/response schemas:
 uv run python -m sptmod.server.dump_openapi openapi.json
@@ -160,3 +163,13 @@ cargo tauri dev                      # hot reload during development
   `catalog._MOD_COLUMN_MIGRATIONS`.
 - Line length 88 (ruff E501) — including docstrings.
 - Real-mod corpus for manual verification lives untracked in `_data/mods/`.
+- Tests exercise only public entry points and observable effects; never patch
+  or call private names (service functions, public methods, CliRunner, `sptmod rpc`, TS exports).
+- Only mocked boundaries: HTTP (respx), subprocess (stub binary), environment
+  (PATH, HOME, XDG_*), filesystem conditions. Public keyword-only seams for
+  testability: `locate_directory(roots=)`, `game_lock(timeout=, poll_interval=)`.
+- Sibling cases parametrized with descriptive ids; coverage exclusions only via
+  the two `exclude_also` patterns in pyproject (sys.platform, TYPE_CHECKING).
+  No `# pragma: no cover`; unreachable defensive code is deleted.
+- A strict `xfail` may pin a known production bug only with a bead reference
+  (currently: spt-mod-manager-6o4).

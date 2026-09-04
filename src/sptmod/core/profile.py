@@ -96,7 +96,8 @@ def collect_mod_ids(repo: Repo, install_commit: str, layout: GameLayout) -> ModI
             continue
         try:
             content = repo.show_file_content(install_commit, mod_file.path)
-            data = json.loads(content)
+            # Mod authors on Windows often save JSON with a UTF-8 BOM.
+            data = json.loads(content.removeprefix("\ufeff"))
         except (GitError, json.JSONDecodeError) as error:
             ids.warnings.append(f"{mod_file.path.as_posix()}: {error}")
             continue
@@ -189,7 +190,7 @@ def _parse_profile(profile_path: Path) -> _ParsedProfile | None:
     encoded, or contains invalid JSON.
     """
     try:
-        text = profile_path.read_text(encoding="utf-8")
+        text = profile_path.read_text(encoding="utf-8-sig")
         profile = json.loads(text)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None

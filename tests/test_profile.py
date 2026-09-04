@@ -481,3 +481,21 @@ def test_check_all_does_not_modify_the_repository_or_profiles(
     check_all(clean_repo, detect_layout(clean_repo.path))
 
     assert (profiles_dir / "abc.json").read_bytes() == before
+
+
+def test_collect_mod_ids_accepts_db_files_saved_with_a_utf8_bom(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/templates/items.json": (
+            "﻿" + json.dumps({ITEM_A: {"_id": ITEM_A, "_name": "item_a"}})
+        ).encode("utf-8"),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.items == {ITEM_A}
+    assert result.warnings == []

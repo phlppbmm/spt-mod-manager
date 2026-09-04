@@ -102,7 +102,7 @@ def read_package_json(mod_dir: Path) -> ModMeta:
     """
     package_file = mod_dir / PACKAGE_JSON_NAME
     try:
-        raw = package_file.read_text(encoding="utf-8")
+        raw = package_file.read_text(encoding="utf-8-sig")
     except OSError as error:
         raise InvalidMetadataError(f"{package_file} cannot be read: {error}") from error
     try:

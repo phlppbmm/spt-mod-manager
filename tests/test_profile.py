@@ -15,6 +15,7 @@ this layout-awareness is covered in tests/test_game_layout.py.
 
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,9 @@ ITEM_A = "5c0d1b8b86f7744bb2683cfa"
 ITEM_B = "5c0d1b8b86f7744bb2683cfb"
 ITEM_C = "5c0d1b8b86f7744bb2683cfc"
 TRADER_ID = "5ac3b934136fb568fa78b1e2"
+QUEST_ID = "quest-mod"
+RECIPE_ID = "5c0d1b8b86f7744bb2683cfd"
+ACHIEVEMENT_ID = "achievement-mod"
 
 
 def _make_profile(tmp_path: Path, name: str, content: dict) -> Path:
@@ -153,6 +157,21 @@ def test_collect_mod_ids_broken_json_warns_and_keeps_scanning_other_files(
     assert "items.json" in result.warnings[0]
 
 
+def test_collect_mod_ids_ignores_files_under_the_mod_dir_but_not_below_db(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/assets/icon.json": json.dumps({"color": "red"}),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result == ModIds()
+
+
 def test_collect_mod_ids_mod_without_db_dir_yields_no_ids_and_no_warnings(
     clean_repo: Repo, install_commit
 ) -> None:
@@ -243,7 +262,14 @@ def test_find_residues_reports_item_hits_from_inventory_items(tmp_path: Path) ->
     residues = find_residues(profile, ids)
 
     assert residues == [
-        ProfileResidue(profile="player1", category="item", ids=[ITEM_A], count=2)
+        ProfileResidue(
+            profile="player1",
+            category="item",
+            ids=[ITEM_A],
+            count=2,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
+        )
     ]
 
 
@@ -286,7 +312,14 @@ def test_find_residues_reports_trader_hits_from_traders_info_keys(
     residues = find_residues(profile, ids)
 
     assert residues == [
-        ProfileResidue(profile="player1", category="trader", ids=[TRADER_ID], count=1)
+        ProfileResidue(
+            profile="player1",
+            category="trader",
+            ids=[TRADER_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/TradersInfo",
+        )
     ]
 
 
@@ -303,7 +336,12 @@ def test_find_residues_reports_quest_hits_from_quests_qid(tmp_path: Path) -> Non
 
     assert residues == [
         ProfileResidue(
-            profile="player1", category="quest", ids=["quest-one"], count=2
+            profile="player1",
+            category="quest",
+            ids=["quest-one"],
+            count=2,
+            character="pmc",
+            path="/characters/pmc/Quests",
         )
     ]
 
@@ -405,7 +443,12 @@ def test_find_residues_ids_are_distinct_and_sorted(tmp_path: Path) -> None:
 
     assert residues == [
         ProfileResidue(
-            profile="player1", category="item", ids=[ITEM_A, ITEM_B], count=3
+            profile="player1",
+            category="item",
+            ids=[ITEM_A, ITEM_B],
+            count=3,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
         )
     ]
 
@@ -473,7 +516,14 @@ def test_find_residues_skips_non_dict_entries_in_inventory_items(
     residues = find_residues(profile, ids)
 
     assert residues == [
-        ProfileResidue(profile="player1", category="item", ids=[ITEM_A], count=1)
+        ProfileResidue(
+            profile="player1",
+            category="item",
+            ids=[ITEM_A],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
+        )
     ]
 
 
@@ -493,9 +543,1199 @@ def test_find_residues_skips_non_dict_entries_in_quests_but_counts_the_rest(
 
     assert residues == [
         ProfileResidue(
-            profile="player1", category="quest", ids=["quest-one"], count=1
+            profile="player1",
+            category="quest",
+            ids=["quest-one"],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Quests",
         )
     ]
+
+
+# --------------------------------------------------------------------------
+# find_residues -- category table (pmc, scav, top-level; make_profile fixture)
+# --------------------------------------------------------------------------
+
+
+def _delete_at(doc: dict, path: tuple) -> None:
+    node = doc
+    for key in path[:-1]:
+        node = node[key]
+    del node[path[-1]]
+
+
+def _corrupt_at(doc: dict, path: tuple) -> None:
+    node = doc
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = "not-a-container"
+
+
+@pytest.mark.parametrize(
+    ("hit", "character", "category", "path", "ids", "expected_ids", "expected_count"),
+    [
+        (
+            "pmc:item",
+            "pmc",
+            "item",
+            "/characters/pmc/Inventory/items",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            3,
+        ),
+        (
+            "scav:item",
+            "scav",
+            "item",
+            "/characters/scav/Inventory/items",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            3,
+        ),
+        (
+            "pmc:encyclopedia",
+            "pmc",
+            "encyclopedia",
+            "/characters/pmc/Encyclopedia",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "scav:encyclopedia",
+            "scav",
+            "encyclopedia",
+            "/characters/scav/Encyclopedia",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "pmc:wishlist",
+            "pmc",
+            "wishlist",
+            "/characters/pmc/WishList",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "scav:wishlist",
+            "scav",
+            "wishlist",
+            "/characters/scav/WishList",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "pmc:trader",
+            "pmc",
+            "trader",
+            "/characters/pmc/TradersInfo",
+            ModIds(traders={TRADER_ID}),
+            [TRADER_ID],
+            1,
+        ),
+        (
+            "scav:trader",
+            "scav",
+            "trader",
+            "/characters/scav/TradersInfo",
+            ModIds(traders={TRADER_ID}),
+            [TRADER_ID],
+            1,
+        ),
+        (
+            ":trader-purchase",
+            "",
+            "trader-purchase",
+            "/traderPurchases",
+            ModIds(traders={TRADER_ID}),
+            [TRADER_ID],
+            1,
+        ),
+        (
+            "pmc:quest",
+            "pmc",
+            "quest",
+            "/characters/pmc/Quests",
+            ModIds(quests={QUEST_ID}),
+            [QUEST_ID],
+            1,
+        ),
+        (
+            "scav:quest",
+            "scav",
+            "quest",
+            "/characters/scav/Quests",
+            ModIds(quests={QUEST_ID}),
+            [QUEST_ID],
+            1,
+        ),
+        (
+            "pmc:task-counter",
+            "pmc",
+            "task-counter",
+            "/characters/pmc/TaskConditionCounters",
+            ModIds(quests={QUEST_ID}),
+            [QUEST_ID],
+            1,
+        ),
+        (
+            "scav:task-counter",
+            "scav",
+            "task-counter",
+            "/characters/scav/TaskConditionCounters",
+            ModIds(quests={QUEST_ID}),
+            [QUEST_ID],
+            1,
+        ),
+        (
+            "pmc:hideout-production",
+            "pmc",
+            "hideout-production",
+            "/characters/pmc/Hideout/Production",
+            ModIds(recipes={RECIPE_ID}),
+            [RECIPE_ID],
+            1,
+        ),
+        (
+            "scav:hideout-production",
+            "scav",
+            "hideout-production",
+            "/characters/scav/Hideout/Production",
+            ModIds(recipes={RECIPE_ID}),
+            [RECIPE_ID],
+            1,
+        ),
+        (
+            "pmc:hideout-area",
+            "pmc",
+            "hideout-area",
+            "/characters/pmc/Hideout/Areas",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "scav:hideout-area",
+            "scav",
+            "hideout-area",
+            "/characters/scav/Hideout/Areas",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+        (
+            "pmc:unlocked-recipe",
+            "pmc",
+            "unlocked-recipe",
+            "/characters/pmc/UnlockedInfo/unlockedProductionRecipe",
+            ModIds(recipes={RECIPE_ID}),
+            [RECIPE_ID],
+            1,
+        ),
+        (
+            "scav:unlocked-recipe",
+            "scav",
+            "unlocked-recipe",
+            "/characters/scav/UnlockedInfo/unlockedProductionRecipe",
+            ModIds(recipes={RECIPE_ID}),
+            [RECIPE_ID],
+            1,
+        ),
+        (
+            "pmc:achievement",
+            "pmc",
+            "achievement",
+            "/characters/pmc/Achievements",
+            ModIds(achievements={ACHIEVEMENT_ID}),
+            [ACHIEVEMENT_ID],
+            1,
+        ),
+        (
+            "pmc:repeatable-quest:templateId",
+            "pmc",
+            "repeatable-quest",
+            "/characters/pmc/RepeatableQuests",
+            ModIds(quests={QUEST_ID}),
+            [QUEST_ID],
+            1,
+        ),
+        (
+            ":insurance:trader",
+            "",
+            "insurance",
+            "/insurance",
+            ModIds(traders={TRADER_ID}),
+            [TRADER_ID],
+            1,
+        ),
+        (
+            ":dialogue:trader",
+            "",
+            "dialogue",
+            "/dialogues",
+            ModIds(traders={TRADER_ID}),
+            [TRADER_ID],
+            1,
+        ),
+        (
+            "userbuild:weapon",
+            "",
+            "userbuild",
+            "/userbuilds",
+            ModIds(items={ITEM_A}),
+            [ITEM_A],
+            1,
+        ),
+    ],
+)
+def test_find_residues_reports_a_hit_for_every_category(
+    tmp_path: Path,
+    make_profile: Callable[..., dict],
+    hit: str,
+    character: str,
+    category: str,
+    path: str,
+    ids: ModIds,
+    expected_ids: list[str],
+    expected_count: int,
+) -> None:
+    doc = make_profile(hits=frozenset({hit}))
+    profile = _make_profile(tmp_path, "player1", doc)
+
+    residues = find_residues(profile, ids)
+
+    matching = [
+        residue
+        for residue in residues
+        if residue.category == category and residue.character == character
+    ]
+    assert matching == [
+        ProfileResidue(
+            profile="player1",
+            category=category,  # type: ignore[arg-type]
+            ids=expected_ids,
+            count=expected_count,
+            character=character,
+            path=path,
+        )
+    ]
+
+
+_UNIFORM_CATEGORY_CASES: list[tuple[str, tuple, ModIds]] = [
+    ("item", ("characters", "pmc", "Inventory", "items"), ModIds(items={ITEM_A})),
+    ("encyclopedia", ("characters", "pmc", "Encyclopedia"), ModIds(items={ITEM_A})),
+    ("wishlist", ("characters", "pmc", "WishList"), ModIds(items={ITEM_A})),
+    ("trader", ("characters", "pmc", "TradersInfo"), ModIds(traders={TRADER_ID})),
+    ("trader-purchase", ("traderPurchases",), ModIds(traders={TRADER_ID})),
+    ("quest", ("characters", "pmc", "Quests"), ModIds(quests={QUEST_ID})),
+    (
+        "repeatable-quest",
+        ("characters", "pmc", "RepeatableQuests"),
+        ModIds(quests={QUEST_ID}),
+    ),
+    (
+        "task-counter",
+        ("characters", "pmc", "TaskConditionCounters"),
+        ModIds(quests={QUEST_ID}),
+    ),
+    (
+        "hideout-production",
+        ("characters", "pmc", "Hideout", "Production"),
+        ModIds(recipes={RECIPE_ID}),
+    ),
+    (
+        "hideout-area",
+        ("characters", "pmc", "Hideout", "Areas"),
+        ModIds(items={ITEM_A}),
+    ),
+    (
+        "unlocked-recipe",
+        ("characters", "pmc", "UnlockedInfo", "unlockedProductionRecipe"),
+        ModIds(recipes={RECIPE_ID}),
+    ),
+    (
+        "insured-item",
+        ("characters", "pmc", "InsuredItems"),
+        ModIds(traders={TRADER_ID}, items={ITEM_A}),
+    ),
+    (
+        "achievement",
+        ("characters", "pmc", "Achievements"),
+        ModIds(achievements={ACHIEVEMENT_ID}),
+    ),
+    (
+        "insurance",
+        ("insurance",),
+        ModIds(traders={TRADER_ID}, items={ITEM_A}),
+    ),
+    (
+        "dialogue",
+        ("dialogues",),
+        ModIds(traders={TRADER_ID}, items={ITEM_A}, quests={QUEST_ID}),
+    ),
+    ("userbuild", ("userbuilds",), ModIds(items={ITEM_A})),
+]
+
+
+@pytest.mark.parametrize("category,path,ids", _UNIFORM_CATEGORY_CASES)
+@pytest.mark.parametrize("corrupt", [_delete_at, _corrupt_at])
+def test_find_residues_missing_or_wrong_type_container_yields_no_residue(
+    tmp_path: Path,
+    make_profile: Callable[..., dict],
+    corrupt: Callable[[dict, tuple], None],
+    category: str,
+    path: tuple,
+    ids: ModIds,
+) -> None:
+    doc = make_profile()
+    corrupt(doc, path)
+    profile = _make_profile(tmp_path, "player1", doc)
+
+    assert find_residues(profile, ids) == []
+
+
+def test_find_residues_reports_pmc_and_scav_item_hits_separately_with_distinct_ids(
+    tmp_path: Path, make_profile: Callable[..., dict]
+) -> None:
+    doc = make_profile(hits=frozenset({"pmc:item"}), item_id=ITEM_A)
+    doc["characters"]["scav"]["Inventory"]["items"][1]["_tpl"] = ITEM_B
+    profile = _make_profile(tmp_path, "player1", doc)
+    ids = ModIds(items={ITEM_A, ITEM_B})
+
+    residues = find_residues(profile, ids)
+
+    item_residues = {
+        residue.character: residue for residue in residues if residue.category == "item"
+    }
+    assert item_residues["pmc"].ids == [ITEM_A]
+    assert item_residues["scav"].ids == [ITEM_B]
+
+
+def test_find_residues_orders_character_major_then_category_then_string_last(
+    tmp_path: Path, make_profile: Callable[..., dict]
+) -> None:
+    marker = "string-only-marker-id"
+    doc = make_profile(
+        hits=frozenset(
+            {
+                "pmc:item",
+                "pmc:encyclopedia",
+                "scav:trader",
+                "scav:quest",
+                ":trader-purchase",
+                ":insurance:trader",
+            }
+        )
+    )
+    doc["info"]["nickname"] = f"prefix-{marker}-suffix"
+    profile = _make_profile(tmp_path, "player1", doc)
+    ids = ModIds(
+        items={ITEM_A},
+        traders={TRADER_ID},
+        quests={QUEST_ID},
+        achievements={marker},
+    )
+
+    residues = find_residues(profile, ids)
+
+    assert [(residue.character, residue.category) for residue in residues] == [
+        ("pmc", "item"),
+        ("pmc", "encyclopedia"),
+        ("scav", "trader"),
+        ("scav", "quest"),
+        ("", "trader-purchase"),
+        ("", "insurance"),
+        ("", "string"),
+    ]
+    assert residues[-1] == ProfileResidue(
+        profile="player1", category="string", ids=[marker], count=1
+    )
+
+
+def test_find_residues_item_closure_counts_children_and_grandchildren_and_is_cycle_safe(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        # A parentId cycle between "container" and "child": neither can be
+        # revisited once it enters the closure, so the walk still terminates.
+        {"_id": "container", "_tpl": ITEM_A, "parentId": "child", "slotId": "main"},
+        {"_id": "child", "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
+        {"_id": "grandchild", "_tpl": ITEM_B, "parentId": "child", "slotId": "main"},
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="item",
+            ids=[ITEM_A],
+            count=3,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
+        )
+    ]
+
+
+def test_find_residues_item_closure_skips_items_without_a_usable_id(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        {"_id": "container", "_tpl": ITEM_A, "slotId": "main"},
+        {"_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
+        {"_id": "", "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
+        {"_id": 123, "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    # Only "container" itself has a usable string _id, so the closure is size 1:
+    # the malformed entries are skipped rather than crashing or being counted.
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="item",
+            ids=[ITEM_A],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
+        )
+    ]
+
+
+def test_find_residues_string_fallback_excludes_matched_ids_but_keeps_unmatched(
+    tmp_path: Path,
+) -> None:
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        {
+            "_id": "x1",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
+    ]
+    # ITEM_A is matched structurally (must not show up as 'string'); RECIPE_ID
+    # and ACHIEVEMENT_ID are only embedded in raw text and must still surface.
+    content["misc"] = {"note": f"{RECIPE_ID} and {ACHIEVEMENT_ID}"}
+    profile = _make_profile(tmp_path, "player1", content)
+    ids = ModIds(items={ITEM_A}, recipes={RECIPE_ID}, achievements={ACHIEVEMENT_ID})
+
+    residues = find_residues(profile, ids)
+
+    string_residue = next(r for r in residues if r.category == "string")
+    assert string_residue.ids == sorted([RECIPE_ID, ACHIEVEMENT_ID])
+    assert all(
+        residue.category != "string" or ITEM_A not in residue.ids
+        for residue in residues
+    )
+
+
+# --------------------------------------------------------------------------
+# find_residues -- repeatable-quest match variants (traderId, _id, templateId,
+# questStatus.qid) and non-dict entries
+# --------------------------------------------------------------------------
+
+
+def _pmc_with_repeatable(active: list) -> dict:
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["RepeatableQuests"] = [
+        {
+            "id": "daily",
+            "name": "Daily",
+            "activeQuests": active,
+            "inactiveQuests": [],
+        }
+    ]
+    return content
+
+
+@pytest.mark.parametrize(
+    "quest_entry",
+    [
+        {"_id": QUEST_ID, "templateId": "other", "traderId": "other-trader"},
+        {"_id": "other", "templateId": QUEST_ID, "traderId": "other-trader"},
+        {
+            "_id": "other",
+            "templateId": "other",
+            "traderId": "other-trader",
+            "questStatus": {"qid": QUEST_ID},
+        },
+    ],
+)
+def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(
+    tmp_path: Path, quest_entry: dict
+) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _pmc_with_repeatable([quest_entry])
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="repeatable-quest",
+            ids=[QUEST_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/RepeatableQuests",
+        )
+    ]
+
+
+def test_find_residues_repeatable_quest_matches_by_trader_id(tmp_path: Path) -> None:
+    ids = ModIds(traders={TRADER_ID})
+    content = _pmc_with_repeatable(
+        [{"_id": "other", "templateId": "other", "traderId": TRADER_ID}]
+    )
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="repeatable-quest",
+            ids=[TRADER_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/RepeatableQuests",
+        )
+    ]
+
+
+def test_find_residues_repeatable_quest_skips_non_dict_groups_and_entries(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["RepeatableQuests"] = [
+        "not-a-dict",
+        {
+            "id": "daily",
+            "name": "Daily",
+            "activeQuests": ["not-a-dict", {"_id": QUEST_ID}],
+            "inactiveQuests": [{"_id": "other"}],
+        },
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="repeatable-quest",
+            ids=[QUEST_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/RepeatableQuests",
+        )
+    ]
+
+
+def test_find_residues_repeatable_quest_no_hit_leaves_no_residue(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(quests={QUEST_ID}, traders={TRADER_ID})
+    content = _pmc_with_repeatable(
+        [{"_id": "other", "templateId": "other", "traderId": "other-trader"}]
+    )
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- task-counter and hideout-production: key vs. nested field
+# --------------------------------------------------------------------------
+
+
+def test_find_residues_task_counter_matches_by_key(tmp_path: Path) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["TaskConditionCounters"] = {
+        QUEST_ID: {"id": QUEST_ID, "type": "Counter", "value": 1, "sourceId": "other"}
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="task-counter",
+            ids=[QUEST_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/TaskConditionCounters",
+        )
+    ]
+
+
+def test_find_residues_task_counter_matches_by_source_id(tmp_path: Path) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["TaskConditionCounters"] = {
+        "cond1": {"id": "cond1", "type": "Counter", "value": 1, "sourceId": QUEST_ID}
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="task-counter",
+            ids=[QUEST_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/TaskConditionCounters",
+        )
+    ]
+
+
+def test_find_residues_task_counter_tolerates_a_non_dict_value_and_no_hit(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["TaskConditionCounters"] = {"cond1": "not-a-dict"}
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+def test_find_residues_hideout_production_matches_by_key(tmp_path: Path) -> None:
+    ids = ModIds(recipes={RECIPE_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Hideout"] = {
+        "Production": {RECIPE_ID: {"Progress": 0}}
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="hideout-production",
+            ids=[RECIPE_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Hideout/Production",
+        )
+    ]
+
+
+def test_find_residues_hideout_production_matches_by_recipe_id(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(recipes={RECIPE_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Hideout"] = {
+        "Production": {"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="hideout-production",
+            ids=[RECIPE_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Hideout/Production",
+        )
+    ]
+
+
+def test_find_residues_hideout_production_tolerates_a_non_dict_value_and_no_hit(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(recipes={RECIPE_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Hideout"] = {"Production": {"prod1": "not-a-dict"}}
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- insured-item: trader id or item closure
+# --------------------------------------------------------------------------
+
+
+def test_find_residues_insured_item_matches_by_trader_id(tmp_path: Path) -> None:
+    ids = ModIds(traders={TRADER_ID})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["InsuredItems"] = [{"tid": TRADER_ID, "itemId": "x"}]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="insured-item",
+            ids=[TRADER_ID],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/InsuredItems",
+        )
+    ]
+
+
+def test_find_residues_insured_item_matches_by_item_closure(tmp_path: Path) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        {"_id": "container", "_tpl": ITEM_A, "slotId": "main"},
+        {"_id": "child", "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
+    ]
+    content["characters"]["pmc"]["InsuredItems"] = [
+        {"tid": "unrelated-trader", "itemId": "child"}
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    insured = next(r for r in residues if r.category == "insured-item")
+    assert insured.ids == ["child"]
+    assert insured.count == 1
+
+
+def test_find_residues_insured_item_skips_non_dict_entries_and_no_hit(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(traders={TRADER_ID}, items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["InsuredItems"] = [
+        "not-a-dict",
+        {"tid": "other-trader", "itemId": "unrelated-item"},
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- insurance: trader id, or nested item _tpl plus its closure
+# --------------------------------------------------------------------------
+
+
+def test_find_residues_insurance_matches_by_trader_id(tmp_path: Path) -> None:
+    ids = ModIds(traders={TRADER_ID})
+    content = _empty_pmc_profile()
+    content["insurance"] = [{"traderId": TRADER_ID, "items": []}]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="insurance",
+            ids=[TRADER_ID],
+            count=1,
+            character="",
+            path="/insurance",
+        )
+    ]
+
+
+def test_find_residues_insurance_matches_by_item_and_its_closure(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["insurance"] = [
+        {
+            "traderId": "unrelated-trader",
+            "items": [
+                {"_id": "i1", "_tpl": ITEM_A},
+                {"_id": "i2", "_tpl": ITEM_B, "parentId": "i1"},
+            ],
+        }
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="insurance",
+            ids=[ITEM_A],
+            count=2,
+            character="",
+            path="/insurance",
+        )
+    ]
+
+
+def test_find_residues_insurance_skips_non_dict_entries_and_no_hit(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(traders={TRADER_ID}, items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["insurance"] = ["not-a-dict", {"traderId": "other", "items": []}]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- dialogue: trader key, message templateId prefix, message items
+# --------------------------------------------------------------------------
+
+
+def test_find_residues_dialogue_matches_by_trader_key(tmp_path: Path) -> None:
+    ids = ModIds(traders={TRADER_ID})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {TRADER_ID: {"_id": TRADER_ID, "messages": []}}
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="dialogue",
+            ids=[TRADER_ID],
+            count=1,
+            character="",
+            path="/dialogues",
+        )
+    ]
+
+
+def test_find_residues_dialogue_matches_message_by_template_id_prefix(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {
+        "unrelated-trader": {
+            "_id": "unrelated-trader",
+            "messages": [
+                {"_id": "m1", "templateId": f"{QUEST_ID}-suffix", "items": {}}
+            ],
+        }
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="dialogue",
+            ids=[QUEST_ID],
+            count=1,
+            character="",
+            path="/dialogues",
+        )
+    ]
+
+
+def test_find_residues_dialogue_matches_message_by_item_tpl(tmp_path: Path) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {
+        "unrelated-trader": {
+            "_id": "unrelated-trader",
+            "messages": [
+                {
+                    "_id": "m1",
+                    "templateId": "unrelated",
+                    "items": {"data": [{"_id": "i1", "_tpl": ITEM_A}]},
+                }
+            ],
+        }
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="dialogue",
+            ids=[ITEM_A],
+            count=1,
+            character="",
+            path="/dialogues",
+        )
+    ]
+
+
+def test_find_residues_dialogue_skips_non_dict_messages(tmp_path: Path) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {
+        "unrelated-trader": {
+            "_id": "unrelated-trader",
+            "messages": [
+                "not-a-dict",
+                {"_id": "m1", "templateId": "unrelated", "items": {}},
+            ],
+        }
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+def test_find_residues_dialogue_matches_message_by_item_when_template_id_is_missing(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A}, quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {
+        "unrelated-trader": {
+            "_id": "unrelated-trader",
+            "messages": [
+                {
+                    "_id": "m1",
+                    "items": {"data": [{"_id": "i1", "_tpl": ITEM_A}]},
+                }
+            ],
+        }
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="dialogue",
+            ids=[ITEM_A],
+            count=1,
+            character="",
+            path="/dialogues",
+        )
+    ]
+
+
+def test_find_residues_dialogue_no_hit_leaves_no_residue(tmp_path: Path) -> None:
+    ids = ModIds(traders={TRADER_ID}, items={ITEM_A}, quests={QUEST_ID})
+    content = _empty_pmc_profile()
+    content["dialogues"] = {
+        "unrelated-trader": {
+            "_id": "unrelated-trader",
+            "messages": [
+                {"_id": "m1", "templateId": "unrelated", "items": {}},
+            ],
+        }
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- userbuild: nested _tpl in weapon, equipment and magazine builds
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "build_key", ["weaponBuilds", "equipmentBuilds", "magazineBuilds"]
+)
+def test_find_residues_userbuild_matches_all_three_build_lists(
+    tmp_path: Path, build_key: str
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["userbuilds"] = {
+        "weaponBuilds": [],
+        "equipmentBuilds": [],
+        "magazineBuilds": [],
+    }
+    content["userbuilds"][build_key] = [
+        {"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_A}]}
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="userbuild",
+            ids=[ITEM_A],
+            count=1,
+            character="",
+            path="/userbuilds",
+        )
+    ]
+
+
+def test_find_residues_userbuild_no_hit_leaves_no_residue(tmp_path: Path) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["userbuilds"] = {
+        "weaponBuilds": [
+            {"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_B}]}
+        ],
+        "equipmentBuilds": [],
+        "magazineBuilds": [],
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# find_residues -- hideout-area: nested _tpl anywhere below Areas[].slots[]
+# --------------------------------------------------------------------------
+
+
+def test_find_residues_hideout_area_matches_a_nested_tpl_below_slots(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Hideout"] = {
+        "Areas": [
+            {
+                "type": 0,
+                "slots": [
+                    {"locationIndex": 0},
+                    {
+                        "locationIndex": 1,
+                        "items": [{"_id": "x1", "_tpl": ITEM_A}],
+                    },
+                ],
+            }
+        ]
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(
+            profile="player1",
+            category="hideout-area",
+            ids=[ITEM_A],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Hideout/Areas",
+        )
+    ]
+
+
+def test_find_residues_hideout_area_no_hit_leaves_no_residue(
+    tmp_path: Path,
+) -> None:
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Hideout"] = {
+        "Areas": [{"type": 0, "slots": [{"locationIndex": 0}]}]
+    }
+    profile = _make_profile(tmp_path, "player1", content)
+
+    assert find_residues(profile, ids) == []
+
+
+# --------------------------------------------------------------------------
+# collect_mod_ids -- recipes and achievements
+# --------------------------------------------------------------------------
+
+
+def test_collect_mod_ids_recipes_from_recipe_list_keys_below_hideout(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/hideout/production.json": json.dumps(
+            {
+                "recipes": [{"_id": RECIPE_ID}],
+                "scavRecipes": [{"_id": "5c0d1b8b86f7744bb2683c02"}],
+                "cultistRecipes": [{"_id": "5c0d1b8b86f7744bb2683c03"}],
+            }
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.recipes == {
+        RECIPE_ID,
+        "5c0d1b8b86f7744bb2683c02",
+        "5c0d1b8b86f7744bb2683c03",
+    }
+    # The recipe list keys are not 24-hex object keys, so nothing leaks into items.
+    assert result.items == set()
+
+
+def test_collect_mod_ids_recipes_from_a_plain_list_below_hideout(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/hideout/areas.json": json.dumps(
+            [{"_id": RECIPE_ID, "type": 5}]
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.recipes == {RECIPE_ID}
+
+
+def test_collect_mod_ids_achievements_from_achievements_json_uses_id_field(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/templates/achievements.json": json.dumps(
+            [{"id": ACHIEVEMENT_ID, "imageUrl": "x.png"}]
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.achievements == {ACHIEVEMENT_ID}
+    assert result.items == set()
+
+
+def test_collect_mod_ids_achievements_from_an_achievement_path_segment(
+    clean_repo: Repo, install_commit
+) -> None:
+    files = {
+        "SPT/user/mods/ServerMod/db/achievement/custom.json": json.dumps(
+            [{"id": ACHIEVEMENT_ID}]
+        ),
+    }
+    commit_hash = install_commit(
+        clean_repo, "ServerMod", mod_type="server", files=files
+    )
+
+    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
+
+    assert result.achievements == {ACHIEVEMENT_ID}
 
 
 # --------------------------------------------------------------------------
@@ -578,7 +1818,14 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
 
     assert set(result.residues.keys()) == {"ModX"}
     assert result.residues["ModX"] == [
-        ProfileResidue(profile="abc", category="item", ids=[item_x], count=1)
+        ProfileResidue(
+            profile="abc",
+            category="item",
+            ids=[item_x],
+            count=1,
+            character="pmc",
+            path="/characters/pmc/Inventory/items",
+        )
     ]
 
 

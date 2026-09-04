@@ -3094,6 +3094,16 @@
           "count": {
             "title": "Count",
             "type": "integer"
+          },
+          "character": {
+            "default": "",
+            "title": "Character",
+            "type": "string"
+          },
+          "path": {
+            "default": "",
+            "title": "Path",
+            "type": "string"
           }
         },
         "required": [
@@ -3198,8 +3208,21 @@
       "ResidueCategory": {
         "enum": [
           "item",
+          "encyclopedia",
+          "wishlist",
           "trader",
+          "trader-purchase",
           "quest",
+          "repeatable-quest",
+          "task-counter",
+          "hideout-production",
+          "hideout-area",
+          "unlocked-recipe",
+          "insured-item",
+          "achievement",
+          "insurance",
+          "dialogue",
+          "userbuild",
           "string"
         ],
         "type": "string"

@@ -1471,6 +1471,16 @@ export interface components {
             ids: string[];
             /** Count */
             count: number;
+            /**
+             * Character
+             * @default
+             */
+            character: string;
+            /**
+             * Path
+             * @default
+             */
+            path: string;
         };
         /**
          * ProgressEvent
@@ -1525,7 +1535,7 @@ export interface components {
             warnings: string[];
         };
         /** @enum {string} */
-        ResidueCategory: "item" | "trader" | "quest" | "string";
+        ResidueCategory: "item" | "encyclopedia" | "wishlist" | "trader" | "trader-purchase" | "quest" | "repeatable-quest" | "task-counter" | "hideout-production" | "hideout-area" | "unlocked-recipe" | "insured-item" | "achievement" | "insurance" | "dialogue" | "userbuild" | "string";
         /**
          * SearchCatalogRequest
          * @description Parameters of ``search_catalog``.

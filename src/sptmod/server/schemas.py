@@ -78,6 +78,8 @@ class ProfileResidue(CoreModel):
     category: ResidueCategory
     ids: list[str]
     count: int
+    character: str = ""
+    path: str = ""
 
 
 class CheckResult(CoreModel):

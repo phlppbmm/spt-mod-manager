@@ -85,6 +85,61 @@ def _install_server_mod_with_item(
 
 
 # --------------------------------------------------------------------------
+# services.check_profiles
+# --------------------------------------------------------------------------
+
+
+def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_path(
+    clean_repo: Repo, install_commit
+) -> None:
+    item_id = "5c0d1b8b86f7744bb2683cf9"
+    trader_id = "5ac3b934136fb568fa78b1e9"
+    install_commit(
+        clean_repo,
+        "ServerMod",
+        mod_type="server",
+        files={
+            "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps(
+                {item_id: {"_id": item_id, "_name": "item"}}
+            ),
+            f"SPT/user/mods/ServerMod/db/traders/{trader_id}/base.json": json.dumps(
+                {"_id": trader_id, "nickname": "Trader"}
+            ),
+        },
+    )
+
+    profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
+    profile = {
+        "characters": {
+            "pmc": {"Inventory": {"items": []}, "TradersInfo": {}, "Quests": []},
+            "scav": {
+                "Inventory": {
+                    "items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]
+                },
+                "TradersInfo": {},
+                "Quests": [],
+            },
+        },
+        "insurance": [{"traderId": trader_id, "items": []}],
+    }
+    (profiles_dir / "abc.json").write_text(json.dumps(profile), encoding="utf-8")
+
+    result = services.check_profiles(clean_repo.path)
+
+    residues = result.residues["ServerMod"]
+    scav_item = next(
+        r for r in residues if r.category == "item" and r.character == "scav"
+    )
+    assert scav_item.ids == [item_id]
+    assert scav_item.path == "/characters/scav/Inventory/items"
+
+    insurance = next(r for r in residues if r.category == "insurance")
+    assert insurance.character == ""
+    assert insurance.path == "/insurance"
+    assert insurance.ids == [trader_id]
+
+
+# --------------------------------------------------------------------------
 # services.remove_mod
 # --------------------------------------------------------------------------
 

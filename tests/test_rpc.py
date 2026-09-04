@@ -347,7 +347,14 @@ def test_profile_residue_error_details_carry_the_residues_list(
     data = lines[0]["data"]
     assert data["code"] == "PROFILE_RESIDUE"
     assert data["details"]["residues"] == [
-        {"profile": "abc", "category": "item", "ids": ["1", "2"], "count": 2}
+        {
+            "profile": "abc",
+            "category": "item",
+            "ids": ["1", "2"],
+            "count": 2,
+            "character": "",
+            "path": "",
+        }
     ]
 
 

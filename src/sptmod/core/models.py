@@ -177,7 +177,25 @@ class InstallPlan:
     spt_version: str
 
 
-type ResidueCategory = Literal["item", "trader", "quest", "string"]
+type ResidueCategory = Literal[
+    "item",
+    "encyclopedia",
+    "wishlist",
+    "trader",
+    "trader-purchase",
+    "quest",
+    "repeatable-quest",
+    "task-counter",
+    "hideout-production",
+    "hideout-area",
+    "unlocked-recipe",
+    "insured-item",
+    "achievement",
+    "insurance",
+    "dialogue",
+    "userbuild",
+    "string",
+]
 
 
 @dataclass(frozen=True)
@@ -187,16 +205,61 @@ class ProfileResidue:
     Attributes:
         profile: The profile the IDs were found in, named by the stem of its
             profile file.
-        category: Where in the profile the IDs were found: ``'item'`` for
-            inventory item templates, ``'trader'`` for trader entries,
-            ``'quest'`` for quest entries, ``'string'`` for the conservative
-            fallback that only found the ID somewhere in the profile text.
+        category: Which part of the profile the IDs were found in:
+
+            ``'item'``
+                Inventory items whose template is the mod's, plus every item
+                stored inside them.
+            ``'encyclopedia'``
+                Encyclopedia entries for the mod's item templates.
+            ``'wishlist'``
+                Wish list entries for the mod's item templates.
+            ``'trader'``
+                Trader standing entries of the mod's traders.
+            ``'trader-purchase'``
+                Purchase counters of the mod's traders.
+            ``'quest'``
+                Accepted or finished quests of the mod.
+            ``'repeatable-quest'``
+                Daily and weekly quests belonging to the mod's quests or
+                traders.
+            ``'task-counter'``
+                Progress counters of the mod's quests.
+            ``'hideout-production'``
+                Running hideout productions of the mod's recipes.
+            ``'hideout-area'``
+                Hideout area slots holding the mod's items.
+            ``'unlocked-recipe'``
+                Unlocked hideout recipes of the mod.
+            ``'insured-item'``
+                Insurance entries for the mod's traders or items.
+            ``'achievement'``
+                Achievements of the mod.
+            ``'insurance'``
+                Pending insurance returns from the mod's traders or holding
+                the mod's items.
+            ``'dialogue'``
+                Messages of the mod's traders or about the mod's quests and
+                items.
+            ``'userbuild'``
+                Saved weapon, equipment and magazine builds using the mod's
+                items.
+            ``'string'``
+                The conservative fallback that only found the ID somewhere in
+                the profile text, without knowing what it is used for.
         ids: The distinct IDs found, sorted.
-        count: How often the IDs occur in that category, so an item template
-            used by five inventory items counts five.
+        count: How many entries of that part of the profile the IDs account
+            for, so an item template used by five inventory items counts five.
+        character: The character the IDs were found in, ``'pmc'`` or
+            ``'scav'``; empty for the shared profile sections and for
+            ``'string'``.
+        path: JSON pointer of the container the IDs were found in, for example
+            ``'/characters/pmc/Inventory/items'``; empty for ``'string'``.
     """
 
     profile: str
     category: ResidueCategory
     ids: list[str]
     count: int
+    character: str = ""
+    path: str = ""

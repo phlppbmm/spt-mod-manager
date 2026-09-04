@@ -122,11 +122,13 @@
 			entries = catalog;
 			mods = installed;
 			favorites = favored.mod_ids;
-			onupdatable(updatableFromCatalog(catalog, installed));
+			// The update count must come from the full mod list, not from search results.
+			if (query.trim() === '') {
+				onupdatable(updatableFromCatalog(catalog, installed));
+			}
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
-				onupdatable([]);
 			}
 		} finally {
 			if (request === requestId) {

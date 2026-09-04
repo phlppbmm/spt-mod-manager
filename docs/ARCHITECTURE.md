@@ -151,6 +151,115 @@ report, so they never block and are never snapshotted. `remove` and `disable`
 delete them together with the mod, because a leftover file would otherwise
 keep the directory alive and resurface as a foreign manual install.
 
+## Profile residues and cleanup
+
+After a mod is removed or updated, its content may still be referenced in the
+player profiles — installed items, accepted quests, trader standing. The
+residue detection (§7 of HANDOFF, `check_profiles` service) identifies this
+content so the user can remove it before gameplay resumes. This section
+documents the structured categories, the two-phase cleanup service, and the
+backup / snapshot protocol.
+
+### Residue categories and collection
+
+The category table below names 16 structured residue kinds and one report-only
+fallback. Each category specifies the JSON path(s) where the content lives, the
+character scope (``pmc``, ``scav``, or shared sections), and the cleanup action.
+IDs are collected from db files of the mod's install commit: items (24-character
+hex object keys and `_id` entries), traders (directory names below `db/traders/`
+and the `_id` of `base.json`), quests (`_id` entries below a `quests` path
+segment), recipes (`_id` entries below a `hideout` path segment, plus entries of
+`recipes`, `scavRecipes`, `cultistRecipes` dicts), and achievements (`id` entries
+in `achievements.json` or files below `achievement`/`achievements` segments).
+
+**The `_tpl` correction:** An early bug read `item.get("tpl")` instead of
+`item.get("_tpl")`, so inventory residues were detected only by the string
+fallback. The inventory template field in the real profile is `_tpl` (verified
+against SPT 4.1.3 live profiles and the server DLL); this fix ensures hits are
+found structurally and attributed to the correct profile location.
+
+| Category | Characters | JSON path | Matched against | Action |
+|---|---|---|---|---|
+| `item` | pmc, scav | `/characters/<c>/Inventory/items` | `items[]._tpl` ∈ ids | remove item and its descendants |
+| `encyclopedia` | pmc, scav | `/characters/<c>/Encyclopedia` | dict key ∈ ids | remove key |
+| `wishlist` | pmc, scav | `/characters/<c>/WishList` | dict key ∈ ids | remove key |
+| `trader` | pmc, scav | `/characters/<c>/TradersInfo` | dict key ∈ traders | remove key |
+| `trader-purchase` | — | `/traderPurchases` | dict key ∈ traders | remove key |
+| `quest` | pmc, scav | `/characters/<c>/Quests` | `[].qid` ∈ quests | remove entry |
+| `repeatable-quest` | pmc | `/characters/<c>/RepeatableQuests` | entry's `_id`/`templateId`/`questStatus.qid` ∈ quests or `traderId` ∈ traders | remove entry |
+| `task-counter` | pmc, scav | `/characters/<c>/TaskConditionCounters` | key/value `sourceId` ∈ quests | remove key |
+| `hideout-production` | pmc, scav | `/characters/<c>/Hideout/Production` | key/value `recipeId` ∈ recipes | remove key |
+| `hideout-area` | pmc, scav | `/characters/<c>/Hideout/Areas` | any `_tpl` ∈ items anywhere below `Areas[].slots[]` | reset slot to `{"locationIndex": n}` |
+| `unlocked-recipe` | pmc, scav | `/characters/<c>/UnlockedInfo/unlockedProductionRecipe` | list element ∈ recipes | remove element |
+| `insured-item` | pmc, scav | `/characters/<c>/InsuredItems` | `tid` ∈ traders or `itemId` in inventory closure | remove entry |
+| `achievement` | pmc | `/characters/<c>/Achievements` | dict key ∈ achievements | remove key |
+| `insurance` | — | `/insurance` | entry `traderId` ∈ traders → whole entry; else entry `items[]._tpl` ∈ items → those items + descendants | remove entry or items |
+| `dialogue` | — | `/dialogues` | dict key ∈ traders → whole dialogue; else message `templateId` starts with quest id or message `items` hold a matching `_tpl` | remove dialogue or message |
+| `userbuild` | — | `/userbuilds` | any `_tpl` ∈ items inside `weaponBuilds`/`equipmentBuilds`/`magazineBuilds` | remove the whole build |
+| `string` | — | — | raw-text hit of an id no category attributed | report only, never edited |
+
+Residues are emitted character-major (``pmc``, then ``scav``, then shared
+sections) and category-minor in the order above; ``string`` is always last.
+``hideout-production``, ``hideout-area``, ``insured-item``, and ``userbuild``
+were never observed populated locally; the rules only depend on verified key
+names and degrade to "no hit" when a container is missing or of an unexpected
+type. ``hideout-area`` deliberately rebuilds the slot from its `locationIndex`
+to avoid losing unknown payload data.
+
+### Two-phase cleanup service
+
+`plan_profile_cleanup(path, mod_name)` reads only and reports what a cleanup
+would remove; `clean_profile(path, mod_name, profiles=None)` applies it. The
+plan is built by the exact code that does the cleaning — a single private
+function `_clean_document(profile, ids)` produces both the cleaned document and
+the report — so the preview never disagrees with the real run.
+
+### Write sequence and backup protocol
+
+When a profile changes, it is backed up to `<runtime>/user/profiles/backups/
+<YYYY-MM-DD_HH-MM-SS>/<profileId>.json` (SPT's own convention, UTC timestamp),
+then written in place. The backup happens first, so a crash leaves the game's
+own backup unaware of the cleanup but post-cleanup recovery is still possible
+via git History. Serialization uses `json.dumps(data, ensure_ascii=False,
+separators=(",", ":"))` with no indentation or trailing newline, byte-identical
+to SPT's own format when the profile is unchanged.
+
+After any profile changes, a snapshot commit is created with the message
+`snapshot: cleaned profiles for <mod>` and **no Mod trailers**. A `Mod:` trailer
+would make the profile commit look like a mod's own commit, so `_current_mods`
+would take it as the mod's head and forget its db files.
+
+### `remove_mod(clean_profiles=True)` ordering
+
+When removing a mod with profile cleanup enabled:
+1. Ensure the game is closed and the tree is installable (auto-snapshot dirty
+   profiles/configs if needed).
+2. Clean the profiles of the mod: collect its ids from the youngest commit
+   carrying the full trailer set (not from the revert if the mod was already
+   disabled/removed), back up and write changed profiles, snapshot if any
+   changed.
+3. Revert the mod's install commit with `Mod-State: removed`.
+4. Delete runtime data (untracked files the mod wrote while the game ran).
+
+The residue check is skipped: what survives a cleanup is what no cleanup can
+attribute (the ``string`` category), and blocking the removal on it would defeat
+the purpose. Unattributed ids travel out in `RemoveResult.cleanup.untouched`.
+
+### Deliberately untouched
+
+`Inventory.favoriteItems` and `Inventory.fastPanel` dangling references when
+their items are removed are repaired if the items belong to the mod (the items
+are deleted, so the references become invalid). Other dangling references stay
+in place: `Hideout.Improvements`, customization unlocks, skills, stats, RagFair
+info, notes, bonuses, friends, `btrDelivery`, and `spt.mods` are not cleaned
+because their ids (improvement ids, customization suite ids, skill names, mod
+names) are not collected from the mod db and so a structured claim would be
+guesswork. The ``string`` category reports them; they may be removed manually
+if needed. No restore service exists — a user can undo a cleanup via git History
+by manually reverting the snapshot commit, and the SPT-side backup copy remains
+recoverable as long as the server hasn't rotated it past its `maxBackups` limit
+(default 15 runs).
+
 ## Parallel operations (the apply lock)
 
 Each RPC call is its own process, so several operations can run at once.
@@ -286,8 +395,8 @@ download cache.
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 28 service functions (declared as `FUNCTIONS: [&str; 28]` in
-  rpc.rs); the frontend client.ts has 26 camelCase wrappers (`install_from_archive`
+- RPC functions: 30 service functions (declared as `FUNCTIONS: [&str; 30]` in
+  rpc.rs); the frontend client.ts has 28 camelCase wrappers (`install_from_archive`
   and `adopt_mod` are RPC-exposed but have no wrapper or frontend caller yet).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
@@ -372,5 +481,13 @@ behavior-focused; do not weaken them to make an implementation fit.
 - sp-mod.com deviates from the old forge source in category/license/
   dependency-embed shapes — the client parses the LIVE shapes (with
   tolerant fallbacks); resolve uses `/mods/dependencies`, which matches.
+- Profile cleanup has no user-facing restore path: a cleaned profile can be
+  recovered via git History (revert the snapshot commit manually) or from the
+  SPT-side backup copy if the server hasn't rotated it past its `maxBackups`
+  limit. A `restore_profile` service is a follow-up candidate.
+- String residues (ids the cleanup cannot attribute) stay in place after a
+  cleanup. They are reported in `cleanup.untouched` and may indicate issues
+  with the db file collection or be unrelated id references (skill names,
+  locale keys, mod paths).
 - Windows `CREATE_NO_WINDOW` process handling is a follow-up; no read timeout
   on child stdout. Linux-only verified (Windows build untested).

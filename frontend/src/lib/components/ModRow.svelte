@@ -23,6 +23,7 @@
 
 	interface Props {
 		path: string;
+		index: number;
 		entry: CatalogEntry;
 		modState: RowState;
 		installed: ModInfo | null;
@@ -35,6 +36,7 @@
 
 	let {
 		path,
+		index,
 		entry,
 		modState,
 		installed,
@@ -200,6 +202,7 @@
 </script>
 
 <div class="row" class:busy>
+	<div class="index">{index}</div>
 	<div class="name">
 		<button
 			type="button"
@@ -214,6 +217,8 @@
 		</button>
 		{#if entry.mod.thumbnail}
 			<img class="thumb" src={entry.mod.thumbnail} alt="" loading="lazy" />
+		{:else}
+			<div class="thumb placeholder" aria-hidden="true">{entry.mod.name.slice(0, 1)}</div>
 		{/if}
 		<div class="name-text">
 			<button class="name-link" onclick={() => void showDetails()}>
@@ -526,9 +531,15 @@
 	}
 
 	@media (max-width: 1000px) {
-		.row > :nth-child(n + 5):nth-child(-n + 7) {
+		.row > :nth-child(n + 6):nth-child(-n + 8) {
 			display: none;
 		}
+	}
+
+	.index {
+		text-align: right;
+		color: #98a2ad;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.name {
@@ -559,6 +570,16 @@
 		object-fit: cover;
 		border-radius: 4px;
 		flex-shrink: 0;
+	}
+
+	.thumb.placeholder {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #2c333b;
+		color: #98a2ad;
+		font-size: 1.1rem;
+		text-transform: uppercase;
 	}
 
 	.name-text {

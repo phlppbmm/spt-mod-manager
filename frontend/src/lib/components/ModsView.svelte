@@ -187,6 +187,7 @@
 
 	<div class="list">
 		<div class="head">
+			<div class="index">#</div>
 			<button class="sort" onclick={() => toggleSort('name')}>Mod{sortMark('name')}</button>
 			<button class="sort" onclick={() => toggleSort('installed')}>
 				Installed{sortMark('installed')}
@@ -203,9 +204,10 @@
 			<div>State</div>
 			<div></div>
 		</div>
-		{#each rows as entry (entry.mod.id)}
+		{#each rows as entry, position (entry.mod.id)}
 			<ModRow
 				{path}
+				index={position + 1}
 				{entry}
 				modState={rowState(entry, disabledMods)}
 				installed={installedByForgeId.get(String(entry.mod.id)) ??
@@ -272,17 +274,17 @@
 	}
 
 	.list {
-		--mods-grid: minmax(12rem, 1fr) 5rem 5rem 6rem 5.5rem 5.5rem 5rem 7.5rem 8rem;
+		--mods-grid: 2.5rem minmax(12rem, 1fr) 5rem 5rem 6rem 5.5rem 5.5rem 5rem 7.5rem 8rem;
 		border: 1px solid #2c3138;
 		border-radius: 4px;
 	}
 
 	@media (max-width: 1000px) {
 		.list {
-			--mods-grid: minmax(10rem, 1fr) 5rem 5rem 6rem 7.5rem 8rem;
+			--mods-grid: 2.5rem minmax(10rem, 1fr) 5rem 5rem 6rem 7.5rem 8rem;
 		}
 
-		.head > :nth-child(n + 5):nth-child(-n + 7) {
+		.head > :nth-child(n + 6):nth-child(-n + 8) {
 			display: none;
 		}
 	}
@@ -294,6 +296,10 @@
 		padding: 0.45rem 0.6rem;
 		border-bottom: 1px solid #3a4048;
 		color: #98a2ad;
+	}
+
+	.head .index {
+		text-align: right;
 	}
 
 	.head .sort {

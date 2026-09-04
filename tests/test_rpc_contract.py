@@ -20,7 +20,14 @@ from sptmod.core.forge.catalog import (
     CatalogVersion,
     SyncResult,
 )
-from sptmod.core.models import CommitInfo, Conflict, ModFile, ModInfo, ProfileResidue
+from sptmod.core.models import (
+    CommitInfo,
+    Conflict,
+    ModFile,
+    ModInfo,
+    ProfileResidue,
+    ProfileSummary,
+)
 from sptmod.server import schemas
 from sptmod.server.errors import ERROR_MAPPING, FALLBACK_ERROR_CODE, error_code
 from sptmod.server.rpc import RPC_FUNCTIONS
@@ -48,8 +55,8 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_thirty_entries() -> None:
-    assert len(RPC_FUNCTIONS) == 30
+def test_rpc_functions_has_exactly_thirtyone_entries() -> None:
+    assert len(RPC_FUNCTIONS) == 31
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
@@ -101,6 +108,7 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (CommitInfo, schemas.CommitInfo),
     (Conflict, schemas.Conflict),
     (ProfileResidue, schemas.ProfileResidue),
+    (ProfileSummary, schemas.ProfileSummary),
     (CatalogMod, schemas.CatalogMod),
     (CatalogVersion, schemas.CatalogVersion),
     (CatalogEntry, schemas.CatalogEntry),

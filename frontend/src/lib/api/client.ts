@@ -8,6 +8,7 @@ export type ModFile = Schemas['ModFile'];
 export type CommitInfo = Schemas['CommitInfo'];
 export type Conflict = Schemas['Conflict'];
 export type ProfileResidue = Schemas['ProfileResidue'];
+export type ProfileSummary = Schemas['ProfileSummary'];
 export type CheckResult = Schemas['CheckResult'];
 export type CleanupPlan = Schemas['CleanupPlan'];
 export type CleanupResult = Schemas['CleanupResult'];
@@ -108,6 +109,12 @@ export function disableMod(path: string, name: string): Promise<ToggleResult> {
 
 export function enableMod(path: string, name: string): Promise<ToggleResult> {
 	return call<ToggleResult>('enable_mod', { path, name } satisfies Schemas['EnableModRequest']);
+}
+
+export function listProfiles(path: string): Promise<ProfileSummary[]> {
+	return call<ProfileSummary[]>('list_profiles', {
+		path
+	} satisfies Schemas['ListProfilesRequest']);
 }
 
 export function checkProfiles(path: string): Promise<CheckResult> {

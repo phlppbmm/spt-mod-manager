@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/list_profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Profiles */
+        post: operations["list_profiles_api_list_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/check_profiles": {
         parameters: {
             query?: never;
@@ -1423,6 +1440,17 @@ export interface components {
             include_all: boolean;
         };
         /**
+         * ListProfilesRequest
+         * @description Parameters of ``list_profiles``.
+         */
+        ListProfilesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+        };
+        /**
          * LocateDirectoryRequest
          * @description Parameters of ``locate_directory``.
          */
@@ -1609,6 +1637,46 @@ export interface components {
              * @default
              */
             path: string;
+        };
+        /**
+         * ProfileSummary
+         * @description One player profile file of the installation, as it presents itself.
+         */
+        ProfileSummary: {
+            /** File */
+            file: string;
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * Nickname
+             * @default
+             */
+            nickname: string;
+            /**
+             * Level
+             * @default 0
+             */
+            level: number;
+            /**
+             * Side
+             * @default
+             */
+            side: string;
+            /**
+             * Modified
+             * @default
+             */
+            modified: string;
+            /**
+             * Readable
+             * @default true
+             */
+            readable: boolean;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
         };
         /**
          * ProgressEvent
@@ -2250,6 +2318,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemoveResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_profiles_api_list_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListProfilesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileSummary"][];
                 };
             };
             /** @description Default Response */

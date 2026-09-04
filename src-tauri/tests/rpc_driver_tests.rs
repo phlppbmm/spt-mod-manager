@@ -393,7 +393,7 @@ fn rpc_error_deserializes_missing_details_field_to_empty_object() {
 }
 
 #[test]
-fn functions_has_30_unique_entries_matching_python_rpc_functions_keys() {
+fn functions_has_31_unique_entries_matching_python_rpc_functions_keys() {
     // Hardcoded from the keys of RPC_FUNCTIONS in
     // src/sptmod/server/rpc.py, as of the time this test was written.
     // If the Python dict's key set changes, this must be updated in lockstep
@@ -407,6 +407,7 @@ fn functions_has_30_unique_entries_matching_python_rpc_functions_keys() {
         "list_mods",
         "mod_files",
         "remove_mod",
+        "list_profiles",
         "check_profiles",
         "plan_profile_cleanup",
         "clean_profile",
@@ -435,9 +436,9 @@ fn functions_has_30_unique_entries_matching_python_rpc_functions_keys() {
     let mut actual: Vec<&str> = FUNCTIONS.to_vec();
     actual.sort_unstable();
 
-    assert_eq!(FUNCTIONS.len(), 30);
+    assert_eq!(FUNCTIONS.len(), 31);
     let unique: std::collections::HashSet<&str> = FUNCTIONS.iter().copied().collect();
-    assert_eq!(unique.len(), 30, "FUNCTIONS must contain no duplicates");
+    assert_eq!(unique.len(), 31, "FUNCTIONS must contain no duplicates");
     assert_eq!(actual, expected_from_python);
 }
 

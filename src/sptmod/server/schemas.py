@@ -71,6 +71,19 @@ class Conflict(CoreModel):
     mod: str = ""
 
 
+class ProfileSummary(CoreModel):
+    """One player profile file of the installation, as it presents itself."""
+
+    file: str
+    profile_id: str
+    nickname: str = ""
+    level: int = 0
+    side: str = ""
+    modified: str = ""
+    readable: bool = True
+    error: str = ""
+
+
 class ProfileResidue(CoreModel):
     """IDs of one mod that one player profile still references."""
 
@@ -462,6 +475,12 @@ class RemoveModRequest(CoreModel):
     name: str
     force: bool = False
     clean_profiles: bool = False
+
+
+class ListProfilesRequest(CoreModel):
+    """Parameters of ``list_profiles``."""
+
+    path: Path
 
 
 class CheckProfilesRequest(CoreModel):

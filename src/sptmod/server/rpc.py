@@ -90,6 +90,11 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.RemoveModRequest,
         schemas.RemoveResult,
     ),
+    "list_profiles": RpcSpec(
+        services.list_profiles,
+        schemas.ListProfilesRequest,
+        list[schemas.ProfileSummary],
+    ),
     "check_profiles": RpcSpec(
         services.check_profiles,
         schemas.CheckProfilesRequest,

@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Callable, Container, Iterator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -18,6 +19,7 @@ from sptmod.core.models import (
     TRAILER_MOD_STATE,
     CommitInfo,
     ProfileResidue,
+    ProfileSummary,
     ResidueCategory,
 )
 from sptmod.core.repo import Repo
@@ -34,6 +36,7 @@ RECIPE_LIST_KEYS: Final = ("recipes", "scavRecipes", "cultistRecipes")
 BUILD_LIST_KEYS: Final = ("weaponBuilds", "equipmentBuilds", "magazineBuilds")
 REPEATABLE_QUEST_KEYS: Final = ("activeQuests", "inactiveQuests")
 CHARACTERS: Final = ("pmc", "scav")
+UNREADABLE_PROFILE: Final = "This file could not be read as a player profile."
 
 _ID_FIELD: Final = "_id"
 _PLAIN_ID_FIELD: Final = "id"
@@ -253,6 +256,44 @@ def profile_paths(layout: GameLayout) -> list[Path]:
         path
         for path in profiles_dir.glob("*.json")
         if path.is_file() and path.parent != backups_dir
+    )
+
+
+def profile_summaries(layout: GameLayout) -> list[ProfileSummary]:
+    """Describe every profile file of the installation, sorted by file name.
+
+    Reads the PMC character of each file returned by :func:`profile_paths`.
+    A file that cannot be read or is no valid JSON is reported as unreadable
+    with a message that can be shown as is; the other files are still
+    described. Missing character data is no error: the profile is readable and
+    simply carries no name, level or faction yet.
+    """
+    return [_summary(path) for path in profile_paths(layout)]
+
+
+def _summary(path: Path) -> ProfileSummary:
+    """Describe one profile file by its PMC character and its file data."""
+    modified = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
+    parsed = _parse_profile(path)
+    if parsed is None:
+        return ProfileSummary(
+            file=path.name,
+            profile_id=path.stem,
+            modified=modified,
+            readable=False,
+            error=UNREADABLE_PROFILE,
+        )
+    info = _dict_at(parsed.root, "characters", "pmc", "Info")
+    nickname = info.get("Nickname")
+    level = info.get("Level")
+    side = info.get("Side")
+    return ProfileSummary(
+        file=path.name,
+        profile_id=path.stem,
+        nickname=nickname if isinstance(nickname, str) else "",
+        level=level if isinstance(level, int) else 0,
+        side=side if isinstance(side, str) else "",
+        modified=modified,
     )
 
 

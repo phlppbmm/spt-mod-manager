@@ -199,6 +199,36 @@ type ResidueCategory = Literal[
 
 
 @dataclass(frozen=True)
+class ProfileSummary:
+    """One player profile file of the installation, as it presents itself.
+
+    Attributes:
+        file: The name of the profile file, for example ``'abc.json'``.
+        profile_id: The file name without the extension, the same value
+            :class:`ProfileResidue` names a profile by.
+        nickname: The name of the PMC character, empty when the profile
+            carries none yet.
+        level: The level of the PMC character, ``0`` when the profile carries
+            none yet.
+        side: The faction of the PMC character, for example ``'Usec'``, empty
+            when the profile carries none yet.
+        modified: When the file was last written, as an ISO 8601 timestamp in
+            UTC.
+        readable: Whether the file could be read and understood.
+        error: Why the file could not be read, empty when it could.
+    """
+
+    file: str
+    profile_id: str
+    nickname: str = ""
+    level: int = 0
+    side: str = ""
+    modified: str = ""
+    readable: bool = True
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class ProfileResidue:
     """IDs of one mod that one player profile still references.
 

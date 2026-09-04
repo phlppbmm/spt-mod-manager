@@ -5,6 +5,7 @@ without touching profiles, a mod without ``db/`` proceeding, and the CLI
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,123 @@ def _install_server_mod_with_item(
             )
         },
     )
+
+
+# --------------------------------------------------------------------------
+# services.list_profiles
+# --------------------------------------------------------------------------
+
+
+def _write_profile_file(profiles_dir: Path, name: str, document: dict) -> Path:
+    target = profiles_dir / name
+    target.write_text(json.dumps(document), encoding="utf-8")
+    return target
+
+
+def _character(nickname: str, level: int, side: str) -> dict:
+    return {
+        "characters": {
+            "pmc": {
+                "Info": {
+                    "Nickname": nickname,
+                    "Level": level,
+                    "Side": side,
+                }
+            }
+        }
+    }
+
+
+def test_list_profiles_describes_the_pmc_character_of_a_profile_file(
+    fake_game_dir: Path,
+) -> None:
+    profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
+    target = _write_profile_file(
+        profiles_dir, "abc.json", _character("Nikita", 42, "Usec")
+    )
+
+    summaries = services.list_profiles(fake_game_dir)
+
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary.file == "abc.json"
+    assert summary.profile_id == "abc"
+    assert summary.nickname == "Nikita"
+    assert summary.level == 42
+    assert summary.side == "Usec"
+    assert summary.readable is True
+    assert summary.error == ""
+    assert datetime.fromisoformat(summary.modified) == datetime.fromtimestamp(
+        target.stat().st_mtime, UTC
+    )
+
+
+def test_list_profiles_sorts_the_profiles_by_file_name(fake_game_dir: Path) -> None:
+    profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
+    _write_profile_file(profiles_dir, "zulu.json", _character("Zulu", 3, "Bear"))
+    _write_profile_file(profiles_dir, "alpha.json", _character("Alpha", 1, "Usec"))
+
+    summaries = services.list_profiles(fake_game_dir)
+
+    assert [summary.file for summary in summaries] == [
+        "abc.json",
+        "alpha.json",
+        "zulu.json",
+    ]
+
+
+def test_list_profiles_defaults_the_character_data_a_profile_does_not_carry(
+    fake_game_dir: Path,
+) -> None:
+    profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
+    _write_profile_file(profiles_dir, "abc.json", {"characters": {"pmc": {"Info": {}}}})
+
+    summary = services.list_profiles(fake_game_dir)[0]
+
+    assert summary.readable is True
+    assert summary.error == ""
+    assert summary.nickname == ""
+    assert summary.level == 0
+    assert summary.side == ""
+
+
+def test_list_profiles_reports_a_broken_file_as_unreadable_with_a_plain_reason(
+    fake_game_dir: Path,
+) -> None:
+    profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
+    (profiles_dir / "abc.json").write_text("{not json", encoding="utf-8")
+
+    summary = services.list_profiles(fake_game_dir)[0]
+
+    assert summary.file == "abc.json"
+    assert summary.profile_id == "abc"
+    assert summary.readable is False
+    assert summary.error == "This file could not be read as a player profile."
+    assert summary.nickname == ""
+    assert summary.level == 0
+    assert summary.side == ""
+    assert summary.modified != ""
+
+
+def test_list_profiles_returns_nothing_when_there_is_no_profile_file(
+    fake_game_dir: Path,
+) -> None:
+    (fake_game_dir / "SPT" / "user" / "profiles" / "abc.json").unlink()
+
+    assert services.list_profiles(fake_game_dir) == []
+
+
+def test_list_profiles_reads_the_profiles_of_the_spt_runtime_layout(
+    fake_game_dir_runtime: Path,
+) -> None:
+    profiles_dir = fake_game_dir_runtime / "SPT_Runtime" / "user" / "profiles"
+    _write_profile_file(profiles_dir, "abc.json", _character("Runtime", 7, "Bear"))
+
+    summaries = services.list_profiles(fake_game_dir_runtime)
+
+    assert [summary.file for summary in summaries] == ["abc.json"]
+    assert summaries[0].nickname == "Runtime"
+    assert summaries[0].side == "Bear"
 
 
 # --------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import {
 	listDirectories,
 	listFavorites,
 	listMods,
+	listProfiles,
 	locateDirectory,
 	modFiles,
 	planModInstall,
@@ -183,6 +184,12 @@ const wrapperCases: Array<{
 		call: () => enableMod('/game', 'mod-a'),
 		command: 'enable_mod',
 		payload: { path: '/game', name: 'mod-a' }
+	},
+	{
+		id: 'listProfiles forwards path',
+		call: () => listProfiles('/game'),
+		command: 'list_profiles',
+		payload: { path: '/game' }
 	},
 	{
 		id: 'checkProfiles forwards path',

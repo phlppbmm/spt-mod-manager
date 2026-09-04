@@ -43,6 +43,7 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("list_mods", schemas.ListModsRequest, list[schemas.ModInfo]),
     ("mod_files", schemas.ModFilesRequest, list[schemas.ModFile]),
     ("remove_mod", schemas.RemoveModRequest, schemas.RemoveResult),
+    ("list_profiles", schemas.ListProfilesRequest, list[schemas.ProfileSummary]),
     ("check_profiles", schemas.CheckProfilesRequest, schemas.CheckResult),
     ("plan_profile_cleanup", schemas.PlanProfileCleanupRequest, schemas.CleanupPlan),
     ("clean_profile", schemas.CleanProfileRequest, schemas.CleanupResult),

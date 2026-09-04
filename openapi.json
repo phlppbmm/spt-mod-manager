@@ -322,6 +322,48 @@
         }
       }
     },
+    "/api/list_profiles": {
+      "post": {
+        "summary": "List Profiles",
+        "operationId": "list_profiles_api_list_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListProfilesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProfileSummary"
+                  },
+                  "title": "Response List Profiles Api List Profiles Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/check_profiles": {
       "post": {
         "summary": "Check Profiles",
@@ -2946,6 +2988,21 @@
         "title": "ListModsRequest",
         "type": "object"
       },
+      "ListProfilesRequest": {
+        "description": "Parameters of ``list_profiles``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ListProfilesRequest",
+        "type": "object"
+      },
       "LocateDirectoryRequest": {
         "description": "Parameters of ``locate_directory``.",
         "properties": {
@@ -3349,6 +3406,55 @@
           "count"
         ],
         "title": "ProfileResidue",
+        "type": "object"
+      },
+      "ProfileSummary": {
+        "description": "One player profile file of the installation, as it presents itself.",
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "nickname": {
+            "default": "",
+            "title": "Nickname",
+            "type": "string"
+          },
+          "level": {
+            "default": 0,
+            "title": "Level",
+            "type": "integer"
+          },
+          "side": {
+            "default": "",
+            "title": "Side",
+            "type": "string"
+          },
+          "modified": {
+            "default": "",
+            "title": "Modified",
+            "type": "string"
+          },
+          "readable": {
+            "default": true,
+            "title": "Readable",
+            "type": "boolean"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "profile_id"
+        ],
+        "title": "ProfileSummary",
         "type": "object"
       },
       "ProgressEvent": {

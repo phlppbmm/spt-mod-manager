@@ -95,6 +95,7 @@ from sptmod.core.models import (
     ModType,
     PlanEntry,
     ProfileResidue,
+    ProfileSummary,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -115,6 +116,7 @@ from sptmod.core.profile import (
     collect_mod_ids,
     find_residues,
     profile_paths,
+    profile_summaries,
 )
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import (
@@ -1049,6 +1051,19 @@ def remove_mod(
         warnings=warnings,
         cleanup=cleanup,
     )
+
+
+def list_profiles(path: Path) -> list[ProfileSummary]:
+    """Describe the player profiles of the installation at ``path``.
+
+    Reads only. Every profile file is listed, sorted by file name; a file that
+    cannot be read is listed as unreadable with the reason instead of being
+    dropped.
+
+    Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
+    """
+    return profile_summaries(detect_layout(path))
 
 
 def check_profiles(path: Path) -> CheckResult:

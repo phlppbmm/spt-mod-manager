@@ -47,9 +47,7 @@ _FORGE_UNAVAILABLE_EXIT_CODE = 14
 
 def _clean_repo(path: Path) -> Repo:
     repo = Repo.init(detect_layout(path))
-    repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
 
 
@@ -370,6 +368,35 @@ def test_browse_catalog_compatible_only_drops_incompatible_mods(
     )
 
     assert [entry.mod.name for entry in results] == ["Alpha Mod"]
+
+
+def test_browse_catalog_hides_versions_that_are_not_installable(
+    fake_game_dir: Path,
+    db_path: Path,
+    client_factory,
+    respx_router: respx.MockRouter,
+) -> None:
+    """Without compatible_only, Beta Mod stays in the list, but its only
+    version (^3.8.0) is no version the installer could resolve for the game
+    dir's SPT 4.1.0, so no version is offered for it."""
+    _clean_repo(fake_game_dir)
+    client = client_factory()
+    _seed(
+        db_path,
+        client,
+        respx_router,
+        [
+            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
+            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
+        ],
+    )
+
+    results = services.browse_catalog(fake_game_dir, "all", db_path=db_path)
+
+    assert [entry.mod.name for entry in results] == ["Alpha Mod", "Beta Mod"]
+    beta = results[1]
+    assert beta.latest_version is None
+    assert beta.state == "available"
 
 
 # --- CLI ---------------------------------------------------------

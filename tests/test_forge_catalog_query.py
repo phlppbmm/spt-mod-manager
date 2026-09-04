@@ -490,9 +490,7 @@ def test_search_treats_percent_and_underscore_as_literal_characters(
     literal = mod_json_full(
         id=1, name="a_b", owner=owner_json(name="Alice"), versions=[]
     )
-    decoy = mod_json_full(
-        id=2, name="aXb", owner=owner_json(name="Bob"), versions=[]
-    )
+    decoy = mod_json_full(id=2, name="aXb", owner=owner_json(name="Bob"), versions=[])
     page = page_envelope(
         [literal, decoy], current_page=1, last_page=1, total=2, next_url=None
     )
@@ -503,3 +501,45 @@ def test_search_treats_percent_and_underscore_as_literal_characters(
     results = catalog.search("a_b")
 
     assert [m.id for m in results] == [1]
+
+
+def test_resolve_version_error_names_the_spt_version(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    # Real data: every cached version of Boss Notifier targets SPT 3.x or
+    # carries no constraint at all, so SPT 4.1.3 has nothing to install.
+    _sync_single_mod_with_versions(
+        client_factory,
+        respx_router,
+        catalog,
+        mod_id=1247,
+        name="Boss Notifier",
+        versions=[
+            {
+                "id": 586,
+                "version": "1.6.0",
+                "spt_version_constraint": "~3.11.0",
+                "downloads": 1,
+                "published_at": "2025-05-16T15:21:41.000000Z",
+            },
+            {
+                "id": 1858,
+                "version": "1.5.4",
+                "spt_version_constraint": "",
+                "downloads": 1,
+                "published_at": "2024-12-27T19:55:03.000000Z",
+            },
+            {
+                "id": 4963,
+                "version": "1.3.4",
+                "spt_version_constraint": "3.8.0",
+                "downloads": 1,
+                "published_at": "2024-04-01T21:36:47.000000Z",
+            },
+        ],
+    )
+
+    with pytest.raises(NoCompatibleVersionError) as error:
+        catalog.resolve_version("Boss Notifier", spt_version="4.1.3")
+
+    assert str(error.value) == "No version of 'Boss Notifier' supports SPT 4.1.3."

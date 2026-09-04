@@ -722,7 +722,7 @@ class Catalog:
 
         Raises:
             NoCompatibleVersionError: The mod is unknown to the cache, the
-                wanted version does not exist, or no cached version is
+                wanted version does not exist, or no known version is
                 compatible with ``spt_version``.
         """
         mod = (
@@ -738,9 +738,9 @@ class Catalog:
         if wanted is not None:
             versions = [version for version in versions if version.version == wanted]
         if not versions:
-            raise NoCompatibleVersionError(
-                f"no cached version of {mod.name!r} matches the request"
-            )
+            named = f"No version {wanted} of" if wanted else "No version of"
+            supported = f"supports SPT {spt_version}" if spt_version else "is available"
+            raise NoCompatibleVersionError(f"{named} {mod.name!r} {supported}.")
         return _highest(versions)
 
     def classify(

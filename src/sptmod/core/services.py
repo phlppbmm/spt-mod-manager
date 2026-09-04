@@ -54,6 +54,7 @@ from sptmod.core.forge.catalog import (
     Catalog,
     CatalogEntry,
     CatalogMod,
+    CatalogState,
     CatalogVersion,
     SyncResult,
     default_db_path,
@@ -1044,7 +1045,7 @@ def search_catalog(
         matched = {
             mod.id for mod in catalog.search(query, compatible_with=compatible_with)
         }
-        entries = catalog.classify(installed, compatible_with=compatible_with)
+        entries = _classified(catalog, installed, path, compatible_only)
     return [entry for entry in entries if entry.mod.id in matched]
 
 
@@ -1077,9 +1078,7 @@ def browse_catalog(
     """
     installed = list_mods(path)
     with _open_catalog(db_path) as catalog:
-        entries = catalog.classify(
-            installed, compatible_with=_compatible_with(path, compatible_only)
-        )
+        entries = _classified(catalog, installed, path, compatible_only)
     if filter == "all":
         return entries
     wanted = filter == "installed"
@@ -2346,6 +2345,37 @@ def _no_update_notice(mod: ModInfo, report: UpdatesReport) -> str:
     if mod.name in report.up_to_date:
         return f"{mod.name} {mod.version} is up to date"
     return f"Forge reports no update for {mod.name} {mod.version}"
+
+
+def _classified(
+    catalog: Catalog,
+    installed: Sequence[ModInfo],
+    path: Path,
+    compatible_only: bool,
+) -> list[CatalogEntry]:
+    """Join the catalog with ``installed``, judged against the SPT version.
+
+    ``latest_version`` always holds a version the installer can actually
+    resolve, so a mod without one is listed as ``available``/``installed``
+    without a version to offer instead of promising an install or update that
+    the resolver would refuse. Without ``compatible_only`` those mods stay in
+    the list.
+    """
+    spt_version = _detected_spt_version(path)
+    compatible = catalog.classify(installed, compatible_with=spt_version)
+    if compatible_only or spt_version is None:
+        return compatible
+
+    known = {entry.mod.id for entry in compatible}
+    entries = list(compatible)
+    for entry in catalog.classify(installed):
+        if entry.mod.id in known:
+            continue
+        state: CatalogState = (
+            "installed" if entry.installed_version is not None else "available"
+        )
+        entries.append(replace(entry, state=state, latest_version=None))
+    return sorted(entries, key=lambda entry: (entry.mod.name.casefold(), entry.mod.id))
 
 
 def _compatible_with(path: Path, compatible_only: bool) -> str | None:

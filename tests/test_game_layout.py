@@ -976,7 +976,14 @@ def test_check_profiles_finds_residue_on_the_runtime_layout(
                 "characters": {
                     "pmc": {
                         "Inventory": {
-                            "items": [{"_id": "i1", "tpl": item_id}]
+                            "items": [
+                                {
+                                    "_id": "i1",
+                                    "_tpl": item_id,
+                                    "parentId": "5c0d1b8b86f7744bb2683c99",
+                                    "slotId": "hideout",
+                                }
+                            ]
                         },
                         "TradersInfo": {},
                         "Quests": [],

@@ -225,8 +225,18 @@ def test_find_residues_reports_item_hits_from_inventory_items(tmp_path: Path) ->
     ids = ModIds(items={ITEM_A})
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "x1", "tpl": ITEM_A},
-        {"_id": "x2", "tpl": ITEM_A},
+        {
+            "_id": "x1",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
+        {
+            "_id": "x2",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
     ]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -234,6 +244,34 @@ def test_find_residues_reports_item_hits_from_inventory_items(tmp_path: Path) ->
 
     assert residues == [
         ProfileResidue(profile="player1", category="item", ids=[ITEM_A], count=2)
+    ]
+
+
+def test_find_residues_legacy_tpl_key_is_not_matched_structurally(
+    tmp_path: Path,
+) -> None:
+    """SPT 4.x profiles key the item template as ``_tpl``, not ``tpl``.
+
+    An inventory item stored under the legacy ``tpl`` key must not be
+    reported as an 'item' residue; it can only surface through the raw-text
+    'string' fallback, since the structural match looks at ``_tpl``.
+    """
+    ids = ModIds(items={ITEM_A})
+    content = _empty_pmc_profile()
+    content["characters"]["pmc"]["Inventory"]["items"] = [
+        {
+            "_id": "x1",
+            "tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
+    ]
+    profile = _make_profile(tmp_path, "player1", content)
+
+    residues = find_residues(profile, ids)
+
+    assert residues == [
+        ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)
     ]
 
 
@@ -291,9 +329,14 @@ def test_find_residues_string_fallback_excludes_ids_already_matched_structurally
     ids = ModIds(items={ITEM_A})
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "x1", "tpl": ITEM_A}
+        {
+            "_id": "x1",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
     ]
-    content["backup"] = {"tpl": ITEM_A}
+    content["backup"] = {"_tpl": ITEM_A}
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -311,7 +354,12 @@ def test_find_residues_orders_categories_item_trader_quest_string(
     )
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "x1", "tpl": ITEM_A}
+        {
+            "_id": "x1",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
     ]
     content["characters"]["pmc"]["TradersInfo"] = {TRADER_ID: {}}
     content["characters"]["pmc"]["Quests"] = [{"qid": "quest-one"}]
@@ -332,9 +380,24 @@ def test_find_residues_ids_are_distinct_and_sorted(tmp_path: Path) -> None:
     ids = ModIds(items={ITEM_B, ITEM_A})
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "x1", "tpl": ITEM_B},
-        {"_id": "x2", "tpl": ITEM_A},
-        {"_id": "x3", "tpl": ITEM_A},
+        {
+            "_id": "x1",
+            "_tpl": ITEM_B,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
+        {
+            "_id": "x2",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
+        {
+            "_id": "x3",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
     ]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -398,7 +461,12 @@ def test_find_residues_skips_non_dict_entries_in_inventory_items(
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         "not-a-dict",
-        {"_id": "x1", "tpl": ITEM_A},
+        {
+            "_id": "x1",
+            "_tpl": ITEM_A,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        },
     ]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -492,7 +560,12 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
     profile_with_x = _empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "i1", "tpl": item_x}
+        {
+            "_id": "i1",
+            "_tpl": item_x,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
     ]
     (profiles_dir / "abc.json").write_text(
         json.dumps(profile_with_x), encoding="utf-8"
@@ -528,7 +601,12 @@ def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit) -> None:
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
     profile_with_x = _empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "i1", "tpl": item_x}
+        {
+            "_id": "i1",
+            "_tpl": item_x,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
     ]
     (profiles_dir / "abc.json").write_text(
         json.dumps(profile_with_x), encoding="utf-8"
@@ -574,7 +652,12 @@ def test_check_all_does_not_modify_the_repository_or_profiles(
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
     profile_with_x = _empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
-        {"_id": "i1", "tpl": item_x}
+        {
+            "_id": "i1",
+            "_tpl": item_x,
+            "parentId": "5c0d1b8b86f7744bb2683c99",
+            "slotId": "hideout",
+        }
     ]
     (profiles_dir / "abc.json").write_text(
         json.dumps(profile_with_x), encoding="utf-8"

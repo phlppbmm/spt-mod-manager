@@ -108,7 +108,7 @@ def collect_mod_ids(repo: Repo, install_commit: str, layout: GameLayout) -> ModI
 def find_residues(profile_path: Path, ids: ModIds) -> list[ProfileResidue]:
     """Return the residues of ``ids`` in the profile file ``profile_path``.
 
-    Searches ``characters.pmc.Inventory.items[].tpl`` for item IDs,
+    Searches ``characters.pmc.Inventory.items[]._tpl`` for item IDs,
     the keys of ``characters.pmc.TradersInfo`` for trader IDs and
     ``characters.pmc.Quests[].qid`` for quest IDs. Every ID that none of these
     matched is then looked for in the raw profile text; a hit there is reported
@@ -291,7 +291,7 @@ def _pmc(profile: object) -> dict[str, object]:
 
 
 def _inventory_hits(pmc: dict[str, object], wanted: set[str]) -> dict[str, int]:
-    """Return item template IDs from pmc.Inventory.items[].tpl in wanted.
+    """Return item template IDs from pmc.Inventory.items[]._tpl in wanted.
 
     Returns a dict mapping each ID to its count of occurrences.
     """
@@ -305,7 +305,7 @@ def _inventory_hits(pmc: dict[str, object], wanted: set[str]) -> dict[str, int]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        template = item.get("tpl")
+        template = item.get("_tpl")
         if isinstance(template, str) and template in wanted:
             hits[template] = hits.get(template, 0) + 1
     return hits

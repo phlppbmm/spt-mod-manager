@@ -35,6 +35,22 @@ class GameRunningError(SptmodError):
     """The SPT server or client is running."""
 
 
+class LaunchError(SptmodError):
+    """The game or its server could not be started."""
+
+
+class ServerPortBusyError(SptmodError):
+    """The address the SPT server would use is held by another program."""
+
+
+class LoginFailedError(SptmodError):
+    """The SPT server does not accept the selected player profile."""
+
+
+class LauncherSettingsError(SptmodError):
+    """The settings the official SPT launcher writes are missing or unusable."""
+
+
 class OperationInProgressError(SptmodError):
     """Another operation is changing the game directory and did not finish.
 

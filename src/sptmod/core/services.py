@@ -77,6 +77,14 @@ from sptmod.core.game_dir import (
     store_spt_version,
     validate_game_dir,
 )
+from sptmod.core.launch import (
+    LaunchResult,
+    LaunchStatus,
+    StopResult,
+)
+from sptmod.core.launch import launch_profile as _launch_profile
+from sptmod.core.launch import launch_status as _launch_status
+from sptmod.core.launch import stop_game as _stop_game
 from sptmod.core.models import (
     ACTIVE_STATES,
     MOD_STATES,
@@ -1728,6 +1736,60 @@ def set_favorite(
     mod_ids = sorted(current)
     save_favorites(path, mod_ids)
     return mod_ids
+
+
+def launch_profile(
+    path: Path,
+    profile_id: str,
+    stop_server_on_exit: bool = True,
+    progress: Progress | None = None,
+) -> LaunchResult:
+    """Start the SPT server and the game at ``path`` for one player profile.
+
+    Reuses a server that is already answering and starts one otherwise, waits
+    until it is ready, signs the profile in and starts the game. The started
+    programs outlive this call.
+
+    Args:
+        path: The tracked game directory.
+        profile_id: The profile to play, named by its file name without the
+            extension.
+        stop_server_on_exit: Close the server when the game closes.
+        progress: Optional callback for the phases of the launch.
+
+    Returns:
+        The profile, its player name and the started processes.
+
+    Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
+        GameRunningError: The game is already running.
+        ServerPortBusyError: Another program holds the server's address.
+        LoginFailedError: The server does not know the profile.
+        LauncherSettingsError: The settings of the official SPT launcher are
+            missing or unusable.
+        LaunchError: A program is missing, could not be started, or the server
+            did not answer in time.
+    """
+    return _launch_profile(path, profile_id, stop_server_on_exit, progress)
+
+
+def launch_status(path: Path) -> LaunchStatus:
+    """Report whether the SPT server and the game at ``path`` are running.
+
+    Reads only, and never fails: an installation nothing is known about
+    reports nothing running. A server or game started outside sptmod is
+    reported as well.
+    """
+    return _launch_status(path)
+
+
+def stop_game(path: Path) -> StopResult:
+    """Close the game and the SPT server of the installation at ``path``.
+
+    Everything the game started is closed with it. Progress the game has not
+    saved yet is lost, so callers ask before calling this.
+    """
+    return _stop_game(path)
 
 
 @dataclass(frozen=True)

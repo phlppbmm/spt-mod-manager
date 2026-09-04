@@ -18,9 +18,13 @@ import pytest
 
 from sptmod.core.errors import GameRunningError, NotAGameDirError
 from sptmod.core.game_dir import (
+    GameProcess,
     ensure_game_not_running,
+    game_process_kind,
+    game_processes,
     is_game_dir,
     is_game_process_name,
+    process_alive,
     running_game_processes,
     validate_game_dir,
 )
@@ -213,3 +217,165 @@ def test_running_game_processes_reports_a_real_process_named_like_the_server(
     finally:
         process.kill()
         process.wait()
+
+
+# --- game_process_kind -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["SPT.Server.exe", "spt.server.exe", "SPT.Server.Linux", "SPT.Server"],
+)
+def test_game_process_kind_matches_the_server(name: str) -> None:
+    assert game_process_kind(name) == "server"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "EscapeFromTarkov.exe",
+        "escapefromtarkov.exe",
+        "/some/wine/path/EscapeFromTarkov.exe",
+    ],
+)
+def test_game_process_kind_matches_the_client(name: str) -> None:
+    assert game_process_kind(name) == "client"
+
+
+@pytest.mark.parametrize("name", ["explorer.exe", "steam.exe", ""])
+def test_game_process_kind_returns_none_for_unrelated_processes(name: str) -> None:
+    assert game_process_kind(name) is None
+
+
+# --- game_processes -----------------------------------------------------------
+
+
+class _FakeProcess:
+    """A stand-in for a real ``psutil.Process`` returned by ``process_iter``."""
+
+    def __init__(self, pid: int, name: str, created: float) -> None:
+        self.pid = pid
+        self._name = name
+        self._created = created
+
+    def name(self) -> str:
+        return self._name
+
+    def create_time(self) -> float:
+        return self._created
+
+
+def test_game_processes_reports_server_and_client_with_pid_and_started_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter(
+            [
+                _FakeProcess(111, "SPT.Server.Linux", 1000.0),
+                _FakeProcess(222, "EscapeFromTarkov.exe", 2000.5),
+                _FakeProcess(333, "explorer.exe", 3000.0),
+            ]
+        ),
+    )
+
+    assert game_processes() == [
+        GameProcess(pid=111, name="SPT.Server.Linux", kind="server", started_at=1000.0),
+        GameProcess(
+            pid=222, name="EscapeFromTarkov.exe", kind="client", started_at=2000.5
+        ),
+    ]
+
+
+def test_game_processes_skips_a_process_that_vanishes_mid_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_VanishedProcess()]),
+    )
+
+    assert game_processes() == []
+
+
+def test_running_game_processes_is_the_name_projection_of_game_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.game_processes",
+        lambda: [
+            GameProcess(pid=1, name="SPT.Server.Linux", kind="server", started_at=1.0),
+            GameProcess(
+                pid=2, name="EscapeFromTarkov.exe", kind="client", started_at=2.0
+            ),
+        ],
+    )
+
+    assert running_game_processes() == ["SPT.Server.Linux", "EscapeFromTarkov.exe"]
+
+
+# --- process_alive -------------------------------------------------------------
+
+
+def test_process_alive_true_for_a_running_process_with_the_matching_start_time(
+    tmp_path: Path,
+) -> None:
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    process = subprocess.Popen([sleep, "30"])
+    try:
+        started_at = psutil.Process(process.pid).create_time()
+        assert process_alive(process.pid, started_at) is True
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_process_alive_false_after_the_process_exits() -> None:
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    process = subprocess.Popen([sleep, "30"])
+    started_at = psutil.Process(process.pid).create_time()
+    process.kill()
+    process.wait()
+
+    assert process_alive(process.pid, started_at) is False
+
+
+def test_process_alive_false_when_the_start_time_no_longer_matches(
+    tmp_path: Path,
+) -> None:
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    process = subprocess.Popen([sleep, "30"])
+    try:
+        assert process_alive(process.pid, 1.0) is False
+    finally:
+        process.kill()
+        process.wait()
+
+
+class _ZombieProcess:
+    """A stand-in for a real zombie ``psutil.Process``."""
+
+    def __init__(self, created: float) -> None:
+        self._created = created
+
+    def is_running(self) -> bool:
+        return True
+
+    def status(self) -> str:
+        return psutil.STATUS_ZOMBIE
+
+    def create_time(self) -> float:
+        return self._created
+
+
+def test_process_alive_false_for_a_zombie_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.Process", lambda pid: _ZombieProcess(5.0)
+    )
+
+    assert process_alive(4242, 5.0) is False

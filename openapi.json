@@ -1211,6 +1211,120 @@
           }
         }
       }
+    },
+    "/api/launch_profile": {
+      "post": {
+        "summary": "Launch Profile",
+        "operationId": "launch_profile_api_launch_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LaunchProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchProfileResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/launch_status": {
+      "post": {
+        "summary": "Launch Status",
+        "operationId": "launch_status_api_launch_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LaunchStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stop_game": {
+      "post": {
+        "summary": "Stop Game",
+        "operationId": "stop_game_api_stop_game_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopGameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2930,6 +3044,130 @@
         "title": "InstallResult",
         "type": "object"
       },
+      "LaunchProfileRequest": {
+        "description": "Parameters of ``launch_profile``.\n\n``operation_id`` names the progress stream of this launch; a generated one\nis used and echoed back when the caller sends none.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "stop_server_on_exit": {
+            "default": true,
+            "title": "Stop Server On Exit",
+            "type": "boolean"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "required": [
+          "path",
+          "profile_id"
+        ],
+        "title": "LaunchProfileRequest",
+        "type": "object"
+      },
+      "LaunchProfileResponse": {
+        "description": "Outcome of ``launch_profile`` plus its progress operation ID.",
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "nickname": {
+            "title": "Nickname",
+            "type": "string"
+          },
+          "server_pid": {
+            "title": "Server Pid",
+            "type": "integer"
+          },
+          "client_pid": {
+            "title": "Client Pid",
+            "type": "integer"
+          },
+          "server_started": {
+            "title": "Server Started",
+            "type": "boolean"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "nickname",
+          "server_pid",
+          "client_pid",
+          "server_started",
+          "operation_id"
+        ],
+        "title": "LaunchProfileResponse",
+        "type": "object"
+      },
+      "LaunchStatus": {
+        "description": "What of the installation is running right now.",
+        "properties": {
+          "server_running": {
+            "title": "Server Running",
+            "type": "boolean"
+          },
+          "client_running": {
+            "title": "Client Running",
+            "type": "boolean"
+          },
+          "server_pid": {
+            "title": "Server Pid",
+            "type": "integer"
+          },
+          "client_pid": {
+            "title": "Client Pid",
+            "type": "integer"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_running",
+          "client_running",
+          "server_pid",
+          "client_pid",
+          "profile_id"
+        ],
+        "title": "LaunchStatus",
+        "type": "object"
+      },
+      "LaunchStatusRequest": {
+        "description": "Parameters of ``launch_status``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "LaunchStatusRequest",
+        "type": "object"
+      },
       "ListDirectoriesRequest": {
         "description": "Parameters of ``list_directories``.",
         "properties": {
@@ -3804,6 +4042,40 @@
           "path"
         ],
         "title": "StatusRequest",
+        "type": "object"
+      },
+      "StopGameRequest": {
+        "description": "Parameters of ``stop_game``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "StopGameRequest",
+        "type": "object"
+      },
+      "StopResult": {
+        "description": "What stopping the game closed.",
+        "properties": {
+          "server_stopped": {
+            "title": "Server Stopped",
+            "type": "boolean"
+          },
+          "client_stopped": {
+            "title": "Client Stopped",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "server_stopped",
+          "client_stopped"
+        ],
+        "title": "StopResult",
         "type": "object"
       },
       "SyncCatalogRequest": {

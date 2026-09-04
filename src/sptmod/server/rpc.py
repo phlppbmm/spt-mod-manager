@@ -211,6 +211,22 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.FavoritesResponse,
         wrap="mod_ids",
     ),
+    "launch_profile": RpcSpec(
+        services.launch_profile,
+        schemas.LaunchProfileRequest,
+        schemas.LaunchProfileResponse,
+        operation_id=True,
+    ),
+    "launch_status": RpcSpec(
+        services.launch_status,
+        schemas.LaunchStatusRequest,
+        schemas.LaunchStatus,
+    ),
+    "stop_game": RpcSpec(
+        services.stop_game,
+        schemas.StopGameRequest,
+        schemas.StopResult,
+    ),
 }
 
 

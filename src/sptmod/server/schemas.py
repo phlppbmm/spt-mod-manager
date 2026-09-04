@@ -721,6 +721,64 @@ class UpdateModResponse(UpdateResult):
     operation_id: str
 
 
+class LaunchProfileRequest(CoreModel):
+    """Parameters of ``launch_profile``.
+
+    ``operation_id`` names the progress stream of this launch; a generated one
+    is used and echoed back when the caller sends none.
+    """
+
+    path: Path
+    profile_id: str
+    stop_server_on_exit: bool = True
+    operation_id: str | None = None
+
+
+class LaunchResult(CoreModel):
+    """What one launch started."""
+
+    profile_id: str
+    nickname: str
+    server_pid: int
+    client_pid: int
+    server_started: bool
+
+
+class LaunchProfileResponse(LaunchResult):
+    """Outcome of ``launch_profile`` plus its progress operation ID."""
+
+    operation_id: str
+
+
+class LaunchStatusRequest(CoreModel):
+    """Parameters of ``launch_status``."""
+
+    path: Path
+
+
+class LaunchStatus(CoreModel):
+    """What of the installation is running right now."""
+
+    server_running: bool
+    client_running: bool
+    server_pid: int
+    client_pid: int
+    profile_id: str
+
+
+class StopGameRequest(CoreModel):
+    """Parameters of ``stop_game``."""
+
+    path: Path
+
+
+class StopResult(CoreModel):
+    """What stopping the game closed."""
+
+    server_stopped: bool
+    client_stopped: bool
+
+
 class ProgressEvent(CoreModel):
     """One progress line of a long-running RPC operation on stdout."""
 

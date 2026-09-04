@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::driver;
 
-pub const FUNCTIONS: [&str; 31] = [
+pub const FUNCTIONS: [&str; 34] = [
     "list_directories",
     "locate_directory",
     "init_game_dir",
@@ -36,6 +36,9 @@ pub const FUNCTIONS: [&str; 31] = [
     "update_mod",
     "list_favorites",
     "set_favorite",
+    "launch_profile",
+    "launch_status",
+    "stop_game",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

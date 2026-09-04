@@ -55,8 +55,8 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_thirtyone_entries() -> None:
-    assert len(RPC_FUNCTIONS) == 31
+def test_rpc_functions_has_exactly_thirtyfour_entries() -> None:
+    assert len(RPC_FUNCTIONS) == 34
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
@@ -126,6 +126,9 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (services.CleanupPlan, schemas.CleanupPlan),
     (services.CleanupResult, schemas.CleanupResult),
     (services.UntouchedResidue, schemas.UntouchedResidue),
+    (services.LaunchResult, schemas.LaunchResult),
+    (services.LaunchStatus, schemas.LaunchStatus),
+    (services.StopResult, schemas.StopResult),
 ]
 
 
@@ -161,10 +164,10 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
 CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
-def test_there_are_twentyone_concrete_core_error_classes() -> None:
+def test_there_are_twentyfive_concrete_core_error_classes() -> None:
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
-    assert len(CONCRETE_CORE_ERROR_CLASSES) == 21
+    assert len(CONCRETE_CORE_ERROR_CLASSES) == 25
 
 
 @pytest.mark.parametrize(
@@ -206,6 +209,7 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
         "sync_catalog",
         "install_mod",
         "update_mod",
+        "launch_profile",
     }
 
 

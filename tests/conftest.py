@@ -1,9 +1,14 @@
 """Shared fixtures for the sptmod test suite."""
 
 import json
+import os
+import sys
 from collections.abc import Iterator
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
 import pytest
 
 from sptmod.core.game_dir import detect_layout
@@ -665,3 +670,224 @@ def install_commit(monkeypatch: pytest.MonkeyPatch):
         return repo.commit(f"mod: {name} {version}", trailers=trailers, paths=paths)
 
     return _install
+
+
+# --------------------------------------------------------------------------
+# launch.py / sptserver.py support
+# --------------------------------------------------------------------------
+
+# A stub server/client "binary": on start it dumps its own argv, cwd and a
+# snapshot of its environment to "<its own script path>.dump.json", then
+# sleeps. It never opens a socket and never talks to the network -- readiness
+# is always simulated through respx on the ping endpoint. Deriving the dump
+# path from ``sys.argv[0]`` (rather than an inherited env var) keeps the dump
+# unambiguous even though the client stub's environment is deliberately
+# reshaped by launch.py before it is spawned.
+_STUB_SCRIPT = f"""#!{sys.executable}
+import json
+import os
+import sys
+import time
+
+dump_path = sys.argv[0] + ".dump.json"
+with open(dump_path, "w", encoding="utf-8") as handle:
+    json.dump(
+        {{
+            "pid": os.getpid(),
+            "argv": sys.argv,
+            "cwd": os.getcwd(),
+            "env": dict(os.environ),
+        }},
+        handle,
+    )
+time.sleep(30)
+"""
+
+
+def _write_stub_binary(path: Path) -> None:
+    """Write an executable stub process to ``path`` (parent must exist)."""
+    path.write_text(_STUB_SCRIPT, encoding="utf-8")
+    os.chmod(path, 0o755)
+
+
+def stub_dump(binary_path: Path) -> dict:
+    """Read back the argv/cwd/env a stub process at ``binary_path`` recorded.
+
+    Raises ``FileNotFoundError`` until the stub has actually started and
+    wound; callers poll on it after ``launch_profile`` returns.
+    """
+    return json.loads(Path(f"{binary_path}.dump.json").read_text(encoding="utf-8"))
+
+
+@dataclass(frozen=True)
+class LaunchableGameDir:
+    """A :func:`fake_launchable_dir` and everything a test needs to drive it."""
+
+    root: Path
+    profile_id: str
+    username: str
+    nickname: str
+    base_url: str
+    server_binary: Path
+    umu_path: Path
+    client_exe: Path
+    http_config_file: Path
+    launcher_settings_file: Path
+
+
+def kill_launchable_processes(root: Path) -> None:
+    """Kill every stub/watcher process a launch test may have started.
+
+    Every process ``launch_profile`` starts (server, client, watcher) is a
+    direct child of this test process at the moment it is spawned -- detached
+    only means it gets its own session, not a different parent -- so walking
+    ``children(recursive=True)`` of the current pid finds them reliably even
+    when a test asserts a failure before any dump file or state file was
+    written (those are only a secondary source, kept as a fallback for a
+    process that was somehow reparented). Safe to call when nothing was ever
+    started.
+    """
+    pids: set[int] = set()
+    with suppress(psutil.Error):
+        for child in psutil.Process(os.getpid()).children(recursive=True):
+            with suppress(psutil.Error):
+                if str(child.cwd()).startswith(str(root)):
+                    pids.add(child.pid)
+    for dump in root.rglob("*.dump.json"):
+        with suppress(OSError, ValueError, KeyError):
+            pids.add(json.loads(dump.read_text(encoding="utf-8"))["pid"])
+    state_file = root / ".sptmod-launch.json"
+    if state_file.is_file():
+        with suppress(OSError, ValueError):
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            for key in ("server", "client", "watcher"):
+                entry = state.get(key) if isinstance(state, dict) else None
+                if isinstance(entry, dict) and isinstance(entry.get("pid"), int):
+                    pids.add(entry["pid"])
+    processes: list[psutil.Process] = []
+    for pid in pids:
+        with suppress(psutil.Error):
+            process = psutil.Process(pid)
+            for child in process.children(recursive=True):
+                with suppress(psutil.Error):
+                    child.kill()
+            process.kill()
+            processes.append(process)
+    if processes:
+        psutil.wait_procs(processes, timeout=2)
+
+
+@pytest.fixture
+def fake_launchable_dir(fake_game_dir_runtime: Path) -> Iterator[LaunchableGameDir]:
+    """A :func:`fake_game_dir_runtime` ready for :mod:`sptmod.core.launch`.
+
+    Adds ``sptLogger.json``, ``http.json`` (default ``127.0.0.1:6969``),
+    ``LauncherSettings.json`` (verbatim live shape, ``GameMode`` off), a
+    profile with ``info.username``/``characters.pmc.Info.Nickname``, an
+    executable stub server at the real ``server_binary`` path and an
+    executable stub "umu" at the ``UmuPath`` named in the settings. Nothing
+    binds a port; nothing talks to the network.
+    """
+    root = fake_game_dir_runtime
+    runtime = root / "SPT_Runtime"
+
+    (runtime / "sptLogger.json").write_text("{}", encoding="utf-8")
+
+    (runtime / "SPT_Data" / "configs" / "http.json").write_text(
+        json.dumps(
+            {
+                "ip": "127.0.0.1",
+                "port": 6969,
+                "backendIp": "127.0.0.1",
+                "backendPort": 6969,
+                "logRequests": True,
+                "serverImagePathOverride": {},
+                "webAuthenticationConfig": {
+                    "enabled": True,
+                    "enableDefaultUser": True,
+                    "allowDefaultUserFromAnyIp": True,
+                    "requireCredentialsOnLocalhost": False,
+                    "defaultUser": {
+                        "username": "spt",
+                        "password": "spt",
+                        "isAdministrator": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    launcher_dir = runtime / "user" / "Launcher"
+    launcher_dir.mkdir(parents=True)
+    umu_path = root / "stub-umu.py"
+    _write_stub_binary(umu_path)
+    (launcher_dir / "LauncherSettings.json").write_text(
+        json.dumps(
+            {
+                "Servers": [],
+                "StartLocation": {"X": 0, "Y": 0},
+                "StartSize": {"Height": 1381, "Width": 2522},
+                "FirstRun": False,
+                "EnableGamePath": False,
+                "GamePath": str(root),
+                "CloseToTray": False,
+                "MinimizeOnLaunch": True,
+                "AlwaysTop": False,
+                "UseBackground": True,
+                "ClearCacheOnLaunch": False,
+                "AutoConnectLastProfile": False,
+                "PreferredProfile": None,
+                "ExcludeFromCleanup": [],
+                "Language": "en",
+                "LinuxSettings": {
+                    "PrefixPath": str(root / "prefix"),
+                    "UmuPath": str(umu_path),
+                    "LaunchSettings": 'PROTON_USE_XALIA=0 PROTON_MEDIA_USE_GST=1',
+                    "ProtonVersion": "GE-Proton11-5",
+                    "ProtonPaths": [],
+                    "GameMode": False,
+                    "DefaultEnv": 'WINEDLLOVERRIDES="winhttp=n,b"',
+                },
+                "DebugLogging": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    profile_id = "6a986df8b3c3f533ed2cd26a"
+    username = "0Sullivan"
+    nickname = "TesterNick"
+    (runtime / "user" / "profiles" / f"{profile_id}.json").write_text(
+        json.dumps(
+            {
+                "info": {"id": profile_id, "username": username},
+                "characters": {"pmc": {"Info": {"Nickname": nickname}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    layout = detect_layout(root)
+    server_binary = root / layout.server_binary
+    server_binary.parent.mkdir(parents=True, exist_ok=True)
+    _write_stub_binary(server_binary)
+
+    client_exe = root / layout.client_exe
+    client_exe.write_text("stub client executable placeholder", encoding="utf-8")
+
+    try:
+        yield LaunchableGameDir(
+            root=root,
+            profile_id=profile_id,
+            username=username,
+            nickname=nickname,
+            base_url="https://127.0.0.1:6969",
+            server_binary=server_binary,
+            umu_path=umu_path,
+            client_exe=client_exe,
+            http_config_file=root / layout.http_config_file,
+            launcher_settings_file=root / layout.launcher_settings_file,
+        )
+    finally:
+        kill_launchable_processes(root)

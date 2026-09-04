@@ -2,9 +2,10 @@
 
 import json
 import struct
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Final
+from typing import IO, Final, Literal
 
 import psutil
 
@@ -16,6 +17,8 @@ BEPINEX_DIR: Final = Path("BepInEx")
 PLUGINS_DIR: Final = Path("BepInEx/plugins")
 BEPINEX_CONFIG_DIR: Final = Path("BepInEx/config")
 SERVER_EXE_NAME: Final = "SPT.Server.exe"
+SERVER_LINUX_NAME: Final = "SPT.Server.Linux"
+CLIENT_EXE_NAME: Final = "EscapeFromTarkov.exe"
 
 # Directories a flat SPT 3.x installation keeps in the game root; 4.x moved
 # them below the runtime directory.
@@ -32,6 +35,15 @@ SPT_VERSION_FIELD: Final = "sptVersion"
 SPT_VERSION_CONFIG_KEY: Final = "sptmod.sptversion"
 
 GAME_PROCESS_NAMES: Final[tuple[str, ...]] = ("SPT.Server", "EscapeFromTarkov")
+
+type GameProcessKind = Literal["server", "client"]
+
+# Which running process belongs to which half of the installation, keyed by the
+# substring of its name.
+_PROCESS_KINDS: Final[tuple[tuple[str, GameProcessKind], ...]] = (
+    ("spt.server", "server"),
+    ("escapefromtarkov", "client"),
+)
 
 _DOS_HEADER_SIZE: Final = 0x40
 _COFF_HEADER_SIZE: Final = 24
@@ -97,6 +109,28 @@ class GameLayout:
     def server_exe(self) -> Path:
         """The server executable carrying the SPT version resource."""
         return self.runtime_dir / SERVER_EXE_NAME
+
+    @property
+    def server_binary(self) -> Path:
+        """The server program started when the game is launched."""
+        if sys.platform == "win32":
+            return self.runtime_dir / SERVER_EXE_NAME
+        return self.runtime_dir / SERVER_LINUX_NAME
+
+    @property
+    def client_exe(self) -> Path:
+        """The game client executable in the installation root."""
+        return Path(CLIENT_EXE_NAME)
+
+    @property
+    def http_config_file(self) -> Path:
+        """The server configuration file naming its address and port."""
+        return self.runtime_dir / "SPT_Data" / "configs" / "http.json"
+
+    @property
+    def launcher_settings_file(self) -> Path:
+        """The settings file the official SPT launcher writes."""
+        return self.runtime_dir / "user" / "Launcher" / "LauncherSettings.json"
 
 
 def detect_layout(path: Path) -> GameLayout:
@@ -466,31 +500,85 @@ def _align4(offset: int) -> int:
     return (offset + 3) & ~3
 
 
-def is_game_process_name(name: str) -> bool:
-    """Return whether a process name belongs to the SPT server or client.
+@dataclass(frozen=True)
+class GameProcess:
+    """A running SPT process.
 
-    Matches case-insensitively on the substrings in ``GAME_PROCESS_NAMES``, so
-    Wine processes whose name ends in ``.exe`` match as well.
+    ``started_at`` is the creation time reported by the operating system; the
+    pair of ``pid`` and ``started_at`` identifies a process even after the
+    number was handed out again.
+    """
+
+    pid: int
+    name: str
+    kind: GameProcessKind
+    started_at: float
+
+
+def game_process_kind(name: str) -> GameProcessKind | None:
+    """Return which half of the installation a process name belongs to.
+
+    Matches case-insensitively on substrings, so Wine processes whose name ends
+    in ``.exe`` match as well. ``None`` means the name belongs to neither.
     """
     lowered = name.lower()
-    return any(candidate.lower() in lowered for candidate in GAME_PROCESS_NAMES)
+    for candidate, kind in _PROCESS_KINDS:
+        if candidate in lowered:
+            return kind
+    return None
 
 
-def running_game_processes() -> list[str]:
-    """Return the names of the running SPT server and client processes.
+def is_game_process_name(name: str) -> bool:
+    """Return whether a process name belongs to the SPT server or client."""
+    return game_process_kind(name) is not None
+
+
+def game_processes() -> list[GameProcess]:
+    """Return the running SPT server and client processes.
 
     The only place that scans the process table (via ``psutil``); tests replace
     this function instead of touching real processes.
     """
-    names: list[str] = []
+    found: list[GameProcess] = []
     for process in psutil.process_iter():
         try:
             name = process.name()
+            kind = game_process_kind(name)
+            if kind is None:
+                continue
+            found.append(
+                GameProcess(
+                    pid=process.pid,
+                    name=name,
+                    kind=kind,
+                    started_at=process.create_time(),
+                )
+            )
         except psutil.Error:
             continue
-        if is_game_process_name(name):
-            names.append(name)
-    return names
+    return found
+
+
+def running_game_processes() -> list[str]:
+    """Return the names of the running SPT server and client processes."""
+    return [process.name for process in game_processes()]
+
+
+def process_alive(pid: int, started_at: float) -> bool:
+    """Return whether the process ``pid`` started at ``started_at`` still runs.
+
+    The creation time rules out a process that only inherited the number of an
+    exited one.
+    """
+    try:
+        process = psutil.Process(pid)
+        return (
+            process.is_running()
+            and process.status() != psutil.STATUS_ZOMBIE
+            and process.create_time() == started_at
+        )
+    except psutil.Error:
+        return False
 
 
 def ensure_game_not_running() -> None:

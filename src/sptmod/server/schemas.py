@@ -89,6 +89,35 @@ class CheckResult(CoreModel):
     warnings: list[str] = []
 
 
+class UntouchedResidue(CoreModel):
+    """Residue a profile cleanup leaves in place, and why it does."""
+
+    residue: ProfileResidue
+    reason: str
+
+
+class CleanupPlan(CoreModel):
+    """What cleaning the profiles of one mod would remove."""
+
+    mod: str
+    profiles: list[str] = []
+    removals: list[ProfileResidue] = []
+    untouched: list[UntouchedResidue] = []
+    warnings: list[str] = []
+
+
+class CleanupResult(CoreModel):
+    """Outcome of ``clean_profile``."""
+
+    mod: str
+    profiles: list[str] = []
+    backups: list[Path] = []
+    removed: list[ProfileResidue] = []
+    untouched: list[UntouchedResidue] = []
+    snapshot: str = ""
+    warnings: list[str] = []
+
+
 class CatalogMod(CoreModel):
     """A mod as cached in the local Forge catalog."""
 
@@ -184,6 +213,7 @@ class RemoveResult(CoreModel):
     commit: str
     files: list[Path] = []
     warnings: list[str] = []
+    cleanup: CleanupResult | None = None
 
 
 class ToggleResult(CoreModel):
@@ -431,12 +461,28 @@ class RemoveModRequest(CoreModel):
     path: Path
     name: str
     force: bool = False
+    clean_profiles: bool = False
 
 
 class CheckProfilesRequest(CoreModel):
     """Parameters of ``check_profiles``."""
 
     path: Path
+
+
+class PlanProfileCleanupRequest(CoreModel):
+    """Parameters of ``plan_profile_cleanup``."""
+
+    path: Path
+    mod_name: str
+
+
+class CleanProfileRequest(CoreModel):
+    """Parameters of ``clean_profile``."""
+
+    path: Path
+    mod_name: str
+    profiles: list[str] | None = None
 
 
 class HistoryRequest(CoreModel):

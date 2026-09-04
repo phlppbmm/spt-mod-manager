@@ -561,6 +561,12 @@ def remove(
     force: Annotated[
         bool, typer.Option("--force", help="Remove despite profile residue.")
     ] = False,
+    clean_profiles: Annotated[
+        bool,
+        typer.Option(
+            "--clean-profiles", help="Also remove the mod's content from the profiles."
+        ),
+    ] = False,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Remove without confirming.")
     ] = False,
@@ -569,12 +575,31 @@ def remove(
     if not yes and not _confirmed(f"remove {name}?"):
         raise typer.Abort()
     with _handled():
-        result = services.remove_mod(Path.cwd(), name, force=force)
+        result = services.remove_mod(
+            Path.cwd(), name, force=force, clean_profiles=clean_profiles
+        )
         for warning in result.warnings:
             console.print(f"warning: {warning}", markup=False)
         console.print(
             f"removed {result.name} ({len(result.files)} files) "
             f"as {result.commit[:_SHORT_HASH_LENGTH]}",
+            markup=False,
+        )
+        if result.cleanup is not None:
+            _print_cleanup(result.cleanup)
+
+
+def _print_cleanup(cleanup: services.CleanupResult) -> None:
+    """Report what the profile cleanup changed and what it left alone."""
+    if cleanup.profiles:
+        console.print(f"cleaned profiles: {', '.join(cleanup.profiles)}", markup=False)
+    else:
+        console.print("no profile needed cleaning", markup=False)
+    console.print(f"removed {len(cleanup.removed)} profile entries", markup=False)
+    if cleanup.untouched:
+        console.print(
+            f"{len(cleanup.untouched)} entries stayed: sptmod cannot tell what "
+            "they are used for, so it leaves them alone",
             markup=False,
         )
 

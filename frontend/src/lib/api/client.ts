@@ -9,6 +9,9 @@ export type CommitInfo = Schemas['CommitInfo'];
 export type Conflict = Schemas['Conflict'];
 export type ProfileResidue = Schemas['ProfileResidue'];
 export type CheckResult = Schemas['CheckResult'];
+export type CleanupPlan = Schemas['CleanupPlan'];
+export type CleanupResult = Schemas['CleanupResult'];
+export type UntouchedResidue = Schemas['UntouchedResidue'];
 export type InitResult = Schemas['InitResult'];
 export type SetSptVersionResponse = Schemas['SetSptVersionResponse'];
 export type RemoveResult = Schemas['RemoveResult'];
@@ -88,12 +91,14 @@ export function modFiles(path: string, name: string): Promise<ModFile[]> {
 export function removeMod(
 	path: string,
 	name: string,
-	force: boolean = false
+	force: boolean = false,
+	cleanProfiles: boolean = false
 ): Promise<RemoveResult> {
 	return call<RemoveResult>('remove_mod', {
 		path,
 		name,
-		force
+		force,
+		clean_profiles: cleanProfiles
 	} satisfies Schemas['RemoveModRequest']);
 }
 
@@ -107,6 +112,25 @@ export function enableMod(path: string, name: string): Promise<ToggleResult> {
 
 export function checkProfiles(path: string): Promise<CheckResult> {
 	return call<CheckResult>('check_profiles', { path } satisfies Schemas['CheckProfilesRequest']);
+}
+
+export function planProfileCleanup(path: string, modName: string): Promise<CleanupPlan> {
+	return call<CleanupPlan>('plan_profile_cleanup', {
+		path,
+		mod_name: modName
+	} satisfies Schemas['PlanProfileCleanupRequest']);
+}
+
+export function cleanProfile(
+	path: string,
+	modName: string,
+	profiles: string[] | null = null
+): Promise<CleanupResult> {
+	return call<CleanupResult>('clean_profile', {
+		path,
+		mod_name: modName,
+		profiles
+	} satisfies Schemas['CleanProfileRequest']);
 }
 
 export function history(path: string, name: string | null = null): Promise<CommitInfo[]> {

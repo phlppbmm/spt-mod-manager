@@ -4,6 +4,7 @@ import {
 	browseCatalog,
 	checkProfiles,
 	checkUpdates,
+	cleanProfile,
 	clearCatalogCache,
 	disableMod,
 	enableMod,
@@ -19,6 +20,7 @@ import {
 	locateDirectory,
 	modFiles,
 	planModInstall,
+	planProfileCleanup,
 	removeMod,
 	searchCatalog,
 	setFavorite,
@@ -153,16 +155,22 @@ const wrapperCases: Array<{
 		payload: { path: '/game', name: 'mod-a' }
 	},
 	{
-		id: 'removeMod defaults force to false',
+		id: 'removeMod defaults force and cleanProfiles to false',
 		call: () => removeMod('/game', 'mod-a'),
 		command: 'remove_mod',
-		payload: { path: '/game', name: 'mod-a', force: false }
+		payload: { path: '/game', name: 'mod-a', force: false, clean_profiles: false }
 	},
 	{
 		id: 'removeMod forwards an explicit force',
 		call: () => removeMod('/game', 'mod-a', true),
 		command: 'remove_mod',
-		payload: { path: '/game', name: 'mod-a', force: true }
+		payload: { path: '/game', name: 'mod-a', force: true, clean_profiles: false }
+	},
+	{
+		id: 'removeMod forwards an explicit cleanProfiles',
+		call: () => removeMod('/game', 'mod-a', false, true),
+		command: 'remove_mod',
+		payload: { path: '/game', name: 'mod-a', force: false, clean_profiles: true }
 	},
 	{
 		id: 'disableMod forwards path and name',
@@ -181,6 +189,24 @@ const wrapperCases: Array<{
 		call: () => checkProfiles('/game'),
 		command: 'check_profiles',
 		payload: { path: '/game' }
+	},
+	{
+		id: 'planProfileCleanup forwards path and modName',
+		call: () => planProfileCleanup('/game', 'mod-a'),
+		command: 'plan_profile_cleanup',
+		payload: { path: '/game', mod_name: 'mod-a' }
+	},
+	{
+		id: 'cleanProfile defaults profiles to null',
+		call: () => cleanProfile('/game', 'mod-a'),
+		command: 'clean_profile',
+		payload: { path: '/game', mod_name: 'mod-a', profiles: null }
+	},
+	{
+		id: 'cleanProfile forwards an explicit profiles list',
+		call: () => cleanProfile('/game', 'mod-a', ['abc', 'def']),
+		command: 'clean_profile',
+		payload: { path: '/game', mod_name: 'mod-a', profiles: ['abc', 'def'] }
 	},
 	{
 		id: 'history defaults name to null',

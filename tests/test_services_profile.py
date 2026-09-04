@@ -293,6 +293,71 @@ def test_cli_remove_with_force_succeeds_despite_profile_residue(
     assert "ServerMod" in result.stdout
 
 
+def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    repo = _clean_repo(fake_game_dir)
+    item_id = "5c0d1b8b86f7744bb2683cf7"
+    _install_server_mod_with_item(repo, install_commit, item_id)
+    profile_path = _commit_profile_with_item(repo, item_id)
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+
+    assert result.exit_code == 0
+    cleaned = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert cleaned["characters"]["pmc"]["Inventory"]["items"] == []
+
+
+def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    repo = _clean_repo(fake_game_dir)
+    item_id = "5c0d1b8b86f7744bb2683cf9"
+    _install_server_mod_with_item(repo, install_commit, item_id)
+    _commit_profile_with_item(repo, item_id)
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+
+    assert result.exit_code == 0
+    assert "abc" in result.stdout
+
+
+def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_count(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+) -> None:
+    # item_id sits only in raw text (e.g. a note field), never in a
+    # structured container: sptmod can only find it via the string
+    # fallback, so nothing is removed but something stays untouched.
+    item_id = "5c0d1b8b86f7744bb2683cfb"
+    repo = _clean_repo(fake_game_dir)
+    _install_server_mod_with_item(repo, install_commit, item_id)
+    profile = {
+        "characters": {
+            "pmc": {
+                "Inventory": {"items": []},
+                "TradersInfo": {},
+                "Quests": [],
+            }
+        },
+        "info": {"note": item_id},
+    }
+    profile_path = repo.path / "SPT/user/profiles/abc.json"
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    repo.commit(
+        "chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")]
+    )
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+
+    assert result.exit_code == 0
+    assert "no profile needed cleaning" in result.stdout
+    assert "removed 0 profile entries" in result.stdout
+    assert "1 entries stayed" in result.stdout
+
+
 def test_cli_remove_prints_a_warning_line_for_broken_db_json(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
 ) -> None:

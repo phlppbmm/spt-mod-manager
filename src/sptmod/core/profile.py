@@ -1,8 +1,11 @@
 """Collecting a mod's content IDs and finding their residue in profiles."""
 
 import json
+import os
 import re
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Container, Iterator
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -29,6 +32,7 @@ TRADER_BASE_FILE: Final = "base.json"
 ACHIEVEMENTS_FILE: Final = "achievements.json"
 RECIPE_LIST_KEYS: Final = ("recipes", "scavRecipes", "cultistRecipes")
 BUILD_LIST_KEYS: Final = ("weaponBuilds", "equipmentBuilds", "magazineBuilds")
+REPEATABLE_QUEST_KEYS: Final = ("activeQuests", "inactiveQuests")
 CHARACTERS: Final = ("pmc", "scav")
 
 _ID_FIELD: Final = "_id"
@@ -276,6 +280,77 @@ def _parse_profile(profile_path: Path) -> _ParsedProfile | None:
     return _ParsedProfile(name=profile_path.stem, text=text, root=root)
 
 
+@dataclass(frozen=True)
+class _Hits:
+    """What one category matched in one profile.
+
+    Attributes:
+        ids: The distinct content IDs that matched.
+        count: How many profile entries those IDs account for.
+    """
+
+    ids: frozenset[str] = frozenset()
+    count: int = 0
+
+
+@dataclass(frozen=True)
+class _Scope:
+    """The part of a profile one category is read from and cleaned in.
+
+    Attributes:
+        node: A character of the profile, or the profile root for the sections
+            both characters share. Removers change it in place.
+        ids: The content IDs of the mod being looked for.
+        item_closure: The IDs of the character's inventory items that belong to
+            the mod, including everything stored inside them. Empty for the
+            shared sections, which hold no inventory.
+    """
+
+    node: dict[str, object]
+    ids: ModIds
+    item_closure: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _Category:
+    """Where content IDs of one kind can sit in a profile, and how to clear it.
+
+    Attributes:
+        category: The reported category.
+        characters: The characters the container belongs to, ``''`` for the
+            sections both characters share.
+        path: JSON pointer of the container, with ``{character}`` standing for
+            the character it is read for.
+        finder: Returns the hits in one scope.
+        remover: Deletes from the scope exactly what the finder reports.
+    """
+
+    category: ResidueCategory
+    characters: tuple[str, ...]
+    path: str
+    finder: Callable[[_Scope], _Hits]
+    remover: Callable[[_Scope], None]
+
+
+@dataclass(frozen=True)
+class _Cleaned:
+    """A profile document freed of a mod's content, and what that cost.
+
+    The residues carry no profile name; the caller knows the file they came
+    from.
+
+    Attributes:
+        document: The cleaned copy of the profile document.
+        removed: The residues the document no longer holds.
+        untouched: The residues that stayed, because no category could say
+            what they are used for.
+    """
+
+    document: dict[str, object]
+    removed: list[ProfileResidue]
+    untouched: list[ProfileResidue]
+
+
 def _residues_in(profile: _ParsedProfile, ids: ModIds) -> list[ProfileResidue]:
     """Find which IDs from ``ids`` appear in ``profile``.
 
@@ -286,45 +361,138 @@ def _residues_in(profile: _ParsedProfile, ids: ModIds) -> list[ProfileResidue]:
     """
     residues: list[ProfileResidue] = []
     matched: set[str] = set()
-    for character in (*CHARACTERS, ""):
-        scope = (
-            _dict_at(profile.root, "characters", character)
-            if character
-            else (profile.root)
-        )
+    for entry, _, character, hits in _hits_in(profile.root, ids):
+        matched |= hits.ids
+        residues.append(_residue(profile.name, entry, character, hits))
+    return [*residues, *_string_residue(profile.name, profile.text, ids, matched)]
+
+
+def _clean_document(profile: _ParsedProfile, ids: ModIds) -> _Cleaned:
+    """Return a copy of ``profile`` freed of the content of ``ids``.
+
+    Every category that reports a hit also clears it, so the report is exactly
+    what the copy lost and a preview can never disagree with the real run. IDs
+    that no category could attribute stay: the text fallback cannot say what
+    they mean, so removing them would be guesswork; it reads the same profile
+    text a check reads, so both agree on what is left.
+
+    ``profile`` itself is never changed, and the reported residues carry no
+    profile name -- only the caller knows which file they came from.
+    """
+    document = deepcopy(profile.root)
+    removed: list[ProfileResidue] = []
+    matched: set[str] = set()
+    for entry, scope, character, hits in _hits_in(document, ids):
+        entry.remover(scope)
+        matched |= hits.ids
+        removed.append(_residue("", entry, character, hits))
+    return _Cleaned(
+        document=document,
+        removed=removed,
+        untouched=_string_residue("", profile.text, ids, matched),
+    )
+
+
+def _write_profile(path: Path, data: dict[str, object]) -> None:
+    """Write ``data`` to ``path`` the way the game writes profiles itself.
+
+    Serialises without indentation, without a trailing newline and with
+    non-ASCII characters kept literally, so a document that was not changed is
+    written back byte for byte. The bytes go to a temporary file next to
+    ``path`` that is then moved into place, so an interrupted write cannot
+    leave behind a half-written profile.
+
+    Raises:
+        OSError: the profile could not be written.
+    """
+    handle, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as file:
+            file.write(_dumps(data).encode())
+        os.replace(temporary, path)
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _dumps(data: dict[str, object]) -> str:
+    """Return the JSON text of a profile document in the game's own format."""
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+
+
+def _hits_in(
+    root: dict[str, object], ids: ModIds
+) -> list[tuple[_Category, _Scope, str, _Hits]]:
+    """Return every category that matches something, with its scope and hits.
+
+    Walks the characters first, then the sections they share, and within each
+    scope the categories in the order of ``_CATEGORIES``. The whole document is
+    read before the caller can act on the result, so a category never reports
+    against what an earlier one removed.
+    """
+    hits_found: list[tuple[_Category, _Scope, str, _Hits]] = []
+    for character, scope in _scopes(root, ids):
         for entry in _CATEGORIES:
             if character not in entry.characters:
                 continue
-            hits = entry.finder(scope, ids)
-            matched.update(hits.ids)
+            hits = entry.finder(scope)
             if hits.ids:
-                residues.append(
-                    ProfileResidue(
-                        profile=profile.name,
-                        category=entry.category,
-                        ids=sorted(hits.ids),
-                        count=hits.count,
-                        character=character,
-                        path=entry.path.format(character=character),
-                    )
-                )
+                hits_found.append((entry, scope, character, hits))
+    return hits_found
 
-    # The fallback scans the whole profile text once per unmatched ID; mods
-    # add tens of IDs and profiles are a few megabytes, so this stays cheap.
-    remaining = _all_ids(ids) - matched
-    fallback = {
-        found: profile.text.count(found) for found in remaining if found in profile.text
-    }
-    if fallback:
-        residues.append(
-            ProfileResidue(
-                profile=profile.name,
-                category="string",
-                ids=sorted(fallback),
-                count=sum(fallback.values()),
-            )
+
+def _scopes(root: dict[str, object], ids: ModIds) -> list[tuple[str, _Scope]]:
+    """Return the scopes of a profile: both characters, then the shared part.
+
+    The inventory closure of a character is computed once here, because both
+    the items themselves and the insurance entries pointing at them need it.
+    """
+    scopes: list[tuple[str, _Scope]] = []
+    for character in CHARACTERS:
+        node = _dict_at(root, "characters", character)
+        closure = _item_closure(_list_at(node, "Inventory", "items"), ids.items)
+        scopes.append(
+            (character, _Scope(node=node, ids=ids, item_closure=frozenset(closure)))
         )
-    return residues
+    scopes.append(("", _Scope(node=root, ids=ids, item_closure=frozenset())))
+    return scopes
+
+
+def _residue(
+    name: str, entry: _Category, character: str, hits: _Hits
+) -> ProfileResidue:
+    """Return the residue one category found in one profile."""
+    return ProfileResidue(
+        profile=name,
+        category=entry.category,
+        ids=sorted(hits.ids),
+        count=hits.count,
+        character=character,
+        path=entry.path.format(character=character),
+    )
+
+
+def _string_residue(
+    name: str, text: str, ids: ModIds, matched: set[str]
+) -> list[ProfileResidue]:
+    """Return the residue of the IDs no category matched, if there is one.
+
+    The fallback scans the whole profile text once per unmatched ID; mods add
+    tens of IDs and profiles are a few megabytes, so this stays cheap.
+    """
+    counts = {
+        found: text.count(found) for found in _all_ids(ids) - matched if found in text
+    }
+    if not counts:
+        return []
+    return [
+        ProfileResidue(
+            profile=name,
+            category="string",
+            ids=sorted(counts),
+            count=sum(counts.values()),
+        )
+    ]
 
 
 def _db_relative(path: Path, layout: GameLayout) -> Path | None:
@@ -388,37 +556,7 @@ def _all_ids(ids: ModIds) -> set[str]:
     return ids.items | ids.traders | ids.quests | ids.recipes | ids.achievements
 
 
-@dataclass(frozen=True)
-class _Hits:
-    """What one category matched in one profile.
-
-    Attributes:
-        ids: The distinct content IDs that matched.
-        count: How many profile entries those IDs account for.
-    """
-
-    ids: frozenset[str] = frozenset()
-    count: int = 0
-
-
-@dataclass(frozen=True)
-class _Category:
-    """Where content IDs of one kind can sit in a profile.
-
-    Attributes:
-        category: The reported category.
-        characters: The characters the container belongs to, ``''`` for the
-            sections both characters share.
-        path: JSON pointer of the container, with ``{character}`` standing for
-            the character it is read for.
-        finder: Returns the hits in one character, or in the whole profile for
-            a shared section.
-    """
-
-    category: ResidueCategory
-    characters: tuple[str, ...]
-    path: str
-    finder: Callable[[dict[str, object], ModIds], _Hits]
+type _Match = Callable[[str, object], set[str]]
 
 
 def _dict_at(scope: object, *keys: str) -> dict[str, object]:
@@ -450,6 +588,56 @@ def _key_hits(container: dict[str, object], wanted: set[str]) -> _Hits:
     """Return the keys of ``container`` that are in ``wanted``, one entry each."""
     keys = {key for key in container if key in wanted}
     return _Hits(frozenset(keys), len(keys))
+
+
+def _remove_keys(container: dict[str, object], wanted: set[str]) -> None:
+    """Delete the keys of ``container`` that are in ``wanted``."""
+    for key in [key for key in container if key in wanted]:
+        del container[key]
+
+
+def _entry_hits(container: dict[str, object], match: _Match) -> _Hits:
+    """Return the hits of a container whose entries match by key and value."""
+    found: set[str] = set()
+    count = 0
+    for key, value in container.items():
+        matched = match(key, value)
+        if matched:
+            found |= matched
+            count += 1
+    return _Hits(frozenset(found), count)
+
+
+def _remove_entries(container: dict[str, object], match: _Match) -> None:
+    """Delete the entries of ``container`` that ``match`` ties to the mod."""
+    for key in [key for key, value in container.items() if match(key, value)]:
+        del container[key]
+
+
+def _filter_list(
+    owner: dict[str, object], key: str, keep: Callable[[object], bool]
+) -> None:
+    """Keep only the entries of the list ``key`` of ``owner`` that ``keep``."""
+    values = owner.get(key)
+    if isinstance(values, list):
+        owner[key] = [value for value in values if keep(value)]
+
+
+def _id_in(value: object, wanted: Container[str]) -> bool:
+    """Return whether ``value`` is an ID that ``wanted`` holds."""
+    return isinstance(value, str) and value in wanted
+
+
+def _item_id(item: object) -> str:
+    """Return the ``_id`` of an inventory item, empty when it has none."""
+    if isinstance(item, dict) and isinstance(item_id := item.get(_ID_FIELD), str):
+        return item_id
+    return ""
+
+
+def _remove_items(owner: dict[str, object], removed: Container[str]) -> None:
+    """Delete the items of ``removed`` from the ``items`` list of ``owner``."""
+    _filter_list(owner, "items", lambda item: _item_id(item) not in removed)
 
 
 def _templates_below(node: object, wanted: set[str]) -> set[str]:
@@ -509,59 +697,119 @@ def _matching_templates(items: list[object], wanted: set[str]) -> set[str]:
     }
 
 
-def _item_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _item_finder(scope: _Scope) -> _Hits:
     """Return inventory items of the mod, counting the items inside them."""
-    items = _list_at(scope, "Inventory", "items")
-    matched = _matching_templates(items, ids.items)
-    return _Hits(frozenset(matched), len(_item_closure(items, ids.items)))
+    items = _list_at(scope.node, "Inventory", "items")
+    matched = _matching_templates(items, scope.ids.items)
+    return _Hits(frozenset(matched), len(scope.item_closure))
 
 
-def _encyclopedia_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _item_remover(scope: _Scope) -> None:
+    """Delete the mod's inventory items and the references pointing at them."""
+    inventory = _dict_at(scope.node, "Inventory")
+    _remove_items(inventory, scope.item_closure)
+    _filter_list(
+        inventory,
+        "favoriteItems",
+        lambda favorite: not _id_in(favorite, scope.item_closure),
+    )
+    panel = inventory.get("fastPanel")
+    if isinstance(panel, dict):
+        inventory["fastPanel"] = {
+            slot: item
+            for slot, item in panel.items()
+            if not _id_in(item, scope.item_closure)
+        }
+
+
+def _encyclopedia_finder(scope: _Scope) -> _Hits:
     """Return encyclopedia entries for the mod's item templates."""
-    return _key_hits(_dict_at(scope, "Encyclopedia"), ids.items)
+    return _key_hits(_dict_at(scope.node, "Encyclopedia"), scope.ids.items)
 
 
-def _wishlist_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _encyclopedia_remover(scope: _Scope) -> None:
+    """Delete the encyclopedia entries of the mod's item templates."""
+    _remove_keys(_dict_at(scope.node, "Encyclopedia"), scope.ids.items)
+
+
+def _wishlist_finder(scope: _Scope) -> _Hits:
     """Return wish list entries for the mod's item templates."""
-    return _key_hits(_dict_at(scope, "WishList"), ids.items)
+    return _key_hits(_dict_at(scope.node, "WishList"), scope.ids.items)
 
 
-def _trader_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _wishlist_remover(scope: _Scope) -> None:
+    """Delete the wish list entries of the mod's item templates."""
+    _remove_keys(_dict_at(scope.node, "WishList"), scope.ids.items)
+
+
+def _trader_finder(scope: _Scope) -> _Hits:
     """Return trader standing entries of the mod's traders."""
-    return _key_hits(_dict_at(scope, "TradersInfo"), ids.traders)
+    return _key_hits(_dict_at(scope.node, "TradersInfo"), scope.ids.traders)
 
 
-def _trader_purchase_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _trader_remover(scope: _Scope) -> None:
+    """Delete the trader standing entries of the mod's traders."""
+    _remove_keys(_dict_at(scope.node, "TradersInfo"), scope.ids.traders)
+
+
+def _trader_purchase_finder(scope: _Scope) -> _Hits:
     """Return purchase counters of the mod's traders."""
-    return _key_hits(_dict_at(scope, "traderPurchases"), ids.traders)
+    return _key_hits(_dict_at(scope.node, "traderPurchases"), scope.ids.traders)
 
 
-def _quest_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _trader_purchase_remover(scope: _Scope) -> None:
+    """Delete the purchase counters of the mod's traders."""
+    _remove_keys(_dict_at(scope.node, "traderPurchases"), scope.ids.traders)
+
+
+def _quest_id_of(quest: object, ids: ModIds) -> str:
+    """Return the mod's quest a quest entry belongs to, empty when it is none."""
+    if not isinstance(quest, dict):
+        return ""
+    quest_id = quest.get("qid")
+    if isinstance(quest_id, str) and quest_id in ids.quests:
+        return quest_id
+    return ""
+
+
+def _quest_finder(scope: _Scope) -> _Hits:
     """Return quests of the mod the character has accepted or finished."""
     counts: dict[str, int] = {}
-    for quest in _list_at(scope, "Quests"):
-        if not isinstance(quest, dict):
-            continue
-        quest_id = quest.get("qid")
-        if isinstance(quest_id, str) and quest_id in ids.quests:
+    for quest in _list_at(scope.node, "Quests"):
+        quest_id = _quest_id_of(quest, scope.ids)
+        if quest_id:
             counts[quest_id] = counts.get(quest_id, 0) + 1
     return _counted(counts)
 
 
-def _repeatable_quest_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _quest_remover(scope: _Scope) -> None:
+    """Delete the quests of the mod from the character's quest list."""
+    _filter_list(scope.node, "Quests", lambda quest: not _quest_id_of(quest, scope.ids))
+
+
+def _repeatable_quest_finder(scope: _Scope) -> _Hits:
     """Return daily and weekly quests belonging to the mod."""
     found: set[str] = set()
     count = 0
-    for group in _list_at(scope, "RepeatableQuests"):
-        if not isinstance(group, dict):
-            continue
-        for key in ("activeQuests", "inactiveQuests"):
+    for group in _list_at(scope.node, "RepeatableQuests"):
+        for key in REPEATABLE_QUEST_KEYS:
             for quest in _list_at(group, key):
-                matched = _repeatable_quest_ids(quest, ids)
+                matched = _repeatable_quest_ids(quest, scope.ids)
                 if matched:
                     found |= matched
                     count += 1
     return _Hits(frozenset(found), count)
+
+
+def _repeatable_quest_remover(scope: _Scope) -> None:
+    """Delete the mod's daily and weekly quests from their lists."""
+    for group in _list_at(scope.node, "RepeatableQuests"):
+        if not isinstance(group, dict):
+            continue
+        for key in REPEATABLE_QUEST_KEYS:
+            _filter_list(
+                group, key, lambda quest: not _repeatable_quest_ids(quest, scope.ids)
+            )
 
 
 def _repeatable_quest_ids(quest: object, ids: ModIds) -> set[str]:
@@ -583,121 +831,229 @@ def _repeatable_quest_ids(quest: object, ids: ModIds) -> set[str]:
     return matched
 
 
-def _task_counter_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _task_counter_ids(key: str, value: object, ids: ModIds) -> set[str]:
+    """Return the mod's quests one progress counter belongs to."""
+    matched = {key} if key in ids.quests else set()
+    if isinstance(value, dict):
+        source = value.get("sourceId")
+        if isinstance(source, str) and source in ids.quests:
+            matched.add(source)
+    return matched
+
+
+def _task_counter_finder(scope: _Scope) -> _Hits:
     """Return progress counters of the mod's quests."""
-    found: set[str] = set()
-    count = 0
-    for key, value in _dict_at(scope, "TaskConditionCounters").items():
-        matched = {key} if key in ids.quests else set()
-        if isinstance(value, dict):
-            source = value.get("sourceId")
-            if isinstance(source, str) and source in ids.quests:
-                matched.add(source)
-        if matched:
-            found |= matched
-            count += 1
-    return _Hits(frozenset(found), count)
+    return _entry_hits(
+        _dict_at(scope.node, "TaskConditionCounters"),
+        lambda key, value: _task_counter_ids(key, value, scope.ids),
+    )
 
 
-def _hideout_production_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _task_counter_remover(scope: _Scope) -> None:
+    """Delete the progress counters of the mod's quests."""
+    _remove_entries(
+        _dict_at(scope.node, "TaskConditionCounters"),
+        lambda key, value: _task_counter_ids(key, value, scope.ids),
+    )
+
+
+def _hideout_production_ids(key: str, value: object, ids: ModIds) -> set[str]:
+    """Return the mod's recipes one hideout production belongs to."""
+    matched = {key} if key in ids.recipes else set()
+    if isinstance(value, dict):
+        recipe = value.get("recipeId")
+        if isinstance(recipe, str) and recipe in ids.recipes:
+            matched.add(recipe)
+    return matched
+
+
+def _hideout_production_finder(scope: _Scope) -> _Hits:
     """Return running hideout productions of the mod's recipes."""
-    found: set[str] = set()
-    count = 0
-    for key, value in _dict_at(scope, "Hideout", "Production").items():
-        matched = {key} if key in ids.recipes else set()
-        if isinstance(value, dict):
-            recipe = value.get("recipeId")
-            if isinstance(recipe, str) and recipe in ids.recipes:
-                matched.add(recipe)
-        if matched:
-            found |= matched
-            count += 1
-    return _Hits(frozenset(found), count)
+    return _entry_hits(
+        _dict_at(scope.node, "Hideout", "Production"),
+        lambda key, value: _hideout_production_ids(key, value, scope.ids),
+    )
 
 
-def _hideout_area_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _hideout_production_remover(scope: _Scope) -> None:
+    """Delete the running hideout productions of the mod's recipes."""
+    _remove_entries(
+        _dict_at(scope.node, "Hideout", "Production"),
+        lambda key, value: _hideout_production_ids(key, value, scope.ids),
+    )
+
+
+def _hideout_slot_hits(scope: _Scope) -> Iterator[tuple[list[object], int, set[str]]]:
+    """Yield the hideout slots holding items of the mod.
+
+    Each hit names the slot list, the position of the slot in it and the item
+    templates of the mod found below that slot.
+    """
+    for area in _list_at(scope.node, "Hideout", "Areas"):
+        slots = _list_at(area, "slots")
+        for index, slot in enumerate(slots):
+            matched = _templates_below(slot, scope.ids.items)
+            if matched:
+                yield slots, index, matched
+
+
+def _hideout_area_finder(scope: _Scope) -> _Hits:
     """Return hideout area slots holding an item of the mod."""
     found: set[str] = set()
     count = 0
-    for area in _list_at(scope, "Hideout", "Areas"):
-        for slot in _list_at(area, "slots"):
-            matched = _templates_below(slot, ids.items)
-            if matched:
-                found |= matched
-                count += 1
+    for _, _, matched in _hideout_slot_hits(scope):
+        found |= matched
+        count += 1
     return _Hits(frozenset(found), count)
 
 
-def _unlocked_recipe_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _hideout_area_remover(scope: _Scope) -> None:
+    """Empty the hideout slots holding items of the mod.
+
+    A slot keeps its position and loses everything else: the payload of a
+    filled slot differs per hideout area, and leaving a part of an item the
+    game no longer knows would break the hideout.
+    """
+    for slots, index, _ in _hideout_slot_hits(scope):
+        slots[index] = _empty_slot(slots[index])
+
+
+def _empty_slot(slot: object) -> dict[str, object]:
+    """Return the empty form of a hideout slot, keeping its position."""
+    index = slot.get("locationIndex") if isinstance(slot, dict) else None
+    return {"locationIndex": index} if isinstance(index, int) else {}
+
+
+def _unlocked_recipe_finder(scope: _Scope) -> _Hits:
     """Return unlocked hideout recipes of the mod."""
     counts: dict[str, int] = {}
-    for recipe in _list_at(scope, "UnlockedInfo", "unlockedProductionRecipe"):
-        if isinstance(recipe, str) and recipe in ids.recipes:
+    for recipe in _list_at(scope.node, "UnlockedInfo", "unlockedProductionRecipe"):
+        if isinstance(recipe, str) and recipe in scope.ids.recipes:
             counts[recipe] = counts.get(recipe, 0) + 1
     return _counted(counts)
 
 
-def _insured_item_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _unlocked_recipe_remover(scope: _Scope) -> None:
+    """Delete the mod's recipes from the unlocked hideout recipes."""
+    _filter_list(
+        _dict_at(scope.node, "UnlockedInfo"),
+        "unlockedProductionRecipe",
+        lambda recipe: not _id_in(recipe, scope.ids.recipes),
+    )
+
+
+def _insured_item_ids(entry: object, scope: _Scope) -> set[str]:
+    """Return the IDs that tie one insured item to the mod."""
+    if not isinstance(entry, dict):
+        return set()
+    matched: set[str] = set()
+    trader = entry.get("tid")
+    if isinstance(trader, str) and trader in scope.ids.traders:
+        matched.add(trader)
+    item_id = entry.get("itemId")
+    if isinstance(item_id, str) and item_id in scope.item_closure:
+        matched.add(item_id)
+    return matched
+
+
+def _insured_item_finder(scope: _Scope) -> _Hits:
     """Return insurance entries for the mod's traders or inventory items."""
-    closure = _item_closure(_list_at(scope, "Inventory", "items"), ids.items)
     found: set[str] = set()
     count = 0
-    for entry in _list_at(scope, "InsuredItems"):
-        if not isinstance(entry, dict):
-            continue
-        matched: set[str] = set()
-        trader = entry.get("tid")
-        if isinstance(trader, str) and trader in ids.traders:
-            matched.add(trader)
-        item_id = entry.get("itemId")
-        if isinstance(item_id, str) and item_id in closure:
-            matched.add(item_id)
+    for entry in _list_at(scope.node, "InsuredItems"):
+        matched = _insured_item_ids(entry, scope)
         if matched:
             found |= matched
             count += 1
     return _Hits(frozenset(found), count)
 
 
-def _achievement_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _insured_item_remover(scope: _Scope) -> None:
+    """Delete the insurance entries of the mod's traders and items."""
+    _filter_list(
+        scope.node, "InsuredItems", lambda entry: not _insured_item_ids(entry, scope)
+    )
+
+
+def _achievement_finder(scope: _Scope) -> _Hits:
     """Return achievements of the mod the character has earned."""
-    return _key_hits(_dict_at(scope, "Achievements"), ids.achievements)
+    return _key_hits(_dict_at(scope.node, "Achievements"), scope.ids.achievements)
 
 
-def _insurance_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _achievement_remover(scope: _Scope) -> None:
+    """Delete the achievements of the mod the character has earned."""
+    _remove_keys(_dict_at(scope.node, "Achievements"), scope.ids.achievements)
+
+
+def _insurance_trader(entry: object, ids: ModIds) -> str:
+    """Return the mod's trader an insurance return is from, empty if none."""
+    if not isinstance(entry, dict):
+        return ""
+    trader = entry.get("traderId")
+    if isinstance(trader, str) and trader in ids.traders:
+        return trader
+    return ""
+
+
+def _insurance_finder(scope: _Scope) -> _Hits:
     """Return pending insurance returns of the mod's traders or items."""
     found: set[str] = set()
     count = 0
-    for entry in _list_at(scope, "insurance"):
-        if not isinstance(entry, dict):
-            continue
-        trader = entry.get("traderId")
-        if isinstance(trader, str) and trader in ids.traders:
+    for entry in _list_at(scope.node, "insurance"):
+        trader = _insurance_trader(entry, scope.ids)
+        if trader:
             found.add(trader)
             count += 1
             continue
         items = _list_at(entry, "items")
-        matched = _matching_templates(items, ids.items)
+        matched = _matching_templates(items, scope.ids.items)
         if matched:
             found |= matched
-            count += len(_item_closure(items, ids.items))
+            count += len(_item_closure(items, scope.ids.items))
     return _Hits(frozenset(found), count)
 
 
-def _dialogue_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _insurance_remover(scope: _Scope) -> None:
+    """Delete insurance returns of the mod's traders and its items."""
+    _filter_list(
+        scope.node,
+        "insurance",
+        lambda entry: not _insurance_trader(entry, scope.ids),
+    )
+    for entry in _list_at(scope.node, "insurance"):
+        if isinstance(entry, dict):
+            items = _list_at(entry, "items")
+            _remove_items(entry, _item_closure(items, scope.ids.items))
+
+
+def _dialogue_finder(scope: _Scope) -> _Hits:
     """Return dialogues of the mod's traders and messages about its content."""
     found: set[str] = set()
     count = 0
-    for key, dialogue in _dict_at(scope, "dialogues").items():
-        if key in ids.traders:
+    for key, dialogue in _dict_at(scope.node, "dialogues").items():
+        if key in scope.ids.traders:
             found.add(key)
             count += 1
             continue
         for message in _list_at(dialogue, "messages"):
-            matched = _message_ids(message, ids)
+            matched = _message_ids(message, scope.ids)
             if matched:
                 found |= matched
                 count += 1
     return _Hits(frozenset(found), count)
+
+
+def _dialogue_remover(scope: _Scope) -> None:
+    """Delete the dialogues of the mod's traders and messages about its content."""
+    dialogues = _dict_at(scope.node, "dialogues")
+    _remove_keys(dialogues, scope.ids.traders)
+    for dialogue in dialogues.values():
+        if isinstance(dialogue, dict):
+            _filter_list(
+                dialogue,
+                "messages",
+                lambda message: not _message_ids(message, scope.ids),
+            )
 
 
 def _message_ids(message: object, ids: ModIds) -> set[str]:
@@ -711,83 +1067,127 @@ def _message_ids(message: object, ids: ModIds) -> set[str]:
     return matched
 
 
-def _userbuild_finder(scope: dict[str, object], ids: ModIds) -> _Hits:
+def _userbuild_finder(scope: _Scope) -> _Hits:
     """Return saved builds using one of the mod's item templates."""
-    builds = _dict_at(scope, "userbuilds")
+    builds = _dict_at(scope.node, "userbuilds")
     found: set[str] = set()
     count = 0
     for key in BUILD_LIST_KEYS:
         for build in _list_at(builds, key):
-            matched = _templates_below(build, ids.items)
+            matched = _templates_below(build, scope.ids.items)
             if matched:
                 found |= matched
                 count += 1
     return _Hits(frozenset(found), count)
 
 
+def _userbuild_remover(scope: _Scope) -> None:
+    """Delete the saved builds using one of the mod's item templates."""
+    builds = _dict_at(scope.node, "userbuilds")
+    for key in BUILD_LIST_KEYS:
+        _filter_list(
+            builds,
+            key,
+            lambda build: not _templates_below(build, scope.ids.items),
+        )
+
+
 _CATEGORIES: Final[tuple[_Category, ...]] = (
+    # Residue categories in emission order: character-major, then category-minor.
     _Category(
-        "item", CHARACTERS, "/characters/{character}/Inventory/items", _item_finder
+        "item",
+        CHARACTERS,
+        "/characters/{character}/Inventory/items",
+        _item_finder,
+        _item_remover,
     ),
     _Category(
         "encyclopedia",
         CHARACTERS,
         "/characters/{character}/Encyclopedia",
         _encyclopedia_finder,
+        _encyclopedia_remover,
     ),
     _Category(
-        "wishlist", CHARACTERS, "/characters/{character}/WishList", _wishlist_finder
+        "wishlist",
+        CHARACTERS,
+        "/characters/{character}/WishList",
+        _wishlist_finder,
+        _wishlist_remover,
     ),
     _Category(
-        "trader", CHARACTERS, "/characters/{character}/TradersInfo", _trader_finder
+        "trader",
+        CHARACTERS,
+        "/characters/{character}/TradersInfo",
+        _trader_finder,
+        _trader_remover,
     ),
-    _Category("trader-purchase", ("",), "/traderPurchases", _trader_purchase_finder),
-    _Category("quest", CHARACTERS, "/characters/{character}/Quests", _quest_finder),
+    _Category(
+        "trader-purchase",
+        ("",),
+        "/traderPurchases",
+        _trader_purchase_finder,
+        _trader_purchase_remover,
+    ),
+    _Category(
+        "quest",
+        CHARACTERS,
+        "/characters/{character}/Quests",
+        _quest_finder,
+        _quest_remover,
+    ),
     _Category(
         "repeatable-quest",
         ("pmc",),
         "/characters/{character}/RepeatableQuests",
         _repeatable_quest_finder,
+        _repeatable_quest_remover,
     ),
     _Category(
         "task-counter",
         CHARACTERS,
         "/characters/{character}/TaskConditionCounters",
         _task_counter_finder,
+        _task_counter_remover,
     ),
     _Category(
         "hideout-production",
         CHARACTERS,
         "/characters/{character}/Hideout/Production",
         _hideout_production_finder,
+        _hideout_production_remover,
     ),
     _Category(
         "hideout-area",
         CHARACTERS,
         "/characters/{character}/Hideout/Areas",
         _hideout_area_finder,
+        _hideout_area_remover,
     ),
     _Category(
         "unlocked-recipe",
         CHARACTERS,
         "/characters/{character}/UnlockedInfo/unlockedProductionRecipe",
         _unlocked_recipe_finder,
+        _unlocked_recipe_remover,
     ),
     _Category(
         "insured-item",
         CHARACTERS,
         "/characters/{character}/InsuredItems",
         _insured_item_finder,
+        _insured_item_remover,
     ),
     _Category(
         "achievement",
         ("pmc",),
         "/characters/{character}/Achievements",
         _achievement_finder,
+        _achievement_remover,
     ),
-    _Category("insurance", ("",), "/insurance", _insurance_finder),
-    _Category("dialogue", ("",), "/dialogues", _dialogue_finder),
-    _Category("userbuild", ("",), "/userbuilds", _userbuild_finder),
+    _Category("insurance", ("",), "/insurance", _insurance_finder, _insurance_remover),
+    _Category("dialogue", ("",), "/dialogues", _dialogue_finder, _dialogue_remover),
+    _Category("userbuild", ("",), "/userbuilds", _userbuild_finder, _userbuild_remover),
 )
 
 

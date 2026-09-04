@@ -157,6 +157,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan_profile_cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Profile Cleanup */
+        post: operations["plan_profile_cleanup_api_plan_profile_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clean_profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clean Profile */
+        post: operations["clean_profile_api_clean_profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/history": {
         parameters: {
             query?: never;
@@ -720,6 +754,87 @@ export interface components {
             names?: string[] | null;
             /** Db Path */
             db_path?: string | null;
+        };
+        /**
+         * CleanProfileRequest
+         * @description Parameters of ``clean_profile``.
+         */
+        CleanProfileRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Mod Name */
+            mod_name: string;
+            /** Profiles */
+            profiles?: string[] | null;
+        };
+        /**
+         * CleanupPlan
+         * @description What cleaning the profiles of one mod would remove.
+         */
+        CleanupPlan: {
+            /** Mod */
+            mod: string;
+            /**
+             * Profiles
+             * @default []
+             */
+            profiles: string[];
+            /**
+             * Removals
+             * @default []
+             */
+            removals: components["schemas"]["ProfileResidue"][];
+            /**
+             * Untouched
+             * @default []
+             */
+            untouched: components["schemas"]["UntouchedResidue"][];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /**
+         * CleanupResult
+         * @description Outcome of ``clean_profile``.
+         */
+        CleanupResult: {
+            /** Mod */
+            mod: string;
+            /**
+             * Profiles
+             * @default []
+             */
+            profiles: string[];
+            /**
+             * Backups
+             * @default []
+             */
+            backups: string[];
+            /**
+             * Removed
+             * @default []
+             */
+            removed: components["schemas"]["ProfileResidue"][];
+            /**
+             * Untouched
+             * @default []
+             */
+            untouched: components["schemas"]["UntouchedResidue"][];
+            /**
+             * Snapshot
+             * @default
+             */
+            snapshot: string;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /**
          * ClearCacheResult
@@ -1460,6 +1575,19 @@ export interface components {
             db_path?: string | null;
         };
         /**
+         * PlanProfileCleanupRequest
+         * @description Parameters of ``plan_profile_cleanup``.
+         */
+        PlanProfileCleanupRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Mod Name */
+            mod_name: string;
+        };
+        /**
          * ProfileResidue
          * @description IDs of one mod that one player profile still references.
          */
@@ -1513,6 +1641,11 @@ export interface components {
              * @default false
              */
             force: boolean;
+            /**
+             * Clean Profiles
+             * @default false
+             */
+            clean_profiles: boolean;
         };
         /**
          * RemoveResult
@@ -1533,6 +1666,7 @@ export interface components {
              * @default []
              */
             warnings: string[];
+            cleanup?: components["schemas"]["CleanupResult"] | null;
         };
         /** @enum {string} */
         ResidueCategory: "item" | "encyclopedia" | "wishlist" | "trader" | "trader-purchase" | "quest" | "repeatable-quest" | "task-counter" | "hideout-production" | "hideout-area" | "unlocked-recipe" | "insured-item" | "achievement" | "insurance" | "dialogue" | "userbuild" | "string";
@@ -1725,6 +1859,15 @@ export interface components {
              * @default
              */
             notice: string;
+        };
+        /**
+         * UntouchedResidue
+         * @description Residue a profile cleanup leaves in place, and why it does.
+         */
+        UntouchedResidue: {
+            residue: components["schemas"]["ProfileResidue"];
+            /** Reason */
+            reason: string;
         };
         /**
          * UpdateCandidate
@@ -2140,6 +2283,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_profile_cleanup_api_plan_profile_cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanProfileCleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CleanupPlan"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    clean_profile_api_clean_profile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CleanupResult"];
                 };
             };
             /** @description Default Response */

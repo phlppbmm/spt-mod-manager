@@ -48,8 +48,8 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_twenty_eight_entries() -> None:
-    assert len(RPC_FUNCTIONS) == 28
+def test_rpc_functions_has_exactly_thirty_entries() -> None:
+    assert len(RPC_FUNCTIONS) == 30
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
@@ -115,6 +115,9 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (services.SnapshotResult, schemas.SnapshotResult),
     (services.ImportEntry, schemas.ImportEntry),
     (services.ImportDiff, schemas.ImportDiff),
+    (services.CleanupPlan, schemas.CleanupPlan),
+    (services.CleanupResult, schemas.CleanupResult),
+    (services.UntouchedResidue, schemas.UntouchedResidue),
 ]
 
 

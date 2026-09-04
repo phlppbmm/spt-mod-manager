@@ -95,6 +95,16 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.CheckProfilesRequest,
         schemas.CheckResult,
     ),
+    "plan_profile_cleanup": RpcSpec(
+        services.plan_profile_cleanup,
+        schemas.PlanProfileCleanupRequest,
+        schemas.CleanupPlan,
+    ),
+    "clean_profile": RpcSpec(
+        services.clean_profile,
+        schemas.CleanProfileRequest,
+        schemas.CleanupResult,
+    ),
     "history": RpcSpec(
         services.history,
         schemas.HistoryRequest,

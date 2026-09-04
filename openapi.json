@@ -360,6 +360,82 @@
         }
       }
     },
+    "/api/plan_profile_cleanup": {
+      "post": {
+        "summary": "Plan Profile Cleanup",
+        "operationId": "plan_profile_cleanup_api_plan_profile_cleanup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanProfileCleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupPlan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/clean_profile": {
+      "post": {
+        "summary": "Clean Profile",
+        "operationId": "clean_profile_api_clean_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/history": {
       "post": {
         "summary": "History",
@@ -1672,6 +1748,146 @@
           "path"
         ],
         "title": "CheckUpdatesRequest",
+        "type": "object"
+      },
+      "CleanProfileRequest": {
+        "description": "Parameters of ``clean_profile``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "mod_name": {
+            "title": "Mod Name",
+            "type": "string"
+          },
+          "profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profiles"
+          }
+        },
+        "required": [
+          "path",
+          "mod_name"
+        ],
+        "title": "CleanProfileRequest",
+        "type": "object"
+      },
+      "CleanupPlan": {
+        "description": "What cleaning the profiles of one mod would remove.",
+        "properties": {
+          "mod": {
+            "title": "Mod",
+            "type": "string"
+          },
+          "profiles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "removals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProfileResidue"
+            },
+            "title": "Removals",
+            "type": "array"
+          },
+          "untouched": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UntouchedResidue"
+            },
+            "title": "Untouched",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mod"
+        ],
+        "title": "CleanupPlan",
+        "type": "object"
+      },
+      "CleanupResult": {
+        "description": "Outcome of ``clean_profile``.",
+        "properties": {
+          "mod": {
+            "title": "Mod",
+            "type": "string"
+          },
+          "profiles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "backups": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Backups",
+            "type": "array"
+          },
+          "removed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProfileResidue"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "untouched": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UntouchedResidue"
+            },
+            "title": "Untouched",
+            "type": "array"
+          },
+          "snapshot": {
+            "default": "",
+            "title": "Snapshot",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mod"
+        ],
+        "title": "CleanupResult",
         "type": "object"
       },
       "ClearCacheResult": {
@@ -3074,6 +3290,26 @@
         "title": "PlanModInstallRequest",
         "type": "object"
       },
+      "PlanProfileCleanupRequest": {
+        "description": "Parameters of ``plan_profile_cleanup``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "mod_name": {
+            "title": "Mod Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "mod_name"
+        ],
+        "title": "PlanProfileCleanupRequest",
+        "type": "object"
+      },
       "ProfileResidue": {
         "description": "IDs of one mod that one player profile still references.",
         "properties": {
@@ -3160,6 +3396,11 @@
             "default": false,
             "title": "Force",
             "type": "boolean"
+          },
+          "clean_profiles": {
+            "default": false,
+            "title": "Clean Profiles",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3196,6 +3437,16 @@
             },
             "title": "Warnings",
             "type": "array"
+          },
+          "cleanup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CleanupResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3571,6 +3822,24 @@
           "state"
         ],
         "title": "ToggleResult",
+        "type": "object"
+      },
+      "UntouchedResidue": {
+        "description": "Residue a profile cleanup leaves in place, and why it does.",
+        "properties": {
+          "residue": {
+            "$ref": "#/components/schemas/ProfileResidue"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "residue",
+          "reason"
+        ],
+        "title": "UntouchedResidue",
         "type": "object"
       },
       "UpdateCandidate": {

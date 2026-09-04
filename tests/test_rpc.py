@@ -29,6 +29,7 @@ from sptmod.core.errors import (
     DependencyError,
     ForgeApiError,
     GitError,
+    InvalidPathError,
     PartialInstallError,
     ProfileResidueError,
     UnresolvableDependencyError,
@@ -717,6 +718,104 @@ def test_check_profiles_reports_no_residue_for_a_db_free_mod(
 
     assert exit_code == 0
     assert lines[0]["data"] == {"residues": {}, "warnings": []}
+
+
+def test_plan_profile_cleanup_reports_removals_through_rpc(
+    clean_repo: Repo, install_commit
+) -> None:
+    item_id = "5c0d1b8b86f7744bb2683cf7"
+    install_commit(
+        clean_repo,
+        "ServerMod",
+        mod_type="server",
+        files={
+            "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps(
+                {item_id: {"_id": item_id, "_name": "item"}}
+            )
+        },
+    )
+    profile = {
+        "characters": {
+            "pmc": {
+                "Inventory": {
+                    "items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]
+                },
+                "TradersInfo": {},
+                "Quests": [],
+            }
+        }
+    }
+    profile_relpath = Path("SPT/user/profiles/abc.json")
+    (clean_repo.path / profile_relpath).write_text(
+        json.dumps(profile), encoding="utf-8"
+    )
+    clean_repo.commit("chore: profile snapshot", paths=[profile_relpath])
+
+    exit_code, lines = _invoke(
+        "plan_profile_cleanup",
+        {"path": str(clean_repo.path), "mod_name": "ServerMod"},
+    )
+
+    assert exit_code == 0
+    data = lines[0]["data"]
+    assert data["mod"] == "ServerMod"
+    assert data["profiles"] == ["abc"]
+    assert [r["category"] for r in data["removals"]] == ["item"]
+
+
+def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
+    clean_repo: Repo, install_commit
+) -> None:
+    item_id = "5c0d1b8b86f7744bb2683cf8"
+    install_commit(
+        clean_repo,
+        "ServerMod",
+        mod_type="server",
+        files={
+            "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps(
+                {item_id: {"_id": item_id, "_name": "item"}}
+            )
+        },
+    )
+    profile = {
+        "characters": {
+            "pmc": {
+                "Inventory": {
+                    "items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]
+                },
+                "TradersInfo": {},
+                "Quests": [],
+            }
+        }
+    }
+    profile_relpath = Path("SPT/user/profiles/abc.json")
+    profile_path = clean_repo.path / profile_relpath
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    clean_repo.commit("chore: profile snapshot", paths=[profile_relpath])
+
+    exit_code, lines = _invoke(
+        "clean_profile", {"path": str(clean_repo.path), "mod_name": "ServerMod"}
+    )
+
+    assert exit_code == 0
+    data = lines[0]["data"]
+    assert data["profiles"] == ["abc"]
+    assert data["snapshot"] != ""
+    cleaned = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert cleaned["characters"]["pmc"]["Inventory"]["items"] == []
+
+
+def test_clean_profile_maps_invalid_path_error_to_the_invalid_path_code(
+    inject_error: Callable[[str, Exception], None],
+) -> None:
+    inject_error("clean_profile", InvalidPathError("no such profile"))
+
+    exit_code, lines = _invoke(
+        "clean_profile", {"path": "/whatever", "mod_name": "ServerMod"}
+    )
+
+    assert exit_code == 1
+    assert lines[0]["data"]["code"] == "INVALID_PATH"
 
 
 def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:

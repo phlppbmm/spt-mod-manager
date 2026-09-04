@@ -1,3 +1,7 @@
+<script module lang="ts">
+	const autoSynced = new Set<string>();
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
@@ -14,6 +18,7 @@
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
 	import { bannerText, isGameUp, nextPollDelay } from '$lib/launch';
 	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
+	import { cached } from '$lib/viewcache';
 
 	type Phase = 'checking' | 'setup' | 'ready' | 'unreachable';
 
@@ -51,21 +56,34 @@
 	}
 
 	async function detect(): Promise<void> {
-		phase = 'checking';
 		error = '';
 		const stored = loadGameDir();
 		if (stored === null) {
 			phase = 'setup';
 			return;
 		}
-		try {
-			await status(stored);
+		const view = cached(stored, 'status', [], () => status(stored));
+		if (view.value !== undefined) {
 			path = stored;
 			phase = 'ready';
 			void pollGameStatus(stored);
-			// Keep the catalog fresh on every app start; delta syncs are cheap
-			// and the list refreshes when it finishes.
-			void sync();
+			void view.refresh().catch((cause: unknown) => {
+				if (cause instanceof ApiError && cause.code === 'NOT_A_GAME_DIR') {
+					clearTimeout(pollTimer);
+					forgetGameDir();
+					phase = 'setup';
+				}
+			});
+			autoSync(stored);
+			return;
+		}
+		phase = 'checking';
+		try {
+			await view.refresh();
+			path = stored;
+			phase = 'ready';
+			void pollGameStatus(stored);
+			autoSync(stored);
 		} catch (cause) {
 			if (cause instanceof ApiError && cause.code === 'NOT_A_GAME_DIR') {
 				forgetGameDir();
@@ -78,12 +96,22 @@
 		}
 	}
 
+	// Keep the catalog fresh once per game directory and app session; delta
+	// syncs are cheap, but a sync on every tab switch is not.
+	function autoSync(gameDir: string): void {
+		if (autoSynced.has(gameDir)) {
+			return;
+		}
+		autoSynced.add(gameDir);
+		void sync();
+	}
+
 	function onReady(gameDir: string): void {
 		saveGameDir(gameDir);
 		path = gameDir;
 		phase = 'ready';
 		void pollGameStatus(gameDir);
-		void sync();
+		autoSync(gameDir);
 	}
 
 	function syncSummary(result: SyncCatalogResponse): string {

@@ -250,36 +250,42 @@
 		{#each groups as group (group.profile.file)}
 			{@const action = launchAction(gameStatus, group.profile.profile_id, launching !== '')}
 			<article class="profile">
-				<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
-				<p class="meta">
-					{#if group.profile.level > 0}<span>Level {group.profile.level}</span>{/if}
-					{#if group.profile.side !== ''}<span>{group.profile.side}</span>{/if}
-					<span>{group.profile.file}</span>
-					{#if group.profile.modified !== ''}
-						<span>Last changed {lastChanged(group.profile.modified)}</span>
+				<div class="header">
+					<div class="identity">
+						<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
+						<p class="meta">
+							{#if group.profile.level > 0}<span>Level {group.profile.level}</span>{/if}
+							{#if group.profile.side !== ''}<span>{group.profile.side}</span>{/if}
+							<span>{group.profile.file}</span>
+							{#if group.profile.modified !== ''}
+								<span>Last changed {lastChanged(group.profile.modified)}</span>
+							{/if}
+						</p>
+					</div>
+
+					{#if group.profile.readable}
+						<div class="launch">
+							<button
+								type="button"
+								disabled={action.disabled}
+								onclick={() =>
+									action.mode === 'stop'
+										? (stopTarget = group.profile.profile_id)
+										: void play(group.profile.profile_id)}
+							>
+								{action.label}
+							</button>
+							{#if launching === group.profile.profile_id && launchProgress !== null}
+								<span class="note">{launchProgress.message}</span>
+							{:else if action.hint !== ''}
+								<span class="note">{action.hint}</span>
+							{/if}
+						</div>
 					{/if}
-				</p>
+				</div>
 
 				{#if !group.profile.readable}
 					<p class="error">{group.profile.error}</p>
-				{:else}
-					<div class="launch">
-						<button
-							type="button"
-							disabled={action.disabled}
-							onclick={() =>
-								action.mode === 'stop'
-									? (stopTarget = group.profile.profile_id)
-									: void play(group.profile.profile_id)}
-						>
-							{action.label}
-						</button>
-						{#if launching === group.profile.profile_id && launchProgress !== null}
-							<span class="note">{launchProgress.message}</span>
-						{:else if action.hint !== ''}
-							<span class="note">{action.hint}</span>
-						{/if}
-					</div>
 				{/if}
 
 				{#if group.profile.readable}
@@ -446,11 +452,24 @@
 		margin: 0.9rem 0 0.4rem;
 	}
 
-	.launch {
+	.header {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
-		margin: 0.7rem 0 0;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.identity {
+		min-width: 0;
+	}
+
+	.launch {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.3rem;
+		flex-shrink: 0;
+		text-align: right;
 	}
 
 	.snapshot {

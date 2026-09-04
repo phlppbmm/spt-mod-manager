@@ -212,9 +212,10 @@ export function updateMod(
 }
 
 export function checkUpdates(path: string, names: string[] = []): Promise<UpdatesReport> {
+	// An empty list would mean "check nothing"; omitting it checks every mod.
 	return call<UpdatesReport>('check_updates', {
 		path,
-		names
+		names: names.length > 0 ? names : null
 	} satisfies Schemas['CheckUpdatesRequest']);
 }
 

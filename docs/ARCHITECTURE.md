@@ -77,7 +77,8 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/api/transport.ts   uses Tauri `invoke()` and `listen()` (not fetch)
   src/lib/api/types.ts       GENERATED from openapi.json — never hand-edit
   src/lib/api/client.ts      typed wrappers per RPC function
-  src/lib/modfilter.ts       pure tab/search/sort logic (unit-tested)
+  src/lib/modfilter.ts       filter and sort predicates; schema for chips, categories
+  src/lib/filterstate.ts     module-scope filter state (survives route nav, not restart)
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog
   src/routes/                / (setup or mods), /history, /profile, /settings
 docs/HANDOFF.md         product specification (English; History lists changes)
@@ -346,14 +347,19 @@ download cache.
   `current_page >= last_page`), envelope/error mapping, streaming with
   `follow_redirects=True` (download links 307-redirect to CDNs/GitHub).
 - Catalog cache: SQLite in the platformdirs config dir (never the game dir).
-  Schema evolution = `_MOD_COLUMN_MIGRATIONS` ALTER list applied on open;
-  the cache is disposable. Cached per mod: thumbnail, teaser, favourites,
-  endorsements, category title, license name+link, source links (JSON
-  column), fika/featured/ads/AI flags, the reduced description plus the
-  `updated_at` it was fetched for. Delta sync via
-  `filter[updated_between]` (one-day overlap, idempotent upserts); a FULL
-  sync prunes rows the API no longer returns — but never on an empty
-  response. Unicode-correct casefold search; `%`/`_` literal.
+  Schema evolution = `_MOD_COLUMN_MIGRATIONS` (mods) + `_VERSION_COLUMN_MIGRATIONS`
+  (versions) ALTER lists applied on open; the cache is disposable. Cached per
+  mod: thumbnail, teaser, favourites, endorsements, category title, license
+  name+link, source links (JSON column), featured/ads/AI flags, the reduced
+  description plus the `updated_at` it was fetched for, and `first_seen_at`
+  (UTC ISO-8601 Z, stamped on first insert, preserved across upserts, NULL for
+  pre-column rows = never "new"). Per version: `fika_compatibility` (nullable;
+  `compatible|incompatible|unknown`), filled only by `fetch_versions` (include=versions
+  summaries carry none; `_merge_version` preserves stored values). Delta sync
+  via `filter[updated_between]` (one-day overlap, idempotent upserts); a FULL
+  sync prunes rows the API no longer returns — but never on an empty response.
+  `DATA_VERSION` stays "2" (no resync forced). Unicode-correct casefold search;
+  `%`/`_` literal. Both `CatalogMod` and `CatalogVersion` schemas expose all fields.
 - Compatibility filter: an EMPTY `spt_version_constraint` counts as
   INCOMPATIBLE (old hub imports would otherwise flood the filter — 749 false
   positives measured). Install-time §6 checks stay tolerant (warning).
@@ -517,14 +523,21 @@ default true, passed as a parameter to each launch call).
   via Tauri plugin → name+fingerprint → `locate_directory` search; fallback
   `list_directories` browser; text input always works. `ALREADY_INITIALIZED`
   proceeds straight in.
-- Mods view: three tabs + search + compatible-only (default ON, filter logic
-  pure in modfilter.ts), sortable column headers, thumbnails/teaser, install
-  plan confirmation (mod + deps + sizes), RPC progress via Tauri event listener,
+- Mods view: filter bar of AND-combined toggle chips (New = first_seen_at
+  within 14 days; Featured; Installed includes disabled; Favorited; Update
+  available; Disabled; Compatible with SPT version client-side over unfiltered
+  browse call; Fika compatible per-version flag or mod-level fallback; Client/
+  Server/Hybrid mod types from installed mod metadata; category dropdown;
+  text search client-side; sort; "Clear filters"), counts show leave-one-out.
+  Filter state in module (survives route nav, not app restart); default
+  compatible-only. Sortable column headers, thumbnails/teaser, install plan
+  confirmation (mod + deps + sizes), RPC progress via Tauri event listener,
   force-retry dialogs rendering conflicts/residues/partial installs. Rows linked
   to installed mods BY FORGE ID first (trailer name ≠ catalog display name!),
   name fallback; all actions use the installed trailer name.
 - Detail dialog (click the mod name): stats, category/flag tags, license and
-  source links, dates, description, version table.
+  source links, dates, description, version table with per-version Fika
+  compatibility (compatible/incompatible shown as tags).
 - Settings page: export/import mod list, catalog cache management (two actions:
   clear cache alone, or clear cache + remove downloaded mod files).
 
@@ -535,12 +548,11 @@ behavior-focused; do not weaken them to make an implementation fit.
 
 ### Suite sizes and coverage
 
-- **Python:** 1194 collected (1193 passed, 1 skipped); `uv run pytest --cov`
-  enforces 100% coverage (line and branch) on `src/sptmod` (coverage config in
-  pyproject.toml). Run `uv run pytest` without --cov for development (no speed
-  penalty, coverage excluded from default pytest addopts so single-file runs
-  stay usable).
-- **Frontend:** 136 vitest cases in 5 files; `cd frontend && pnpm vitest run
+- **Python:** 1521 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+  coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
+  Run `uv run pytest` without --cov for development (no speed penalty, coverage
+  excluded from default pytest addopts so single-file runs stay usable).
+- **Frontend:** 269 vitest tests in 9 files; `cd frontend && pnpm vitest run
   --coverage` enforces 100% statements/branches/functions/lines on `src/lib/**/*.ts`
   (minus `*.test.ts` and generated `api/types.ts`; v8 provider). Coverage directory
   ignored in git.

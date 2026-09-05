@@ -173,5 +173,3 @@ __all__ = [
     "sync_catalog",
     "update_mod",
 ]
-
-

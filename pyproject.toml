@@ -30,6 +30,7 @@ testpaths = ["tests"]
 timeout = 5
 
 [tool.ruff]
+line-length = 119
 target-version = "py312"
 src = ["src", "tests"]
 
@@ -131,6 +132,7 @@ max-returns = 10              # (9)
 min-public-methods = 0        # frozen dataclasses have none
 
 [tool.pylint.format]
+max-line-length = 119
 max-module-lines = 4000       # (services.py 3480)
 
 [dependency-groups]

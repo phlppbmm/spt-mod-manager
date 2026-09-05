@@ -740,10 +740,7 @@ def init_game_dir(
                 paths=baseline,
             )
             pre_existing = _mod_entries(untracked, layout)
-            if isinstance(adopt, bool):
-                selected = pre_existing if adopt else []
-            else:
-                selected = list(adopt)
+            selected = (pre_existing if adopt else []) if isinstance(adopt, bool) else list(adopt)
             adopted = [_adopt_mod(path, entry).mod for entry in selected]
         except Exception:
             if created:

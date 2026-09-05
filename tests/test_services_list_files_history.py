@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import game_dir, services
 from sptmod.core.errors import AmbiguousModError, ModNotFoundError
+from sptmod.core.models import ACTIVE_STATES
 from sptmod.core.repo import Repo
 
 
@@ -25,7 +27,7 @@ def test_list_mods_on_a_fresh_repo_returns_no_mods(clean_repo: Repo) -> None:
 
 
 def test_install_revert_reinstall_sequence_is_reflected_by_list_and_history(
-    clean_repo: Repo, make_archive
+    clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
     first_archive = make_archive(
         {
@@ -62,7 +64,7 @@ def test_install_revert_reinstall_sequence_is_reflected_by_list_and_history(
 
 
 def test_list_mods_default_returns_only_active_mods(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", minute=1)
     disable_target = install_commit(clean_repo, "ModB", minute=2)
@@ -76,11 +78,11 @@ def test_list_mods_default_returns_only_active_mods(
     names = {mod.name for mod in result}
     assert names == {"ModA", "ModC"}
     for mod in result:
-        assert mod.state in services.ACTIVE_STATES
+        assert mod.state in ACTIVE_STATES
 
 
 def test_list_mods_include_all_also_returns_disabled_and_removed(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", minute=1)
     disable_target = install_commit(clean_repo, "ModB", minute=2)
@@ -101,7 +103,7 @@ def test_list_mods_include_all_also_returns_disabled_and_removed(
 
 
 def test_list_mods_excludes_a_mod_trailer_with_no_descriptive_commit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """A ``Mod`` trailer only ever exists with the full trailer set on a real
     install commit; a history written by hand can carry a bare ``Mod``
@@ -126,7 +128,7 @@ def test_list_mods_excludes_a_mod_trailer_with_no_descriptive_commit(
 
 
 def test_list_mods_reflects_the_youngest_commit_of_each_mod(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(
@@ -141,7 +143,7 @@ def test_list_mods_reflects_the_youngest_commit_of_each_mod(
 
 
 def test_mod_files_returns_the_files_of_the_active_mods_install_commit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -162,7 +164,7 @@ def test_mod_files_returns_the_files_of_the_active_mods_install_commit(
 
 
 def test_mod_files_matches_case_insensitively(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "a-content"}
@@ -181,7 +183,7 @@ def test_mod_files_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> No
 
 
 def test_mod_files_raises_ambiguous_mod_error_for_case_variant_names(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
@@ -193,7 +195,7 @@ def test_mod_files_raises_ambiguous_mod_error_for_case_variant_names(
 
 
 def test_history_without_name_returns_all_commits_newest_first(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     baseline_hash = clean_repo.log()[0].hash
     first_hash = install_commit(clean_repo, "ModA", minute=1)
@@ -209,7 +211,7 @@ def test_history_without_name_returns_all_commits_newest_first(
 
 
 def test_history_filtered_by_name_returns_only_that_mods_commits(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     first_hash = install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(clean_repo, "ModB", minute=2)
@@ -223,7 +225,7 @@ def test_history_filtered_by_name_returns_only_that_mods_commits(
 
 
 def test_history_name_filter_matches_case_insensitively(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     commit_hash = install_commit(clean_repo, "ModA", minute=1)
 
@@ -238,7 +240,7 @@ def test_history_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None
 
 
 def test_history_raises_ambiguous_mod_error_for_case_variant_names(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)

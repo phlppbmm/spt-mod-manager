@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from sptmod.core import services
+from sptmod.core.errors import InvalidPathError
 
 
 @pytest.fixture
@@ -71,7 +72,7 @@ def test_list_directories_parent_is_none_at_the_filesystem_root() -> None:
 def test_list_directories_raises_invalid_path_error_for_a_nonexistent_path(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(services.InvalidPathError):
+    with pytest.raises(InvalidPathError):
         services.list_directories(str(tmp_path / "does-not-exist"))
 
 
@@ -81,7 +82,7 @@ def test_list_directories_raises_invalid_path_error_for_a_file(
     a_file = tmp_path / "not-a-directory.txt"
     a_file.write_text("content", encoding="utf-8")
 
-    with pytest.raises(services.InvalidPathError):
+    with pytest.raises(InvalidPathError):
         services.list_directories(str(a_file))
 
 
@@ -92,7 +93,7 @@ def test_list_directories_raises_invalid_path_error_for_permission_denied(
     unreadable.mkdir()
     os.chmod(unreadable, 0o000)
     try:
-        with pytest.raises(services.InvalidPathError):
+        with pytest.raises(InvalidPathError):
             services.list_directories(str(unreadable))
     finally:
         os.chmod(unreadable, 0o755)
@@ -151,7 +152,7 @@ def test_locate_directory_returns_an_empty_list_when_nothing_matches(
 def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator() -> (
     None
 ):
-    with pytest.raises(services.InvalidPathError):
+    with pytest.raises(InvalidPathError):
         services.locate_directory("a/b", [])
 
 

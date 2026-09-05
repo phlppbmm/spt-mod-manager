@@ -22,11 +22,15 @@ import json
 
 import pytest
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import game_dir, services
 from sptmod.core.errors import ConflictError, DependencyError
 from sptmod.core.repo import Repo
 
-_BLOCKING_ERRORS = (ConflictError, DependencyError)
+_BLOCKING_ERRORS: tuple[type[ConflictError | DependencyError], ...] = (
+    ConflictError,
+    DependencyError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +39,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_tracked_file_conflict_aborts_install_and_names_owning_mod(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -58,7 +62,7 @@ def test_tracked_file_conflict_aborts_install_and_names_owning_mod(
 
 
 def test_tracked_file_conflict_with_force_proceeds_and_reports_warning(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -80,7 +84,7 @@ def test_tracked_file_conflict_with_force_proceeds_and_reports_warning(
 
 
 def test_dll_duplicate_across_mod_folders_is_a_warning_and_install_proceeds(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -103,7 +107,7 @@ def test_dll_duplicate_across_mod_folders_is_a_warning_and_install_proceeds(
 
 
 def test_missing_and_out_of_range_dependency_abort_listing_all_offenders(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -143,7 +147,7 @@ def test_missing_and_out_of_range_dependency_abort_listing_all_offenders(
 
 
 def test_missing_and_out_of_range_dependency_with_force_proceeds(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -182,7 +186,7 @@ def test_missing_and_out_of_range_dependency_with_force_proceeds(
 
 
 def test_tracked_file_and_missing_dependency_both_block_and_are_both_reported(
-    clean_repo: Repo, install_commit, make_archive
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
     install_commit(
         clean_repo,
@@ -216,7 +220,7 @@ def test_tracked_file_and_missing_dependency_both_block_and_are_both_reported(
 
 
 def test_spt_version_mismatch_is_a_warning_and_install_proceeds(
-    clean_repo: Repo, make_archive
+    clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
     # fake_game_dir's SPT/SPT_Data/configs/core.json reports sptVersion 4.1.0.
     archive = make_archive(

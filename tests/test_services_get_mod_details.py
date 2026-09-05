@@ -7,6 +7,7 @@ than the stored text. An unreachable Forge degrades to the stored description
 or an empty one, unless nothing is cached at all, in which case it raises.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -101,7 +102,7 @@ def _seed(
 
 def test_get_mod_details_strips_html_and_fetches_missing_version_links(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If get_mod_details' body is `pass`, this fails: returns None instead of
@@ -140,7 +141,7 @@ def test_get_mod_details_strips_html_and_fetches_missing_version_links(
 @pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])
 def test_get_mod_details_skips_refetching_versions_that_already_have_a_link(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     use_client: bool,
 ) -> None:
@@ -183,7 +184,7 @@ def test_get_mod_details_skips_refetching_versions_that_already_have_a_link(
 
 def test_get_mod_details_owned_client_fetches_missing_version_links(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """Same as the injected-client happy path, but exercised through the
@@ -220,7 +221,7 @@ def test_get_mod_details_owned_client_fetches_missing_version_links(
 
 def test_get_mod_details_degrades_to_cached_data_when_forge_is_unreachable(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If the except ForgeUnavailableError branch were removed, this fails:
@@ -238,7 +239,7 @@ def test_get_mod_details_degrades_to_cached_data_when_forge_is_unreachable(
 
 def test_get_mod_details_reraises_when_nothing_is_cached_and_forge_is_unreachable(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If `if cached is None: raise` were dropped, this fails: a ModDetails
@@ -282,7 +283,7 @@ def _versions_route(
 @pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])
 def test_get_mod_details_serves_the_stored_description_without_a_request(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     use_client: bool,
 ) -> None:
@@ -307,7 +308,7 @@ def test_get_mod_details_serves_the_stored_description_without_a_request(
 
 def test_get_mod_details_refetches_once_after_a_sync_changed_the_mod(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If the stored stamp were ignored, this fails: the description would
@@ -332,7 +333,7 @@ def test_get_mod_details_refetches_once_after_a_sync_changed_the_mod(
 
 def test_get_mod_details_refetches_only_versions_while_the_description_stands(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If the stored description were not reused, this fails: fetching the
@@ -353,7 +354,7 @@ def test_get_mod_details_refetches_only_versions_while_the_description_stands(
 
 def test_get_mod_details_falls_back_to_the_stored_description_when_forge_is_down(
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If the fallback ignored the catalog, this fails: an outdated stamp plus

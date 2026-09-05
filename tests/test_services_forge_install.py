@@ -9,6 +9,7 @@ with ``apply=True`` and the ``content`` parameter, and
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,12 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, JsonDict, MakeArchive
 from sptmod.cli import app as cli_app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import ArchiveError, ConflictError, NotAGameDirError
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, NoCompatibleVersionError
-from sptmod.core.forge.client import DEFAULT_BASE_URL
+from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 from sptmod.core.forge.download import CACHE_HIT_MESSAGE
 from sptmod.core.models import PlanEntry
 from sptmod.core.repo import Repo
@@ -55,6 +57,21 @@ SPT_CONSTRAINT = "^4.0.0"
 cli_runner = CliRunner()
 
 
+def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
+    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
+
+    The trailer names contain hyphens, so they can only be passed as keyword
+    overrides through ``**``. The return type is ``dict[str, Any]`` on
+    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
+    rejected by both type checkers because of its non-``str`` ``files`` and
+    ``minute`` parameters.
+    """
+    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
+    if version_id is not None:
+        trailers["Mod-Forge-Version-Id"] = version_id
+    return trailers
+
+
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the OS-process check so a real SPT session on the test host
@@ -81,7 +98,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 
 def _seed_target(
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
     *,
@@ -91,7 +108,7 @@ def _seed_target(
     version_id: int,
     link: str,
     content_length: int,
-):
+) -> ForgeClient:
     """Sync one mod into the catalog and fill in its version's link/content_length.
 
     Mirrors ``_seed_target`` of ``test_forge_resolve.py``: a plain ``sync``
@@ -143,7 +160,7 @@ def _seed_target(
 
 
 def _seed_target_without_fetch_versions(
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
     *,
@@ -153,7 +170,7 @@ def _seed_target_without_fetch_versions(
     version_id: int,
     link: str,
     content_length: int,
-):
+) -> ForgeClient:
     """Sync one mod but stop short of ``fetch_versions``.
 
     The cached version stays a summary with ``link=None`` and no
@@ -244,7 +261,9 @@ def _dep_node(
     }
 
 
-def _package_archive(make_archive, folder: str, name: str, version: str) -> Path:
+def _package_archive(
+    make_archive: MakeArchive, folder: str, name: str, version: str
+) -> Path:
     return make_archive(
         {
             f"SPT/user/mods/{folder}/package.json": json.dumps(
@@ -299,7 +318,10 @@ def _seed_download_cache_entry(
 
 
 def test_plan_mod_install_orders_dependency_before_the_requested_mod(
-    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
 ) -> None:
     """If plan_mod_install's body is `pass`, this fails: returns None instead
     of an InstallPlan with the dependency ordered before the target."""
@@ -358,7 +380,10 @@ def test_plan_mod_install_orders_dependency_before_the_requested_mod(
 
 
 def test_plan_mod_install_resolves_a_link_missing_from_a_sync_only_catalog(
-    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
 ) -> None:
     """``sync`` alone caches only the version *summary* (no link); the plan
     must still carry a usable download link -- the service must call
@@ -387,10 +412,10 @@ def test_plan_mod_install_resolves_a_link_missing_from_a_sync_only_catalog(
 
 def test_install_mod_succeeds_when_the_catalog_was_only_synced(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     archive = _package_archive(make_archive, "LinkMod", "Link Mod", "1.0.0")
     link = "https://dl.example/link-mod-1.0.0.zip"
@@ -419,7 +444,7 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
 
 def test_install_mod_raises_archive_error_when_forge_no_longer_lists_the_version(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
 ) -> None:
@@ -468,10 +493,10 @@ def test_install_mod_raises_archive_error_when_forge_no_longer_lists_the_version
 
 def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     """Regression for the WTT - Content Backport bug: a Forge download link
     whose final path segment is a bare version number -- no file extension,
@@ -510,7 +535,7 @@ def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
 
 
 def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
-    clean_repo: Repo, client_factory, db_path: Path
+    clean_repo: Repo, client_factory: Callable[..., ForgeClient], db_path: Path
 ) -> None:
     """If plan_mod_install's body is `pass`, this fails: no exception raised
     for a mod absent from the (empty) catalog."""
@@ -523,7 +548,7 @@ def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
 
 
 def test_plan_mod_install_raises_not_a_game_dir_when_spt_version_unknown(
-    clean_repo: Repo, client_factory, db_path: Path
+    clean_repo: Repo, client_factory: Callable[..., ForgeClient], db_path: Path
 ) -> None:
     """If plan_mod_install's body is `pass`, this fails: no exception raised
     when the game dir's core.json carries no readable SPT version."""
@@ -543,10 +568,10 @@ def test_plan_mod_install_raises_not_a_game_dir_when_spt_version_unknown(
 
 def test_install_mod_installs_missing_dependency_as_its_own_commit_before_the_target(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     """If install_mod's body is `pass`, this fails: no commits are created and
     the returned result is None instead of an InstallModResult."""
@@ -608,10 +633,10 @@ def test_install_mod_installs_missing_dependency_as_its_own_commit_before_the_ta
 
 def test_install_mod_writes_the_plan_version_when_the_archive_carries_none(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     """A bare-DLL client archive carries no embedded version
     (``meta_from_dll`` leaves it empty). The commit's ``Mod-Version`` must
@@ -647,10 +672,10 @@ def test_install_mod_writes_the_plan_version_when_the_archive_carries_none(
 
 def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     archive = make_archive({"BepInEx/plugins/VersionlessMod.dll": b"dll-bytes"}, "zip")
     body = archive.read_bytes()
@@ -697,11 +722,11 @@ def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
 
 def test_install_mod_aborts_on_a_file_conflict_without_force(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
-    install_commit,
+    make_archive: MakeArchive,
+    install_commit: InstallCommit,
 ) -> None:
     """If install_mod's body is `pass`, this fails: no ConflictError is raised
     and the file-conflict check is never reached."""
@@ -740,11 +765,11 @@ def test_install_mod_aborts_on_a_file_conflict_without_force(
 
 def test_install_mod_force_downgrades_the_conflict_and_installs(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
-    install_commit,
+    make_archive: MakeArchive,
+    install_commit: InstallCommit,
 ) -> None:
     """If install_mod does not forward force= to install_from_archive, this
     fails: the conflicting file blocks the install even with force=True."""
@@ -782,10 +807,10 @@ def test_install_mod_force_downgrades_the_conflict_and_installs(
 
 
 def _partial_failure_scenario(
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     *,
     mod_id: int,
     dep_id: int,
@@ -831,10 +856,10 @@ def _partial_failure_scenario(
 
 def test_install_mod_partial_failure_raises_partial_install_error_keeping_dep_commit(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     """If install_mod's partial-failure path is unimplemented, this fails:
     either no PartialInstallError is raised, or it lacks .installed/.cause,
@@ -862,10 +887,10 @@ def test_install_mod_partial_failure_raises_partial_install_error_keeping_dep_co
 
 def test_cli_install_prints_mods_installed_before_a_partial_failure(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Distinguishes a deliberate partial-install summary from ordinary
@@ -894,7 +919,10 @@ def test_cli_install_prints_mods_installed_before_a_partial_failure(
 
 
 def _seed_simple_catalog(
-    client_factory, respx_router: respx.MockRouter, db_path: Path, mods: list[dict]
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    mods: list[JsonDict],
 ) -> None:
     page = page_envelope(
         mods, current_page=1, last_page=1, total=len(mods), next_url=None
@@ -906,8 +934,11 @@ def _seed_simple_catalog(
 
 
 def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
-    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path,
-    make_archive,
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive: MakeArchive,
 ) -> None:
     _seed_simple_catalog(
         client_factory,
@@ -942,8 +973,11 @@ def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
 
 
 def test_install_from_archive_forge_match_leaves_ids_empty_when_the_version_is_unknown(
-    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path,
-    make_archive,
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive: MakeArchive,
 ) -> None:
     """One mod matches the name unambiguously, but the installed archive's
     version has no matching cached version at all: `_catalog_match`'s `if
@@ -983,8 +1017,11 @@ def test_install_from_archive_forge_match_leaves_ids_empty_when_the_version_is_u
 
 
 def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
-    clean_repo: Repo, client_factory, respx_router: respx.MockRouter, db_path: Path,
-    make_archive,
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    make_archive: MakeArchive,
 ) -> None:
     _seed_simple_catalog(
         client_factory,
@@ -1034,7 +1071,7 @@ def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
 
 
 def test_install_from_archive_forge_match_leaves_ids_empty_when_no_match(
-    clean_repo: Repo, db_path: Path, make_archive
+    clean_repo: Repo, db_path: Path, make_archive: MakeArchive
 ) -> None:
     # db_path points at a file that has never been created: the catalog cache
     # does not exist yet, which install_from_archive's docstring says makes
@@ -1054,10 +1091,10 @@ def test_install_from_archive_forge_match_leaves_ids_empty_when_no_match(
 
 def test_import_list_apply_installs_exactly_the_missing_mods(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     tmp_path: Path,
 ) -> None:
     """If import_list's apply path is `pass`/unimplemented, this fails: the
@@ -1198,10 +1235,10 @@ def test_clear_catalog_cache_without_downloads_leaves_cached_archives_in_place(
 
 def test_reinstalling_a_removed_mod_reuses_the_cached_archive_and_skips_the_download(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1252,10 +1289,10 @@ def test_reinstalling_a_removed_mod_reuses_the_cached_archive_and_skips_the_down
 
 def test_install_mod_redownloads_when_the_cached_archive_size_does_not_match(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1351,11 +1388,11 @@ def _mock_updates_single(
 
 def test_update_mod_to_a_cached_version_skips_the_download(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1374,7 +1411,7 @@ def test_update_mod_to_a_cached_version_skips_the_download(
                 {"name": "UpdateCacheMod", "version": "1.0.0", "author": "Acme"}
             )
         },
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -1413,11 +1450,11 @@ def test_update_mod_to_a_cached_version_skips_the_download(
 
 def test_update_mod_to_an_uncached_version_downloads_once_and_caches_it(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1436,7 +1473,7 @@ def test_update_mod_to_an_uncached_version_downloads_once_and_caches_it(
                 {"name": "FreshCacheMod", "version": "1.0.0", "author": "Acme"}
             )
         },
-        **{"Mod-Forge-Id": "11", "Mod-Forge-Version-Id": "110"},
+        **_forge_trailers("11", "110"),
     )
     new_archive = make_archive(
         {
@@ -1477,10 +1514,10 @@ def test_update_mod_to_an_uncached_version_downloads_once_and_caches_it(
 
 def test_install_mod_leaves_no_leftover_staging_directories(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1516,10 +1553,10 @@ def test_install_mod_leaves_no_leftover_staging_directories(
 
 def test_no_download_progress_message_during_a_cache_hit_mentions_git_vocabulary(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

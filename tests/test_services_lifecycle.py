@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit
 from sptmod.cli import app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
@@ -43,7 +44,9 @@ def _clean_repo(path: Path) -> Repo:
 # --- disable_mod -----------------------------------------------------------
 
 
-def test_disable_mod_removes_the_mods_files(clean_repo: Repo, install_commit) -> None:
+def test_disable_mod_removes_the_mods_files(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     services.disable_mod(clean_repo.path, "ModA")
@@ -52,7 +55,7 @@ def test_disable_mod_removes_the_mods_files(clean_repo: Repo, install_commit) ->
 
 
 def test_disable_mod_revert_commit_carries_disabled_trailers(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
 
@@ -64,7 +67,7 @@ def test_disable_mod_revert_commit_carries_disabled_trailers(
 
 
 def test_disable_mod_removes_mod_from_default_list_but_keeps_it_in_all(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
 
@@ -79,7 +82,7 @@ def test_disable_mod_removes_mod_from_default_list_but_keeps_it_in_all(
 
 
 def test_disabling_twice_is_a_no_op_with_a_notice_and_no_new_commit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
     services.disable_mod(clean_repo.path, "ModA")
@@ -100,7 +103,7 @@ def test_disable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> 
 
 
 def test_disable_mod_conflict_with_an_unowned_later_change_names_no_mod(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """A conflicting path whose last-touching commit carries no ``Mod``
     trailer (a manual/foreign commit, unlike another mod's install commit)
@@ -129,7 +132,7 @@ def test_disable_mod_conflict_with_an_unowned_later_change_names_no_mod(
 
 
 def test_disable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1
@@ -155,7 +158,7 @@ def test_disable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
 
 
 def test_enable_mod_restores_the_files_with_original_content(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "original-bytes"}
@@ -170,7 +173,7 @@ def test_enable_mod_restores_the_files_with_original_content(
 
 
 def test_enable_mod_commit_carries_enabled_trailers_and_mod_is_active_again(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
     services.disable_mod(clean_repo.path, "ModA")
@@ -190,7 +193,7 @@ def test_enable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> N
 
 
 def test_enabling_an_active_mod_is_a_no_op_with_a_notice(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
     commits_before = [c.hash for c in clean_repo.log()]
@@ -205,7 +208,7 @@ def test_enabling_an_active_mod_is_a_no_op_with_a_notice(
 
 
 def test_enable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """Mirrors the disable_mod/remove_mod conflict tests: enabling a mod
     whose install commit's cherry-pick collides with a file a later mod now
@@ -235,7 +238,7 @@ def test_enable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
 
 
 def test_enable_mod_conflict_with_no_conflicting_paths_still_raises_plainly(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """A cherry-pick can fail with *no* merge conflict at all: here the
     working tree already has byte-identical content (restored by an
@@ -340,7 +343,7 @@ def test_adopt_mod_works_on_a_dirty_tree(clean_repo: Repo) -> None:
 
 
 def test_adopt_mod_raises_conflict_error_for_an_already_tracked_folder(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -414,7 +417,7 @@ def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_the_game_dir
 
 
 def test_adopt_mod_of_a_partially_tracked_folder_raises_conflict(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -472,7 +475,7 @@ def test_init_adopt_explicit_sequence_adopts_only_the_selected_mods(
 
 
 def test_snapshot_commits_only_profile_and_config_changes(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "v1"})
     config_file = clean_repo.path / "BepInEx/config/mod.cfg"
@@ -517,7 +520,7 @@ def test_snapshot_raises_git_error_when_nothing_changed(clean_repo: Repo) -> Non
 
 
 def test_cli_disable_then_enable_roundtrip(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")

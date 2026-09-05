@@ -7,12 +7,14 @@ commands built on top of them.
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit
 from sptmod.cli import EXIT_CODES, app
 from sptmod.core import services
 from sptmod.core.errors import CatalogUnavailableError, ForgeUnavailableError
@@ -94,6 +96,21 @@ def _seed(
         cat.sync(client, full=True)
 
 
+def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
+    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
+
+    The trailer names contain hyphens, so they can only be passed as keyword
+    overrides through ``**``. The return type is ``dict[str, Any]`` on
+    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
+    rejected by both type checkers because of its non-``str`` ``files`` and
+    ``minute`` parameters.
+    """
+    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
+    if version_id is not None:
+        trailers["Mod-Forge-Version-Id"] = version_id
+    return trailers
+
+
 @pytest.fixture
 def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point ``default_db_path()`` at an isolated location for CLI tests.
@@ -117,7 +134,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 def test_sync_catalog_syncs_via_the_injected_client_into_the_injected_db(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If sync_catalog's body is `pass`, this fails: result is None, not a
@@ -143,7 +160,7 @@ def test_sync_catalog_syncs_via_the_injected_client_into_the_injected_db(
 def test_sync_catalog_raises_forge_unavailable_on_a_network_error(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If sync_catalog's body is `pass`, this fails: no exception is raised."""
@@ -161,9 +178,9 @@ def test_sync_catalog_raises_forge_unavailable_on_a_network_error(
 def test_search_catalog_classifies_installed_and_available_mods(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If search_catalog's body is `pass`, this fails: returns None instead of
     an entry list with the joined installed state."""
@@ -179,7 +196,7 @@ def test_search_catalog_classifies_installed_and_available_mods(
         ],
     )
     install_commit(
-        repo, "Alpha Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
 
     results = services.search_catalog(fake_game_dir, "", db_path=db_path)
@@ -194,7 +211,7 @@ def test_search_catalog_classifies_installed_and_available_mods(
 def test_search_catalog_matches_query_against_name_and_author(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If search_catalog's body is `pass`, this fails: returns None instead of
@@ -219,7 +236,7 @@ def test_search_catalog_matches_query_against_name_and_author(
 def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If search_catalog's body is `pass`, this fails: Beta Mod (^3.8.0, not
@@ -249,9 +266,9 @@ def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
 def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: returns None instead of
     both cached mods ordered by name."""
@@ -267,7 +284,7 @@ def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
         ],
     )
     install_commit(
-        repo, "Alpha Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
 
     results = services.browse_catalog(fake_game_dir, "all", db_path=db_path)
@@ -278,9 +295,9 @@ def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
 def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: Beta Mod (never
     installed) would not be excluded from the "installed" filter."""
@@ -298,7 +315,7 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
         ],
     )
     install_commit(
-        repo, "Alpha Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
     install_commit(
         repo,
@@ -306,7 +323,7 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
         "1.0.0",
         mod_type="server",
         minute=2,
-        **{"Mod-Forge-Id": "3"},
+        **_forge_trailers("3"),
     )
 
     results = services.browse_catalog(fake_game_dir, "installed", db_path=db_path)
@@ -318,9 +335,9 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
 def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: the installed Alpha Mod
     would not be excluded from the "available" filter."""
@@ -336,7 +353,7 @@ def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
         ],
     )
     install_commit(
-        repo, "Alpha Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
 
     results = services.browse_catalog(fake_game_dir, "available", db_path=db_path)
@@ -347,7 +364,7 @@ def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
 def test_browse_catalog_compatible_only_drops_incompatible_mods(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: Beta Mod (^3.8.0) would
@@ -374,7 +391,7 @@ def test_browse_catalog_compatible_only_drops_incompatible_mods(
 def test_browse_catalog_hides_versions_that_are_not_installable(
     fake_game_dir: Path,
     db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
 ) -> None:
     """Without compatible_only, Beta Mod stays in the list, but its only
@@ -428,7 +445,7 @@ def test_cli_search_and_browse_render_after_a_sync(
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
     monkeypatch: pytest.MonkeyPatch,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If the search/browse handlers are `pass`, this fails: neither table
     would contain the synced and installed mod's name."""
@@ -440,7 +457,7 @@ def test_cli_search_and_browse_render_after_a_sync(
     sync_result = runner.invoke(app, ["sync"])
     assert sync_result.exit_code == 0
     install_commit(
-        repo, "Cool Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        repo, "Cool Mod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
 
     search_result = runner.invoke(app, ["search", "cool"])
@@ -496,6 +513,19 @@ def test_cli_sync_maps_forge_unavailable_to_its_own_exit_code(
 # error, not a raw crash (spt-mod-manager-r3a).
 
 
+class _ClosedClient(ForgeClient):
+    """A ``ForgeClient`` whose HTTP transport is closed on construction.
+
+    ``sync_catalog`` must fail on the unwritable catalog directory long
+    before it uses the client, so a closed one is enough here -- and it
+    guarantees that no request can escape to the real Forge.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.close()
+
+
 def _blocked_db_path(tmp_path: Path) -> Path:
     """A ``db_path`` whose parent cannot be created: a file sits in its place."""
     blocked = tmp_path / "blocked-config-dir"
@@ -515,9 +545,11 @@ def _blocked_db_path(tmp_path: Path) -> Path:
             id="browse_catalog",
         ),
         pytest.param(
-            # A dummy client is enough: Catalog(db_path) must fail before the
-            # client is ever used to talk to Forge.
-            lambda path, db: services.sync_catalog(path, db_path=db, client=object()),
+            # A closed client is enough: Catalog(db_path) must fail before
+            # the client is ever used to talk to Forge.
+            lambda path, db: services.sync_catalog(
+                path, db_path=db, client=_ClosedClient()
+            ),
             id="sync_catalog",
         ),
     ],

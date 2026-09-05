@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, JsonDict
 from sptmod.cli import app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import ProfileResidueError
@@ -33,7 +34,7 @@ def _clean_repo(path: Path) -> Repo:
     return repo
 
 
-def _profile_with_item(item_id: str) -> dict:
+def _profile_with_item(item_id: str) -> JsonDict:
     return {
         "characters": {
             "pmc": {
@@ -71,7 +72,7 @@ def _commit_profile_with_item(repo: Repo, item_id: str) -> Path:
 
 
 def _install_server_mod_with_item(
-    clean_repo: Repo, install_commit, item_id: str
+    clean_repo: Repo, install_commit: InstallCommit, item_id: str
 ) -> None:
     install_commit(
         clean_repo,
@@ -90,13 +91,13 @@ def _install_server_mod_with_item(
 # --------------------------------------------------------------------------
 
 
-def _write_profile_file(profiles_dir: Path, name: str, document: dict) -> Path:
+def _write_profile_file(profiles_dir: Path, name: str, document: JsonDict) -> Path:
     target = profiles_dir / name
     target.write_text(json.dumps(document), encoding="utf-8")
     return target
 
 
-def _character(nickname: str, level: int, side: str) -> dict:
+def _character(nickname: str, level: int, side: str) -> JsonDict:
     return {
         "characters": {
             "pmc": {
@@ -208,7 +209,7 @@ def test_list_profiles_reads_the_profiles_of_the_spt_runtime_layout(
 
 
 def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_path(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf9"
     trader_id = "5ac3b934136fb568fa78b1e9"
@@ -263,7 +264,7 @@ def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_p
 
 
 def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references_it(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf1"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
@@ -278,7 +279,7 @@ def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references
 
 
 def test_remove_mod_leaves_the_mod_installed_when_it_raises_profile_residue_error(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf2"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
@@ -292,7 +293,7 @@ def test_remove_mod_leaves_the_mod_installed_when_it_raises_profile_residue_erro
 
 
 def test_remove_mod_force_reverts_and_leaves_the_profile_file_byte_identical(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf3"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
@@ -309,7 +310,7 @@ def test_remove_mod_force_reverts_and_leaves_the_profile_file_byte_identical(
 
 
 def test_remove_mod_without_db_dir_proceeds_without_a_residue_error(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"}
@@ -321,7 +322,7 @@ def test_remove_mod_without_db_dir_proceeds_without_a_residue_error(
 
 
 def test_remove_mod_result_warnings_include_broken_db_json_entries(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     trader_id = "5ac3b934136fb568fa78b1e2"
     install_commit(
@@ -360,7 +361,7 @@ def test_cli_check_exits_zero_when_no_profile_has_residue(
 
 
 def test_cli_check_exits_zero_and_reports_residues_when_found(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf4"
@@ -382,7 +383,7 @@ def test_cli_check_exits_zero_and_reports_residues_when_found(
 
 
 def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf5"
@@ -397,7 +398,7 @@ def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
 
 
 def test_cli_remove_with_force_succeeds_despite_profile_residue(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf6"
@@ -412,7 +413,7 @@ def test_cli_remove_with_force_succeeds_despite_profile_residue(
 
 
 def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf7"
@@ -428,7 +429,7 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
 
 
 def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf9"
@@ -443,7 +444,7 @@ def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
 
 
 def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_count(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     # item_id sits only in raw text (e.g. a note field), never in a
     # structured container: sptmod can only find it via the string
@@ -477,7 +478,7 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
 
 
 def test_cli_remove_prints_a_warning_line_for_broken_db_json(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     trader_id = "5ac3b934136fb568fa78b1e2"

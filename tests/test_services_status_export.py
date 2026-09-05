@@ -10,6 +10,7 @@ through Typer's ``CliRunner``.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -17,9 +18,11 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app
 from sptmod.core import game_dir, services
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
+from sptmod.core.forge.client import ForgeClient
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
@@ -97,7 +100,7 @@ def test_status_groups_modified_config(clean_repo: Repo) -> None:
 
 
 def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "v1"})
     (clean_repo.path / "BepInEx/plugins/ModA.dll").write_text("v2", encoding="utf-8")
@@ -145,7 +148,7 @@ def test_status_groups_a_loose_untracked_dll_as_a_manual_mod_by_itself(
 
 
 def test_export_text_lists_name_version_ordered_by_name(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "Zeta", version="1.0.0", mod_type="client", minute=1)
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="client", minute=2)
@@ -159,7 +162,7 @@ def test_export_text_lists_name_version_ordered_by_name(
 
 
 def test_export_json_structure(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="server")
 
@@ -174,7 +177,7 @@ def test_export_json_structure(
 
 
 def test_export_client_only_keeps_client_and_hybrid_mods(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ServerOnly", mod_type="server", minute=1)
     install_commit(clean_repo, "ClientOnly", mod_type="client", minute=2)
@@ -192,7 +195,7 @@ def test_export_client_only_keeps_client_and_hybrid_mods(
 
 
 def _seed_catalog_mod(
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
     *,
@@ -216,8 +219,8 @@ def _seed_catalog_mod(
 
 def test_export_includes_the_catalog_link_when_the_db_has_a_match(
     clean_repo: Repo,
-    install_commit,
-    client_factory,
+    install_commit: InstallCommit,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     tmp_path: Path,
 ) -> None:
@@ -239,8 +242,8 @@ def test_export_includes_the_catalog_link_when_the_db_has_a_match(
 
 def test_export_skips_a_cached_catalog_mod_that_is_not_installed(
     clean_repo: Repo,
-    install_commit,
-    client_factory,
+    install_commit: InstallCommit,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     tmp_path: Path,
 ) -> None:
@@ -287,7 +290,7 @@ def test_export_skips_a_cached_catalog_mod_that_is_not_installed(
 
 
 def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     """The catalog-link lookup opens the cache DB whose parent directory it
     creates on the fly (``Catalog.__init__``); when that directory cannot be
@@ -312,7 +315,7 @@ def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
 
 
 def test_import_diff_reports_missing_different_and_extra(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(clean_repo, "ModB", version="2.0.0", minute=2)
@@ -337,7 +340,7 @@ def test_import_diff_reports_missing_different_and_extra(
 
 
 def test_import_matches_names_case_insensitively(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0")
     list_file = tmp_path / "wanted.txt"
@@ -349,7 +352,7 @@ def test_import_matches_names_case_insensitively(
 
 
 def test_import_json_format_is_recognised_by_content_not_extension(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0")
     list_file = tmp_path / "wanted.txt"  # ".txt" extension, JSON content
@@ -419,7 +422,9 @@ def test_import_raises_invalid_metadata_for_a_mod_entry_missing_name_or_version(
         )
 
 
-def test_import_text_format_skips_blank_lines(clean_repo: Repo, install_commit) -> None:
+def test_import_text_format_skips_blank_lines(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0")
 
     diff = services.import_list(
@@ -439,7 +444,7 @@ def test_import_raises_invalid_metadata_for_a_text_line_with_no_version(
 
 
 def test_export_import_text_roundtrip(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.txt"
@@ -456,7 +461,7 @@ def test_export_import_text_roundtrip(
 
 
 def test_export_import_json_roundtrip(
-    clean_repo: Repo, install_commit, tmp_path: Path
+    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.json"
@@ -494,7 +499,7 @@ def test_cli_status_shows_adopt_hint_for_a_manual_mod(
 
 
 def test_cli_export_json_happy_path(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -509,10 +514,10 @@ def test_cli_export_json_happy_path(
 def test_cli_import_apply_installs_the_missing_mod_via_the_mocked_forge_path(
     fake_game_dir: Path,
     isolated_default_db_path: Path,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     monkeypatch: pytest.MonkeyPatch,
-    make_archive,
+    make_archive: MakeArchive,
     tmp_path: Path,
 ) -> None:
     _clean_repo(fake_game_dir)

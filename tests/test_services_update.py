@@ -8,13 +8,16 @@ and its no-op behaviour for blocked, incompatible or absent updates.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, JsonDict, MakeArchive
 from sptmod.cli import app as cli_app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
@@ -25,6 +28,7 @@ from sptmod.core.errors import (
     ModNotFoundError,
 )
 from sptmod.core.forge.catalog import DB_FILE_NAME
+from sptmod.core.forge.client import ForgeClient
 from sptmod.core.repo import Repo
 from test_forge_catalog_fixtures import (
     client_factory,
@@ -40,6 +44,21 @@ __all__ = ["client_factory", "db_path", "fake_clock", "recording_sleep", "respx_
 SPT_VERSION = "4.1.0"
 
 cli_runner = CliRunner()
+
+
+def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
+    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
+
+    The trailer names contain hyphens, so they can only be passed as keyword
+    overrides through ``**``. The return type is ``dict[str, Any]`` on
+    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
+    rejected by both type checkers because of its non-``str`` ``files`` and
+    ``minute`` parameters.
+    """
+    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
+    if version_id is not None:
+        trailers["Mod-Forge-Version-Id"] = version_id
+    return trailers
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +86,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     return config_dir / DB_FILE_NAME
 
 
-def _mock_updates(respx_router: respx.MockRouter, data: dict) -> None:
+def _mock_updates(respx_router: respx.MockRouter, data: JsonDict) -> None:
     respx_router.get("/mods/updates").mock(
         return_value=httpx.Response(200, json=success_envelope(data))
     )
@@ -75,7 +94,7 @@ def _mock_updates(respx_router: respx.MockRouter, data: dict) -> None:
 
 def _current_version(
     *, id: int, mod_id: int, name: str, version: str, slug: str | None = None
-) -> dict:
+) -> JsonDict:
     return {
         "id": id,
         "mod_id": mod_id,
@@ -91,10 +110,10 @@ def _current_version(
 
 def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """If check_updates's body is `pass`, this fails: returns None instead of
     an UpdatesReport with the mods sorted into their four buckets."""
@@ -103,7 +122,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "Available Mod",
         "1.0.0",
         mod_type="server",
-        **{"Mod-Forge-Id": "10"},
+        **_forge_trailers("10"),
     )
     install_commit(
         clean_repo,
@@ -111,7 +130,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "1.5.0",
         mod_type="server",
         minute=2,
-        **{"Mod-Forge-Id": "20"},
+        **_forge_trailers("20"),
     )
     install_commit(
         clean_repo,
@@ -119,7 +138,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "2.0.0",
         mod_type="server",
         minute=3,
-        **{"Mod-Forge-Id": "40"},
+        **_forge_trailers("40"),
     )
     install_commit(
         clean_repo,
@@ -127,7 +146,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "0.9.0",
         mod_type="server",
         minute=4,
-        **{"Mod-Forge-Id": "30"},
+        **_forge_trailers("30"),
     )
     install_commit(
         clean_repo,
@@ -135,7 +154,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "1.0.0",
         mod_type="server",
         minute=5,
-        **{"Mod-Forge-Id": ""},
+        **_forge_trailers(""),
     )
     _mock_updates(
         respx_router,
@@ -251,7 +270,10 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
 
 
 def test_check_updates_unknown_name_raises_mod_not_found(
-    clean_repo: Repo, client_factory, db_path: Path, install_commit
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    db_path: Path,
+    install_commit: InstallCommit,
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server")
     client = client_factory()
@@ -263,10 +285,13 @@ def test_check_updates_unknown_name_raises_mod_not_found(
 
 
 def test_check_updates_ambiguous_name_raises_ambiguous_mod(
-    clean_repo: Repo, client_factory, db_path: Path, install_commit
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    db_path: Path,
+    install_commit: InstallCommit,
 ) -> None:
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
     install_commit(
         clean_repo,
@@ -274,7 +299,7 @@ def test_check_updates_ambiguous_name_raises_ambiguous_mod(
         "2.0.0",
         mod_type="server",
         minute=2,
-        **{"Mod-Forge-Id": "2"},
+        **_forge_trailers("2"),
     )
     client = client_factory()
 
@@ -289,11 +314,11 @@ def test_check_updates_ambiguous_name_raises_ambiguous_mod(
 
 def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
 ) -> None:
     """If update_mod's body is `pass`, this fails: no commit is created and
     the returned result is None instead of an UpdateResult."""
@@ -309,7 +334,7 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
             "SPT/user/mods/CoolMod/old_only.txt": "old text",
             "BepInEx/config/CoolMod.cfg": "user settings",
         },
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -396,9 +421,9 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
 
 def test_update_mod_with_a_foreign_untracked_mod_folder_raises_dirty_tree_error(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     db_path: Path,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """§4b requires a clean tree before update, same as install: a manually
     copied mod folder nothing manages must abort with DirtyTreeError."""
@@ -412,7 +437,7 @@ def test_update_mod_with_a_foreign_untracked_mod_folder_raises_dirty_tree_error(
                 {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
             )
         },
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     foreign = clean_repo.path / "SPT/user/mods/Foreign/x.txt"
     foreign.parent.mkdir(parents=True)
@@ -429,11 +454,11 @@ def test_update_mod_with_a_foreign_untracked_mod_folder_raises_dirty_tree_error(
 
 def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
 ) -> None:
     """A mod writing its own settings file into its folder must not turn its
     update into a dirty-tree error, and the file must survive untouched."""
@@ -448,7 +473,7 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
             ),
             "SPT/user/mods/CoolMod/old_only.txt": "old text",
         },
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     runtime_file = clean_repo.path / "SPT/user/mods/CoolMod/new_file.txt"
     runtime_file.write_text("written while playing", encoding="utf-8")
@@ -588,13 +613,13 @@ def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
     mod_version: str,
     payload: dict[str, object],
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     install_commit(
-        clean_repo, "CoolMod", mod_version, mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", mod_version, mod_type="server", **_forge_trailers("10")
     )
     _mock_updates(respx_router, payload)
     client = client_factory()
@@ -612,7 +637,7 @@ def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
 
 
 def test_update_mod_unknown_name_raises_mod_not_found(
-    clean_repo: Repo, client_factory, db_path: Path
+    clean_repo: Repo, client_factory: Callable[..., ForgeClient], db_path: Path
 ) -> None:
     client = client_factory()
 
@@ -624,17 +649,17 @@ def test_update_mod_unknown_name_raises_mod_not_found(
 
 def test_update_mod_absent_from_every_report_list_is_a_noop_with_generic_notice(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     """Forge's four update-report lists can all omit a queried mod (an odd
     but possible server response); update_mod must still no-op instead of
     crashing, with the generic fallback notice. If _no_update_notice's final
     `return` were changed to return "", this fails."""
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
     _mock_updates(
         respx_router,
@@ -687,11 +712,11 @@ def _mock_update_recommendation(
 
 def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
 ) -> None:
     """Mirrors install_from_archive's tracked-file conflict, but for a file
     the *new* version of the mod being updated wants to write. If `if files:
@@ -704,7 +729,7 @@ def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
         mod_type="server",
         files={"SPT/user/mods/Shared/data.txt": "modb-content"},
         minute=1,
-        **{"Mod-Forge-Id": "20"},
+        **_forge_trailers("20"),
     )
     install_commit(
         clean_repo,
@@ -717,7 +742,7 @@ def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
             )
         },
         minute=2,
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -752,11 +777,11 @@ def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
 
 def test_update_mod_missing_dependency_aborts_without_committing(
     clean_repo: Repo,
-    client_factory,
+    client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
 ) -> None:
     """If `if blocking: raise DependencyError(...)` in _check_update_conflicts
     were removed, this fails: the update with an unmet dependency would
@@ -771,7 +796,7 @@ def test_update_mod_missing_dependency_aborts_without_committing(
                 {"name": "ModA", "version": "1.0.0"}
             )
         },
-        **{"Mod-Forge-Id": "10", "Mod-Forge-Version-Id": "100"},
+        **_forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -810,7 +835,7 @@ def test_update_mod_missing_dependency_aborts_without_committing(
 # --- CLI: update confirmation --------------------------------------------
 
 
-def _available_update_data(link: str, content_length: int) -> dict:
+def _available_update_data(link: str, content_length: int) -> JsonDict:
     return {
         "spt_version": SPT_VERSION,
         "updates": [
@@ -843,11 +868,11 @@ def test_cli_update_check_never_prompts(
     clean_repo: Repo,
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
     _mock_updates(
         respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1)
@@ -866,13 +891,13 @@ def test_cli_update_without_yes_prompts_and_cancels_on_no(
     clean_repo: Repo,
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: InstallCommit,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If update never prompts before applying, this fails: the update is
     applied anyway even though the simulated user answered 'n'."""
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
     _mock_updates(
         respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1)
@@ -890,12 +915,12 @@ def test_cli_update_without_yes_prompts_and_applies_on_yes(
     clean_repo: Repo,
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
     new_archive = make_archive(
         {
@@ -926,15 +951,15 @@ def test_cli_update_yes_flag_applies_without_prompting(
     clean_repo: Repo,
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
-    install_commit,
-    make_archive,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If --yes does not exist yet or does not skip the prompt, this fails:
     either Typer rejects the unknown option, or empty stdin makes the prompt
     hit EOF and abort instead of applying."""
     install_commit(
-        clean_repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
+        clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
     new_archive = make_archive(
         {

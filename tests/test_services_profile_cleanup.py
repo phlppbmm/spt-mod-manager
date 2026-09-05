@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from fixture_types import InstallCommit, JsonDict
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
     AmbiguousModError,
@@ -56,7 +57,9 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
-def _install_mod(repo: Repo, install_commit, name: str = MOD_NAME, minute: int = 1):
+def _install_mod(
+    repo: Repo, install_commit: InstallCommit, name: str = MOD_NAME, minute: int = 1
+) -> str:
     """Install a server mod that provides every content ID used above."""
     return install_commit(
         repo,
@@ -89,7 +92,7 @@ def _install_mod(repo: Repo, install_commit, name: str = MOD_NAME, minute: int =
     )
 
 
-def _write_profile(repo: Repo, stem: str, data: dict) -> Path:
+def _write_profile(repo: Repo, stem: str, data: JsonDict) -> Path:
     """Write a profile document and commit it, keeping the tree clean."""
     relpath = Path(f"SPT/user/profiles/{stem}.json")
     profile_path = repo.path / relpath
@@ -98,7 +101,7 @@ def _write_profile(repo: Repo, stem: str, data: dict) -> Path:
     return profile_path
 
 
-def _character(name: str, *, achievements: bool, repeatable: bool) -> dict:
+def _character(name: str, *, achievements: bool, repeatable: bool) -> JsonDict:
     """Build one character with mixed mod/unrelated entries in every container."""
     root_id = f"{name}-root"
     container_id = f"{name}-container"
@@ -107,7 +110,7 @@ def _character(name: str, *, achievements: bool, repeatable: bool) -> dict:
     unrelated_id = f"{name}-unrelated"
     naked_slot_item = f"{name}-naked-slot-item"
 
-    data: dict = {
+    data: JsonDict = {
         "Inventory": {
             "items": [
                 {"_id": root_id, "_tpl": OTHER_ITEM_ID, "slotId": "stash"},
@@ -215,7 +218,7 @@ def _character(name: str, *, achievements: bool, repeatable: bool) -> dict:
     return data
 
 
-def _full_profile() -> dict:
+def _full_profile() -> JsonDict:
     """A profile document with mixed mod/unrelated content in every container
     the cleanup knows, on both characters and the shared top-level sections.
     """
@@ -282,7 +285,7 @@ def _full_profile() -> dict:
 
 
 def test_plan_profile_cleanup_does_not_modify_the_profile_repo_or_history(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
@@ -303,7 +306,7 @@ def test_plan_profile_cleanup_does_not_modify_the_profile_repo_or_history(
 
 
 def test_plan_and_apply_report_identical_removals_for_the_same_input(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -316,7 +319,7 @@ def test_plan_and_apply_report_identical_removals_for_the_same_input(
 
 
 def test_plan_profile_cleanup_works_for_an_already_removed_mod(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -329,7 +332,7 @@ def test_plan_profile_cleanup_works_for_an_already_removed_mod(
 
 
 def test_plan_profile_cleanup_skips_an_unreadable_profile_and_warns(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     broken_relpath = Path("SPT/user/profiles/broken.json")
@@ -345,7 +348,7 @@ def test_plan_profile_cleanup_skips_an_unreadable_profile_and_warns(
 
 
 def test_plan_profile_cleanup_only_lists_profiles_that_have_a_hit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "hit", _full_profile())
@@ -368,7 +371,7 @@ def test_plan_profile_cleanup_raises_mod_not_found_for_unknown_name(
 
 
 def test_plan_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
@@ -383,7 +386,7 @@ def test_plan_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
 
 
 def test_clean_profile_removes_every_category_hit_and_keeps_unrelated_ids(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     original = _full_profile()
@@ -492,7 +495,7 @@ def test_clean_profile_removes_every_category_hit_and_keeps_unrelated_ids(
 
 
 def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     untouched_profile = {
@@ -522,7 +525,7 @@ def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup
 
 
 def test_clean_profile_writes_compact_json_and_preserves_key_order_and_non_ascii(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     original = _full_profile()
@@ -545,7 +548,7 @@ def test_clean_profile_writes_compact_json_and_preserves_key_order_and_non_ascii
 
 
 def test_clean_profile_writes_a_backup_with_the_pre_clean_bytes_within_a_utc_window(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
@@ -572,7 +575,7 @@ def test_clean_profile_writes_a_backup_with_the_pre_clean_bytes_within_a_utc_win
 
 
 def test_clean_profile_snapshot_has_no_mod_trailer_and_leaves_the_tree_clean(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -587,7 +590,7 @@ def test_clean_profile_snapshot_has_no_mod_trailer_and_leaves_the_tree_clean(
 
 
 def test_clean_profile_secures_a_dirty_profile_with_an_automatic_snapshot_first(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile_path = clean_repo.path / "SPT/user/profiles/abc.json"
@@ -609,7 +612,7 @@ def test_clean_profile_secures_a_dirty_profile_with_an_automatic_snapshot_first(
 
 
 def test_clean_profile_profiles_param_restricts_cleaning_to_the_named_stem(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -623,7 +626,7 @@ def test_clean_profile_profiles_param_restricts_cleaning_to_the_named_stem(
 
 
 def test_clean_profile_raises_invalid_path_error_for_an_unknown_profile_stem(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -633,7 +636,7 @@ def test_clean_profile_raises_invalid_path_error_for_an_unknown_profile_stem(
 
 
 def test_clean_profile_skips_an_unreadable_profile_and_warns(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     good_path = _write_profile(clean_repo, "abc", _full_profile())
@@ -652,7 +655,7 @@ def test_clean_profile_skips_an_unreadable_profile_and_warns(
 
 
 def test_clean_profile_raises_game_running_error_while_the_game_runs(
-    clean_repo: Repo, install_commit, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -672,7 +675,7 @@ def test_clean_profile_raises_mod_not_found_for_unknown_name(
 
 
 def test_clean_profile_raises_ambiguous_mod_error_for_case_variants(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
@@ -682,7 +685,7 @@ def test_clean_profile_raises_ambiguous_mod_error_for_case_variants(
 
 
 def test_clean_profile_write_failure_surfaces_as_sptmod_error(
-    clean_repo: Repo, install_commit, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
@@ -702,7 +705,7 @@ def test_clean_profile_write_failure_surfaces_as_sptmod_error(
 
 
 def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
-    clean_repo: Repo, install_commit, monkeypatch: pytest.MonkeyPatch
+    clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -711,7 +714,9 @@ def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
 
     real_replace = os.replace
 
-    def _selective_raise(source: object, target: object) -> None:
+    def _selective_raise(
+        source: str | os.PathLike[str], target: str | os.PathLike[str]
+    ) -> None:
         if str(target).endswith("xyz.json"):
             raise OSError("disk full")
         real_replace(source, target)
@@ -736,7 +741,7 @@ def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
 
 
 def test_remove_mod_default_clean_profiles_false_leaves_cleanup_none(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA")
 
@@ -746,7 +751,7 @@ def test_remove_mod_default_clean_profiles_false_leaves_cleanup_none(
 
 
 def test_remove_mod_clean_profiles_true_cleans_before_reverting_in_history_order(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
@@ -769,7 +774,7 @@ def test_remove_mod_clean_profiles_true_cleans_before_reverting_in_history_order
 
 
 def test_remove_mod_clean_profiles_true_skips_the_residue_guard_without_force(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile = _full_profile()
@@ -790,7 +795,7 @@ def test_remove_mod_clean_profiles_true_skips_the_residue_guard_without_force(
 
 
 def test_remove_mod_clean_profiles_true_merges_cleanup_warnings(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     broken_relpath = Path("SPT/user/profiles/broken.json")
@@ -812,7 +817,7 @@ def test_remove_mod_clean_profiles_true_merges_cleanup_warnings(
 
 
 def test_clean_profile_tolerates_malformed_entries_mixed_with_real_hits(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     _install_mod(clean_repo, install_commit)
     profile = {

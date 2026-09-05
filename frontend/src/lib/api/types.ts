@@ -1868,7 +1868,11 @@ export interface components {
             warnings: string[];
             cleanup?: components["schemas"]["CleanupResult"] | null;
         };
-        /** @enum {string} */
+        /**
+         * ResidueCategory
+         * @description Which part of a player profile a mod's IDs were found in.
+         * @enum {string}
+         */
         ResidueCategory: "item" | "encyclopedia" | "wishlist" | "trader" | "trader-purchase" | "quest" | "repeatable-quest" | "task-counter" | "hideout-production" | "hideout-area" | "unlocked-recipe" | "insured-item" | "achievement" | "insurance" | "dialogue" | "userbuild" | "string";
         /**
          * SearchCatalogRequest

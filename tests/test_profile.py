@@ -243,7 +243,7 @@ def test_find_residues_reports_item_hits_from_inventory_items(tmp_path: Path) ->
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[ITEM_A],
             count=2,
             character="pmc",
@@ -275,7 +275,7 @@ def test_find_residues_legacy_tpl_key_is_not_matched_structurally(
 
     residues = find_residues(profile, ids)
 
-    assert residues == [ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)]
+    assert residues == [ProfileResidue(profile="player1", category=ResidueCategory.STRING, ids=[ITEM_A], count=1)]
 
 
 def test_find_residues_reports_trader_hits_from_traders_info_keys(
@@ -292,7 +292,7 @@ def test_find_residues_reports_trader_hits_from_traders_info_keys(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="trader",
+            category=ResidueCategory.TRADER,
             ids=[TRADER_ID],
             count=1,
             character="pmc",
@@ -316,7 +316,7 @@ def test_find_residues_reports_quest_hits_from_quests_qid(tmp_path: Path) -> Non
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="quest",
+            category=ResidueCategory.QUEST,
             ids=["quest-one"],
             count=2,
             character="pmc",
@@ -336,7 +336,7 @@ def test_find_residues_string_fallback_finds_id_embedded_elsewhere(
 
     residues = find_residues(profile, ids)
 
-    assert residues == [ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)]
+    assert residues == [ProfileResidue(profile="player1", category=ResidueCategory.STRING, ids=[ITEM_A], count=1)]
 
 
 def test_find_residues_string_fallback_excludes_ids_already_matched_structurally(
@@ -423,7 +423,7 @@ def test_find_residues_ids_are_distinct_and_sorted(tmp_path: Path) -> None:
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[ITEM_A, ITEM_B],
             count=3,
             character="pmc",
@@ -503,7 +503,7 @@ def test_find_residues_skips_non_dict_entries_in_inventory_items(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[ITEM_A],
             count=1,
             character="pmc",
@@ -530,7 +530,7 @@ def test_find_residues_skips_non_dict_entries_in_quests_but_counts_the_rest(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="quest",
+            category=ResidueCategory.QUEST,
             ids=["quest-one"],
             count=1,
             character="pmc",
@@ -941,7 +941,7 @@ def test_find_residues_orders_character_major_then_category_then_string_last(
         ("", "insurance"),
         ("", "string"),
     ]
-    assert residues[-1] == ProfileResidue(profile="player1", category="string", ids=[marker], count=1)
+    assert residues[-1] == ProfileResidue(profile="player1", category=ResidueCategory.STRING, ids=[marker], count=1)
 
 
 def test_find_residues_item_closure_counts_children_and_grandchildren_and_is_cycle_safe(
@@ -964,7 +964,7 @@ def test_find_residues_item_closure_counts_children_and_grandchildren_and_is_cyc
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[ITEM_A],
             count=3,
             character="pmc",
@@ -994,7 +994,7 @@ def test_find_residues_item_closure_skips_items_without_a_usable_id(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[ITEM_A],
             count=1,
             character="pmc",
@@ -1073,7 +1073,7 @@ def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(tmp_path
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="repeatable-quest",
+            category=ResidueCategory.REPEATABLE_QUEST,
             ids=[QUEST_ID],
             count=1,
             character="pmc",
@@ -1093,7 +1093,7 @@ def test_find_residues_repeatable_quest_matches_by_trader_id(tmp_path: Path) -> 
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="repeatable-quest",
+            category=ResidueCategory.REPEATABLE_QUEST,
             ids=[TRADER_ID],
             count=1,
             character="pmc",
@@ -1124,7 +1124,7 @@ def test_find_residues_repeatable_quest_skips_non_dict_groups_and_entries(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="repeatable-quest",
+            category=ResidueCategory.REPEATABLE_QUEST,
             ids=[QUEST_ID],
             count=1,
             character="pmc",
@@ -1163,7 +1163,7 @@ def test_find_residues_task_counter_matches_by_key(tmp_path: Path) -> None:
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="task-counter",
+            category=ResidueCategory.TASK_COUNTER,
             ids=[QUEST_ID],
             count=1,
             character="pmc",
@@ -1186,7 +1186,7 @@ def test_find_residues_task_counter_matches_by_source_id(tmp_path: Path) -> None
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="task-counter",
+            category=ResidueCategory.TASK_COUNTER,
             ids=[QUEST_ID],
             count=1,
             character="pmc",
@@ -1219,7 +1219,7 @@ def test_find_residues_hideout_production_matches_by_key(tmp_path: Path) -> None
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="hideout-production",
+            category=ResidueCategory.HIDEOUT_PRODUCTION,
             ids=[RECIPE_ID],
             count=1,
             character="pmc",
@@ -1242,7 +1242,7 @@ def test_find_residues_hideout_production_matches_by_recipe_id(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="hideout-production",
+            category=ResidueCategory.HIDEOUT_PRODUCTION,
             ids=[RECIPE_ID],
             count=1,
             character="pmc",
@@ -1280,7 +1280,7 @@ def test_find_residues_insured_item_matches_by_trader_id(tmp_path: Path) -> None
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="insured-item",
+            category=ResidueCategory.INSURED_ITEM,
             ids=[TRADER_ID],
             count=1,
             character="pmc",
@@ -1339,7 +1339,7 @@ def test_find_residues_insurance_matches_by_trader_id(tmp_path: Path) -> None:
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="insurance",
+            category=ResidueCategory.INSURANCE,
             ids=[TRADER_ID],
             count=1,
             character="",
@@ -1370,7 +1370,7 @@ def test_find_residues_insurance_matches_by_item_and_its_closure(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="insurance",
+            category=ResidueCategory.INSURANCE,
             ids=[ITEM_A],
             count=2,
             character="",
@@ -1408,7 +1408,7 @@ def test_find_residues_dialogue_matches_by_trader_key(tmp_path: Path) -> None:
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="dialogue",
+            category=ResidueCategory.DIALOGUE,
             ids=[TRADER_ID],
             count=1,
             character="",
@@ -1436,7 +1436,7 @@ def test_find_residues_dialogue_matches_message_by_template_id_prefix(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="dialogue",
+            category=ResidueCategory.DIALOGUE,
             ids=[QUEST_ID],
             count=1,
             character="",
@@ -1468,7 +1468,7 @@ def test_find_residues_dialogue_matches_message_by_item_tpl(tmp_path: Path) -> N
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="dialogue",
+            category=ResidueCategory.DIALOGUE,
             ids=[ITEM_A],
             count=1,
             character="",
@@ -1519,7 +1519,7 @@ def test_find_residues_dialogue_matches_message_by_item_when_template_id_is_miss
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="dialogue",
+            category=ResidueCategory.DIALOGUE,
             ids=[ITEM_A],
             count=1,
             character="",
@@ -1568,7 +1568,7 @@ def test_find_residues_userbuild_matches_all_three_build_lists(tmp_path: Path, b
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="userbuild",
+            category=ResidueCategory.USERBUILD,
             ids=[ITEM_A],
             count=1,
             character="",
@@ -1623,7 +1623,7 @@ def test_find_residues_hideout_area_matches_a_nested_tpl_below_slots(
     assert residues == [
         ProfileResidue(
             profile="player1",
-            category="hideout-area",
+            category=ResidueCategory.HIDEOUT_AREA,
             ids=[ITEM_A],
             count=1,
             character="pmc",
@@ -1793,7 +1793,7 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
     assert result.residues["ModX"] == [
         ProfileResidue(
             profile="abc",
-            category="item",
+            category=ResidueCategory.ITEM,
             ids=[item_x],
             count=1,
             character="pmc",

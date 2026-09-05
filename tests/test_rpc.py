@@ -46,6 +46,7 @@ from sptmod.core.models import (
     ModState,
     ModType,
     ProfileResidue,
+    ResidueCategory,
 )
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import download_cache_dir
@@ -375,7 +376,7 @@ def test_profile_residue_error_details_carry_the_residues_list(
     The error_details() function validates each residue through
     schemas.ProfileResidue.model_validate() and dumps them as JSON objects.
     """
-    residue = ProfileResidue(profile="abc", category="item", ids=["1", "2"], count=2)
+    residue = ProfileResidue(profile="abc", category=ResidueCategory.ITEM, ids=["1", "2"], count=2)
     inject_error("status", ProfileResidueError("boom", residues=[residue]))
 
     exit_code, lines = invoke_rpc("status", {"path": "/whatever"})

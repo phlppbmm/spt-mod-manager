@@ -197,25 +197,26 @@ class InstallPlan:
     spt_version: str
 
 
-type ResidueCategory = Literal[
-    "item",
-    "encyclopedia",
-    "wishlist",
-    "trader",
-    "trader-purchase",
-    "quest",
-    "repeatable-quest",
-    "task-counter",
-    "hideout-production",
-    "hideout-area",
-    "unlocked-recipe",
-    "insured-item",
-    "achievement",
-    "insurance",
-    "dialogue",
-    "userbuild",
-    "string",
-]
+class ResidueCategory(StrEnum):
+    """Which part of a player profile a mod's IDs were found in."""
+
+    ITEM = "item"
+    ENCYCLOPEDIA = "encyclopedia"
+    WISHLIST = "wishlist"
+    TRADER = "trader"
+    TRADER_PURCHASE = "trader-purchase"
+    QUEST = "quest"
+    REPEATABLE_QUEST = "repeatable-quest"
+    TASK_COUNTER = "task-counter"
+    HIDEOUT_PRODUCTION = "hideout-production"
+    HIDEOUT_AREA = "hideout-area"
+    UNLOCKED_RECIPE = "unlocked-recipe"
+    INSURED_ITEM = "insured-item"
+    ACHIEVEMENT = "achievement"
+    INSURANCE = "insurance"
+    DIALOGUE = "dialogue"
+    USERBUILD = "userbuild"
+    STRING = "string"
 
 
 @dataclass(frozen=True)

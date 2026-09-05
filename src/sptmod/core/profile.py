@@ -8,6 +8,7 @@ from collections.abc import Callable, Container, Iterator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -25,6 +26,15 @@ from sptmod.core.models import (
 )
 from sptmod.core.repo import Repo
 
+
+class ResidueCharacter(StrEnum):
+    """The character a residue scope belongs to; ``SHARED`` for both."""
+
+    PMC = "pmc"
+    SCAV = "scav"
+    SHARED = ""
+
+
 DB_DIR_NAME: Final = "db"
 TRADERS_SEGMENT: Final = "traders"
 ITEMS_SEGMENT: Final = "items"
@@ -36,7 +46,7 @@ ACHIEVEMENTS_FILE: Final = "achievements.json"
 RECIPE_LIST_KEYS: Final = ("recipes", "scavRecipes", "cultistRecipes")
 BUILD_LIST_KEYS: Final = ("weaponBuilds", "equipmentBuilds", "magazineBuilds")
 REPEATABLE_QUEST_KEYS: Final = ("activeQuests", "inactiveQuests")
-CHARACTERS: Final = ("pmc", "scav")
+CHARACTERS: Final = (ResidueCharacter.PMC, ResidueCharacter.SCAV)
 UNREADABLE_PROFILE: Final = "This file could not be read as a player profile."
 
 _ID_FIELD: Final = "_id"
@@ -368,7 +378,7 @@ class _Category:
     """
 
     category: ResidueCategory
-    characters: tuple[str, ...]
+    characters: tuple[ResidueCharacter, ...]
     path: str
     finder: Callable[[_Scope], _Hits]
     remover: Callable[[_Scope], None]
@@ -464,7 +474,7 @@ def _dumps(data: dict[str, Json]) -> str:
 
 def _hits_in(
     root: dict[str, Json], ids: ModIds
-) -> list[tuple[_Category, _Scope, str, _Hits]]:
+) -> list[tuple[_Category, _Scope, ResidueCharacter, _Hits]]:
     """Return every category that matches something, with its scope and hits.
 
     Walks the characters first, then the sections they share, and within each
@@ -472,7 +482,7 @@ def _hits_in(
     read before the caller can act on the result, so a category never reports
     against what an earlier one removed.
     """
-    hits_found: list[tuple[_Category, _Scope, str, _Hits]] = []
+    hits_found: list[tuple[_Category, _Scope, ResidueCharacter, _Hits]] = []
     for character, scope in _scopes(root, ids):
         for entry in _CATEGORIES:
             if character not in entry.characters:
@@ -483,25 +493,29 @@ def _hits_in(
     return hits_found
 
 
-def _scopes(root: dict[str, Json], ids: ModIds) -> list[tuple[str, _Scope]]:
+def _scopes(
+    root: dict[str, Json], ids: ModIds
+) -> list[tuple[ResidueCharacter, _Scope]]:
     """Return the scopes of a profile: both characters, then the shared part.
 
     The inventory closure of a character is computed once here, because both
     the items themselves and the insurance entries pointing at them need it.
     """
-    scopes: list[tuple[str, _Scope]] = []
+    scopes: list[tuple[ResidueCharacter, _Scope]] = []
     for character in CHARACTERS:
         node = _dict_at(root, "characters", character)
         closure = _item_closure(_list_at(node, "Inventory", "items"), ids.items)
         scopes.append(
             (character, _Scope(node=node, ids=ids, item_closure=frozenset(closure)))
         )
-    scopes.append(("", _Scope(node=root, ids=ids, item_closure=frozenset())))
+    scopes.append(
+        (ResidueCharacter.SHARED, _Scope(node=root, ids=ids, item_closure=frozenset()))
+    )
     return scopes
 
 
 def _residue(
-    name: str, entry: _Category, character: str, hits: _Hits
+    name: str, entry: _Category, character: ResidueCharacter, hits: _Hits
 ) -> ProfileResidue:
     """Return the residue one category found in one profile."""
     return ProfileResidue(
@@ -530,7 +544,7 @@ def _string_residue(
     return [
         ProfileResidue(
             profile=name,
-            category="string",
+            category=ResidueCategory.STRING,
             ids=sorted(counts),
             count=sum(counts.values()),
         )
@@ -1137,99 +1151,117 @@ def _userbuild_remover(scope: _Scope) -> None:
 _CATEGORIES: Final[tuple[_Category, ...]] = (
     # Residue categories in emission order: character-major, then category-minor.
     _Category(
-        "item",
+        ResidueCategory.ITEM,
         CHARACTERS,
         "/characters/{character}/Inventory/items",
         _item_finder,
         _item_remover,
     ),
     _Category(
-        "encyclopedia",
+        ResidueCategory.ENCYCLOPEDIA,
         CHARACTERS,
         "/characters/{character}/Encyclopedia",
         _encyclopedia_finder,
         _encyclopedia_remover,
     ),
     _Category(
-        "wishlist",
+        ResidueCategory.WISHLIST,
         CHARACTERS,
         "/characters/{character}/WishList",
         _wishlist_finder,
         _wishlist_remover,
     ),
     _Category(
-        "trader",
+        ResidueCategory.TRADER,
         CHARACTERS,
         "/characters/{character}/TradersInfo",
         _trader_finder,
         _trader_remover,
     ),
     _Category(
-        "trader-purchase",
-        ("",),
+        ResidueCategory.TRADER_PURCHASE,
+        (ResidueCharacter.SHARED,),
         "/traderPurchases",
         _trader_purchase_finder,
         _trader_purchase_remover,
     ),
     _Category(
-        "quest",
+        ResidueCategory.QUEST,
         CHARACTERS,
         "/characters/{character}/Quests",
         _quest_finder,
         _quest_remover,
     ),
     _Category(
-        "repeatable-quest",
-        ("pmc",),
+        ResidueCategory.REPEATABLE_QUEST,
+        (ResidueCharacter.PMC,),
         "/characters/{character}/RepeatableQuests",
         _repeatable_quest_finder,
         _repeatable_quest_remover,
     ),
     _Category(
-        "task-counter",
+        ResidueCategory.TASK_COUNTER,
         CHARACTERS,
         "/characters/{character}/TaskConditionCounters",
         _task_counter_finder,
         _task_counter_remover,
     ),
     _Category(
-        "hideout-production",
+        ResidueCategory.HIDEOUT_PRODUCTION,
         CHARACTERS,
         "/characters/{character}/Hideout/Production",
         _hideout_production_finder,
         _hideout_production_remover,
     ),
     _Category(
-        "hideout-area",
+        ResidueCategory.HIDEOUT_AREA,
         CHARACTERS,
         "/characters/{character}/Hideout/Areas",
         _hideout_area_finder,
         _hideout_area_remover,
     ),
     _Category(
-        "unlocked-recipe",
+        ResidueCategory.UNLOCKED_RECIPE,
         CHARACTERS,
         "/characters/{character}/UnlockedInfo/unlockedProductionRecipe",
         _unlocked_recipe_finder,
         _unlocked_recipe_remover,
     ),
     _Category(
-        "insured-item",
+        ResidueCategory.INSURED_ITEM,
         CHARACTERS,
         "/characters/{character}/InsuredItems",
         _insured_item_finder,
         _insured_item_remover,
     ),
     _Category(
-        "achievement",
-        ("pmc",),
+        ResidueCategory.ACHIEVEMENT,
+        (ResidueCharacter.PMC,),
         "/characters/{character}/Achievements",
         _achievement_finder,
         _achievement_remover,
     ),
-    _Category("insurance", ("",), "/insurance", _insurance_finder, _insurance_remover),
-    _Category("dialogue", ("",), "/dialogues", _dialogue_finder, _dialogue_remover),
-    _Category("userbuild", ("",), "/userbuilds", _userbuild_finder, _userbuild_remover),
+    _Category(
+        ResidueCategory.INSURANCE,
+        (ResidueCharacter.SHARED,),
+        "/insurance",
+        _insurance_finder,
+        _insurance_remover,
+    ),
+    _Category(
+        ResidueCategory.DIALOGUE,
+        (ResidueCharacter.SHARED,),
+        "/dialogues",
+        _dialogue_finder,
+        _dialogue_remover,
+    ),
+    _Category(
+        ResidueCategory.USERBUILD,
+        (ResidueCharacter.SHARED,),
+        "/userbuilds",
+        _userbuild_finder,
+        _userbuild_remover,
+    ),
 )
 
 

@@ -3834,6 +3834,7 @@
         "type": "object"
       },
       "ResidueCategory": {
+        "description": "Which part of a player profile a mod's IDs were found in.",
         "enum": [
           "item",
           "encyclopedia",
@@ -3853,6 +3854,7 @@
           "userbuild",
           "string"
         ],
+        "title": "ResidueCategory",
         "type": "string"
       },
       "SearchCatalogRequest": {

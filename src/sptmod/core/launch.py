@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -54,6 +55,16 @@ _GAMEMODE_COMMAND: Final = "gamemoderun"
 # The official launcher sets this for the whole process on Linux and the game
 # inherits it, so a launch from sptmod runs in the same environment.
 _NVIDIA_SYNC_ENV: Final = "__NV_DISABLE_EXPLICIT_SYNC"
+
+
+class LaunchStep(StrEnum):
+    """The phases a launch reports progress for."""
+
+    SERVER = "server"
+    WAITING = "waiting"
+    LOGIN = "login"
+    CLIENT = "client"
+    DONE = "done"
 
 
 @dataclass(frozen=True)
@@ -219,7 +230,7 @@ def _launch(
     server_started = answer == "free"
     server: _ProcessRef | None
     if server_started:
-        _report(progress, "server", 5, "Starting the server")
+        _report(progress, LaunchStep.SERVER, 5, "Starting the server")
         server = _spawn_server(layout)
         _wait_for_server(
             base_url,
@@ -234,14 +245,14 @@ def _launch(
     else:
         server = _running_ref(running, "server")
 
-    _report(progress, "login", 80, f"Signing in as {nickname}")
+    _report(progress, LaunchStep.LOGIN, 80, f"Signing in as {nickname}")
     if not sptserver.login(base_url, username, request_timeout):
         raise LoginFailedError(
             f"The SPT server does not know the profile {nickname}. "
             f"Start the official SPT launcher once to create it."
         )
 
-    _report(progress, "client", 95, "Starting the game")
+    _report(progress, LaunchStep.CLIENT, 95, "Starting the game")
     client = _spawn_client(layout, profile_id, base_url)
 
     state = _LaunchState(
@@ -260,7 +271,7 @@ def _launch(
             f"game (process {client.pid}) are running, but sptmod cannot note "
             f"that in {path}: {error}. Close them yourself when you are done."
         ) from error
-    _report(progress, "done", 100, "The game is starting")
+    _report(progress, LaunchStep.DONE, 100, "The game is starting")
     return LaunchResult(
         profile_id=profile_id,
         nickname=nickname,
@@ -471,7 +482,7 @@ def _wait_for_server(
 ) -> None:
     """Ask the freshly started server until it answers, or give up."""
     started = clock()
-    _report(progress, "waiting", _WAIT_PERCENT_START, "Waiting for the server")
+    _report(progress, LaunchStep.WAITING, _WAIT_PERCENT_START, "Waiting for the server")
     while True:
         answer = sptserver.probe(base_url, request_timeout)
         if answer == "spt":
@@ -492,7 +503,7 @@ def _wait_for_server(
         percent = _WAIT_PERCENT_START + int(
             _WAIT_PERCENT_SPAN * elapsed / ready_timeout
         )
-        _report(progress, "waiting", percent, "Waiting for the server")
+        _report(progress, LaunchStep.WAITING, percent, "Waiting for the server")
         sleep(poll_seconds)
 
 

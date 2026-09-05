@@ -24,7 +24,7 @@ from conftest import empty_pmc_profile
 from fixture_types import InstallCommit, JsonDict, MakeProfile
 from sptmod.core.errors import GitError
 from sptmod.core.game_dir import GameLayout, detect_layout
-from sptmod.core.models import ProfileResidue
+from sptmod.core.models import ProfileResidue, ResidueCategory
 from sptmod.core.profile import (
     ModIds,
     check_all,
@@ -786,7 +786,7 @@ def test_find_residues_reports_a_hit_for_every_category(
     make_profile: MakeProfile,
     hit: str,
     character: str,
-    category: str,
+    category: ResidueCategory,
     path: str,
     ids: ModIds,
     expected_ids: list[str],
@@ -802,7 +802,7 @@ def test_find_residues_reports_a_hit_for_every_category(
     assert matching == [
         ProfileResidue(
             profile="player1",
-            category=category,  # type: ignore[arg-type]
+            category=category,
             ids=expected_ids,
             count=expected_count,
             character=character,

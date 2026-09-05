@@ -20,7 +20,7 @@ from sptmod.core.forge.client import (
     ForgeVersion,
     ForgeVersionSummary,
 )
-from sptmod.core.models import ModInfo, Progress
+from sptmod.core.models import Json, ModInfo, Progress
 from sptmod.core.modmeta import UnsupportedRangeError, version_matches
 
 APP_NAME: Final = "sptmod"
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS mods (
 CREATE INDEX IF NOT EXISTS mods_name_idx ON mods (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_author_idx ON mods (author COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_updated_at_idx ON mods (updated_at);
-"""  # noqa: E501 - continued below
+"""
 
 # Columns added after the first release; applied via ALTER TABLE on open so
 # existing caches keep working (the cache is disposable, this is the only
@@ -311,7 +311,7 @@ def _mod_from_row(row: sqlite3.Row) -> CatalogMod:
 def _links_from_json(raw: str | None) -> tuple[CatalogSourceLink, ...]:
     """Decode the JSON-encoded source links column, tolerating junk."""
     try:
-        data = json.loads(raw or "[]")
+        data: Json = json.loads(raw or "[]")
     except json.JSONDecodeError:
         return ()
     if not isinstance(data, list):

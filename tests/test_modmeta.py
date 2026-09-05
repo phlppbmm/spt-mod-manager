@@ -1,6 +1,7 @@
 """Tests for package.json parsing, DLL fallbacks, trailer mapping and semver ranges."""
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -211,39 +212,29 @@ def test_meta_from_dll_no_version_override_is_empty(tmp_path: Path) -> None:
 # --- build_trailers / mod_info_from_commit -------------------------------
 
 
-def _sample_mod_info(**overrides: object) -> ModInfo:
-    """Construct a ModInfo with fixed defaults, allowing keyword overrides.
-
-    Sets standard values: name="SAIN", version="3.2.1", mod_type="hybrid",
-    author="Solarint", spt_range="~4.1.0", state="installed", commit="abc1234",
-    date=2026-01-01, forge_id="1234", forge_version_id="56789". Any provided
-    override replaces the corresponding default before instantiation.
-    """
-    defaults: dict[str, object] = {
-        "name": "SAIN",
-        "version": "3.2.1",
-        "mod_type": "hybrid",
-        "author": "Solarint",
-        "spt_range": "~4.1.0",
-        "state": "installed",
-        "commit": "abc1234",
-        "date": datetime(2026, 1, 1, tzinfo=UTC),
-        "forge_id": "1234",
-        "forge_version_id": "56789",
-        "guid": "",
-        "source": "https://example.invalid/SAIN-3.2.1.7z",
-    }
-    defaults.update(overrides)
-    return ModInfo(**defaults)  # type: ignore[arg-type]
+_SAMPLE_MOD_INFO = ModInfo(
+    name="SAIN",
+    version="3.2.1",
+    mod_type="hybrid",
+    author="Solarint",
+    spt_range="~4.1.0",
+    state="installed",
+    commit="abc1234",
+    date=datetime(2026, 1, 1, tzinfo=UTC),
+    forge_id="1234",
+    forge_version_id="56789",
+    guid="",
+    source="https://example.invalid/SAIN-3.2.1.7z",
+)
 
 
 def test_build_trailers_contains_all_keys_in_order() -> None:
     """build_trailers returns dict with all MOD_TRAILER_KEYS in exact order.
 
-    Calls build_trailers(_sample_mod_info()). Resulting dict keys must be
+    Calls build_trailers(_SAMPLE_MOD_INFO). Resulting dict keys must be
     identical to MOD_TRAILER_KEYS (both keys and order match).
     """
-    mod_info = _sample_mod_info()
+    mod_info = _SAMPLE_MOD_INFO
 
     trailers = build_trailers(mod_info)
 
@@ -253,11 +244,11 @@ def test_build_trailers_contains_all_keys_in_order() -> None:
 def test_build_trailers_maps_field_values() -> None:
     """build_trailers maps ModInfo fields to trailer keys with exact values.
 
-    build_trailers(_sample_mod_info()) produces: trailers["Mod"]="SAIN",
+    build_trailers(_SAMPLE_MOD_INFO) produces: trailers["Mod"]="SAIN",
     trailers["Mod-Version"]="3.2.1", trailers["Mod-Author"]="Solarint",
     trailers["Mod-Type"]="hybrid", trailers["Mod-SPT"]="~4.1.0", etc.
     """
-    mod_info = _sample_mod_info()
+    mod_info = _SAMPLE_MOD_INFO
 
     trailers = build_trailers(mod_info)
 
@@ -279,7 +270,7 @@ def test_build_trailers_keeps_empty_values() -> None:
     Resulting trailers["Mod-Guid"]="", trailers["Mod-Forge-Id"]="",
     trailers["Mod-Forge-Version-Id"]="" (not omitted, present and empty).
     """
-    mod_info = _sample_mod_info(guid="", forge_id="", forge_version_id="")
+    mod_info = replace(_SAMPLE_MOD_INFO, guid="", forge_id="", forge_version_id="")
 
     trailers = build_trailers(mod_info)
 
@@ -290,7 +281,7 @@ def test_build_trailers_keeps_empty_values() -> None:
 
 def test_build_trailers_without_previous_version_omits_the_key() -> None:
     """Without previous_version parameter, Mod-Previous-Version key is absent."""
-    mod_info = _sample_mod_info()
+    mod_info = _SAMPLE_MOD_INFO
 
     trailers = build_trailers(mod_info)
 
@@ -299,7 +290,7 @@ def test_build_trailers_without_previous_version_omits_the_key() -> None:
 
 def test_build_trailers_with_previous_version_adds_the_key() -> None:
     """With previous_version parameter, Mod-Previous-Version key is added."""
-    mod_info = _sample_mod_info()
+    mod_info = _SAMPLE_MOD_INFO
 
     trailers = build_trailers(mod_info, previous_version="3.2.0")
 
@@ -368,10 +359,10 @@ def test_mod_info_from_commit_raises_on_an_out_of_enum_trailer(trailer: str, val
 def test_build_trailers_roundtrips_through_mod_info_from_commit() -> None:
     """build_trailers and mod_info_from_commit roundtrip ModInfo identically.
 
-    Converts _sample_mod_info() → build_trailers() → CommitInfo → mod_info_from_commit().
+    Converts _SAMPLE_MOD_INFO → build_trailers() → CommitInfo → mod_info_from_commit().
     Result matches original ModInfo exactly, proving serialization is lossless.
     """
-    mod_info = _sample_mod_info()
+    mod_info = _SAMPLE_MOD_INFO
     trailers = build_trailers(mod_info)
     commit = CommitInfo(
         hash=mod_info.commit,
@@ -386,26 +377,24 @@ def test_build_trailers_roundtrips_through_mod_info_from_commit() -> None:
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    "mod_info",
     [
-        {"guid": "com.sain.mod"},
-        {"forge_id": "9999", "forge_version_id": "8888"},
-        {"mod_type": "server"},
-        {"mod_type": "client"},
-        {"state": "disabled"},
-        {"state": "removed"},
+        replace(_SAMPLE_MOD_INFO, guid="com.sain.mod"),
+        replace(_SAMPLE_MOD_INFO, forge_id="9999", forge_version_id="8888"),
+        replace(_SAMPLE_MOD_INFO, mod_type="server"),
+        replace(_SAMPLE_MOD_INFO, mod_type="client"),
+        replace(_SAMPLE_MOD_INFO, state="disabled"),
+        replace(_SAMPLE_MOD_INFO, state="removed"),
     ],
+    ids=["guid", "forge-ids", "type-server", "type-client", "state-disabled", "state-removed"],
 )
-def test_build_trailers_roundtrips_with_variant_fields(
-    overrides: dict[str, object],
-) -> None:
+def test_build_trailers_roundtrips_with_variant_fields(mod_info: ModInfo) -> None:
     """Roundtrip works for all enum variants (mod_type, state) and forge fields.
 
     Parametrized with guid="com.sain.mod", forge_id/forge_version_id, and all
     combinations of mod_type (server/client/hybrid) and state (disabled/removed).
     Each variant survives the trailers→commit→parse cycle identically.
     """
-    mod_info = _sample_mod_info(**overrides)
     trailers = build_trailers(mod_info)
     commit = CommitInfo(
         hash=mod_info.commit,

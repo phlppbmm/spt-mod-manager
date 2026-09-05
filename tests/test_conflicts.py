@@ -23,12 +23,12 @@ from sptmod.core.conflicts import (
     check_spt_compat,
 )
 from sptmod.core.errors import GitError
-from sptmod.core.models import Conflict, ModInfo
+from sptmod.core.models import Conflict, ModInfo, ModState
 from sptmod.core.modmeta import ModMeta
 from sptmod.core.repo import Repo
 
 
-def _mod_info(name: str, version: str, state: str = "installed") -> ModInfo:
+def _mod_info(name: str, version: str, state: ModState = "installed") -> ModInfo:
     """Construct ModInfo with fixed fields except name, version, and state.
 
     Sets type='server', author='tester', commit='deadbeef', date=2024-01-01,
@@ -41,7 +41,7 @@ def _mod_info(name: str, version: str, state: str = "installed") -> ModInfo:
         mod_type="server",
         author="tester",
         spt_range="",
-        state=state,  # type: ignore[arg-type]
+        state=state,
         commit="deadbeef",
         date=datetime(2024, 1, 1),
         forge_id="",

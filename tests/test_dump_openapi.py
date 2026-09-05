@@ -326,8 +326,8 @@ removed = [
     "star" + "lette",
 ]
 
-import sptmod.cli  # noqa: F401
-import sptmod.server.dump_openapi  # noqa: F401
+importlib.import_module("sptmod.cli")
+importlib.import_module("sptmod.server.dump_openapi")
 
 top_level_imported = {name.split(".")[0] for name in sys.modules}
 imported_hits = top_level_imported.intersection(removed)

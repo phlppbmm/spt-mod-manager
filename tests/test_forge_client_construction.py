@@ -5,6 +5,7 @@ import pytest
 import respx
 
 from forge_json import page_envelope
+from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.client import ForgeClient
 
 FORGE_URL_ENV_VAR = "SPTMOD_FORGE_URL"
@@ -28,10 +29,10 @@ def test_context_manager_closes_client_on_exit(respx_router: respx.MockRouter) -
     with ForgeClient() as client:
         client.mods()  # succeeds while the client is open
 
-    with pytest.raises(Exception):  # noqa: B017 - exact exception type is an
-        # implementation detail (raw httpx RuntimeError vs. a wrapped
-        # ForgeUnavailableError are both acceptable "closed" signals); what
-        # matters is that a request after close() no longer succeeds.
+    # A request after close() must not succeed. Both the raw httpx
+    # RuntimeError and a wrapped ForgeUnavailableError are acceptable
+    # "closed" signals.
+    with pytest.raises((RuntimeError, ForgeUnavailableError)):
         client.mods()
 
 

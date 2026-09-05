@@ -81,19 +81,13 @@ def test_collect_mod_ids_reads_item_trader_and_quest_ids_from_the_commit(
         f"SPT/user/mods/ServerMod/db/traders/{TRADER_ID}/base.json": json.dumps(
             {"_id": TRADER_ID, "nickname": "Test Trader"}
         ),
-        "SPT/user/mods/ServerMod/db/quests/quests.json": json.dumps(
-            [{"_id": "quest-one"}, {"_id": "quest-two"}]
-        ),
+        "SPT/user/mods/ServerMod/db/quests/quests.json": json.dumps([{"_id": "quest-one"}, {"_id": "quest-two"}]),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     # Mutate/delete the working tree after the commit: collect_mod_ids must
     # read from the commit only, never the working tree.
-    (
-        clean_repo.path / "SPT/user/mods/ServerMod/db/templates/items.json"
-    ).write_text("{}", encoding="utf-8")
+    (clean_repo.path / "SPT/user/mods/ServerMod/db/templates/items.json").write_text("{}", encoding="utf-8")
     shutil.rmtree(clean_repo.path / "SPT/user/mods/ServerMod/db/traders")
     (clean_repo.path / "SPT/user/mods/ServerMod/db/quests/quests.json").unlink()
 
@@ -115,9 +109,7 @@ def test_collect_mod_ids_trader_id_includes_both_folder_name_and_base_json_id(
             {"_id": TRADER_ID, "nickname": "Custom Trader"}
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -129,13 +121,9 @@ def test_collect_mod_ids_finds_item_ids_below_an_items_path_segment(
 ) -> None:
     """Item IDs can be in db/templates/items/ subdirectories, not just items.json."""
     files = {
-        "SPT/user/mods/ServerMod/db/templates/items/custom.json": json.dumps(
-            {"_id": ITEM_C, "_name": "custom_item"}
-        ),
+        "SPT/user/mods/ServerMod/db/templates/items/custom.json": json.dumps({"_id": ITEM_C, "_name": "custom_item"}),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -152,9 +140,7 @@ def test_collect_mod_ids_broken_json_warns_and_keeps_scanning_other_files(
             {"_id": TRADER_ID, "nickname": "Test Trader"}
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -171,9 +157,7 @@ def test_collect_mod_ids_ignores_files_under_the_mod_dir_but_not_below_db(
     files = {
         "SPT/user/mods/ServerMod/assets/icon.json": json.dumps({"color": "red"}),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -184,9 +168,7 @@ def test_collect_mod_ids_mod_without_db_dir_yields_no_ids_and_no_warnings(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """collect_mod_ids returns empty results for mods without a db/ directory."""
-    commit_hash = install_commit(
-        clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"}
-    )
+    commit_hash = install_commit(clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"})
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -211,9 +193,7 @@ def test_collect_mod_ids_trader_folder_non_base_file_registers_only_the_folder(
             json.dumps({"started": {TRADER_ID: "quest-one"}})
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -237,9 +217,7 @@ def test_collect_mod_ids_malformed_quest_entries_are_skipped_without_crashing(
             ]
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -309,9 +287,7 @@ def test_find_residues_legacy_tpl_key_is_not_matched_structurally(
 
     residues = find_residues(profile, ids)
 
-    assert residues == [
-        ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)
-    ]
+    assert residues == [ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)]
 
 
 def test_find_residues_reports_trader_hits_from_traders_info_keys(
@@ -372,9 +348,7 @@ def test_find_residues_string_fallback_finds_id_embedded_elsewhere(
 
     residues = find_residues(profile, ids)
 
-    assert residues == [
-        ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)
-    ]
+    assert residues == [ProfileResidue(profile="player1", category="string", ids=[ITEM_A], count=1)]
 
 
 def test_find_residues_string_fallback_excludes_ids_already_matched_structurally(
@@ -405,9 +379,7 @@ def test_find_residues_orders_categories_item_trader_quest_string(
 ) -> None:
     """Residues are ordered by category: item, trader, quest, then string."""
     string_only_id = "loose-mod-marker-id"
-    ids = ModIds(
-        items={ITEM_A}, traders={TRADER_ID}, quests={"quest-one", string_only_id}
-    )
+    ids = ModIds(items={ITEM_A}, traders={TRADER_ID}, quests={"quest-one", string_only_id})
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
@@ -838,11 +810,7 @@ def test_find_residues_reports_a_hit_for_every_category(
 
     residues = find_residues(profile, ids)
 
-    matching = [
-        residue
-        for residue in residues
-        if residue.category == category and residue.character == character
-    ]
+    matching = [residue for residue in residues if residue.category == category and residue.character == character]
     assert matching == [
         ProfileResidue(
             profile="player1",
@@ -940,9 +908,7 @@ def test_find_residues_reports_pmc_and_scav_item_hits_separately_with_distinct_i
 
     residues = find_residues(profile, ids)
 
-    item_residues = {
-        residue.character: residue for residue in residues if residue.category == "item"
-    }
+    item_residues = {residue.character: residue for residue in residues if residue.category == "item"}
     assert item_residues["pmc"].ids == [ITEM_A]
     assert item_residues["scav"].ids == [ITEM_B]
 
@@ -984,9 +950,7 @@ def test_find_residues_orders_character_major_then_category_then_string_last(
         ("", "insurance"),
         ("", "string"),
     ]
-    assert residues[-1] == ProfileResidue(
-        profile="player1", category="string", ids=[marker], count=1
-    )
+    assert residues[-1] == ProfileResidue(profile="player1", category="string", ids=[marker], count=1)
 
 
 def test_find_residues_item_closure_counts_children_and_grandchildren_and_is_cycle_safe(
@@ -1071,10 +1035,7 @@ def test_find_residues_string_fallback_excludes_matched_ids_but_keeps_unmatched(
 
     string_residue = next(r for r in residues if r.category == "string")
     assert string_residue.ids == sorted([RECIPE_ID, ACHIEVEMENT_ID])
-    assert all(
-        residue.category != "string" or ITEM_A not in residue.ids
-        for residue in residues
-    )
+    assert all(residue.category != "string" or ITEM_A not in residue.ids for residue in residues)
 
 
 # --------------------------------------------------------------------------
@@ -1110,9 +1071,7 @@ def _pmc_with_repeatable(active: list[JsonDict]) -> JsonDict:
         },
     ],
 )
-def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(
-    tmp_path: Path, quest_entry: JsonDict
-) -> None:
+def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(tmp_path: Path, quest_entry: JsonDict) -> None:
     """Repeatable-quest category matches via _id, templateId, or questStatus.qid."""
     ids = ModIds(quests={QUEST_ID})
     content = _pmc_with_repeatable([quest_entry])
@@ -1135,9 +1094,7 @@ def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(
 def test_find_residues_repeatable_quest_matches_by_trader_id(tmp_path: Path) -> None:
     """Repeatable-quest also matches when traderId field references a mod trader."""
     ids = ModIds(traders={TRADER_ID})
-    content = _pmc_with_repeatable(
-        [{"_id": "other", "templateId": "other", "traderId": TRADER_ID}]
-    )
+    content = _pmc_with_repeatable([{"_id": "other", "templateId": "other", "traderId": TRADER_ID}])
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -1190,9 +1147,7 @@ def test_find_residues_repeatable_quest_no_hit_leaves_no_residue(
 ) -> None:
     """No repeatable-quest residue when entry IDs and traders don't match."""
     ids = ModIds(quests={QUEST_ID}, traders={TRADER_ID})
-    content = _pmc_with_repeatable(
-        [{"_id": "other", "templateId": "other", "traderId": "other-trader"}]
-    )
+    content = _pmc_with_repeatable([{"_id": "other", "templateId": "other", "traderId": "other-trader"}])
     profile = _make_profile(tmp_path, "player1", content)
 
     assert find_residues(profile, ids) == []
@@ -1265,9 +1220,7 @@ def test_find_residues_hideout_production_matches_by_key(tmp_path: Path) -> None
     """Hideout-production category matches when the Production dict key is a recipe ID."""
     ids = ModIds(recipes={RECIPE_ID})
     content = _empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {
-        "Production": {RECIPE_ID: {"Progress": 0}}
-    }
+    content["characters"]["pmc"]["Hideout"] = {"Production": {RECIPE_ID: {"Progress": 0}}}
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -1290,9 +1243,7 @@ def test_find_residues_hideout_production_matches_by_recipe_id(
     """Hideout-production also matches when entry's recipeId field is a mod recipe."""
     ids = ModIds(recipes={RECIPE_ID})
     content = _empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {
-        "Production": {"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}
-    }
+    content["characters"]["pmc"]["Hideout"] = {"Production": {"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}}
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -1355,9 +1306,7 @@ def test_find_residues_insured_item_matches_by_item_closure(tmp_path: Path) -> N
         {"_id": "container", "_tpl": ITEM_A, "slotId": "main"},
         {"_id": "child", "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
     ]
-    content["characters"]["pmc"]["InsuredItems"] = [
-        {"tid": "unrelated-trader", "itemId": "child"}
-    ]
+    content["characters"]["pmc"]["InsuredItems"] = [{"tid": "unrelated-trader", "itemId": "child"}]
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -1486,9 +1435,7 @@ def test_find_residues_dialogue_matches_message_by_template_id_prefix(
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
-            "messages": [
-                {"_id": "m1", "templateId": f"{QUEST_ID}-suffix", "items": {}}
-            ],
+            "messages": [{"_id": "m1", "templateId": f"{QUEST_ID}-suffix", "items": {}}],
         }
     }
     profile = _make_profile(tmp_path, "player1", content)
@@ -1612,12 +1559,8 @@ def test_find_residues_dialogue_no_hit_leaves_no_residue(tmp_path: Path) -> None
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "build_key", ["weaponBuilds", "equipmentBuilds", "magazineBuilds"]
-)
-def test_find_residues_userbuild_matches_all_three_build_lists(
-    tmp_path: Path, build_key: str
-) -> None:
+@pytest.mark.parametrize("build_key", ["weaponBuilds", "equipmentBuilds", "magazineBuilds"])
+def test_find_residues_userbuild_matches_all_three_build_lists(tmp_path: Path, build_key: str) -> None:
     """Userbuild category matches items in weaponBuilds, equipmentBuilds, magazineBuilds."""
     ids = ModIds(items={ITEM_A})
     content = _empty_pmc_profile()
@@ -1626,9 +1569,7 @@ def test_find_residues_userbuild_matches_all_three_build_lists(
         "equipmentBuilds": [],
         "magazineBuilds": [],
     }
-    content["userbuilds"][build_key] = [
-        {"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_A}]}
-    ]
+    content["userbuilds"][build_key] = [{"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_A}]}]
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -1650,9 +1591,7 @@ def test_find_residues_userbuild_no_hit_leaves_no_residue(tmp_path: Path) -> Non
     ids = ModIds(items={ITEM_A})
     content = _empty_pmc_profile()
     content["userbuilds"] = {
-        "weaponBuilds": [
-            {"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_B}]}
-        ],
+        "weaponBuilds": [{"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_B}]}],
         "equipmentBuilds": [],
         "magazineBuilds": [],
     }
@@ -1708,9 +1647,7 @@ def test_find_residues_hideout_area_no_hit_leaves_no_residue(
     """No hideout-area residue when slots don't hold mod items."""
     ids = ModIds(items={ITEM_A})
     content = _empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {
-        "Areas": [{"type": 0, "slots": [{"locationIndex": 0}]}]
-    }
+    content["characters"]["pmc"]["Hideout"] = {"Areas": [{"type": 0, "slots": [{"locationIndex": 0}]}]}
     profile = _make_profile(tmp_path, "player1", content)
 
     assert find_residues(profile, ids) == []
@@ -1734,9 +1671,7 @@ def test_collect_mod_ids_recipes_from_recipe_list_keys_below_hideout(
             }
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -1754,13 +1689,9 @@ def test_collect_mod_ids_recipes_from_a_plain_list_below_hideout(
 ) -> None:
     """Recipe IDs extracted from list entries below hideout/ with type=5."""
     files = {
-        "SPT/user/mods/ServerMod/db/hideout/areas.json": json.dumps(
-            [{"_id": RECIPE_ID, "type": 5}]
-        ),
+        "SPT/user/mods/ServerMod/db/hideout/areas.json": json.dumps([{"_id": RECIPE_ID, "type": 5}]),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -1776,9 +1707,7 @@ def test_collect_mod_ids_achievements_from_achievements_json_uses_id_field(
             [{"id": ACHIEVEMENT_ID, "imageUrl": "x.png"}]
         ),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -1791,13 +1720,9 @@ def test_collect_mod_ids_achievements_from_an_achievement_path_segment(
 ) -> None:
     """Achievement IDs extracted from files below achievement/ or achievements/ path."""
     files = {
-        "SPT/user/mods/ServerMod/db/achievement/custom.json": json.dumps(
-            [{"id": ACHIEVEMENT_ID}]
-        ),
+        "SPT/user/mods/ServerMod/db/achievement/custom.json": json.dumps([{"id": ACHIEVEMENT_ID}]),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
@@ -1848,22 +1773,14 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
         "ModX",
         mod_type="server",
         minute=1,
-        files={
-            "SPT/user/mods/ModX/db/templates/items.json": json.dumps(
-                {item_x: {"_id": item_x, "_name": "item_x"}}
-            )
-        },
+        files={"SPT/user/mods/ModX/db/templates/items.json": json.dumps({item_x: {"_id": item_x, "_name": "item_x"}})},
     )
     install_commit(
         clean_repo,
         "ModY",
         mod_type="server",
         minute=2,
-        files={
-            "SPT/user/mods/ModY/db/templates/items.json": json.dumps(
-                {item_y: {"_id": item_y, "_name": "item_y"}}
-            )
-        },
+        files={"SPT/user/mods/ModY/db/templates/items.json": json.dumps({item_y: {"_id": item_y, "_name": "item_y"}})},
     )
 
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
@@ -1876,12 +1793,8 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
             "slotId": "hideout",
         }
     ]
-    (profiles_dir / "abc.json").write_text(
-        json.dumps(profile_with_x), encoding="utf-8"
-    )
-    (profiles_dir / "def.json").write_text(
-        json.dumps(_empty_pmc_profile()), encoding="utf-8"
-    )
+    (profiles_dir / "abc.json").write_text(json.dumps(profile_with_x), encoding="utf-8")
+    (profiles_dir / "def.json").write_text(json.dumps(_empty_pmc_profile()), encoding="utf-8")
 
     result = check_all(clean_repo, detect_layout(clean_repo.path))
 
@@ -1898,24 +1811,16 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
     ]
 
 
-def test_check_all_skips_removed_mods(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
+def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit: InstallCommit) -> None:
     """check_all excludes mods with Mod-State: removed from residue analysis."""
     item_x = "5c0d1b8b86f7744bb2683cf1"
     commit_hash = install_commit(
         clean_repo,
         "ModZ",
         mod_type="server",
-        files={
-            "SPT/user/mods/ModZ/db/templates/items.json": json.dumps(
-                {item_x: {"_id": item_x, "_name": "item_x"}}
-            )
-        },
+        files={"SPT/user/mods/ModZ/db/templates/items.json": json.dumps({item_x: {"_id": item_x, "_name": "item_x"}})},
     )
-    clean_repo.revert(
-        commit_hash, extra_trailers={"Mod": "ModZ", "Mod-State": "removed"}
-    )
+    clean_repo.revert(commit_hash, extra_trailers={"Mod": "ModZ", "Mod-State": "removed"})
 
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
     profile_with_x = _empty_pmc_profile()
@@ -1927,9 +1832,7 @@ def test_check_all_skips_removed_mods(
             "slotId": "hideout",
         }
     ]
-    (profiles_dir / "abc.json").write_text(
-        json.dumps(profile_with_x), encoding="utf-8"
-    )
+    (profiles_dir / "abc.json").write_text(json.dumps(profile_with_x), encoding="utf-8")
 
     result = check_all(clean_repo, detect_layout(clean_repo.path))
 
@@ -1944,9 +1847,7 @@ def test_check_all_prefixes_collection_warnings_with_the_mod_name(
         clean_repo,
         "BrokenMod",
         mod_type="server",
-        files={
-            "SPT/user/mods/BrokenMod/db/templates/items.json": "{not valid json"
-        },
+        files={"SPT/user/mods/BrokenMod/db/templates/items.json": "{not valid json"},
     )
 
     result = check_all(clean_repo, detect_layout(clean_repo.path))
@@ -1955,20 +1856,14 @@ def test_check_all_prefixes_collection_warnings_with_the_mod_name(
     assert result.warnings[0].startswith("BrokenMod")
 
 
-def test_check_all_does_not_modify_the_repository_or_profiles(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
+def test_check_all_does_not_modify_the_repository_or_profiles(clean_repo: Repo, install_commit: InstallCommit) -> None:
     """check_all is read-only; it does not modify repo or profile files."""
     item_x = "5c0d1b8b86f7744bb2683cf1"
     install_commit(
         clean_repo,
         "ModX",
         mod_type="server",
-        files={
-            "SPT/user/mods/ModX/db/templates/items.json": json.dumps(
-                {item_x: {"_id": item_x, "_name": "item_x"}}
-            )
-        },
+        files={"SPT/user/mods/ModX/db/templates/items.json": json.dumps({item_x: {"_id": item_x, "_name": "item_x"}})},
     )
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
     profile_with_x = _empty_pmc_profile()
@@ -1980,9 +1875,7 @@ def test_check_all_does_not_modify_the_repository_or_profiles(
             "slotId": "hideout",
         }
     ]
-    (profiles_dir / "abc.json").write_text(
-        json.dumps(profile_with_x), encoding="utf-8"
-    )
+    (profiles_dir / "abc.json").write_text(json.dumps(profile_with_x), encoding="utf-8")
     before = (profiles_dir / "abc.json").read_bytes()
 
     check_all(clean_repo, detect_layout(clean_repo.path))
@@ -1999,9 +1892,7 @@ def test_collect_mod_ids_accepts_db_files_saved_with_a_utf8_bom(
             "﻿" + json.dumps({ITEM_A: {"_id": ITEM_A, "_name": "item_a"}})
         ).encode("utf-8"),
     }
-    commit_hash = install_commit(
-        clean_repo, "ServerMod", mod_type="server", files=files
-    )
+    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 

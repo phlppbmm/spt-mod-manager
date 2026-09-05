@@ -28,10 +28,14 @@ def test_third_request_within_window_sleeps_a_sane_duration(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
-    """The third request within the rate window sleeps for a reasonable duration."""
-    respx_router.get("/mods").mock(
-        return_value=httpx.Response(200, json=page_envelope([]))
-    )
+    """Token bucket throttle enforces rate_per_minute via sleep on exhaustion.
+
+    With rate_per_minute=2 (2 tokens per 60 seconds), the first two mods() calls
+    consume both tokens without sleeping; the third call detects insufficient tokens
+    and sleeps a positive duration (0 < sleep <= 60) before proceeding, respecting
+    the per-minute rate limit.
+    """
+    respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page_envelope([])))
     client = client_factory(rate_per_minute=2)
 
     client.mods()
@@ -50,10 +54,13 @@ def test_ping_bypasses_the_throttle(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
-    """ping() bypasses the rate throttle even when called repeatedly."""
-    respx_router.get("/ping").mock(
-        return_value=httpx.Response(200, json={"success": True})
-    )
+    """ping() sends requests without consuming or checking the token bucket.
+
+    With rate_per_minute=1 (only 1 request per minute after exhaustion), five
+    consecutive ping() calls all succeed without any sleep() invocation, because
+    _send() throttle is skipped by ping() (direct httpx.get to /ping endpoint).
+    """
+    respx_router.get("/ping").mock(return_value=httpx.Response(200, json={"success": True}))
     client = client_factory(rate_per_minute=1)
 
     for _ in range(5):
@@ -121,9 +128,7 @@ def test_429_with_a_malformed_retry_after_falls_back_to_exponential_backoff(
     def side_effect(request: httpx.Request) -> httpx.Response:
         attempts["n"] += 1
         if attempts["n"] == 1:
-            return httpx.Response(
-                429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}
-            )
+            return httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"})
         return httpx.Response(200, json=page_envelope([]))
 
     respx_router.get("/mods").mock(side_effect=side_effect)

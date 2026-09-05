@@ -15,9 +15,7 @@ from sptmod.core.favorites import (
 # --- default_favorites_path ------------------------------------------------
 
 
-def test_default_favorites_path_honors_xdg_config_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_default_favorites_path_honors_xdg_config_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """If the body is `pass`, this fails: result is None, not the expected path."""
     config_home = tmp_path / "config"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
@@ -28,7 +26,10 @@ def test_default_favorites_path_honors_xdg_config_home(
 
 
 def test_favorites_file_name_constant_is_favorites_json() -> None:
-    """The favorites file name constant is "favorites.json"."""
+    """The FAVORITES_FILE_NAME constant is exactly "favorites.json".
+
+    Asserts the constant value to catch accidental renames.
+    """
     assert FAVORITES_FILE_NAME == "favorites.json"
 
 
@@ -76,9 +77,7 @@ def test_load_favorites_returns_sorted_unique_ids(tmp_path: Path) -> None:
         "float-member",
     ],
 )
-def test_load_favorites_treats_malformed_content_as_an_empty_list(
-    tmp_path: Path, content: str
-) -> None:
+def test_load_favorites_treats_malformed_content_as_an_empty_list(tmp_path: Path, content: str) -> None:
     """If the malformed-content guards are dropped, this fails: a TypeError or
     ValueError propagates, or a garbage value like True or "two" survives into
     the returned list, instead of the whole file being treated as empty."""

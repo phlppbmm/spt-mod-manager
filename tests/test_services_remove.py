@@ -34,7 +34,11 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_remove_mod_deletes_the_files_added_by_its_install_commit(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod deletes the files that were added by the mod's install commit."""
+    """remove_mod deletes all files from the mod's install commit from the working tree.
+
+    After removing ModA, BepInEx/plugins/ModA.dll (added by the install commit) no longer
+    exists on disk.
+    """
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     services.remove_mod(clean_repo.path, "ModA")
@@ -42,10 +46,12 @@ def test_remove_mod_deletes_the_files_added_by_its_install_commit(
     assert not (clean_repo.path / "BepInEx/plugins/ModA.dll").exists()
 
 
-def test_remove_mod_result_reports_name_commit_and_files(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """remove_mod result includes the mod name, commit hash, and removed files."""
+def test_remove_mod_result_reports_name_commit_and_files(clean_repo: Repo, install_commit: InstallCommit) -> None:
+    """remove_mod result carries name, commit hash, and list of deleted file paths.
+
+    Removing ModA returns a RemoveResult with name='ModA', a commit hash present in the
+    repo's log, and files={Path('BepInEx/plugins/ModA.dll')}.
+    """
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     result = services.remove_mod(clean_repo.path, "ModA")
@@ -72,10 +78,12 @@ def test_remove_mod_revert_commit_carries_the_removed_state_trailer(
 def test_remove_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """When a file was overwritten by a later mod, the error names that mod and leaves tree clean."""
-    install_commit(
-        clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1
-    )
+    """A revert conflict (file overwritten by a later mod) raises ConflictError naming the mod.
+
+    Removing ModA when ModB has overwritten BepInEx/plugins/shared.dll raises ConflictError
+    with ModB in the message; the tree stays clean and the overwritten file survives.
+    """
+    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1)
     install_commit(
         clean_repo,
         "ModB",
@@ -88,15 +96,17 @@ def test_remove_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
 
     assert "ModB" in str(exc_info.value)
     assert clean_repo.is_clean() is True
-    assert (clean_repo.path / "BepInEx/plugins/shared.dll").read_text(
-        encoding="utf-8"
-    ) == "overwritten-by-modb"
+    assert (clean_repo.path / "BepInEx/plugins/shared.dll").read_text(encoding="utf-8") == "overwritten-by-modb"
 
 
 def test_remove_mod_conflict_message_names_both_overwritten_files(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """The conflict error message lists all overwritten files."""
+    """A revert conflict error message names the mod and all overwritten file paths.
+
+    Removing ModA (with shared1.dll and shared2.dll) when ModB overwrote both raises
+    ConflictError whose message includes ModB, shared1.dll, and shared2.dll.
+    """
     install_commit(
         clean_repo,
         "ModA",
@@ -126,7 +136,11 @@ def test_remove_mod_conflict_message_names_both_overwritten_files(
 
 
 def test_remove_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
-    """remove_mod raises ModNotFoundError for a non-existent mod."""
+    """remove_mod on a name not in any install commit raises ModNotFoundError.
+
+    Calling remove_mod(path, 'Ghost') when Ghost has never been installed raises
+    ModNotFoundError without making any changes.
+    """
     with pytest.raises(ModNotFoundError):
         services.remove_mod(clean_repo.path, "Ghost")
 
@@ -134,7 +148,11 @@ def test_remove_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> N
 def test_remove_mod_raises_mod_not_found_for_an_already_removed_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """Removing a mod twice raises ModNotFoundError on the second attempt."""
+    """Calling remove_mod twice on the same mod raises ModNotFoundError the second time.
+
+    After removing ModA once, calling remove_mod(path, 'ModA') again raises
+    ModNotFoundError because the mod no longer has an active install commit.
+    """
     install_commit(clean_repo, "ModA")
     services.remove_mod(clean_repo.path, "ModA")
 
@@ -145,7 +163,11 @@ def test_remove_mod_raises_mod_not_found_for_an_already_removed_mod(
 def test_remove_mod_raises_ambiguous_mod_error_for_case_variant_names(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod raises AmbiguousModError when multiple case variants exist."""
+    """Removing with a case-variant name raises AmbiguousModError listing candidates.
+
+    After installing CoolMod and coolmod, calling remove_mod(path, 'COOLMOD') raises
+    AmbiguousModError with candidates={'CoolMod', 'coolmod'}.
+    """
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
@@ -155,14 +177,10 @@ def test_remove_mod_raises_ambiguous_mod_error_for_case_variant_names(
     assert set(exc_info.value.candidates) == {"CoolMod", "coolmod"}
 
 
-def test_remove_mod_rejects_a_dirty_tree(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
+def test_remove_mod_rejects_a_dirty_tree(clean_repo: Repo, install_commit: InstallCommit) -> None:
     """remove_mod raises DirtyTreeError when there are untracked changes."""
     install_commit(clean_repo, "ModA")
-    (clean_repo.path / "BepInEx/plugins/stray.txt").write_text(
-        "stray", encoding="utf-8"
-    )
+    (clean_repo.path / "BepInEx/plugins/stray.txt").write_text("stray", encoding="utf-8")
 
     with pytest.raises(DirtyTreeError):
         services.remove_mod(clean_repo.path, "ModA")
@@ -173,9 +191,7 @@ def test_remove_mod_rejects_a_running_game(
 ) -> None:
     """remove_mod raises GameRunningError when the game is running."""
     install_commit(clean_repo, "ModA")
-    monkeypatch.setattr(
-        game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"]
-    )
+    monkeypatch.setattr(game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"])
 
     with pytest.raises(GameRunningError):
         services.remove_mod(clean_repo.path, "ModA")
@@ -186,7 +202,11 @@ def test_remove_mod_rejects_a_running_game(
 def test_remove_mod_waits_for_a_lock_held_by_another_operation_then_succeeds(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod blocks until the game lock is released, then succeeds."""
+    """remove_mod waits for the game lock and completes after it is released.
+
+    While another thread holds the game_lock, remove_mod blocks; it unblocks after the
+    lock is released (~0.3 seconds) and completes successfully with the mod deleted.
+    """
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
     release_after = 0.3
     holder_ready = threading.Event()

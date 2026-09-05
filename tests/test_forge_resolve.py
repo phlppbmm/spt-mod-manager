@@ -93,9 +93,7 @@ def _seed_target(
         total=1,
         next_url=None,
     )
-    respx_router.get(f"/mod/{mod_id}/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get(f"/mod/{mod_id}/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
     catalog.fetch_versions(client, mod_id)
 
 
@@ -133,9 +131,7 @@ def _dep_node(
     }
 
 
-def _mock_dependencies_response(
-    respx_router: respx.MockRouter, nodes: list[dict[str, Any]]
-) -> None:
+def _mock_dependencies_response(respx_router: respx.MockRouter, nodes: list[dict[str, Any]]) -> None:
     """Echo the queried ``mods`` pair back as the dict key of the response.
 
     Per docs/FORGE_API.md (confirmed by
@@ -157,9 +153,7 @@ def _mock_dependencies_response(
 
 def _mock_empty_dependencies_response(respx_router: respx.MockRouter) -> None:
     """Mock a response that omits every queried pair, including the target's."""
-    respx_router.get("/mods/dependencies").mock(
-        return_value=httpx.Response(200, json=success_envelope({}))
-    )
+    respx_router.get("/mods/dependencies").mock(return_value=httpx.Response(200, json=success_envelope({})))
 
 
 def test_plan_install_orders_dependency_before_the_requested_mod(
@@ -204,10 +198,11 @@ def test_plan_install_orders_dependency_before_the_requested_mod(
 def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When Dep Mod (id=2, version 1.0.0) is a dependency but an installed mod
-    already has forge_id="2" and version 1.0.0, plan_install returns only the
-    target mod (skipping the dependency); this prevents re-installing already-
-    satisfied dependencies.
+    """plan_install() skips dependency when forge_id and version already installed.
+
+    Target (id=1, version 2.0.0) depends on Dep Mod (id=2, version 1.0.0). An installed
+    mod with forge_id="2" and version="1.0.0" exists. plan_install returns plan.entries=[1]
+    (only the target), skipping the dependency entry because it's already satisfied.
     """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
@@ -223,10 +218,12 @@ def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
 def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_id(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When a dependency lacks a forge_id but an installed mod's name matches
-    (case-insensitive "dep mod" = "Dep Mod") at the required version, the
-    dependency is skipped from the plan; this handles the fallback matching
-    path for older or manually-installed mods.
+    """plan_install() skips dependency when mod name matches (case-insensitive) and forge_id absent.
+
+    Target (id=1) depends on Dep Mod (id=2, guid=None, version 1.0.0). An installed mod with
+    empty forge_id but name="dep mod" (lowercase, matches "Dep Mod" case-insensitively) and
+    version="1.0.0" exists. plan_install returns plan.entries=[1], skipping the dependency
+    via name-based fallback matching for older/manually-installed mods.
     """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid=None, version="1.0.0")
@@ -242,9 +239,12 @@ def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_i
 def test_plan_install_includes_outdated_installed_dependency(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When Dep Mod (id=2) depends on version 2.0.0 but only version 1.0.0 is
-    installed, plan_install includes the dependency in the plan (not satisfied);
-    this ensures upgrades are not skipped just because an older version exists.
+    """plan_install() includes dependency upgrade when installed version is outdated.
+
+    Target (id=1) depends on Dep Mod (id=2, version 2.0.0). An installed mod with forge_id="2"
+    and version="1.0.0" exists. plan_install includes the dependency in the plan (id=2, version
+    2.0.0 with is_dependency=True) because version 1.0.0 does not satisfy the 2.0.0 requirement,
+    ensuring upgrades are not silently skipped.
     """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="2.0.0")
@@ -321,10 +321,13 @@ def test_plan_install_target_pair_omitted_from_response_raises_naming_the_target
 def test_plan_install_installed_dependency_with_unparseable_version_is_not_satisfied(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When Dep Mod (id=2) requires version 1.0.0 but an installed mod with
-    forge_id="2" has version="dev-build" (unparseable as semver), the dependency
-    is not considered satisfied and remains in the plan; this prevents silently
-    keeping a dev build when a real version is required.
+    """plan_install() treats unparseable installed version as unsatisfied dependency.
+
+    Target (id=1) depends on Dep Mod (id=2, version 1.0.0). An installed mod with forge_id="2"
+    but version="dev-build" (not valid semver) exists. plan_install includes the dependency
+    (id=2 in is_dependency entries) because "dev-build" cannot be compared to "1.0.0", so the
+    dependency is not satisfied; this prevents silently keeping a dev build when a release is
+    required.
     """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
@@ -364,9 +367,7 @@ def test_plan_install_null_compatible_version_raises_naming_the_dependency(
     to install a dependency that has no compatible release.
     """
     _seed_target(client_factory, respx_router, catalog)
-    dep = _dep_node(
-        id=2, name="No Version Dep", latest_compatible_version=None, conflict=False
-    )
+    dep = _dep_node(id=2, name="No Version Dep", latest_compatible_version=None, conflict=False)
     _mock_dependencies_response(respx_router, [dep])
     client = client_factory()
 
@@ -396,7 +397,12 @@ def test_plan_install_dependency_cycle_raises_naming_the_dependency(
 def test_plan_install_unknown_mod_raises_no_compatible_version_error(
     catalog: Catalog, client_factory: ClientFactory
 ) -> None:
-    """Install plan raises NoCompatibleVersionError for unknown mod IDs."""
+    """plan_install() raises NoCompatibleVersionError for unknown mod ID.
+
+    Requesting plan_install(99999, None, ...) for a non-existent mod ID (not in the
+    catalog) raises NoCompatibleVersionError, signalling that the target mod cannot be
+    resolved.
+    """
     client = client_factory()
 
     with pytest.raises(NoCompatibleVersionError):
@@ -406,7 +412,13 @@ def test_plan_install_unknown_mod_raises_no_compatible_version_error(
 def test_plan_install_without_wanted_version_resolves_the_highest_compatible(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Install plan selects highest compatible version when no version is specified."""
+    """plan_install() selects highest compatible version when wanted_version is None.
+
+    Target mod (id=1) has two versions: 1.0.0 (id=901) and 2.0.0 (id=902), both compatible
+    with SPT_CONSTRAINT (^3.8.0). Calling plan_install(1, None, ...) without specifying a
+    version resolves to version="2.0.0" (the highest), producing plan.entries with version
+    "2.0.0".
+    """
     mod = mod_json_full(
         id=1,
         name="Target Mod",
@@ -455,9 +467,7 @@ def test_plan_install_without_wanted_version_resolves_the_highest_compatible(
         total=2,
         next_url=None,
     )
-    respx_router.get("/mod/1/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get("/mod/1/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
     catalog.fetch_versions(client, 1)
     _mock_dependencies_response(respx_router, [])
 

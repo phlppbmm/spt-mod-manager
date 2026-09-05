@@ -62,7 +62,12 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
-    """Create a progress callback that records all emitted steps for inspection."""
+    """Capture all progress callback invocations into a list for inspection.
+
+    Returns a tuple of (events, callback). The callback appends (step, percent,
+    message) tuples; events is readable to verify the order and values of each
+    reported step.
+    """
     events: list[tuple[str, int, str]] = []
 
     def _capture(step: str, percent: int, message: str) -> None:
@@ -95,12 +100,20 @@ def _free_then_ready_route(router: respx.MockRouter) -> respx.Route:
 
 
 def _login_ok(router: respx.MockRouter) -> respx.Route:
-    """Mock the SPT server login endpoint to succeed."""
+    """Set up respx to return a successful login response.
+
+    Routes PUT requests to LOGIN_PATH to reply with HTTP 200 and
+    {"Response": true}, simulating a profile that the server accepts.
+    """
     return router.put(LOGIN_PATH).respond(200, json={"Response": True})
 
 
 def _wait_until(predicate: Callable[[], bool], timeout: float = 4.0) -> None:
-    """Poll until a condition becomes true, raising an error if timeout is exceeded."""
+    """Repeatedly call predicate until it returns true or timeout expires.
+
+    Sleeps 20ms between polls; raises AssertionError if the deadline passes
+    before predicate becomes true. Timeout defaults to 4 seconds.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -110,10 +123,12 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 4.0) -> None:
 
 
 def _state_payload(root: Path) -> dict[str, Any]:
-    """Parse the launch state file and return its payload."""
-    payload: dict[str, Any] = json.loads(
-        (root / LAUNCH_STATE_FILE_NAME).read_text(encoding="utf-8")
-    )
+    """Load and parse LAUNCH_STATE_FILE_NAME from the game directory.
+
+    Reads the JSON state file from root and returns the parsed payload dict,
+    which holds keys like profile_id, server, client, watcher, stop_server_on_exit.
+    """
+    payload: dict[str, Any] = json.loads((root / LAUNCH_STATE_FILE_NAME).read_text(encoding="utf-8"))
     return payload
 
 
@@ -126,7 +141,13 @@ def _write_state_file(
     client: dict[str, Any] | None = None,
     watcher: dict[str, Any] | None = None,
 ) -> None:
-    """Write a launch state file with the specified process and configuration state."""
+    """Write LAUNCH_STATE_FILE_NAME to the game directory with given process state.
+
+    Creates the JSON state file recording the profile, process PIDs and start times
+    (server, client, watcher), and the stop_server_on_exit flag. Keyword args
+    allow each process reference and the flag to be individually set; defaults are
+    empty profile and true for stop_server_on_exit.
+    """
     payload = {
         "profile_id": profile_id,
         "stop_server_on_exit": stop_server_on_exit,
@@ -137,10 +158,13 @@ def _write_state_file(
     (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _ref(
-    pid: int, started_at: float, *, started_by_sptmod: bool | None = None
-) -> dict[str, Any]:
-    """Build a process reference object for the launch state file."""
+def _ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
+    """Build a process reference dict for the launch state file.
+
+    Returns a dict with pid and started_at (float timestamp); if started_by_sptmod
+    is not None, it is also included. This object is assigned to server, client, or
+    watcher fields in the state file.
+    """
     payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
     if started_by_sptmod is not None:
         payload["started_by_sptmod"] = started_by_sptmod
@@ -199,7 +223,11 @@ def test_tokenize_launch_settings(text: str, expected: list[str]) -> None:
 
 
 def test_launch_profile_raises_not_a_game_dir_for_a_bad_path(tmp_path: Path) -> None:
-    """launch_profile raises NotAGameDirError for a non-existent game directory path."""
+    """launch_profile raises NotAGameDirError when the game directory does not exist.
+
+    Calling launch_profile with a path that has no valid SPT/SPT_Runtime layout
+    raises NotAGameDirError before any other checks.
+    """
     with pytest.raises(NotAGameDirError):
         launch_profile(tmp_path / "does-not-exist", "any-profile")
 
@@ -207,19 +235,15 @@ def test_launch_profile_raises_not_a_game_dir_for_a_bad_path(tmp_path: Path) -> 
 def test_launch_profile_refuses_a_running_client(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_profile raises GameRunningError when the game client process exists.
+    """launch_profile raises GameRunningError before proceeding when a client is running.
 
-    Scan result shows a running EscapeFromTarkov.exe; launch_profile refuses
-    to proceed and names the process in the error.
+    Process scan returns a running EscapeFromTarkov.exe; launch_profile exits with
+    GameRunningError naming the process, refusing to start server or perform login.
     """
     monkeypatch.setattr(
         game_dir,
         "game_processes",
-        lambda: [
-            GameProcess(
-                pid=1, name="EscapeFromTarkov.exe", kind="client", started_at=1.0
-            )
-        ],
+        lambda: [GameProcess(pid=1, name="EscapeFromTarkov.exe", kind="client", started_at=1.0)],
     )
 
     with pytest.raises(GameRunningError, match="EscapeFromTarkov.exe"):
@@ -229,21 +253,18 @@ def test_launch_profile_refuses_a_running_client(
 def test_launch_profile_reuses_an_already_running_server(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_profile reuses a running server instead of starting a new one.
+    """launch_profile reuses an existing server process without spawning a new one.
 
-    When scan finds a server already listening, launch_profile records
-    server_started=False and the found pid, and never spawns the server binary.
+    Process scan finds an already-running SPT.Server.Linux (pid 555, started at 42.0);
+    launch_profile records server_started=False with that pid in the result, and
+    server_binary.dump.json is never created (proof the binary was not spawned).
     """
     # A server started by someone else (or a previous launch) is running, but
     # sptmod has no process record of it -- the scan is the only signal.
     monkeypatch.setattr(
         game_dir,
         "game_processes",
-        lambda: [
-            GameProcess(
-                pid=555, name="SPT.Server.Linux", kind="server", started_at=42.0
-            )
-        ],
+        lambda: [GameProcess(pid=555, name="SPT.Server.Linux", kind="server", started_at=42.0)],
     )
     d = fake_launchable_dir
 
@@ -283,9 +304,10 @@ def test_launch_profile_raises_server_port_busy_for_a_foreign_listener(
 def test_launch_profile_raises_launch_error_for_a_missing_profile(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when the profile file does not exist.
+    """launch_profile raises LaunchError when the profile JSON file does not exist.
 
-    Error message names the missing profile.
+    Calling launch_profile(root, "no-such-profile") when the file is missing raises
+    LaunchError with the profile name in the message, preventing any server startup.
     """
     with pytest.raises(LaunchError, match="no-such-profile"):
         launch_profile(fake_launchable_dir.root, "no-such-profile")
@@ -323,16 +345,15 @@ def test_launch_profile_raises_launch_error_for_an_unreadable_profile(
 def test_launch_profile_raises_launch_error_when_username_is_missing(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when profile lacks username in info.
+    """launch_profile raises LaunchError when profile.info lacks a username key.
 
-    Error message names the profile.
+    Profile JSON contains info.id but no info.username field; launch_profile raises
+    LaunchError naming the profile (via match), stopping before server startup.
     """
     d = fake_launchable_dir
     layout = detect_layout(d.root)
     profile_file = d.root / layout.profiles_dir / f"{d.profile_id}.json"
-    profile_file.write_text(
-        json.dumps({"info": {"id": d.profile_id}}), encoding="utf-8"
-    )
+    profile_file.write_text(json.dumps({"info": {"id": d.profile_id}}), encoding="utf-8")
 
     with pytest.raises(LaunchError, match=d.profile_id):
         launch_profile(d.root, d.profile_id)
@@ -341,10 +362,10 @@ def test_launch_profile_raises_launch_error_when_username_is_missing(
 def test_launch_profile_falls_back_to_the_account_name_when_nickname_is_absent(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile uses username as nickname when nickname field is absent from profile.
+    """launch_profile uses username as nickname when profile.info has no nickname.
 
-    Profile contains username but no nickname in the info dict; the returned
-    LaunchResult.nickname matches the username.
+    Profile JSON has info.username ("test_user") but no info.nickname; launch_profile
+    completes successfully and LaunchResult.nickname equals the username value.
     """
     d = fake_launchable_dir
     layout = detect_layout(d.root)
@@ -370,9 +391,10 @@ def test_launch_profile_falls_back_to_the_account_name_when_nickname_is_absent(
 def test_launch_profile_raises_launch_error_for_a_missing_server_binary(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when the SPT server binary does not exist.
+    """launch_profile raises LaunchError when the server executable is missing.
 
-    Error message names the missing binary.
+    After profile validation, before spawning the server, launch_profile checks
+    that SPT.Server.Linux exists; missing binary raises LaunchError naming it.
     """
     d = fake_launchable_dir
     d.server_binary.unlink()
@@ -413,7 +435,11 @@ def test_launch_profile_raises_launch_error_for_a_missing_client_executable(
 def test_launch_profile_raises_launcher_settings_error_when_the_file_is_missing(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LauncherSettingsError when LauncherSettings.json does not exist."""
+    """launch_profile raises LauncherSettingsError when LauncherSettings.json is missing.
+
+    After server login succeeds, launch_profile reads LauncherSettings.json to get
+    client wrapper settings; missing file raises LauncherSettingsError.
+    """
     d = fake_launchable_dir
     d.launcher_settings_file.unlink()
 
@@ -428,7 +454,12 @@ def test_launch_profile_raises_launcher_settings_error_when_the_file_is_missing(
 def test_launch_profile_raises_launcher_settings_error_for_invalid_json(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LauncherSettingsError when settings JSON is malformed."""
+    """launch_profile raises LauncherSettingsError when LauncherSettings.json is malformed.
+
+    Settings file exists but contains "not json"; json.loads() fails and
+    launch_profile raises LauncherSettingsError instead of letting the parse
+    exception escape.
+    """
     d = fake_launchable_dir
     d.launcher_settings_file.write_text("not json", encoding="utf-8")
 
@@ -443,7 +474,11 @@ def test_launch_profile_raises_launcher_settings_error_for_invalid_json(
 def test_launch_profile_raises_launcher_settings_error_when_linux_settings_is_missing(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LauncherSettingsError when LinuxSettings section is absent."""
+    """launch_profile raises LauncherSettingsError when LinuxSettings is absent.
+
+    Settings JSON parses but lacks the LinuxSettings section; launch_profile
+    requires it and raises LauncherSettingsError instead of continuing.
+    """
     d = fake_launchable_dir
     d.launcher_settings_file.write_text(json.dumps({"Servers": []}), encoding="utf-8")
 
@@ -484,9 +519,10 @@ def test_launch_profile_raises_launcher_settings_error_when_umu_path_is_unset(
 def test_launch_profile_raises_login_failed_when_the_server_rejects_the_profile(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LoginFailedError when server rejects the profile (Response: false).
+    """launch_profile raises LoginFailedError when server responds false to login.
 
-    Error message names the nickname of the rejected profile.
+    Server ping succeeds, but PUT LOGIN_PATH returns {"Response": false}; launch_profile
+    raises LoginFailedError naming the profile's nickname in the message.
     """
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -500,9 +536,11 @@ def test_launch_profile_raises_login_failed_when_the_server_rejects_the_profile(
 def test_launch_profile_propagates_launch_error_on_a_login_transport_failure(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when login request times out.
+    """launch_profile raises LaunchError when login HTTP request times out.
 
-    HTTP transport errors are wrapped and surfaced to the caller.
+    Server responds to ping successfully; login PUT request raises httpx.ReadTimeout.
+    launch_profile catches the transport error and raises LaunchError, not the raw
+    httpx exception.
     """
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -521,11 +559,12 @@ def test_launch_profile_propagates_launch_error_on_a_login_transport_failure(
 def test_launch_profile_polls_until_ready_with_two_free_answers_first(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile polls the server until it answers with pong, reporting progress.
+    """launch_profile polls server until pong appears, emitting monotonic progress.
 
-    Setup: initial check and 2 poll iterations answer "connection refused" before
-    the 4th attempt gets a pong. The progress callback receives "waiting" step
-    events with monotonically increasing percent values.
+    First 3 pings (1 initial + 2 polls) fail with ConnectError ("refused"); 4th
+    returns pong. Progress callback receives "waiting" step events with percent
+    values that form a strictly increasing sequence. Server is spawned and
+    result.server_started is True.
     """
     d = fake_launchable_dir
     calls = {"n": 0}
@@ -541,9 +580,7 @@ def test_launch_profile_polls_until_ready_with_two_free_answers_first(
         router.get(PING_PATH).mock(side_effect=_ping)
         _login_ok(router)
 
-        result = launch_profile(
-            d.root, d.profile_id, progress=progress, poll_seconds=0.0, clock=lambda: 0.0
-        )
+        result = launch_profile(d.root, d.profile_id, progress=progress, poll_seconds=0.0, clock=lambda: 0.0)
 
     assert result.server_started is True
     waiting_percents = [percent for step, percent, _ in events if step == "waiting"]
@@ -577,9 +614,7 @@ def test_launch_profile_keeps_polling_through_a_mid_poll_timeout_then_succeeds(
         router.get(PING_PATH).mock(side_effect=_ping)
         _login_ok(router)
 
-        result = launch_profile(
-            d.root, d.profile_id, poll_seconds=0.0, clock=lambda: 0.0
-        )
+        result = launch_profile(d.root, d.profile_id, poll_seconds=0.0, clock=lambda: 0.0)
 
     assert result.server_started is True
 
@@ -587,10 +622,11 @@ def test_launch_profile_keeps_polling_through_a_mid_poll_timeout_then_succeeds(
 def test_launch_profile_raises_launch_error_when_the_server_never_answers(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when server remains unreachable past ready_timeout.
+    """launch_profile raises LaunchError when polling exceeds the ready_timeout.
 
-    Clock is injected to make time jump from 0.0 to 1000.0, simulating a 5-second
-    timeout exceeding the ready_timeout of 5 seconds. Error message names the timeout.
+    Every ping raises ConnectError; injected clock jumps from 0.0 to 1000.0 on
+    the first poll, exceeding ready_timeout=5.0. launch_profile raises LaunchError
+    with "5 seconds" in the message.
     """
     d = fake_launchable_dir
     clock_values = iter([0.0, 1000.0])
@@ -611,10 +647,11 @@ def test_launch_profile_raises_launch_error_when_the_server_never_answers(
 def test_launch_profile_raises_server_port_busy_when_a_foreign_answer_appears_mid_poll(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises ServerPortBusyError when port switches to a foreign response mid-poll.
+    """launch_profile raises ServerPortBusyError when port answers non-SPT mid-poll.
 
-    Initial check: refused. Next poll: port answers but with non-SPT response,
-    indicating another program claimed it.
+    Initial ping fails with ConnectError. On next poll attempt, port answers with
+    HTTP 200 but {"Response": "someone-else"}, indicating a foreign service owns
+    the port. launch_profile raises ServerPortBusyError immediately.
     """
     d = fake_launchable_dir
     calls = {"n": 0}
@@ -635,17 +672,16 @@ def test_launch_profile_raises_server_port_busy_when_a_foreign_answer_appears_mi
 def test_launch_profile_raises_launch_error_when_the_spawned_server_dies(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when spawned server process exits mid-poll.
+    """launch_profile raises LaunchError when spawned server process exits early.
 
     Server binary is replaced with a script that exits with code 1 immediately.
-    A small delay in the ping mock lets the process exit before the first poll
-    checks process_alive. Error message names "stopped".
+    Ping mock sleeps 0.1s before responding, guaranteeing server has exited before
+    first poll checks process_alive. launch_profile raises LaunchError with
+    "stopped" in message.
     """
     d = fake_launchable_dir
     # Replace the stub with one that exits immediately instead of sleeping.
-    d.server_binary.write_text(
-        f"#!{sys.executable}\nimport sys\nsys.exit(1)\n", encoding="utf-8"
-    )
+    d.server_binary.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(1)\n", encoding="utf-8")
     os.chmod(d.server_binary, 0o755)
 
     def _ping(request: httpx.Request) -> httpx.Response:
@@ -710,9 +746,7 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
     login_request = login_route.calls.last.request
     assert login_request.method == "PUT"
     assert login_request.headers["responsecompressed"] == "0"
-    assert json.loads(zlib.decompress(login_request.content)) == {
-        "username": d.username
-    }
+    assert json.loads(zlib.decompress(login_request.content)) == {"username": d.username}
 
     # -- server argv/cwd ------------------------------------------------
     _wait_until(lambda: Path(f"{d.server_binary}.dump.json").exists())
@@ -729,8 +763,7 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
         "-force-gfx-jobs",
         "native",
         f"-token={d.profile_id}",
-        f"-config={{'BackendUrl':'{d.base_url}',"
-        f"'Version':'live','MatchingVersion':'live'}}",
+        f"-config={{'BackendUrl':'{d.base_url}','Version':'live','MatchingVersion':'live'}}",
     ]
     assert client_dump["cwd"] == str(d.root)
     env = client_dump["env"]
@@ -757,7 +790,11 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
 def test_launch_profile_writes_stop_server_on_exit_false(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile records stop_server_on_exit=false in state file when parameter is false."""
+    """launch_profile writes stop_server_on_exit false to state file when param is false.
+
+    Successful launch with stop_server_on_exit=False argument; state file's
+    stop_server_on_exit field reads as False.
+    """
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         _free_then_ready_route(router)
@@ -800,11 +837,11 @@ def test_launch_profile_prefixes_gamemoderun_when_game_mode_is_set(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """launch_profile prepends gamemoderun to client command when GameMode is true.
+    """launch_profile prepends gamemoderun wrapper when GameMode=true in settings.
 
-    GameMode setting enables use of the gamemoderun wrapper. A fake gamemoderun
-    is injected via PATH that leaves a marker file proving it was invoked before
-    execing into the umu wrapper.
+    Settings LinuxSettings.GameMode is set to true; fake gamemoderun on PATH leaves
+    a marker file and execs umu. launch_profile starts client wrapped with gamemoderun,
+    verified by marker existence and by gamemoderun being invoked before umu argv[0].
     """
     d = fake_launchable_dir
     settings = json.loads(d.launcher_settings_file.read_text(encoding="utf-8"))
@@ -819,9 +856,7 @@ def test_launch_profile_prefixes_gamemoderun_when_game_mode_is_set(
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     gamemoderun = fake_bin / "gamemoderun"
-    gamemoderun.write_text(
-        f'#!/bin/sh\necho invoked > "{marker}"\nexec "$@"\n', encoding="utf-8"
-    )
+    gamemoderun.write_text(f'#!/bin/sh\necho invoked > "{marker}"\nexec "$@"\n', encoding="utf-8")
     gamemoderun.chmod(gamemoderun.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
 
@@ -877,12 +912,12 @@ def test_launch_profile_records_zero_started_at_when_the_process_vanishes_instan
 def test_launch_profile_wraps_a_state_file_write_failure_naming_the_running_pids(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile wraps state file write OSError into LaunchError naming running pids.
+    """launch_profile wraps state file write OSError into LaunchError with pids.
 
-    State file path is replaced with a directory; os.replace() fails. launch_profile
-    catches the OSError and wraps it with a message naming the running server and
-    client pids, warning that they are unrecorded and must be closed manually.
-    Error message includes the game directory path.
+    After server login and client spawn, launch_profile attempts atomic replace of
+    state file; LAUNCH_STATE_FILE_NAME is a directory instead of a file, so
+    os.replace() fails. launch_profile wraps the OSError into LaunchError naming
+    server and client pids and game directory path, warning they run unrecorded.
     """
     # _write_state's atomic-replace step has no recovery path of its own; a
     # state "file" that is actually a directory makes os.replace() fail.
@@ -912,7 +947,8 @@ def test_launch_profile_refuses_a_concurrent_launch(
 ) -> None:
     """launch_profile raises LaunchError when launch lock file already exists.
 
-    Another launch is already in progress; the lock file blocks this attempt.
+    Lock file LAUNCH_LOCK_FILE_NAME is present; launch_profile detects it and
+    raises LaunchError with "already in progress", refusing to proceed.
     """
     d = fake_launchable_dir
     (d.root / LAUNCH_LOCK_FILE_NAME).touch()
@@ -924,9 +960,11 @@ def test_launch_profile_refuses_a_concurrent_launch(
 def test_launch_profile_raises_launch_error_when_the_lock_file_cannot_be_created(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile raises LaunchError when lock file cannot be created (permission denied).
+    """launch_profile raises LaunchError when lock file creation fails (no write).
 
-    Game directory is read-only; lock file creation fails with OSError.
+    Game directory is chmod 0o555 (read-only); open() to create LAUNCH_LOCK_FILE_NAME
+    fails. launch_profile catches the OSError and raises LaunchError with
+    "cannot be written" in the message.
     """
     d = fake_launchable_dir
     d.root.chmod(0o555)
@@ -940,7 +978,12 @@ def test_launch_profile_raises_launch_error_when_the_lock_file_cannot_be_created
 def test_launch_profile_removes_the_lock_file_after_a_successful_launch(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile removes lock file after successful launch completion."""
+    """launch_profile deletes lock file after successful profile launch.
+
+    After all startup steps complete (server ready, login, client spawn, state written),
+    launch_profile removes LAUNCH_LOCK_FILE_NAME and returns LaunchResult. Lock file
+    does not exist after successful return.
+    """
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         _pong_route(router)
@@ -954,9 +997,11 @@ def test_launch_profile_removes_the_lock_file_after_a_successful_launch(
 def test_launch_profile_removes_the_lock_file_after_a_failed_launch(
     fake_launchable_dir: LaunchableGameDir,
 ) -> None:
-    """launch_profile removes lock file even when launch fails.
+    """launch_profile removes lock file even when launch fails partway through.
 
-    Profile not found raises LaunchError, but lock cleanup still happens.
+    Profile name does not exist, so launch_profile raises LaunchError; the lock
+    file created at start is cleaned up in the exception path. Lock file does
+    not exist after the exception.
     """
     d = fake_launchable_dir
 
@@ -974,17 +1019,22 @@ def test_launch_profile_removes_the_lock_file_after_a_failed_launch(
 def test_launch_status_reports_nothing_with_no_state_and_no_processes(
     tmp_path: Path,
 ) -> None:
-    """launch_status returns all-false/zero/empty when no state file or game processes exist."""
+    """launch_status returns all-false LaunchStatus when nothing is running or recorded.
+
+    No state file and no game processes found by scan; launch_status returns
+    LaunchStatus with all boolean flags false, pids 0, and empty profile_id.
+    """
     assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "")
 
 
 def test_launch_status_reports_alive_processes_from_the_state_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status reports state file's pids when process_alive check confirms they run.
+    """launch_status extracts running process pids from state file when alive.
 
-    State file has server pid 111 and client pid 222; both are confirmed alive
-    by monkeypatched process_alive. Result includes profile_id from state.
+    State file records profile "profile-a" with server pid 111 and client pid 222,
+    both started at epoch times 1.0 and 2.0. process_alive returns True for both;
+    launch_status returns LaunchStatus reporting both running with the profile_id.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
     _write_state_file(
@@ -1000,22 +1050,19 @@ def test_launch_status_reports_alive_processes_from_the_state_file(
 def test_launch_status_falls_back_to_the_scanned_process_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status scans game_processes when no state file exists.
+    """launch_status scans running processes when state file is absent.
 
-    No state file; process_alive always returns False so scan fallback runs.
-    Scan finds server pid 333 and client pid 444. No profile_id from state.
+    No state file exists; process_alive always returns False (so state fallback
+    doesn't help). game_processes scan finds SPT.Server.Linux (pid 333) and
+    EscapeFromTarkov.exe (pid 444). Result reports both running, profile_id empty.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
         lambda: [
-            GameProcess(
-                pid=333, name="SPT.Server.Linux", kind="server", started_at=9.0
-            ),
-            GameProcess(
-                pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0
-            ),
+            GameProcess(pid=333, name="SPT.Server.Linux", kind="server", started_at=9.0),
+            GameProcess(pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0),
         ],
     )
 
@@ -1025,11 +1072,11 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
 def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status scans for the game by name when recorded client pid is no longer alive.
+    """launch_status falls back to scanned game name when recorded pid dies.
 
-    State file records client pid 222 (dead); scan finds EscapeFromTarkov.exe
-    at pid 444 (the actual game running after the wrapper exited). Result uses
-    the scanned pid.
+    State file records client pid 222 (dead per process_alive check); scan finds
+    EscapeFromTarkov.exe at pid 444 (real game running after wrapper exited).
+    launch_status returns the scanned pid (444), not the stale recorded one.
     """
     # The Linux case: the process the launch spawned was only the wrapper and
     # is gone, while the game itself still runs under its own name.
@@ -1037,11 +1084,7 @@ def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
     monkeypatch.setattr(
         game_dir,
         "game_processes",
-        lambda: [
-            GameProcess(
-                pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0
-            )
-        ],
+        lambda: [GameProcess(pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0)],
     )
     _write_state_file(tmp_path, profile_id="profile-a", client=_ref(222, 2.0))
 
@@ -1054,10 +1097,11 @@ def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
 def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status preserves profile_id from state even when all processes are gone.
+    """launch_status preserves profile_id from state even when all processes died.
 
-    State file records a profile_id with dead pids. Result shows no running
-    processes but retains the profile_id.
+    State file records profile "stale-profile" with pids 1 and 2 (both dead per
+    process_alive check) and no scan results. Result shows both_running false
+    with pids 0, but profile_id="stale-profile" is retained.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
     _write_state_file(
@@ -1073,17 +1117,16 @@ def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
 def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status uses recorded pid from state file, not scan results when both exist.
+    """launch_status returns recorded pid from state, not scan, when both present.
 
-    State records server pid 111 (alive); scan finds pid 999. Result uses 111.
+    State file records server pid 111 (alive per process_alive); scan simultaneously
+    finds SPT.Server.Linux at pid 999. Result server_pid is 111, not 999.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
-        lambda: [
-            GameProcess(pid=999, name="SPT.Server.Linux", kind="server", started_at=1.0)
-        ],
+        lambda: [GameProcess(pid=999, name="SPT.Server.Linux", kind="server", started_at=1.0)],
     )
     _write_state_file(tmp_path, server=_ref(111, 1.0, started_by_sptmod=True))
 
@@ -1108,10 +1151,11 @@ def test_stop_game_falls_back_to_the_scanned_process_table(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """stop_game terminates processes found via scan when no state file exists.
+    """stop_game terminates scanned processes when no state file exists.
 
-    No state file; scan finds real server and client processes; both are
-    terminated successfully.
+    No state file; game_processes scan returns real SPT.Server.Linux (pid server.pid)
+    and EscapeFromTarkov.exe (pid client.pid) with correct create_time values. Both
+    processes are terminated; result shows server_stopped=True, client_stopped=True.
     """
     # No state file at all -- exactly like launch_status, stop_game finds a
     # server/client started outside sptmod (or by an untracked launch) via
@@ -1149,10 +1193,10 @@ def test_stop_game_stops_every_scanned_game_process(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """stop_game terminates all game processes when multiple clients are scanned.
+    """stop_game terminates all instances of the game when multiple exist.
 
-    Wine-hosted game appears multiple times in the scan; all instances are
-    terminated.
+    Wine-hosted game appears as two separate processes in scan (first, second).
+    Both are terminated; result.client_stopped is True after both pids exit.
     """
     # A game hosted by Wine shows up more than once; leaving any of them
     # running would keep the installation locked.
@@ -1182,10 +1226,11 @@ def test_stop_game_stops_every_scanned_game_process(
 def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
-    """stop_game terminates server, client, and watcher; state file is deleted.
+    """stop_game terminates server/client/watcher and deletes state file.
 
-    State file records all three process types (server started by sptmod, client,
-    watcher). All are terminated and state file is cleared.
+    State file records all three (server with started_by_sptmod=True, client, watcher);
+    all processes are running. stop_game terminates all three and deletes
+    LAUNCH_STATE_FILE_NAME. Result shows server_stopped=True, client_stopped=True.
     """
     server = spawn_sleeper()
     client = spawn_sleeper()
@@ -1193,9 +1238,7 @@ def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
     _write_state_file(
         tmp_path,
         profile_id="p",
-        server=_ref(
-            server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=True
-        ),
+        server=_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=True),
         client=_ref(client.pid, psutil.Process(client.pid).create_time()),
         watcher=_ref(watcher.pid, psutil.Process(watcher.pid).create_time()),
     )
@@ -1209,10 +1252,11 @@ def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
 
 
 def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> None:
-    """stop_game terminates client process and all its child processes recursively.
+    """stop_game terminates client and all child processes recursively.
 
-    Client process spawns a child; stop_game terminates both the parent and the
-    child process.
+    Client spawns a child process (sleep 30); state records the parent pid. stop_game
+    terminates the parent and recursively kills its children. Both parent and child
+    exit before timeout; result.client_stopped is True.
     """
     child_pid_file = tmp_path / "child.pid"
     script = (
@@ -1244,18 +1288,17 @@ def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> 
 def test_stop_game_tolerates_an_already_gone_process(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
-    """stop_game returns (False, False) when state records a dead process.
+    """stop_game handles gracefully when state records a pid that no longer exists.
 
-    Process was already killed before stop_game was called; no termination
-    needed. State file is still cleared.
+    Process was killed before stop_game() called; state file records its (now-dead)
+    pid. stop_game attempts termination but finds it gone, returns server_stopped=False,
+    and still deletes state file. No error is raised.
     """
     process = spawn_sleeper()
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait(timeout=4)
-    _write_state_file(
-        tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True)
-    )
+    _write_state_file(tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True))
 
     result = stop_game(tmp_path)
 
@@ -1266,10 +1309,11 @@ def test_stop_game_tolerates_an_already_gone_process(
 def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
-    """stop_game ignores a recorded pid when start time doesn't match the running process.
+    """stop_game skips pid with mismatched start time (PID reuse guard).
 
-    PID reuse detection: state records old start time (1.0), but the process at
-    that pid started much later. The process is left alone.
+    State records server=_ref(process.pid, 1.0, started_by_sptmod=True). Current
+    process at that pid has a much later real create_time. start time mismatch
+    proves the pid was reused; stop_game leaves it running. Result server_stopped=False.
     """
     process = spawn_sleeper()
     _write_state_file(tmp_path, server=_ref(process.pid, 1.0, started_by_sptmod=True))
@@ -1283,10 +1327,11 @@ def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
 def test_stop_game_tolerates_an_already_gone_watcher(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
-    """stop_game handles gracefully when watcher process in state is already gone.
+    """stop_game handles dead watcher pid in state without raising.
 
-    Unlike server/client which fall back to scan, watcher pid is passed directly
-    to terminate. Dead watcher does not raise an error.
+    Unlike server/client (which fall back to scan), watcher pid is handed directly
+    to _terminate. State records a dead watcher; stop_game attempts termination,
+    finds it gone, and returns gracefully. No error is raised.
     """
     # Unlike server/client, the watcher entry is handed to _terminate directly
     # (no _live_ref/scan fallback), so a dead watcher pid exercises
@@ -1305,10 +1350,11 @@ def test_stop_game_tolerates_an_already_gone_watcher(
 def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
-    """stop_game ignores watcher pid with mismatched start time (pid reuse).
+    """stop_game skips watcher with mismatched start time (pid reuse guard).
 
-    Watcher pid is reused by another process; start time guard prevents mistaken
-    termination.
+    State records watcher at process.pid with start time 1.0. Current process at
+    that pid has a much later real create_time (pid reuse). stop_game detects the
+    mismatch and leaves the process running.
     """
     process = spawn_sleeper()
     _write_state_file(tmp_path, watcher=_ref(process.pid, 1.0))
@@ -1340,9 +1386,7 @@ def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
     # what the SUT did (killed the process), not what this monkeypatch wrote.
     process = spawn_sleeper()
     started_at = psutil.Process(process.pid).create_time()
-    _write_state_file(
-        tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True)
-    )
+    _write_state_file(tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True))
     real_wait_procs = psutil.wait_procs
 
     def _report_still_alive(
@@ -1390,13 +1434,12 @@ def test_launch_profile_raises_launch_error_when_the_client_program_is_missing(
 def test_launch_status_treats_a_non_object_state_file_as_nothing_running(
     tmp_path: Path,
 ) -> None:
-    """launch_status treats non-dict state file (JSON array) as no processes running.
+    """launch_status returns all-false when state file is JSON array not object.
 
-    State file is malformed; status returns all falses/zeros/empty.
+    State file contains [1, 2, 3] (array instead of dict); launch_status skips
+    the malformed state and returns LaunchStatus with all flags false, pids 0.
     """
-    (tmp_path / LAUNCH_STATE_FILE_NAME).write_text(
-        json.dumps([1, 2, 3]), encoding="utf-8"
-    )
+    (tmp_path / LAUNCH_STATE_FILE_NAME).write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
     assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "")
 
@@ -1405,9 +1448,11 @@ def test_launch_status_treats_a_non_object_state_file_as_nothing_running(
 def test_launch_status_ignores_a_state_entry_with_an_unusable_pid(
     tmp_path: Path, bad_pid: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status ignores state server entry with invalid pid: string, negative, zero, bool.
+    """launch_status skips server entry with invalid pid (string, negative, zero, bool).
 
-    Parameterized bad pid values exercise type validation and range checks.
+    State server entry has pid="111" (string), or -1, or 0, or True instead of
+    positive int. launch_status detects type/value violation and skips the entry,
+    returning server_running=False.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
     _write_state_file(tmp_path, server={"pid": bad_pid, "started_at": 1.0})
@@ -1419,9 +1464,11 @@ def test_launch_status_ignores_a_state_entry_with_an_unusable_pid(
 def test_launch_status_ignores_a_state_entry_with_an_unusable_started_at(
     tmp_path: Path, bad_started_at: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status ignores state entry with invalid started_at: string or bool instead of float.
+    """launch_status skips entry with invalid started_at (string "1.0" or bool).
 
-    Parameterized bad types (string, bool) exercise type validation.
+    State server entry has started_at="1.0" (string) or True instead of float.
+    launch_status detects type violation and skips the entry, returning
+    server_running=False.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
     _write_state_file(tmp_path, server={"pid": 111, "started_at": bad_started_at})

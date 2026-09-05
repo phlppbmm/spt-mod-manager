@@ -17,9 +17,7 @@ from sptmod.core.repo import Repo
 
 
 @pytest.fixture(autouse=True)
-def isolate_git_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
-) -> None:
+def isolate_git_config(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     """Isolate every test from the developer machine's git configuration.
 
     Points HOME and the global/system git config files at locations that do
@@ -30,9 +28,7 @@ def isolate_git_config(
     fake_home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fake_home / "does-not-exist-gitconfig"))
-    monkeypatch.setenv(
-        "GIT_CONFIG_SYSTEM", str(fake_home / "does-not-exist-gitconfig-system")
-    )
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(fake_home / "does-not-exist-gitconfig-system"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     for var in (
         "GIT_AUTHOR_NAME",
@@ -75,24 +71,14 @@ def fake_game_dir(tmp_path: Path) -> Path:
         "TradersInfo": {},
         "Quests": [],
     }
-    (root / "SPT" / "user" / "profiles" / "abc.json").write_text(
-        json.dumps(profile), encoding="utf-8"
-    )
+    (root / "SPT" / "user" / "profiles" / "abc.json").write_text(json.dumps(profile), encoding="utf-8")
 
     core_config = {"sptVersion": "4.1.0"}
-    (root / "SPT" / "SPT_Data" / "configs" / "core.json").write_text(
-        json.dumps(core_config), encoding="utf-8"
-    )
+    (root / "SPT" / "SPT_Data" / "configs" / "core.json").write_text(json.dumps(core_config), encoding="utf-8")
 
-    (root / "SPT" / "user" / "logs" / "x.log").write_text(
-        "dummy log line\n", encoding="utf-8"
-    )
-    (root / "EscapeFromTarkov_Data" / "foo").write_text(
-        "dummy game data\n", encoding="utf-8"
-    )
-    (root / "SPT" / "user" / "profiles" / "backups" / "old.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    (root / "SPT" / "user" / "logs" / "x.log").write_text("dummy log line\n", encoding="utf-8")
+    (root / "EscapeFromTarkov_Data" / "foo").write_text("dummy game data\n", encoding="utf-8")
+    (root / "SPT" / "user" / "profiles" / "backups" / "old.json").write_text("{}", encoding="utf-8")
 
     return root
 
@@ -133,24 +119,14 @@ def fake_game_dir_runtime(tmp_path: Path) -> Path:
         "TradersInfo": {},
         "Quests": [],
     }
-    (root / "SPT_Runtime" / "user" / "profiles" / "abc.json").write_text(
-        json.dumps(profile), encoding="utf-8"
-    )
+    (root / "SPT_Runtime" / "user" / "profiles" / "abc.json").write_text(json.dumps(profile), encoding="utf-8")
 
     core_config = {"projectName": "SPT", "compatibleTarkovVersion": "1.0.0"}
-    (root / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json").write_text(
-        json.dumps(core_config), encoding="utf-8"
-    )
+    (root / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json").write_text(json.dumps(core_config), encoding="utf-8")
 
-    (root / "SPT_Runtime" / "user" / "logs" / "x.log").write_text(
-        "dummy log line\n", encoding="utf-8"
-    )
-    (root / "EscapeFromTarkov_Data" / "foo").write_text(
-        "dummy game data\n", encoding="utf-8"
-    )
-    (root / "SPT_Runtime" / "user" / "profiles" / "backups" / "old.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    (root / "SPT_Runtime" / "user" / "logs" / "x.log").write_text("dummy log line\n", encoding="utf-8")
+    (root / "EscapeFromTarkov_Data" / "foo").write_text("dummy game data\n", encoding="utf-8")
+    (root / "SPT_Runtime" / "user" / "profiles" / "backups" / "old.json").write_text("{}", encoding="utf-8")
 
     return root
 
@@ -278,13 +254,9 @@ def make_profile() -> MakeProfile:
                     "favoriteItems": [],
                     "hideoutCustomizationStashId": f"{name}-customization-stash",
                 },
-                "Encyclopedia": {
-                    v(f"{name}:encyclopedia", item_id, other_item_id): True
-                },
+                "Encyclopedia": {v(f"{name}:encyclopedia", item_id, other_item_id): True},
                 "WishList": {v(f"{name}:wishlist", item_id, other_item_id): 1},
-                "TradersInfo": {
-                    v(f"{name}:trader", trader_id, other_trader_id): {"salesSum": 0}
-                },
+                "TradersInfo": {v(f"{name}:trader", trader_id, other_trader_id): {"salesSum": 0}},
                 "Quests": [
                     {
                         "qid": v(f"{name}:quest", quest_id, other_quest_id),
@@ -299,9 +271,7 @@ def make_profile() -> MakeProfile:
                         "id": f"{name}-cond",
                         "type": "Counter",
                         "value": 1,
-                        "sourceId": v(
-                            f"{name}:task-counter", quest_id, other_quest_id
-                        ),
+                        "sourceId": v(f"{name}:task-counter", quest_id, other_quest_id),
                     }
                 },
                 "Hideout": {
@@ -350,18 +320,12 @@ def make_profile() -> MakeProfile:
                     "Customization": {},
                 },
                 "UnlockedInfo": {
-                    "unlockedProductionRecipe": [
-                        v(f"{name}:unlocked-recipe", recipe_id, other_recipe_id)
-                    ]
+                    "unlockedProductionRecipe": [v(f"{name}:unlocked-recipe", recipe_id, other_recipe_id)]
                 },
                 "InsuredItems": [
                     {
-                        "tid": v(
-                            f"{name}:insured-item:tid", trader_id, other_trader_id
-                        ),
-                        "itemId": v(
-                            f"{name}:insured-item:itemId", container_id, unrelated_id
-                        ),
+                        "tid": v(f"{name}:insured-item:tid", trader_id, other_trader_id),
+                        "itemId": v(f"{name}:insured-item:itemId", container_id, unrelated_id),
                     }
                 ],
             }
@@ -372,9 +336,7 @@ def make_profile() -> MakeProfile:
                         "name": "Daily",
                         "activeQuests": [
                             {
-                                "_id": v(
-                                    f"{name}:repeatable-quest:id", quest_id, "rq-id"
-                                ),
+                                "_id": v(f"{name}:repeatable-quest:id", quest_id, "rq-id"),
                                 "templateId": v(
                                     f"{name}:repeatable-quest:templateId",
                                     quest_id,
@@ -401,11 +363,7 @@ def make_profile() -> MakeProfile:
                     }
                 ]
             if achievements:
-                data["Achievements"] = {
-                    v("pmc:achievement", achievement_id, other_achievement_id): (
-                        1700000000
-                    )
-                }
+                data["Achievements"] = {v("pmc:achievement", achievement_id, other_achievement_id): (1700000000)}
             return data
 
         return {
@@ -434,9 +392,7 @@ def make_profile() -> MakeProfile:
                         "Items": [
                             {
                                 "_id": "build-item-2",
-                                "_tpl": v(
-                                    "userbuild:equipment", item_id, other_item_id
-                                ),
+                                "_tpl": v("userbuild:equipment", item_id, other_item_id),
                             }
                         ],
                     }
@@ -448,9 +404,7 @@ def make_profile() -> MakeProfile:
                         "Items": [
                             {
                                 "_id": "build-item-3",
-                                "_tpl": v(
-                                    "userbuild:magazine", item_id, other_item_id
-                                ),
+                                "_tpl": v("userbuild:magazine", item_id, other_item_id),
                             }
                         ],
                     }
@@ -481,9 +435,7 @@ def make_profile() -> MakeProfile:
                                 "data": [
                                     {
                                         "_id": "message-item-1",
-                                        "_tpl": v(
-                                            ":dialogue:items", item_id, other_item_id
-                                        ),
+                                        "_tpl": v(":dialogue:items", item_id, other_item_id),
                                     }
                                 ]
                             },
@@ -494,9 +446,7 @@ def make_profile() -> MakeProfile:
             "insurance": [
                 {
                     "scheduledTime": 0,
-                    "traderId": v(
-                        ":insurance:trader", trader_id, other_trader_id
-                    ),
+                    "traderId": v(":insurance:trader", trader_id, other_trader_id),
                     "maxStorageTime": 0,
                     "systemData": {},
                     "messageType": 0,
@@ -515,13 +465,9 @@ def make_profile() -> MakeProfile:
                 }
             ],
             "traderPurchases": {
-                v(":trader-purchase", trader_id, other_trader_id): {
-                    "assort-1": {"count": 1, "purchaseTimestamp": 0}
-                }
+                v(":trader-purchase", trader_id, other_trader_id): {"assort-1": {"count": 1, "purchaseTimestamp": 0}}
             },
-            "customisationUnlocks": [
-                {"id": "unlock-1", "source": "default", "type": "suite"}
-            ],
+            "customisationUnlocks": [{"id": "unlock-1", "source": "default", "type": "suite"}],
             "spt": {"version": "4.1.3", "mods": []},
         }
 
@@ -554,9 +500,7 @@ def make_archive(tmp_path: Path) -> MakeArchive:
 
             with zipfile.ZipFile(archive_path, "w") as zf:
                 for relpath, content in files.items():
-                    data = (
-                        content.encode("utf-8") if isinstance(content, str) else content
-                    )
+                    data = content.encode("utf-8") if isinstance(content, str) else content
                     zf.writestr(relpath, data)
         elif fmt == "7z":
             import py7zr
@@ -565,9 +509,7 @@ def make_archive(tmp_path: Path) -> MakeArchive:
             staging.mkdir()
             with py7zr.SevenZipFile(archive_path, "w") as zf:
                 for member_index, (relpath, content) in enumerate(files.items()):
-                    data = (
-                        content.encode("utf-8") if isinstance(content, str) else content
-                    )
+                    data = content.encode("utf-8") if isinstance(content, str) else content
                     # The staged file lives under a flat, safe name -- only
                     # the arcname passed to py7zr carries the (possibly
                     # unsafe, e.g. "../evil.txt") relpath. This keeps a
@@ -606,9 +548,7 @@ def clean_repo(initialized_repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Repo:
     date = "2024-01-01T00:00:00+00:00"
     monkeypatch.setenv("GIT_AUTHOR_DATE", date)
     monkeypatch.setenv("GIT_COMMITTER_DATE", date)
-    initialized_repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    initialized_repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return initialized_repo
 
 
@@ -717,9 +657,7 @@ def stub_dump(binary_path: Path) -> JsonDict:
     Raises ``FileNotFoundError`` until the stub has actually started and
     wound; callers poll on it after ``launch_profile`` returns.
     """
-    dump: JsonDict = json.loads(
-        Path(f"{binary_path}.dump.json").read_text(encoding="utf-8")
-    )
+    dump: JsonDict = json.loads(Path(f"{binary_path}.dump.json").read_text(encoding="utf-8"))
     return dump
 
 
@@ -847,7 +785,7 @@ def fake_launchable_dir(fake_game_dir_runtime: Path) -> Iterator[LaunchableGameD
                 "LinuxSettings": {
                     "PrefixPath": str(root / "prefix"),
                     "UmuPath": str(umu_path),
-                    "LaunchSettings": 'PROTON_USE_XALIA=0 PROTON_MEDIA_USE_GST=1',
+                    "LaunchSettings": "PROTON_USE_XALIA=0 PROTON_MEDIA_USE_GST=1",
                     "ProtonVersion": "GE-Proton11-5",
                     "ProtonPaths": [],
                     "GameMode": False,

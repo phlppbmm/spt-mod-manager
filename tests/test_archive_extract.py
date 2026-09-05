@@ -21,9 +21,7 @@ from sptmod.core.errors import ArchiveError
 
 
 @pytest.mark.parametrize("fmt", ["zip", "7z"])
-def test_extract_roundtrip_lands_files_with_content(
-    make_archive: MakeArchive, tmp_path: Path, fmt: str
-) -> None:
+def test_extract_roundtrip_lands_files_with_content(make_archive: MakeArchive, tmp_path: Path, fmt: str) -> None:
     """extract() writes archive members to disk with exact content preserved."""
     archive = make_archive(
         {
@@ -37,16 +35,16 @@ def test_extract_roundtrip_lands_files_with_content(
 
     extract(archive, dest)
 
-    assert (dest / "package.json").read_text(encoding="utf-8") == (
-        '{"name": "CoolMod"}'
-    )
-    assert (dest / "sub" / "dir" / "mod.dll").read_text(encoding="utf-8") == (
-        "binary-ish-content"
-    )
+    assert (dest / "package.json").read_text(encoding="utf-8") == ('{"name": "CoolMod"}')
+    assert (dest / "sub" / "dir" / "mod.dll").read_text(encoding="utf-8") == ("binary-ish-content")
 
 
 def test_extract_unknown_suffix_raises_archive_error(tmp_path: Path) -> None:
-    """extract() raises ArchiveError for unsupported suffix (.tar), error message names the suffix."""
+    """extract() raises ArchiveError when archive suffix is unsupported (.tar).
+
+    Creates archive.tar (with non-archive bytes) and calls extract(). Must raise
+    ArchiveError and the error message must contain ".tar" to identify the problem.
+    """
     archive = tmp_path / "archive.tar"
     archive.write_bytes(b"not a real archive")
     dest = tmp_path / "dest"
@@ -82,9 +80,7 @@ def test_extract_traversal_member_is_rejected_before_writing_outside(
     assert not (dest.parent / "evil.txt").exists()
 
 
-def test_extract_zip_traversal_absolute_member_is_rejected(
-    make_archive: MakeArchive, tmp_path: Path
-) -> None:
+def test_extract_zip_traversal_absolute_member_is_rejected(make_archive: MakeArchive, tmp_path: Path) -> None:
     """Absolute-path members (e.g. /etc/evil.txt) are rejected before extraction."""
     archive = make_archive({"/etc/evil.txt": "pwned"}, "zip")
     dest = tmp_path / "dest"
@@ -105,7 +101,12 @@ def test_extract_zip_traversal_absolute_member_is_rejected(
 def test_extract_encrypted_zip_raises_archive_error_not_runtime_error(
     tmp_path: Path,
 ) -> None:
-    """Encrypted zip archives raise ArchiveError (not raw RuntimeError)."""
+    """extract() maps raw RuntimeError from encrypted zip to ArchiveError.
+
+    Uses a pre-built encrypted.zip (AES-encrypted with password "secret123").
+    Calling extract() without password internally gets RuntimeError from zipfile,
+    which must be caught and re-raised as ArchiveError.
+    """
     archive = Path(__file__).parent / "data" / "encrypted.zip"
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -117,7 +118,11 @@ def test_extract_encrypted_zip_raises_archive_error_not_runtime_error(
 def test_extract_encrypted_7z_raises_archive_error_not_password_required(
     tmp_path: Path,
 ) -> None:
-    """Encrypted 7z archives raise ArchiveError (not py7zr.PasswordRequired)."""
+    """extract() maps py7zr.PasswordRequired from encrypted 7z to ArchiveError.
+
+    Creates an encrypted .7z file (password "secret123") using py7zr. Calling
+    extract() must catch py7zr.PasswordRequired and raise ArchiveError instead.
+    """
     import py7zr
 
     stage = tmp_path / "stage"
@@ -136,9 +141,7 @@ def test_extract_encrypted_7z_raises_archive_error_not_password_required(
         extract(archive, dest)
 
 
-@pytest.mark.skipif(
-    rar_backend_available(), reason="a rar backend is present on this machine"
-)
+@pytest.mark.skipif(rar_backend_available(), reason="a rar backend is present on this machine")
 def test_extract_rar_without_backend_raises_helpful_archive_error(
     tmp_path: Path,
 ) -> None:
@@ -178,13 +181,9 @@ RAR_SAMPLE_DIRS = [
 ]
 
 
-@pytest.mark.skipif(
-    not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available"
-)
+@pytest.mark.skipif(not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available")
 @pytest.mark.parametrize("sample_name", ["rar3-subdirs.rar", "rar5-subdirs.rar"])
-def test_extract_rar_roundtrip_lands_files_with_content(
-    tmp_path: Path, sample_name: str
-) -> None:
+def test_extract_rar_roundtrip_lands_files_with_content(tmp_path: Path, sample_name: str) -> None:
     """Real .rar archives are extracted correctly (rar3 and rar5 formats)."""
     archive = Path(__file__).parent / "data" / sample_name
     dest = tmp_path / "dest"
@@ -242,14 +241,17 @@ def test_extract_detects_format_from_magic_bytes_regardless_of_file_name(
     assert (dest / "package.json").read_text(encoding="utf-8") == marker
 
 
-@pytest.mark.skipif(
-    not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available"
-)
+@pytest.mark.skipif(not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available")
 @pytest.mark.parametrize("misleading_name", ["2.0.1", "download"])
 def test_extract_rar_detects_format_from_magic_bytes_regardless_of_file_name(
     tmp_path: Path, misleading_name: str
 ) -> None:
-    """Format detection from magic bytes works for .rar even with misleading filenames."""
+    """extract() detects .rar format from magic bytes despite misleading filename.
+
+    Uses real rar5-subdirs.rar sample renamed to "2.0.1" or "download" (no suffix).
+    extract() must dispatch on magic bytes (Rar!\\x1a\\x07), not filename, and
+    extract file1.txt correctly (6 bytes).
+    """
     sample = Path(__file__).parent / "data" / "rar5-subdirs.rar"
     renamed = tmp_path / misleading_name
     renamed.write_bytes(sample.read_bytes())
@@ -265,7 +267,12 @@ def test_extract_rar_detects_format_from_magic_bytes_regardless_of_file_name(
 
 
 def test_extract_unknown_suffix_error_names_supported_formats(tmp_path: Path) -> None:
-    """Error message for unsupported formats lists all supported formats."""
+    """extract() error message for unknown format lists all supported formats.
+
+    Creates archive.tar (no valid magic bytes) and calls extract(). Error message
+    must exactly match "unsupported archive format '.tar' (archive.tar); supported:
+    .7z, .zip, .rar" to help users know what formats work.
+    """
     archive = tmp_path / "archive.tar"
     archive.write_bytes(b"not a real archive")
     dest = tmp_path / "dest"
@@ -274,10 +281,7 @@ def test_extract_unknown_suffix_error_names_supported_formats(tmp_path: Path) ->
     with pytest.raises(ArchiveError) as excinfo:
         extract(archive, dest)
 
-    assert str(excinfo.value) == (
-        "unsupported archive format '.tar' (archive.tar); "
-        "supported: .7z, .zip, .rar"
-    )
+    assert str(excinfo.value) == ("unsupported archive format '.tar' (archive.tar); supported: .7z, .zip, .rar")
 
 
 def test_extract_rar_without_backend_on_path_raises_archive_error_naming_the_hint(
@@ -311,13 +315,16 @@ def test_extract_rar_without_backend_on_path_raises_archive_error_naming_the_hin
         rarfile.tool_setup(force=True)
 
 
-@pytest.mark.skipif(
-    not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available"
-)
+@pytest.mark.skipif(not rar_backend_available(), reason="no rar backend (unrar/bsdtar) available")
 def test_extract_rar_raises_archive_error_when_the_destination_is_read_only(
     tmp_path: Path,
 ) -> None:
-    """extract() raises ArchiveError when dest dir is chmod(0o500), error names the archive file."""
+    """extract() raises ArchiveError when destination directory is read-only.
+
+    Uses real rar5-subdirs.rar and a destination directory chmod(0o500). extract()
+    must raise ArchiveError when rarfile cannot write, and error message must
+    contain the filename "rar5-subdirs.rar" to identify which archive failed.
+    """
     archive = Path(__file__).parent / "data" / "rar5-subdirs.rar"
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -334,7 +341,12 @@ def test_extract_rar_raises_archive_error_when_the_destination_is_read_only(
 def test_extract_non_archive_with_no_suffix_raises_archive_error(
     tmp_path: Path,
 ) -> None:
-    """extract() raises ArchiveError; error message names the file and lists supported formats."""
+    """extract() raises ArchiveError for non-archive data with missing suffix.
+
+    Creates a file with no suffix (not-an-archive-at-all) containing random bytes
+    (no magic bytes). extract() must raise ArchiveError; message must include both
+    the filename and the list "supported: .7z, .zip, .rar".
+    """
     archive = tmp_path / "not-an-archive-at-all"
     archive.write_bytes(b"just some plain bytes, no magic number here")
     dest = tmp_path / "dest"
@@ -373,7 +385,12 @@ def test_extract_zip_named_directory_raises_archive_error_naming_the_directory(
 def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
     tmp_path: Path,
 ) -> None:
-    """Corrupt zip archives (with valid magic bytes) raise ArchiveError."""
+    """extract() raises ArchiveError for corrupt zip (bad central directory).
+
+    Creates archive.zip with valid PK\\x03\\x04 magic bytes followed by random data
+    (no valid central directory). extract() must detect the format from magic bytes,
+    attempt to open with zipfile, and raise ArchiveError on BadZipFile.
+    """
     archive = tmp_path / "archive.zip"
     archive.write_bytes(b"PK\x03\x04" + b"not a real zip central directory" * 4)
     dest = tmp_path / "dest"
@@ -388,11 +405,14 @@ def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
 def test_extract_corrupt_7z_with_valid_magic_bytes_raises_archive_error(
     tmp_path: Path,
 ) -> None:
-    """Corrupt 7z archives (with valid magic bytes) raise ArchiveError."""
+    """extract() raises ArchiveError for corrupt 7z (bad header/body).
+
+    Creates archive.7z with valid 7z\\xbc\\xaf\\x27\\x1c magic bytes followed by
+    random data (no valid 7z header or body). extract() must detect the format
+    from magic bytes and raise ArchiveError on py7zr parse failure.
+    """
     archive = tmp_path / "archive.7z"
-    archive.write_bytes(
-        b"7z\xbc\xaf\x27\x1c" + b"not a real 7z header or body" * 4
-    )
+    archive.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"not a real 7z header or body" * 4)
     dest = tmp_path / "dest"
     dest.mkdir()
 

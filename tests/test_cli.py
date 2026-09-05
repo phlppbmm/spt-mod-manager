@@ -17,7 +17,10 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure no game processes are detected during CLI tests."""
+    """Patches ``game_dir.running_game_processes`` to return an empty list.
+
+    Every CLI test runs as if no SPT process were running.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -31,7 +34,12 @@ def _clean_repo(path: Path) -> Repo:
 def test_init_happy_path_exits_zero_and_reports_the_spt_version(
     fake_game_dir: Path,
 ) -> None:
-    """init command exits 0 and stdout contains "4.1.0" from the detected layout."""
+    """The init command exits 0 and outputs the detected SPT version to stdout.
+
+    Calls ``sptmod init <path>`` on a valid game directory with core.json
+    present; must exit with code 0 and print "4.1.0" to stdout (detected from
+    the layout's PE or core.json, never from user input).
+    """
     result = runner.invoke(app, ["init", str(fake_game_dir)])
 
     assert result.exit_code == 0
@@ -41,7 +49,12 @@ def test_init_happy_path_exits_zero_and_reports_the_spt_version(
 def test_init_on_a_non_game_dir_exits_with_code_3_and_reports_on_stderr(
     tmp_path: Path,
 ) -> None:
-    """Init rejects non-game directories with exit code 3."""
+    """The init command exits 3 for non-game directories with stderr output.
+
+    Invokes ``sptmod init`` on an empty directory lacking SPT and BepInEx
+    subdirectories; must exit with code 3 (mapped NotAGameDirError) and write
+    a message to stderr starting with "error:".
+    """
     not_a_game_dir = tmp_path / "not-a-game"
     not_a_game_dir.mkdir()
 
@@ -72,14 +85,17 @@ def test_install_file_without_a_resolvable_version_prints_a_hint(
 def test_install_file_with_a_version_override_prints_no_versionless_hint(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
-    """Install with explicit --version suppresses the version hint."""
+    """Supplying --version suppresses the stdout hint to use --version.
+
+    Installs a bare DLL with ``--file --version 1.0.0``; the CLI must not
+    print the ``--version`` hint that would normally guide a user to resolve
+    the missing version for a bare DLL.
+    """
     _clean_repo(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(
-        app, ["install", "--file", str(archive), "--version", "1.0.0"]
-    )
+    result = runner.invoke(app, ["install", "--file", str(archive), "--version", "1.0.0"])
 
     assert result.exit_code == 0
     assert "--version" not in result.stdout
@@ -88,7 +104,11 @@ def test_install_file_with_a_version_override_prints_no_versionless_hint(
 def test_list_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """list command exits 0 when the game directory has mods."""
+    """The list command exits 0 when the repository has one mod installed.
+
+    Creates a repo with a single installed mod and runs ``sptmod list``;
+    must exit with code 0.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -101,7 +121,11 @@ def test_list_happy_path_exits_zero(
 def test_files_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """files command exits 0 for an installed mod name."""
+    """The files command exits 0 when querying an installed mod by name.
+
+    Creates a repo with one installed mod named "CoolMod" and runs
+    ``sptmod files CoolMod``; must exit with code 0.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -114,7 +138,11 @@ def test_files_happy_path_exits_zero(
 def test_history_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """history command exits 0 when repo has commits."""
+    """The history command exits 0 when the repository has one install commit.
+
+    Creates a repo with a mod install commit and runs ``sptmod history``;
+    must exit with code 0.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -127,7 +155,11 @@ def test_history_happy_path_exits_zero(
 def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """Remove command succeeds and prints the removed mod name."""
+    """The remove command exits 0 and prints the mod name to stdout.
+
+    Removes an installed mod with ``--yes``; must exit with code 0 and print
+    the mod name "CoolMod" to stdout.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -151,7 +183,12 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
     monkeypatch: pytest.MonkeyPatch,
     install_commit: InstallCommit,
 ) -> None:
-    """Remove prompts for confirmation and leaves mod when declined."""
+    """Declining the confirmation prompt leaves the mod files in place.
+
+    Runs ``sptmod remove <name>`` without ``--yes`` and answers "n" to the
+    confirmation; the mod's DLL must still exist and exit code must be
+    non-zero.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -166,7 +203,11 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
 def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """Remove proceeds when user confirms the prompt."""
+    """Confirming the prompt removes the mod and exits 0.
+
+    Runs ``sptmod remove <name>`` without ``--yes`` and answers "y"; must exit
+    with code 0, print the mod name, and the DLL must no longer exist.
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -182,7 +223,11 @@ def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
 def test_remove_with_yes_flag_skips_the_confirmation_prompt(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """--yes flag bypasses the confirmation prompt."""
+    """The --yes flag bypasses the confirmation prompt and removes the mod.
+
+    Runs ``sptmod remove <name> --yes``; must exit with code 0, print the mod
+    name, and the DLL must no longer exist (no interactive prompt).
+    """
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -198,7 +243,12 @@ def test_remove_with_yes_flag_skips_the_confirmation_prompt(
 def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Removing a non-existent mod fails with exit code 11."""
+    """Removing a non-existent mod exits 11 with stderr output.
+
+    Runs ``sptmod remove Ghost`` (name not in any install commit); must exit
+    with code 11 (mapped ModNotFoundError) and write a message to stderr
+    starting with "error:".
+    """
     _clean_repo(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -211,7 +261,12 @@ def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
 def test_install_with_invalid_metadata_exits_with_code_13(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
-    """Installing a mod with invalid metadata fails with exit code 13."""
+    """Installing a mod with missing required metadata exits 13.
+
+    Installs an archive containing package.json missing the required "version"
+    field; must exit with code 13 (mapped InvalidMetadataError) and write
+    "error:" to stderr.
+    """
     _clean_repo(fake_game_dir)
     # "version" is mandatory in package.json; missing it makes read_package_json
     # raise InvalidMetadataError, which the CLI must map to its own exit code.
@@ -243,8 +298,12 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
     make_archive: MakeArchive,
     install_commit: InstallCommit,
 ) -> None:
-    """Dirty tree, game running, and ambiguous mod errors exit with codes 4, 5,
-    and 12 respectively."""
+    """Core exceptions map to exit codes: 4 for dirty tree, 5 for game running,
+    12 for ambiguous mod names.
+
+    Parametrized over three scenarios triggering each error; the CLI must
+    exit with the corresponding code (4, 5, or 12) instead of the default 1.
+    """
     if scenario == "dirty_tree":
         # No baseline commit: the tracked profile is still untracked.
         Repo.init(detect_layout(fake_game_dir))
@@ -252,9 +311,7 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
         argv = ["install", "--file", str(archive)]
     elif scenario == "game_running":
         _clean_repo(fake_game_dir)
-        monkeypatch.setattr(
-            game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"]
-        )
+        monkeypatch.setattr(game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"])
         archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
         argv = ["install", "--file", str(archive)]
     else:

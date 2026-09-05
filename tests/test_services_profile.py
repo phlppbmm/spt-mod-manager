@@ -30,9 +30,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 def _clean_repo(path: Path) -> Repo:
     """Initialize a repository with a clean initial commit, simulating post-init state."""
     repo = Repo.init(detect_layout(path))
-    repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
 
 
@@ -65,27 +63,19 @@ def _commit_profile_with_item(repo: Repo, item_id: str) -> Path:
     the tree clean for the subsequent ``remove_mod``/CLI call.
     """
     profile_path = repo.path / "SPT/user/profiles/abc.json"
-    profile_path.write_text(
-        json.dumps(_profile_with_item(item_id)), encoding="utf-8"
-    )
-    repo.commit(
-        "chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")]
-    )
+    profile_path.write_text(json.dumps(_profile_with_item(item_id)), encoding="utf-8")
+    repo.commit("chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")])
     return profile_path
 
 
-def _install_server_mod_with_item(
-    clean_repo: Repo, install_commit: InstallCommit, item_id: str
-) -> None:
+def _install_server_mod_with_item(clean_repo: Repo, install_commit: InstallCommit, item_id: str) -> None:
     """Install a server mod with a database entry for the given item ID."""
     install_commit(
         clean_repo,
         "ServerMod",
         mod_type="server",
         files={
-            "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps(
-                {item_id: {"_id": item_id, "_name": "item"}}
-            )
+            "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps({item_id: {"_id": item_id, "_name": "item"}})
         },
     )
 
@@ -120,11 +110,13 @@ def _character(nickname: str, level: int, side: str) -> JsonDict:
 def test_list_profiles_describes_the_pmc_character_of_a_profile_file(
     fake_game_dir: Path,
 ) -> None:
-    """list_profiles extracts and returns PMC character metadata from profile files."""
+    """list_profiles extracts and returns the PMC character's metadata from profile files.
+
+    Reads the Info.Nickname, Info.Level, and Info.Side from a profile's pmc
+    character, returning them as nickname, level, and side in each ProfileSummary.
+    """
     profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
-    target = _write_profile_file(
-        profiles_dir, "abc.json", _character("Nikita", 42, "Usec")
-    )
+    target = _write_profile_file(profiles_dir, "abc.json", _character("Nikita", 42, "Usec"))
 
     summaries = services.list_profiles(fake_game_dir)
 
@@ -137,13 +129,15 @@ def test_list_profiles_describes_the_pmc_character_of_a_profile_file(
     assert summary.side == "Usec"
     assert summary.readable is True
     assert summary.error == ""
-    assert datetime.fromisoformat(summary.modified) == datetime.fromtimestamp(
-        target.stat().st_mtime, UTC
-    )
+    assert datetime.fromisoformat(summary.modified) == datetime.fromtimestamp(target.stat().st_mtime, UTC)
 
 
 def test_list_profiles_sorts_the_profiles_by_file_name(fake_game_dir: Path) -> None:
-    """list_profiles returns profiles sorted by file name."""
+    """list_profiles returns profiles sorted by file name in ascending order.
+
+    Given profiles abc.json, zulu.json, and alpha.json, they are returned
+    sorted to [abc.json, alpha.json, zulu.json].
+    """
     profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
     _write_profile_file(profiles_dir, "zulu.json", _character("Zulu", 3, "Bear"))
     _write_profile_file(profiles_dir, "alpha.json", _character("Alpha", 1, "Usec"))
@@ -160,7 +154,11 @@ def test_list_profiles_sorts_the_profiles_by_file_name(fake_game_dir: Path) -> N
 def test_list_profiles_defaults_the_character_data_a_profile_does_not_carry(
     fake_game_dir: Path,
 ) -> None:
-    """list_profiles returns default values for missing character metadata."""
+    """list_profiles fills missing character metadata with default values.
+
+    A profile with an empty Info object gets nickname='', level=0, side='',
+    readable=True, and error=''.
+    """
     profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
     _write_profile_file(profiles_dir, "abc.json", {"characters": {"pmc": {"Info": {}}}})
 
@@ -176,7 +174,11 @@ def test_list_profiles_defaults_the_character_data_a_profile_does_not_carry(
 def test_list_profiles_reports_a_broken_file_as_unreadable_with_a_plain_reason(
     fake_game_dir: Path,
 ) -> None:
-    """list_profiles reports malformed profile files as unreadable with an error message."""
+    """list_profiles sets readable=False and a standard error message for malformed JSON.
+
+    A profile containing invalid JSON gets readable=False and error set to the
+    constant message 'This file could not be read as a player profile.'
+    """
     profiles_dir = fake_game_dir / "SPT" / "user" / "profiles"
     (profiles_dir / "abc.json").write_text("{not json", encoding="utf-8")
 
@@ -195,7 +197,11 @@ def test_list_profiles_reports_a_broken_file_as_unreadable_with_a_plain_reason(
 def test_list_profiles_returns_nothing_when_there_is_no_profile_file(
     fake_game_dir: Path,
 ) -> None:
-    """list_profiles returns empty list when no profile files exist."""
+    """list_profiles returns an empty list when the profiles directory is empty.
+
+    After deleting the seeded abc.json from the profiles directory,
+    list_profiles returns an empty list rather than raising.
+    """
     (fake_game_dir / "SPT" / "user" / "profiles" / "abc.json").unlink()
 
     assert services.list_profiles(fake_game_dir) == []
@@ -204,7 +210,11 @@ def test_list_profiles_returns_nothing_when_there_is_no_profile_file(
 def test_list_profiles_reads_the_profiles_of_the_spt_runtime_layout(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """list_profiles reads profiles from SPT_Runtime directory for 4.1+ layouts."""
+    """list_profiles reads from SPT_Runtime/user/profiles for 4.1+ game layouts.
+
+    A game directory with SPT_Runtime (4.1+) instead of SPT (4.0) has its
+    profiles read from the runtime layout's profiles directory.
+    """
     profiles_dir = fake_game_dir_runtime / "SPT_Runtime" / "user" / "profiles"
     _write_profile_file(profiles_dir, "abc.json", _character("Runtime", 7, "Bear"))
 
@@ -223,7 +233,12 @@ def test_list_profiles_reads_the_profiles_of_the_spt_runtime_layout(
 def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_path(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """check_profiles identifies residues at all levels including scav and top-level."""
+    """check_profiles finds residues in scav character and top-level insurance sections.
+
+    When a mod's item template appears in scav.Inventory.items and a mod's
+    trader ID appears in the top-level insurance section, both residues are
+    reported with the correct category, character, and path.
+    """
     item_id = "5c0d1b8b86f7744bb2683cf9"
     trader_id = "5ac3b934136fb568fa78b1e9"
     install_commit(
@@ -245,9 +260,7 @@ def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_p
         "characters": {
             "pmc": {"Inventory": {"items": []}, "TradersInfo": {}, "Quests": []},
             "scav": {
-                "Inventory": {
-                    "items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]
-                },
+                "Inventory": {"items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]},
                 "TradersInfo": {},
                 "Quests": [],
             },
@@ -259,9 +272,7 @@ def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_p
     result = services.check_profiles(clean_repo.path)
 
     residues = result.residues["ServerMod"]
-    scav_item = next(
-        r for r in residues if r.category == "item" and r.character == "scav"
-    )
+    scav_item = next(r for r in residues if r.category == "item" and r.character == "scav")
     assert scav_item.ids == [item_id]
     assert scav_item.path == "/characters/scav/Inventory/items"
 
@@ -279,7 +290,12 @@ def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_p
 def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references_it(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod raises ProfileResidueError when profiles reference the mod."""
+    """remove_mod raises ProfileResidueError before touching the tree when a profile holds residues.
+
+    After installing ServerMod and committing a profile that references its
+    item ID, remove_mod(path, 'ServerMod') raises ProfileResidueError
+    without reverting or removing any files.
+    """
     item_id = "5c0d1b8b86f7744bb2683cf1"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
     _commit_profile_with_item(clean_repo, item_id)
@@ -295,7 +311,11 @@ def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references
 def test_remove_mod_leaves_the_mod_installed_when_it_raises_profile_residue_error(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """A failed remove_mod leaves the mod installed."""
+    """The mod remains active after remove_mod raises ProfileResidueError.
+
+    When remove_mod raises ProfileResidueError due to a profile holding
+    residues, the mod is still listed as active by list_mods.
+    """
     item_id = "5c0d1b8b86f7744bb2683cf2"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
     _commit_profile_with_item(clean_repo, item_id)
@@ -310,7 +330,12 @@ def test_remove_mod_leaves_the_mod_installed_when_it_raises_profile_residue_erro
 def test_remove_mod_force_reverts_and_leaves_the_profile_file_byte_identical(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """force=True removes the mod without modifying profile files."""
+    """remove_mod(force=True) reverts the mod without touching profile files.
+
+    With force=True, the mod's install commit is reverted (removing
+    SPT/user/mods/ServerMod/db/templates/items.json) but the profile file
+    remains exactly as it was, byte for byte, even though it still holds residues.
+    """
     item_id = "5c0d1b8b86f7744bb2683cf3"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
     profile_path = _commit_profile_with_item(clean_repo, item_id)
@@ -320,18 +345,19 @@ def test_remove_mod_force_reverts_and_leaves_the_profile_file_byte_identical(
 
     assert result.name == "ServerMod"
     assert profile_path.read_bytes() == before
-    assert not (
-        clean_repo.path / "SPT/user/mods/ServerMod/db/templates/items.json"
-    ).exists()
+    assert not (clean_repo.path / "SPT/user/mods/ServerMod/db/templates/items.json").exists()
 
 
 def test_remove_mod_without_db_dir_proceeds_without_a_residue_error(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """Mods without database directories can be removed without residue checks."""
-    install_commit(
-        clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"}
-    )
+    """remove_mod succeeds without checking for residues when the mod has no db/ directory.
+
+    A client-only mod (ClientMod with only BepInEx/plugins/ClientMod.dll) can
+    be removed without raising ProfileResidueError, even without any profile
+    check, because there is no db/ directory to contribute content IDs.
+    """
+    install_commit(clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"})
 
     result = services.remove_mod(clean_repo.path, "ClientMod")
 
@@ -341,7 +367,12 @@ def test_remove_mod_without_db_dir_proceeds_without_a_residue_error(
 def test_remove_mod_result_warnings_include_broken_db_json_entries(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod reports malformed database files in warnings."""
+    """remove_mod includes malformed db files in result.warnings.
+
+    A mod with one valid db file (traders/*/base.json) and one unparseable
+    JSON file (templates/items.json with '{not valid json') returns a result
+    with one warning naming items.json.
+    """
     trader_id = "5ac3b934136fb568fa78b1e2"
     install_commit(
         clean_repo,
@@ -370,7 +401,11 @@ def test_remove_mod_result_warnings_include_broken_db_json_entries(
 def test_cli_check_exits_zero_when_no_profile_has_residue(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The CLI check command exits successfully when no residues are found."""
+    """The CLI check command exits with code 0 when no residues are found.
+
+    Running 'sptmod check' on a clean repository with no mods installed
+    results in exit code 0.
+    """
     _clean_repo(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -382,7 +417,12 @@ def test_cli_check_exits_zero_when_no_profile_has_residue(
 def test_cli_check_exits_zero_and_reports_residues_when_found(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI check command reports found residues in output."""
+    """The CLI check command exits with 0 and reports residues in stdout when found.
+
+    After installing ServerMod and committing a profile referencing its item,
+    'sptmod check' exits with code 0 (not an error, just a report) and
+    includes 'ServerMod' and profile ID 'abc' in the output.
+    """
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf4"
     _install_server_mod_with_item(repo, install_commit, item_id)
@@ -405,7 +445,11 @@ def test_cli_check_exits_zero_and_reports_residues_when_found(
 def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove command maps ProfileResidueError to exit code 8."""
+    """The CLI remove command exits with code 8 and stderr when a profile holds residues.
+
+    After installing ServerMod and committing a profile with its item,
+    'sptmod remove ServerMod' exits with code 8 and prints 'error:' to stderr.
+    """
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf5"
     _install_server_mod_with_item(repo, install_commit, item_id)
@@ -421,7 +465,12 @@ def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
 def test_cli_remove_with_force_succeeds_despite_profile_residue(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove --force flag bypasses ProfileResidueError."""
+    """The CLI remove --force flag succeeds with exit code 0 even with residues.
+
+    After installing ServerMod and committing a profile with its item,
+    'sptmod remove ServerMod --force' exits with code 0, includes 'ServerMod'
+    in stdout, and removes the mod despite the residue.
+    """
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf6"
     _install_server_mod_with_item(repo, install_commit, item_id)
@@ -437,7 +486,12 @@ def test_cli_remove_with_force_succeeds_despite_profile_residue(
 def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove --clean-profiles flag removes residues from profiles."""
+    """The CLI remove --clean-profiles flag removes residues from the profile before reverting.
+
+    After installing ServerMod with an item and committing a profile
+    containing that item, 'sptmod remove ServerMod --clean-profiles' exits 0
+    and leaves the profile with an empty items array.
+    """
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf7"
     _install_server_mod_with_item(repo, install_commit, item_id)
@@ -454,7 +508,11 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
 def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove --clean-profiles output mentions which profiles were cleaned."""
+    """The CLI remove --clean-profiles output includes the profile ID of cleaned profiles.
+
+    After cleaning a profile with residues, 'sptmod remove ServerMod
+    --clean-profiles' stdout includes the profile ID 'abc'.
+    """
     repo = _clean_repo(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf9"
     _install_server_mod_with_item(repo, install_commit, item_id)
@@ -470,7 +528,12 @@ def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
 def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_count(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove output distinguishes between cleaned and untouched residues."""
+    """The CLI remove --clean-profiles output distinguishes structured from unstructured residues.
+
+    An item ID appearing only in a profile's info.note (string fallback, not
+    a structured container) outputs 'no profile needed cleaning', 'removed 0
+    profile entries', and '1 entries stayed untouched'.
+    """
     # item_id sits only in raw text (e.g. a note field), never in a
     # structured container: sptmod can only find it via the string
     # fallback, so nothing is removed but something stays untouched.
@@ -489,9 +552,7 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
     }
     profile_path = repo.path / "SPT/user/profiles/abc.json"
     profile_path.write_text(json.dumps(profile), encoding="utf-8")
-    repo.commit(
-        "chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")]
-    )
+    repo.commit("chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")])
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
@@ -505,7 +566,12 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
 def test_cli_remove_prints_a_warning_line_for_broken_db_json(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """The CLI remove output reports malformed database files."""
+    """The CLI remove output includes warnings for malformed db files.
+
+    A mod with unparseable JSON in its db (templates/items.json with '{not
+    valid json') causes 'sptmod remove ServerMod' to print 'items.json' in
+    stdout or stderr.
+    """
     repo = _clean_repo(fake_game_dir)
     trader_id = "5ac3b934136fb568fa78b1e2"
     install_commit(

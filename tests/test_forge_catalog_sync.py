@@ -37,9 +37,7 @@ __all__ = [
 ]
 
 
-def _mods_route_queue(
-    respx_router: respx.MockRouter, responses: list[httpx.Response]
-) -> respx.Route:
+def _mods_route_queue(respx_router: respx.MockRouter, responses: list[httpx.Response]) -> respx.Route:
     """Mock GET /mods to hand out ``responses`` in order, one per request."""
 
     def _next(request: httpx.Request) -> httpx.Response:
@@ -49,6 +47,12 @@ def _mods_route_queue(
 
 
 def _alpha_mod(**overrides: object) -> dict[str, object]:
+    """Build a mod_json_full envelope for Alpha Mod (id=1) with defaults.
+
+    Creates Alpha Mod with default id=1, name="Alpha Mod", author="Alice",
+    downloads=100, timestamps, and one version (1.0.0 for SPT 3.8). Accepts
+    **overrides to replace any default field.
+    """
     defaults: dict[str, object] = {
         "id": 1,
         "name": "Alpha Mod",
@@ -74,6 +78,12 @@ def _alpha_mod(**overrides: object) -> dict[str, object]:
 
 
 def _beta_mod(**overrides: object) -> dict[str, object]:
+    """Build a mod_json_full envelope for Beta Mod (id=2) with defaults.
+
+    Creates Beta Mod with default id=2, name="Beta Mod", author="Bob",
+    downloads=200, timestamps, and one version (2.0.0 for SPT 3.8). Accepts
+    **overrides to replace any default field.
+    """
     defaults: dict[str, object] = {
         "id": 2,
         "name": "Beta Mod",
@@ -99,6 +109,12 @@ def _beta_mod(**overrides: object) -> dict[str, object]:
 
 
 def _gamma_mod(**overrides: object) -> dict[str, object]:
+    """Build a mod_json_full envelope for Gamma Mod (id=3) with defaults.
+
+    Creates Gamma Mod with default id=3, name="Gamma Mod", author="Carol",
+    downloads=300, timestamps, and one version (1.0.0 for SPT 3.8). Accepts
+    **overrides to replace any default field.
+    """
     defaults: dict[str, object] = {
         "id": 3,
         "name": "Gamma Mod",
@@ -124,6 +140,11 @@ def _gamma_mod(**overrides: object) -> dict[str, object]:
 
 
 def _full_sync_pages() -> list[httpx.Response]:
+    """Return a two-page /mods API response: Alpha+Beta (page 1), Gamma (page 2).
+
+    Constructs mock HTTP 200 responses for a full sync that fetches 3 mods
+    across 2 pages (current_page/last_page tags, total=3, pagination link).
+    """
     page1 = page_envelope(
         [_alpha_mod(), _beta_mod()],
         current_page=1,
@@ -144,7 +165,12 @@ def _full_sync_pages() -> list[httpx.Response]:
 def test_full_sync_fills_the_cache_from_a_multi_page_response(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Full sync fetches all pages and stores all mods in the catalog."""
+    """sync(client, full=True) on two-page response stores all three mods.
+
+    Full sync follows pagination (pages=2, total=3) and caches all mods with
+    complete metadata (name, author, slug, downloads, timestamps), reporting
+    new_mods=3, pages=2, full=True.
+    """
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
 
@@ -177,9 +203,11 @@ def test_full_sync_fills_the_cache_from_a_multi_page_response(
 def test_full_sync_watermark_is_the_max_updated_at_seen(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """After a full sync with a two-page response (Alpha updated 2025-06-08,
-    Gamma updated 2025-06-10), last_synced_at() returns the maximum timestamp
-    (2025-06-10); this ensures delta syncs request only newer mods.
+    """last_synced_at() returns 2025-06-10, the max updated_at of three mods.
+
+    After full sync of Alpha (2025-06-08), Beta (2025-06-09), Gamma (2025-06-10),
+    the watermark timestamp is the maximum observed, enabling delta syncs to
+    request only changes since that point.
     """
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -190,9 +218,10 @@ def test_full_sync_watermark_is_the_max_updated_at_seen(
 
 
 def test_last_synced_at_is_none_before_the_first_sync(catalog: Catalog) -> None:
-    """An empty catalog with no prior syncs returns None from last_synced_at(),
-    indicating that delta syncs have nowhere to start from and must perform
-    a full sync on first run.
+    """last_synced_at() returns None on empty catalog before any sync.
+
+    With no prior syncs, the watermark is unset (None), signaling that delta
+    syncs must default to full sync on first run.
     """
     assert catalog.last_synced_at() is None
 
@@ -200,9 +229,11 @@ def test_last_synced_at_is_none_before_the_first_sync(catalog: Catalog) -> None:
 def test_full_sync_caches_embedded_version_summaries_without_link(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """After a full sync, get_versions(1) returns the embedded version summary
-    (id=901, version 1.0.0, SPT constraint) but with link=None and
-    content_length=None, indicating those fields require a separate fetch_versions call.
+    """get_versions(1) after full sync has id=901, version, constraint but link=None.
+
+    Sync caches the embedded version summary from /mods (id, version, SPT
+    constraint) without link and content_length, which require a separate
+    fetch_versions call for lazy-loading download metadata.
     """
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -240,15 +271,18 @@ def test_delta_sync_requests_updated_between_from_watermark_minus_overlap_and_so
 def test_delta_sync_updates_only_changed_rows_and_counts_correctly(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Delta sync updates only the mods in the response, leaving others unchanged."""
+    """Delta sync with Beta and Gamma in response updates only id=3, reports updated_mods=1.
+
+    After full sync of 3 mods, delta response containing Beta (unchanged) and
+    Gamma (name and downloads changed) updates id=3 in place, leaves id=2
+    unchanged, and reports new_mods=0 and updated_mods=1.
+    """
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
     catalog.sync(client, full=True)
 
     beta_before = catalog.get_mod(2)
-    gamma_changed = _gamma_mod(
-        name="Gamma Mod Renamed", downloads=999, updated_at="2025-06-20T00:00:00Z"
-    )
+    gamma_changed = _gamma_mod(name="Gamma Mod Renamed", downloads=999, updated_at="2025-06-20T00:00:00Z")
     delta_page = page_envelope(
         [_beta_mod(), gamma_changed],
         current_page=1,
@@ -278,14 +312,17 @@ def test_delta_sync_updates_only_changed_rows_and_counts_correctly(
 def test_delta_sync_is_idempotent_when_run_twice_in_a_row(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Running delta sync twice with the same response leaves catalog unchanged."""
+    """Second delta sync with same response reports updated_mods=0, catalog unchanged.
+
+    After one delta sync, running it again with identical response results in
+    new_mods=0 and updated_mods=0, with all mod objects remaining equal,
+    preventing duplicate updates from repeated requests.
+    """
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
     catalog.sync(client, full=True)
 
-    gamma_changed = _gamma_mod(
-        name="Gamma Mod Renamed", downloads=999, updated_at="2025-06-20T00:00:00Z"
-    )
+    gamma_changed = _gamma_mod(name="Gamma Mod Renamed", downloads=999, updated_at="2025-06-20T00:00:00Z")
     delta_page = page_envelope(
         [_beta_mod(), gamma_changed],
         current_page=1,
@@ -325,10 +362,12 @@ def test_delta_sync_without_prior_watermark_falls_back_to_full_listing(
 def test_fetch_versions_fills_link_and_content_length(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """After a full sync where version 901 has link=None, calling
-    fetch_versions(client, 1) populates the version with link and content_length
-    from the /mod/1/versions API; this separates the two fetches and allows
-    lazy-loading of download metadata.
+    """fetch_versions(client, 1) populates version id=901 link and content_length.
+
+    After sync caches id=901 with link=None, calling fetch_versions via
+    /mod/1/versions API populates link="https://cdn.example/alpha-1.0.0.zip"
+    and content_length=123456, separating the two fetches for lazy-loading
+    download metadata.
     """
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -351,9 +390,7 @@ def test_fetch_versions_fills_link_and_content_length(
         total=1,
         next_url=None,
     )
-    respx_router.get("/mod/1/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get("/mod/1/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
 
     fetched = catalog.fetch_versions(client, 1)
 
@@ -369,16 +406,19 @@ def test_fetch_versions_fills_link_and_content_length(
     assert persisted[0].content_length == 123456
 
 
-@pytest.mark.parametrize(
-    "fika_compatibility", ["compatible", "incompatible", "unknown"]
-)
+@pytest.mark.parametrize("fika_compatibility", ["compatible", "incompatible", "unknown"])
 def test_fetch_versions_stores_and_exposes_fika_compatibility(
     catalog: Catalog,
     client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     fika_compatibility: str,
 ) -> None:
-    """fetch_versions() stores and retrieves fika compatibility status for versions."""
+    """fetch_versions for id=901 stores fika_compatibility and get_versions returns it.
+
+    For each parametrized fika_compatibility ("compatible", "incompatible",
+    "unknown"), fetched version records the status and retrieval returns the
+    same value, persisting fika metadata separately from mod syncs.
+    """
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
     catalog.sync(client, full=True)
@@ -398,9 +438,7 @@ def test_fetch_versions_stores_and_exposes_fika_compatibility(
         total=1,
         next_url=None,
     )
-    respx_router.get("/mod/1/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get("/mod/1/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
 
     fetched = catalog.fetch_versions(client, 1)
 
@@ -431,9 +469,7 @@ def test_sync_after_fetch_versions_does_not_wipe_stored_fika_compatibility(
         total=1,
         next_url=None,
     )
-    respx_router.get("/mod/1/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get("/mod/1/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
     catalog.fetch_versions(client, 1)
 
     # A later sync only ever re-sends the /mods `include=versions` summary,
@@ -450,7 +486,12 @@ def test_forge_unavailable_during_sync_raises_but_keeps_prior_cache(
     client_factory: ClientFactory,
     respx_router: respx.MockRouter,
 ) -> None:
-    """Sync failure raises ForgeUnavailableError and leaves cache unchanged."""
+    """Sync raises ForgeUnavailableError on ConnectError, leaving search/versions/classify unchanged.
+
+    After full sync with 3 mods, failing sync (ConnectError) raises
+    ForgeUnavailableError, and subsequent search, get_versions, classify calls
+    return the pre-failure snapshot unchanged.
+    """
     _mods_route_queue(respx_router, _full_sync_pages())
     good_client = client_factory()
     catalog.sync(good_client, full=True)
@@ -473,7 +514,12 @@ def test_forge_unavailable_during_sync_raises_but_keeps_prior_cache(
 def test_full_sync_prunes_mods_no_longer_returned_by_the_api(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Full sync deletes mods that are no longer in the API response."""
+    """Second full sync with only Alpha and Beta removes Gamma (id=3) from cache.
+
+    After full sync of 3 mods, a second full sync returning only Alpha and Beta
+    deletes Gamma and its versions from cache (get_mod(3) returns None,
+    get_versions(3) returns []), while keeping Alpha and Beta.
+    """
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
     catalog.sync(client, full=True)
@@ -553,7 +599,12 @@ def test_delta_sync_does_not_prune_mods_absent_from_the_response(
 def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Full sync rolls back all writes if a later page fails; atomic or nothing."""
+    """Page 1 success followed by page 2 500 error rolls back all writes.
+
+    After page 1 returns Alpha successfully, page 2 returns 500 SERVER_ERROR,
+    raising ForgeUnavailableError and rolling back the Alpha write so
+    get_mod(1) returns None and last_synced_at() returns None.
+    """
     page1 = page_envelope(
         [_alpha_mod()],
         current_page=1,
@@ -567,9 +618,7 @@ def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
         call_count["n"] += 1
         if call_count["n"] == 1:
             return httpx.Response(200, json=page1)
-        return httpx.Response(
-            500, json={"success": False, "code": "SERVER_ERROR", "message": "boom"}
-        )
+        return httpx.Response(500, json={"success": False, "code": "SERVER_ERROR", "message": "boom"})
 
     respx_router.get("/mods").mock(side_effect=side_effect)
     client = client_factory()
@@ -584,7 +633,12 @@ def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
 def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Delta sync falls back to full listing when watermark timestamp cannot be parsed."""
+    """Delta sync with watermark="not-a-date" omits filter[updated_between] query param.
+
+    After full sync stores watermark="not-a-date" (unparseable), a delta sync
+    detects the parse failure and omits the updated_between filter, falling
+    back to full listing semantics.
+    """
     route = _mods_route_queue(
         respx_router,
         [
@@ -617,7 +671,11 @@ def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable
 def test_full_sync_with_no_updated_at_on_any_mod_leaves_the_watermark_unset(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Full sync without any updated_at timestamps leaves watermark unset."""
+    """Full sync with Alpha having updated_at=None leaves last_synced_at() as None.
+
+    When a synced mod has no updated_at timestamp (None), the watermark
+    remains unset (None) rather than defaulting to the null value.
+    """
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
@@ -645,7 +703,7 @@ class _RecordingProgress:
         self.calls: list[tuple[str, int, str]] = []
 
     def __call__(self, step: str, percent: int, message: str) -> None:
-        """Record a progress callback invocation."""
+        """Append (step, percent, message) tuple to calls list for test verification."""
         self.calls.append((step, percent, message))
 
 
@@ -670,7 +728,12 @@ def test_sync_reports_a_page_of_a_zero_last_page_listing_as_complete(
 def test_fetch_versions_rolls_back_on_failure_and_keeps_the_prior_cache(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Fetch failure leaves cached versions unchanged."""
+    """fetch_versions on /mod/1/versions ConnectError raises and leaves versions unchanged.
+
+    After full sync caches versions for id=1, a fetch_versions call hitting
+    ConnectError raises ForgeUnavailableError, and get_versions(1) returns the
+    pre-fetch snapshot unchanged.
+    """
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
     catalog.sync(client, full=True)
@@ -705,9 +768,7 @@ def test_get_mod_tolerates_a_corrupted_source_links_column(
     catalog.sync(client, full=True)
 
     with sqlite3.connect(db_path) as db:
-        db.execute(
-            "UPDATE mods SET source_links = ? WHERE id = ?", (raw_source_links, 1)
-        )
+        db.execute("UPDATE mods SET source_links = ? WHERE id = ?", (raw_source_links, 1))
         db.commit()
 
     mod = catalog.get_mod(1)

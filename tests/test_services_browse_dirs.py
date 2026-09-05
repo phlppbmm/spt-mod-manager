@@ -33,7 +33,10 @@ def browse_root(tmp_path: Path) -> Path:
 
 
 def test_list_directories_without_a_path_lists_the_home_directory() -> None:
-    """None defaults to listing the user's home directory."""
+    """list_directories with path=None defaults to the user's home directory.
+
+    Calling list_directories(None) returns result.path == Path.home().resolve().
+    """
     result = services.list_directories(None)
 
     assert result.path == Path.home().resolve()
@@ -42,7 +45,11 @@ def test_list_directories_without_a_path_lists_the_home_directory() -> None:
 def test_list_directories_lists_subdirectories_only_sorted_hidden_excluded(
     browse_root: Path,
 ) -> None:
-    """Only directories are returned, sorted alphabetically, excluding hidden ones."""
+    """list_directories returns only subdirectories, sorted, with hidden entries excluded.
+
+    From [alpha, zeta, .hidden, note.txt], it returns [alpha, zeta] without
+    .hidden or files, sorted alphabetically.
+    """
     result = services.list_directories(str(browse_root))
 
     assert result.path == browse_root.resolve()
@@ -67,7 +74,10 @@ def test_list_directories_marks_an_entry_that_looks_like_an_spt_install(
 
 
 def test_list_directories_parent_is_none_at_the_filesystem_root() -> None:
-    """The parent reference is None when listing the root directory."""
+    """list_directories returns parent=None when called on the filesystem root.
+
+    Calling list_directories("/") returns a result with parent == None.
+    """
     result = services.list_directories("/")
 
     assert result.parent is None
@@ -76,7 +86,10 @@ def test_list_directories_parent_is_none_at_the_filesystem_root() -> None:
 def test_list_directories_raises_invalid_path_error_for_a_nonexistent_path(
     tmp_path: Path,
 ) -> None:
-    """InvalidPathError is raised when the path does not exist."""
+    """list_directories raises InvalidPathError when the path does not exist.
+
+    Passing a path that doesn't exist raises InvalidPathError.
+    """
     with pytest.raises(InvalidPathError):
         services.list_directories(str(tmp_path / "does-not-exist"))
 
@@ -84,7 +97,10 @@ def test_list_directories_raises_invalid_path_error_for_a_nonexistent_path(
 def test_list_directories_raises_invalid_path_error_for_a_file(
     tmp_path: Path,
 ) -> None:
-    """InvalidPathError is raised when the path is a file, not a directory."""
+    """list_directories raises InvalidPathError when the path is a file.
+
+    Passing a file instead of a directory raises InvalidPathError.
+    """
     a_file = tmp_path / "not-a-directory.txt"
     a_file.write_text("content", encoding="utf-8")
 
@@ -95,7 +111,11 @@ def test_list_directories_raises_invalid_path_error_for_a_file(
 def test_list_directories_raises_invalid_path_error_for_permission_denied(
     tmp_path: Path,
 ) -> None:
-    """InvalidPathError is raised when directory cannot be read due to permission denial."""
+    """list_directories raises InvalidPathError when a directory has no read permission.
+
+    A directory with mode 0o000 raises InvalidPathError when passed to
+    list_directories.
+    """
     unreadable = tmp_path / "no-access"
     unreadable.mkdir()
     os.chmod(unreadable, 0o000)
@@ -129,10 +149,13 @@ def locate_root(tmp_path: Path) -> Path:
 def test_locate_directory_returns_only_the_fingerprint_matching_directory(
     locate_root: Path,
 ) -> None:
-    """Only directories matching both the name and all fingerprint entries are returned."""
-    matches = services.locate_directory(
-        "SPT", ["BepInEx", "cache"], roots=[locate_root]
-    )
+    """locate_directory returns only directories matching the name and containing all fingerprint entries.
+
+    Given roots with parent_a/SPT (no BepInEx) and parent_b/SPT (has BepInEx
+    and cache), searching for ("SPT", ["BepInEx", "cache"]) returns only
+    parent_b/SPT.
+    """
+    matches = services.locate_directory("SPT", ["BepInEx", "cache"], roots=[locate_root])
 
     assert len(matches) == 1
     assert matches[0].path == locate_root / "parent_b" / "SPT"
@@ -142,7 +165,10 @@ def test_locate_directory_returns_only_the_fingerprint_matching_directory(
 def test_locate_directory_empty_fingerprint_matches_by_name_only(
     locate_root: Path,
 ) -> None:
-    """An empty fingerprint results in matching directories by name alone."""
+    """locate_directory with an empty fingerprint matches all directories by name.
+
+    Searching for ("SPT", []) returns both parent_a/SPT and parent_b/SPT.
+    """
     matches = services.locate_directory("SPT", [], roots=[locate_root])
 
     assert sorted(match.path for match in matches) == sorted(
@@ -153,16 +179,21 @@ def test_locate_directory_empty_fingerprint_matches_by_name_only(
 def test_locate_directory_returns_an_empty_list_when_nothing_matches(
     locate_root: Path,
 ) -> None:
-    """An empty list is returned when no directories match the name and fingerprint."""
+    """locate_directory returns an empty list when no directories match.
+
+    Searching for ("NoSuchDirectoryName", []) returns [].
+    """
     matches = services.locate_directory("NoSuchDirectoryName", [], roots=[locate_root])
 
     assert matches == []
 
 
-def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator() -> (
-    None
-):
-    """InvalidPathError is raised when the name contains path separators."""
+def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator() -> None:
+    """locate_directory raises InvalidPathError when the name contains path separators.
+
+    Passing "a/b" as the name raises InvalidPathError because names must be
+    single directory components.
+    """
     with pytest.raises(InvalidPathError):
         services.locate_directory("a/b", [])
 
@@ -170,16 +201,21 @@ def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator(
 def test_locate_directory_deduplicates_a_root_passed_more_than_once(
     locate_root: Path,
 ) -> None:
-    """Duplicate roots do not result in duplicate search results."""
-    matches = services.locate_directory(
-        "SPT", ["BepInEx", "cache"], roots=[locate_root, locate_root]
-    )
+    """locate_directory deduplicates roots so passing [root, root] yields one result.
+
+    Passing the same root twice does not create duplicate results in the returned list.
+    """
+    matches = services.locate_directory("SPT", ["BepInEx", "cache"], roots=[locate_root, locate_root])
 
     assert len(matches) == 1
 
 
 def test_locate_directory_caps_results_at_ten(tmp_path: Path) -> None:
-    """Search results are capped at ten matches."""
+    """locate_directory returns at most ten results even when more matches exist.
+
+    Creating 11 parent_*/SPT directories and searching for "SPT" returns
+    exactly 10 results.
+    """
     root = tmp_path / "many-matches"
     for i in range(11):
         (root / f"parent_{i}" / "SPT").mkdir(parents=True)
@@ -192,7 +228,11 @@ def test_locate_directory_caps_results_at_ten(tmp_path: Path) -> None:
 def test_locate_directory_without_roots_searches_the_home_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The home directory is searched when no roots are provided."""
+    """locate_directory without roots defaults to searching the home directory.
+
+    When roots is not provided or empty, the home directory is searched
+    automatically.
+    """
     home = tmp_path / "home"
     marker = home / "SptModManagerLocateMarker9f3"
     marker.mkdir(parents=True)
@@ -206,7 +246,11 @@ def test_locate_directory_without_roots_searches_the_home_directory(
 def test_locate_directory_skips_an_unreadable_subdirectory_without_raising(
     tmp_path: Path,
 ) -> None:
-    """Unreadable subdirectories do not interrupt the search."""
+    """locate_directory skips unreadable subdirectories and continues searching.
+
+    When one subdirectory has mode 0o000, the search skips it and returns
+    results from readable directories without raising.
+    """
     root = tmp_path / "with-unreadable"
     unreadable = root / "no-access"
     unreadable.mkdir(parents=True)

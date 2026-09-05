@@ -30,14 +30,16 @@ pytestmark = pytest.mark.skipif(
 def _clean_repo(path: Path) -> Repo:
     """Initialize a game directory repository and commit the baseline configuration."""
     repo = Repo.init(detect_layout(path))
-    repo.commit(
-        "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
-    )
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
 
 
 def _run_rpc(name: str, request: dict[str, object]) -> subprocess.CompletedProcess[str]:
-    """Invoke the ``sptmod rpc`` console script and return the subprocess result."""
+    """Spawn sptmod rpc <name> subprocess with JSON input; return CompletedProcess.
+
+    Raises AssertionError if SPTMOD_BINARY (from shutil.which) is None. Uses
+    text=True to capture stdout/stderr as strings, timeout=5, check=False.
+    """
     assert SPTMOD_BINARY is not None
     return subprocess.run(
         [SPTMOD_BINARY, "rpc", name],
@@ -52,8 +54,10 @@ def _run_rpc(name: str, request: dict[str, object]) -> subprocess.CompletedProce
 def test_happy_path_prints_exactly_one_stdout_line_and_empty_stderr(
     tmp_path: Path,
 ) -> None:
-    """The subprocess produces exactly one stdout line (the result) and no
-    stderr output on success."""
+    """list_directories via subprocess exits 0, stdout has one result event, stderr=\"\".
+
+    The event is valid JSON with event=result, data.path resolved absolutely.
+    """
     process = _run_rpc("list_directories", {"path": str(tmp_path)})
 
     assert process.returncode == 0
@@ -68,8 +72,11 @@ def test_happy_path_prints_exactly_one_stdout_line_and_empty_stderr(
 def test_install_from_archive_streams_progress_then_a_result_all_valid_json(
     fake_game_dir: Path, tmp_path: Path
 ) -> None:
-    """The subprocess streams progress lines before the final result, all as
-    valid JSON."""
+    """install_from_archive via subprocess streams multiple progress lines then result.
+
+    Events precede the result (event=result with mod.name=\"CoolMod\"); all lines
+    are valid JSON parsed without errors.
+    """
     _clean_repo(fake_game_dir)
     archive = tmp_path / "mod.zip"
     with zipfile.ZipFile(archive, "w") as zf:
@@ -98,8 +105,11 @@ def test_install_from_archive_streams_progress_then_a_result_all_valid_json(
 
 
 def test_core_error_exits_one_with_a_mapped_error_envelope(tmp_path: Path) -> None:
-    """The subprocess exits with code 1 and an error envelope when a core
-    exception is raised."""
+    """status on nonexistent path exits 1, stdout has error event with code=NOT_A_GAME_DIR.
+
+    The error message includes the missing path; details object is fully populated
+    with empty fields for all possible error types.
+    """
     missing = tmp_path / "does-not-exist"
 
     process = _run_rpc("status", {"path": str(missing)})
@@ -130,7 +140,11 @@ def test_core_error_exits_one_with_a_mapped_error_envelope(tmp_path: Path) -> No
 
 
 def test_malformed_stdin_exits_two() -> None:
-    """The subprocess exits with code 2 when stdin is not valid JSON."""
+    """sptmod rpc status with input=\"not json at all\" exits 2, code=VALIDATION_ERROR.
+
+    The main() function rejects malformed JSON at line json.loads() and returns
+    EXIT_REQUEST without dispatching to the service.
+    """
     assert SPTMOD_BINARY is not None
     process = subprocess.run(
         [SPTMOD_BINARY, "rpc", "status"],
@@ -148,8 +162,11 @@ def test_malformed_stdin_exits_two() -> None:
 
 
 def test_unknown_function_name_exits_two() -> None:
-    """The subprocess exits with code 2 when an unknown function name is
-    requested."""
+    """sptmod rpc totally_made_up_function exits 2, code=VALIDATION_ERROR with name in error.
+
+    The main() function checks RPC_FUNCTIONS.get(name) and returns EXIT_REQUEST
+    with the unknown name in the error message.
+    """
     process = _run_rpc("totally_made_up_function", {})
 
     assert process.returncode == 2

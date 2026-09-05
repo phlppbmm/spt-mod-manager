@@ -29,9 +29,7 @@ def _service_function_names() -> list[str]:
     return sorted(
         name
         for name, obj in vars(services).items()
-        if inspect.isfunction(obj)
-        and obj.__module__ == services.__name__
-        and not name.startswith("_")
+        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
     )
 
 
@@ -76,7 +74,12 @@ def _find_nulls(value: Any, path: str, sink: list[str]) -> None:
 
 
 def test_build_openapi_matches_the_committed_openapi_json() -> None:
-    """Generated OpenAPI document matches the committed file."""
+    """The built OpenAPI document byte-for-byte equals the committed openapi.json.
+
+    Calls build_openapi() and compares the dict result against the committed
+    COMMITTED_OPENAPI_JSON parsed from disk; any divergence (routing, schema,
+    response wrapping) fails the test.
+    """
     # If build_openapi() body were `pass` (returns None), this fails because
     # the committed document, parsed from disk, is a non-trivial dict that
     # can never equal None; any schema drift also breaks the equality.
@@ -93,7 +96,11 @@ def test_build_openapi_matches_the_committed_openapi_json() -> None:
 def test_dump_openapi_run_as_a_module_writes_the_built_document(
     tmp_path: Path,
 ) -> None:
-    """Running as module writes the OpenAPI document to disk."""
+    """Running the module with -m writes the OpenAPI document to the given path.
+
+    Executes ``python -m sptmod.server.dump_openapi <target>`` as a subprocess;
+    must exit 0, create the file, and its JSON content must match build_openapi().
+    """
     # If main()/dump() did nothing, the process would exit 0 with no file
     # written, or the file would be empty/invalid JSON, or its content would
     # not equal build_openapi(); each of those breaks one assertion below.
@@ -114,10 +121,12 @@ def test_dump_openapi_run_as_a_module_writes_the_built_document(
     assert written == build_openapi()
 
 
-def test_run_module_as_main_writes_the_built_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Module's __main__ guard writes the document."""
+def test_run_module_as_main_writes_the_built_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The module's __name__ == "__main__" guard invokes main() and calls sys.exit.
+
+    Uses runpy.run_module() to execute the module's __main__ block in-process;
+    must exit with code 0 and write the built OpenAPI document.
+    """
     # Runs the actual `if __name__ == "__main__":` guard in-process (unlike
     # the subprocess test above, which the coverage run driving this suite
     # cannot see into): if that guard's `sys.exit(main(sys.argv[1:]))` line
@@ -127,9 +136,7 @@ def test_run_module_as_main_writes_the_built_document(
     monkeypatch.setattr(sys, "argv", ["dump_openapi", str(target)])
 
     with pytest.raises(SystemExit) as exit_info:
-        runpy.run_module(
-            "sptmod.server.dump_openapi", run_name="__main__", alter_sys=True
-        )
+        runpy.run_module("sptmod.server.dump_openapi", run_name="__main__", alter_sys=True)
 
     assert exit_info.value.code == 0
     assert target.is_file()
@@ -139,7 +146,11 @@ def test_run_module_as_main_writes_the_built_document(
 def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(
     tmp_path: Path,
 ) -> None:
-    """Too many arguments causes usage error."""
+    """Passing two arguments exits 2 with usage message to stderr.
+
+    Runs with two positional arguments (one more than allowed); must exit
+    with code 2, print "usage:" to stderr, and stdout must be empty.
+    """
     result = subprocess.run(
         [sys.executable, "-m", "sptmod.server.dump_openapi", "a", "b"],
         capture_output=True,
@@ -154,10 +165,12 @@ def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(
     assert result.stdout == ""
 
 
-def test_main_with_no_arguments_writes_to_the_default_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """No arguments uses the default output path."""
+def test_main_with_no_arguments_writes_to_the_default_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling main() with no arguments writes to DEFAULT_TARGET (openapi.json).
+
+    Changes directory to a scratch path and calls main([]); must return 0 and
+    write the document to DEFAULT_TARGET resolved in the current directory.
+    """
     # DEFAULT_TARGET is a relative path resolved against the current working
     # directory; chdir into a scratch directory so this never touches the
     # repository's own openapi.json.
@@ -174,7 +187,11 @@ def test_main_with_no_arguments_writes_to_the_default_target(
 def test_main_with_too_many_arguments_does_not_write_a_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Too many arguments prevents file creation."""
+    """Calling main() with two arguments returns 2 and writes nothing.
+
+    Calls main(["a", "b"]) from a scratch directory; must return 2, print
+    "usage:" to stderr, and DEFAULT_TARGET must not be created.
+    """
     monkeypatch.chdir(tmp_path)
 
     exit_code = main(["a", "b"])
@@ -186,7 +203,11 @@ def test_main_with_too_many_arguments_does_not_write_a_file(
 
 
 def test_dump_creates_missing_parent_directories(tmp_path: Path) -> None:
-    """Dump creates parent directories when needed."""
+    """The dump() function creates missing parent directories.
+
+    Calls dump() with a path three levels deep (nested/dir/openapi.json) with
+    no parent directories existing; must create all parents and write the file.
+    """
     target = tmp_path / "nested" / "dir" / "openapi.json"
 
     dump(target)
@@ -207,23 +228,28 @@ def document() -> dict[str, Any]:
 
 
 def test_document_declares_openapi_3_1(document: dict[str, Any]) -> None:
-    """Document declares OpenAPI 3.1.0."""
+    """The document's top-level openapi field is "3.1.0".
+
+    Checks the document["openapi"] value against the expected version string.
+    """
     assert document["openapi"] == "3.1.0"
 
 
 def test_every_service_function_has_exactly_one_post_path(
     document: dict[str, Any],
 ) -> None:
-    """Each service function has exactly one POST path."""
+    """Each service function maps to exactly one /api/{name} POST path.
+
+    Iterates over all public service functions and asserts document["paths"]
+    has one entry per function containing only a "post" operation (no get/put/delete).
+    """
     for name in SERVICE_FUNCTION_NAMES:
         path_item = document["paths"][f"/api/{name}"]
         assert set(path_item.keys()) == {"post"}
 
 
 @pytest.mark.parametrize("name", SERVICE_FUNCTION_NAMES)
-def test_request_body_refs_the_camel_case_request_schema(
-    document: dict[str, Any], name: str
-) -> None:
+def test_request_body_refs_the_camel_case_request_schema(document: dict[str, Any], name: str) -> None:
     """Request body references the correct PascalCase request schema."""
     operation = document["paths"][f"/api/{name}"]["post"]
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
@@ -234,14 +260,15 @@ def test_request_body_refs_the_camel_case_request_schema(
 
 
 @pytest.mark.parametrize("name", SERVICE_FUNCTION_NAMES)
-def test_200_response_resolves_to_an_existing_component_schema(
-    document: dict[str, Any], name: str
-) -> None:
-    """200 response schema reference exists in components."""
+def test_200_response_resolves_to_an_existing_component_schema(document: dict[str, Any], name: str) -> None:
+    """Each service function's 200 response $ref points to an existing schema.
+
+    Parametrized over all service functions; extracts the response schema's
+    $ref (handling both bare refs and array wrapping) and asserts it exists
+    in components/schemas.
+    """
     operation = document["paths"][f"/api/{name}"]["post"]
-    response_schema = operation["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ]
+    response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
 
     ref_name = _resolved_ref_name(response_schema)
 
@@ -252,7 +279,11 @@ def test_200_response_resolves_to_an_existing_component_schema(
 def test_error_response_and_progress_event_schemas_exist(
     document: dict[str, Any],
 ) -> None:
-    """ErrorResponse and ProgressEvent schemas exist."""
+    """The components/schemas has both ErrorResponse and ProgressEvent entries.
+
+    Checks that the two shared response schemas used by the RPC transport are
+    present in the OpenAPI document.
+    """
     schemas = document["components"]["schemas"]
 
     assert "ErrorResponse" in schemas
@@ -260,7 +291,11 @@ def test_error_response_and_progress_event_schemas_exist(
 
 
 def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> None:
-    """No null values exist anywhere in the OpenAPI document."""
+    """The document tree contains no JSON null values anywhere.
+
+    Recursively scans the document; if null is found, the paths are collected
+    and asserted to be empty (openapi-typescript v7 mishandles explicit nulls).
+    """
     # openapi-typescript v7 turns "x?: T | null" into a required field, so a
     # reintroduced explicit `null` anywhere in the tree would break codegen.
     null_paths: list[str] = []
@@ -275,7 +310,12 @@ def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> 
 
 
 def test_cli_and_dump_openapi_do_not_pull_in_the_removed_web_framework() -> None:
-    """Removed web framework dependencies are not reintroduced."""
+    """Imports of sptmod.cli and dump_openapi never load fastapi, uvicorn, etc.
+
+    Runs a subprocess that imports those modules and checks sys.modules and
+    importlib.util.find_spec() for package names assembled at runtime (never
+    as string literals, to evade repo-wide grep checks).
+    """
     # If the CLI or the OpenAPI dumper reintroduced a dependency on the old
     # ASGI web framework stack, this fails because one of the runtime-built
     # names below would show up either as an imported top-level package or

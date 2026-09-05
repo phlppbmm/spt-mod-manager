@@ -43,11 +43,14 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_mod_versions_parses_null_content_length_and_embedded_dependency(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """mod_versions() parses null content_length and embedded dependencies."""
+    """mod_versions() parses null content_length and nested dependencies into dataclasses.
+
+    A version JSON with content_length=None (historical versions without size info) and
+    embedded dependencies=[{id:1, mod_id:2, mod_guid:"com.example.dep", ...}] is parsed
+    into ForgeVersion with content_length=None and dependencies=[ForgeVersionDependency(...)].
+    """
     respx_router.get("/mod/42/versions").mock(
-        return_value=httpx.Response(
-            200, json=page_envelope([version_json(content_length=None)])
-        )
+        return_value=httpx.Response(200, json=page_envelope([version_json(content_length=None)]))
     )
     client = client_factory()
 
@@ -85,11 +88,14 @@ def test_mod_versions_parses_null_content_length_and_embedded_dependency(
 def test_mod_versions_parses_incompatible_fika_compatibility(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """mod_versions() parses and preserves the 'incompatible' fika_compatibility value."""
+    """mod_versions() preserves fika_compatibility="incompatible" without coercion.
+
+    The _fika() parser maps "incompatible" string to FikaCompatibility="incompatible";
+    a version with fika_compatibility="incompatible" is parsed to version.fika_compatibility
+    matching the string value exactly.
+    """
     respx_router.get("/mod/42/versions").mock(
-        return_value=httpx.Response(
-            200, json=page_envelope([version_json(fika_compatibility="incompatible")])
-        )
+        return_value=httpx.Response(200, json=page_envelope([version_json(fika_compatibility="incompatible")]))
     )
     client = client_factory()
 
@@ -170,9 +176,7 @@ def test_updates_parses_all_four_lists_with_blocked_update_quirks(
             }
         ],
     }
-    respx_router.get("/mods/updates").mock(
-        return_value=httpx.Response(200, json=success_envelope(data))
-    )
+    respx_router.get("/mods/updates").mock(return_value=httpx.Response(200, json=success_envelope(data)))
     client = client_factory()
 
     result = client.updates(mods=[("5", "1.0.0")], spt_version="3.11.5")
@@ -182,12 +186,19 @@ def test_updates_parses_all_four_lists_with_blocked_update_quirks(
         updates=[
             ModUpdate(
                 current_version=CurrentVersion(
-                    id=21, mod_id=5, guid="com.example.mod", name="Example Mod",
-                    version="1.0.0", slug="example-mod",
+                    id=21,
+                    mod_id=5,
+                    guid="com.example.mod",
+                    name="Example Mod",
+                    version="1.0.0",
+                    slug="example-mod",
                 ),
                 recommended_version=RecommendedVersion(
-                    id=22, version="1.1.0", link="https://dl.example/1.1.0.zip",
-                    content_length=2048, fika_compatibility="compatible",
+                    id=22,
+                    version="1.1.0",
+                    link="https://dl.example/1.1.0.zip",
+                    content_length=2048,
+                    fika_compatibility="compatible",
                     spt_versions=["3.11.5"],
                 ),
                 update_reason="Newer compatible version available.",
@@ -196,43 +207,60 @@ def test_updates_parses_all_four_lists_with_blocked_update_quirks(
         blocked_updates=[
             BlockedUpdate(
                 current_version=CurrentVersion(
-                    id=11, mod_id=2, guid="com.example.dep", name="Dep Mod",
-                    version="1.9.0", slug=None,
+                    id=11,
+                    mod_id=2,
+                    guid="com.example.dep",
+                    name="Dep Mod",
+                    version="1.9.0",
+                    slug=None,
                 ),
-                latest_version=LatestVersion(
-                    id=12, version="2.0.0", spt_versions=["3.11.5"]
-                ),
+                latest_version=LatestVersion(id=12, version="2.0.0", spt_versions=["3.11.5"]),
                 block_reason="Conflicting mod dependency.",
                 blocking_mods=[],
             )
         ],
         up_to_date=[
             UpToDateMod(
-                id=31, mod_id=6, guid="com.example.uptodate", name="Up To Date Mod",
-                version="2.0.0", spt_versions=["3.11.5"],
+                id=31,
+                mod_id=6,
+                guid="com.example.uptodate",
+                name="Up To Date Mod",
+                version="2.0.0",
+                spt_versions=["3.11.5"],
             )
         ],
         incompatible_with_spt=[
             IncompatibleMod(
-                id=41, mod_id=7, guid="com.example.incompat", name="Incompatible Mod",
-                version="0.9.0", reason="No version for this SPT release.",
+                id=41,
+                mod_id=7,
+                guid="com.example.incompat",
+                name="Incompatible Mod",
+                version="0.9.0",
+                reason="No version for this SPT release.",
                 latest_compatible_version="1.0.0",
             )
         ],
     )
 
 
-def test_updates_parses_populated_blocking_mods(
-    client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """updates() parses the blocking_mods list when present in blocked_updates."""
+def test_updates_parses_populated_blocking_mods(client_factory: ClientFactory, respx_router: respx.MockRouter) -> None:
+    """updates() parses blocking_mods list when present in blocked_updates.
+
+    A blocked_update with a non-empty blocking_mods list (mod_id=9, mod_guid
+    ="com.example.blocker", constraint="^1.0.0") is parsed into blocked_updates[0]
+    .blocking_mods=[BlockingMod(...)]; the blocking_mods defaults to [] only when
+    omitted from the payload, not when the key is present but empty.
+    """
     data = {
         "spt_version": "3.11.5",
         "updates": [],
         "blocked_updates": [
             {
                 "current_version": {
-                    "id": 11, "mod_id": 2, "guid": "com.example.dep", "name": "Dep Mod",
+                    "id": 11,
+                    "mod_id": 2,
+                    "guid": "com.example.dep",
+                    "name": "Dep Mod",
                     "version": "1.9.0",
                 },
                 "latest_version": {
@@ -256,9 +284,7 @@ def test_updates_parses_populated_blocking_mods(
         "up_to_date": [],
         "incompatible_with_spt": [],
     }
-    respx_router.get("/mods/updates").mock(
-        return_value=httpx.Response(200, json=success_envelope(data))
-    )
+    respx_router.get("/mods/updates").mock(return_value=httpx.Response(200, json=success_envelope(data)))
     client = client_factory()
 
     result = client.updates(mods=[("2", "1.9.0")], spt_version="3.11.5")
@@ -278,7 +304,13 @@ def test_updates_parses_populated_blocking_mods(
 def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """dependencies() parses the recursive dependency tree, conflict flag, and nullable versions."""
+    """dependencies() parses recursive DependencyNode trees with conflict and nullable versions.
+
+    The result ["5:1.2.0"] contains a root DependencyNode with conflict=True,
+    latest_compatible_version=None, and nested dependencies=[...]. The nested node
+    has conflict=False and a valid CompatibleVersion. The recursive structure is
+    preserved through all levels.
+    """
     nested_dep = {
         "id": 100,
         "guid": "com.example.nested",
@@ -304,9 +336,7 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
         "dependencies": [nested_dep],
     }
     data = {"5:1.2.0": [dep_with_conflict]}
-    respx_router.get("/mods/dependencies").mock(
-        return_value=httpx.Response(200, json=success_envelope(data))
-    )
+    respx_router.get("/mods/dependencies").mock(return_value=httpx.Response(200, json=success_envelope(data)))
     client = client_factory()
 
     result = client.dependencies(mods=[("5", "1.2.0")], spt_version="3.11.5")
@@ -317,8 +347,11 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
         name="Nested Dep",
         slug="nested-dep",
         latest_compatible_version=CompatibleVersion(
-            id=500, version="1.0.0", link="https://dl.example/nested-1.0.0.zip",
-            content_length=512, fika_compatibility="unknown",
+            id=500,
+            version="1.0.0",
+            link="https://dl.example/nested-1.0.0.zip",
+            content_length=512,
+            fika_compatibility="unknown",
         ),
         conflict=False,
         dependencies=[],
@@ -338,18 +371,20 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
 def test_dependencies_omits_unresolvable_pairs_and_keeps_empty_list_for_no_deps(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """dependencies() omits unresolvable pairs from the result and keeps empty lists."""
+    """dependencies() omits unresolvable pairs and preserves empty dependency lists.
+
+    Two mods queried: ("5", "1.2.0") and ("9", "9.9.9"). The server resolves only
+    "5:1.2.0" (with no dependencies, so the value is []) and omits "9:9.9.9" from
+    the response. The result dict contains only the key "5:1.2.0" (not "9:9.9.9"),
+    distinguishing "resolved with zero deps" from "not resolved".
+    """
     # Two pairs queried; only one resolves ("9:9.9.9" is unresolvable and
     # omitted by the server). The resolved pair has no dependencies -> [].
     data: JsonDict = {"5:1.2.0": []}
-    respx_router.get("/mods/dependencies").mock(
-        return_value=httpx.Response(200, json=success_envelope(data))
-    )
+    respx_router.get("/mods/dependencies").mock(return_value=httpx.Response(200, json=success_envelope(data)))
     client = client_factory()
 
-    result = client.dependencies(
-        mods=[("5", "1.2.0"), ("9", "9.9.9")], spt_version="3.11.5"
-    )
+    result = client.dependencies(mods=[("5", "1.2.0"), ("9", "9.9.9")], spt_version="3.11.5")
 
     assert result == {"5:1.2.0": []}
     assert "9:9.9.9" not in result

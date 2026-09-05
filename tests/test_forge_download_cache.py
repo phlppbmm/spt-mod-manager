@@ -38,12 +38,17 @@ class RecordingProgress:
         self.calls: list[tuple[str, int, str]] = []
 
     def __call__(self, step: str, percent: int, message: str) -> None:
-        """Record a progress callback invocation."""
+        """Append (step, percent, message) to calls log for test assertion.
+
+        Each invocation by download_cached() is recorded, preserving the order and exact
+        values (step name, percentage int, status message string).
+        """
         self.calls.append((step, percent, message))
 
 
 @pytest.fixture
 def cache_dir(tmp_path: Path) -> Path:
+    """Empty temporary directory used as the download cache root."""
     directory = tmp_path / "cache"
     directory.mkdir()
     return directory
@@ -70,16 +75,18 @@ class _RaisingAfterFirstChunk(httpx.SyncByteStream):
 # --- cache hit vs miss ---------------------------------------------------
 
 
-def test_first_call_downloads_and_second_call_hits_the_cache(
-    client_factory: ClientFactory, cache_dir: Path
-) -> None:
-    """Second call with matching expected_length skips HTTP; returns same path, updates mtime."""
+def test_first_call_downloads_and_second_call_hits_the_cache(client_factory: ClientFactory, cache_dir: Path) -> None:
+    """download_cached() fetches on first call, cache-hits on second call with same expected_length.
+
+    First call downloads body to cache_dir/777/mod-archive.zip (1 HTTP request).
+    Second call with the same key="777" and expected_length finds the cached file and skips
+    HTTP entirely (0 new requests, total still 1); returns the same path and updates the
+    entry's mtime to "now".
+    """
     body = b"archive-bytes-for-hit-test"
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200, content=body, headers={"Content-Length": str(len(body))}
-            )
+            return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
         )
         client = client_factory()
 
@@ -139,9 +146,7 @@ def test_resume_continues_from_the_leftover_offset_on_a_206_response(
         encoding="utf-8",
     )
     with respx.mock(assert_all_called=False) as router:
-        range_route = router.get(
-            DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}
-        ).mock(
+        range_route = router.get(DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}).mock(
             return_value=httpx.Response(
                 206,
                 content=full_payload[offset:],
@@ -150,9 +155,7 @@ def test_resume_continues_from_the_leftover_offset_on_a_206_response(
                 },
             )
         )
-        plain_route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(200, content=full_payload)
-        )
+        plain_route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=full_payload))
         client = client_factory()
         progress = RecordingProgress()
 
@@ -180,7 +183,13 @@ def test_resume_continues_from_the_leftover_offset_on_a_206_response(
 def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """When server ignores range request and sends 200 OK, download restarts from offset 0."""
+    """download_cached() restarts from offset 0 when server ignores Range and sends 200.
+
+    A leftover part file (43.part with 10 bytes of garbage) exists; download_cached sends
+    Range: bytes=10- but the server responds 200 OK (ignoring the range), providing the
+    full payload from offset 0. The function detects this (200 instead of 206), discards
+    the leftover, and writes the full payload (40 bytes) to the final file.
+    """
     total = 40
     full_payload = bytes(range(total))
     offset = 10
@@ -188,16 +197,12 @@ def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
     # a fresh download, not from stitching the (wrong) leftover prefix.
     (cache_dir / "43.part").write_bytes(b"\xff" * offset)
     (cache_dir / "43.part.json").write_text(
-        json.dumps(
-            {"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}
-        ),
+        json.dumps({"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}),
         encoding="utf-8",
     )
     with respx.mock() as router:
         router.get(DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}).mock(
-            return_value=httpx.Response(
-                200, content=full_payload, headers={"Content-Length": str(total)}
-            )
+            return_value=httpx.Response(200, content=full_payload, headers={"Content-Length": str(total)})
         )
         client = client_factory()
 
@@ -246,15 +251,11 @@ def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
     offset = 10
     (cache_dir / f"{key}.part").write_bytes(full_payload[:offset])
     (cache_dir / f"{key}.part.json").write_text(
-        json.dumps(
-            {"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}
-        ),
+        json.dumps({"name": "mod-archive.zip", "expected_length": total, "url": DOWNLOAD_URL}),
         encoding="utf-8",
     )
     with respx.mock() as router:
-        range_route = router.get(
-            DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}
-        ).mock(
+        range_route = router.get(DOWNLOAD_URL, headers={"range": f"bytes={offset}-"}).mock(
             return_value=httpx.Response(
                 range_status,
                 content=b"irrelevant-mismatched-body",
@@ -262,9 +263,7 @@ def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
             )
         )
         plain_route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200, content=full_payload, headers={"Content-Length": str(total)}
-            )
+            return_value=httpx.Response(200, content=full_payload, headers={"Content-Length": str(total)})
         )
         client = client_factory()
 
@@ -291,9 +290,7 @@ def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
     total = DEFAULT_CHUNK_SIZE + 5_000
     full_payload = bytes(i % 251 for i in range(total))
     with respx.mock() as router:
-        router.get(DOWNLOAD_URL).respond(
-            200, stream=_RaisingAfterFirstChunk(full_payload)
-        )
+        router.get(DOWNLOAD_URL).respond(200, stream=_RaisingAfterFirstChunk(full_payload))
         client = client_factory()
 
         with pytest.raises(ForgeUnavailableError):
@@ -312,16 +309,12 @@ def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
 
     # A subsequent call resumes exactly where the interrupted one stopped.
     with respx.mock() as router:
-        router.get(
-            DOWNLOAD_URL, headers={"range": f"bytes={DEFAULT_CHUNK_SIZE}-"}
-        ).mock(
+        router.get(DOWNLOAD_URL, headers={"range": f"bytes={DEFAULT_CHUNK_SIZE}-"}).mock(
             return_value=httpx.Response(
                 206,
                 content=full_payload[DEFAULT_CHUNK_SIZE:],
                 headers={
-                    "Content-Range": (
-                        f"bytes {DEFAULT_CHUNK_SIZE}-{total - 1}/{total}"
-                    ),
+                    "Content-Range": (f"bytes {DEFAULT_CHUNK_SIZE}-{total - 1}/{total}"),
                 },
             )
         )
@@ -344,7 +337,13 @@ def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
 def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """Deletes cached file when size mismatches; downloads fresh copy and makes exactly 1 HTTP call."""
+    """download_cached() deletes stale cache entry and downloads fresh when size mismatches.
+
+    A cached file (key="46", 24 bytes of stale-wrong-size-content) exists, but expected_length
+    points to a different size. cache.find() returns None (size mismatch), download_cached
+    fetches fresh (1 HTTP call), and stores correct_body (18 bytes). The stale entry is removed,
+    and the new content is saved.
+    """
     entry = cache_dir / "46"
     entry.mkdir()
     (entry / "mod-archive.zip").write_bytes(b"stale-wrong-size-content")
@@ -360,9 +359,7 @@ def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
     )
     correct_body = b"correct-fresh-body"
     with respx.mock() as router:
-        route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(200, content=correct_body)
-        )
+        route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=correct_body))
         client = client_factory()
 
         result = download_cached(
@@ -380,7 +377,12 @@ def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
 def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """ArchiveError on size mismatch; no entry in cache.find() result; directory not created."""
+    """download_cached() raises ArchiveError on size mismatch and leaves no complete cache entry.
+
+    A fresh download of 25 bytes with expected_length=26 fails the post-download size check.
+    ArchiveError is raised, the partial file is deleted, and no cache entry directory (47) is
+    created, so cache.find() returns None.
+    """
     body = b"actual-body-of-eighteen-b"
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
@@ -402,7 +404,13 @@ def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
 def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """With expected_length=None, cached file is reused without HTTP call or size check."""
+    """download_cached() with expected_length=None reuses cache without HTTP or size check.
+
+    A cached entry (key="48") exists with a file. When expected_length=None, cache.find() returns
+    the path regardless of actual vs. recorded size, and download_cached returns that path
+    immediately. No HTTP request is made (respx asserts all mocked routes are used); no size
+    validation occurs.
+    """
     entry = cache_dir / "48"
     entry.mkdir()
     (entry / "mod-archive.zip").write_bytes(b"whatever-size-content-here")
@@ -438,7 +446,13 @@ def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
 def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
     client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Publish failure (final rename) raises ArchiveError but preserves .part for resume."""
+    """download_cached() raises ArchiveError on publish (final rename) failure but preserves .part.
+
+    A download completes successfully, but os.replace() to finalize the file (move from
+    temp to archive name) fails with OSError("disk full"). The function raises ArchiveError,
+    but the partial file (53.part) and metadata (53.part.json) remain, allowing a subsequent
+    call to resume from that offset.
+    """
     body = b"body-for-publish-failure-test"
     real_replace = os.replace
 
@@ -457,9 +471,7 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
         real_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
     with respx.mock() as router:
-        route = router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(200, content=body)
-        )
+        route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
         client = client_factory()
         monkeypatch.setattr(os, "replace", failing_replace)
 
@@ -476,10 +488,7 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
     leftover = cache_dir / "53.part"
     sidecar = cache_dir / "53.part.json"
     assert leftover.read_bytes() == body
-    assert (
-        json.loads(sidecar.read_text(encoding="utf-8"))["expected_length"]
-        == len(body)
-    )
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["expected_length"] == len(body)
     assert cache.find("53", expected_length=len(body), cache_dir=cache_dir) is None
 
 
@@ -489,7 +498,12 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
 def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """Fresh download receiving 416 Range Not Satisfiable raises ForgeUnavailableError."""
+    """download_cached() raises ForgeUnavailableError when fresh download receives 416.
+
+    No resumable .part exists (fresh download), and the server responds 416 Range Not
+    Satisfiable to the initial GET. stream() raises ForgeUnavailableError, no cache entry
+    is created, and the directory remains empty.
+    """
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(416))
         client = client_factory()
@@ -514,7 +528,13 @@ def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
 def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
     client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Successful download triggers cache sweep that evicts older entries to stay under cap."""
+    """download_cached() triggers cache sweep after successful download to enforce size cap.
+
+    An old entry (old-key, 5000 bytes, mtime 100k seconds ago) and a new download (new-key,
+    100 bytes) exist. max_bytes is capped at len(new_body) + 68 bytes. After the new download
+    completes, sweep() runs and evicts the oldest entry (old-key) to stay under the cap,
+    leaving only new-key in the cache.
+    """
     old_entry = cache_dir / "old-key"
     old_entry.mkdir()
     (old_entry / "old.zip").write_bytes(b"O" * 5_000)
@@ -529,9 +549,7 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
     monkeypatch.setattr(cache, "max_bytes", lambda: len(new_body) + 68)
 
     with respx.mock() as router:
-        router.get(DOWNLOAD_URL).mock(
-            return_value=httpx.Response(200, content=new_body)
-        )
+        router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=new_body))
         client = client_factory()
 
         result = download_cached(
@@ -549,9 +567,7 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
 # --- progress message vocabulary ----------------------------------------
 
 
-def test_progress_messages_never_mention_git_vocabulary(
-    client_factory: ClientFactory, cache_dir: Path
-) -> None:
+def test_progress_messages_never_mention_git_vocabulary(client_factory: ClientFactory, cache_dir: Path) -> None:
     """Progress messages use user-facing language, not git/commit/revert terminology."""
     body = b"body-for-vocabulary-test"
     all_messages: list[str] = []

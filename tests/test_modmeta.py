@@ -29,7 +29,12 @@ def _write_package_json(mod_dir: Path, content: dict[str, object]) -> None:
 
 
 def test_read_package_json_full_metadata(tmp_path: Path) -> None:
-    """Parse package.json with all optional fields populated."""
+    """read_package_json parses all optional fields from package.json correctly.
+
+    Creates mod_dir/SAIN/package.json with name, version, sptVersion (~4.1.0),
+    author, guid, and dependencies (BigBrain: ^1.0.0). read_package_json returns
+    ModMeta with all fields populated matching the input exactly.
+    """
     mod_dir = tmp_path / "SAIN"
     _write_package_json(
         mod_dir,
@@ -114,9 +119,7 @@ def test_read_package_json_missing_file_raises(tmp_path: Path) -> None:
         "version-non-string",
     ],
 )
-def test_read_package_json_invalid_mandatory_field_raises(
-    tmp_path: Path, content: dict[str, object]
-) -> None:
+def test_read_package_json_invalid_mandatory_field_raises(tmp_path: Path, content: dict[str, object]) -> None:
     """Missing/empty/wrong-type name or version raises InvalidMetadataError."""
     mod_dir = tmp_path / "Mod"
     _write_package_json(mod_dir, content)
@@ -149,7 +152,11 @@ def test_read_package_json_non_object_json_raises(tmp_path: Path) -> None:
 
 
 def test_meta_from_dll_uses_stem_as_default_name(tmp_path: Path) -> None:
-    """DLL filename (stem) becomes mod name when no override provided."""
+    """meta_from_dll uses DLL filename stem as mod name when no override given.
+
+    Creates dll_path (AmandsCoolMod.dll) with no name override. Returns ModMeta
+    with name="AmandsCoolMod" (stem only, not full filename) and version="".
+    """
     dll_path = tmp_path / "AmandsCoolMod.dll"
     dll_path.write_bytes(b"binary")
 
@@ -160,7 +167,11 @@ def test_meta_from_dll_uses_stem_as_default_name(tmp_path: Path) -> None:
 
 
 def test_meta_from_dll_explicit_name_overrides_stem(tmp_path: Path) -> None:
-    """Explicit name parameter overrides DLL filename."""
+    """meta_from_dll name parameter overrides DLL filename stem.
+
+    Creates AmandsCoolMod.dll but passes name="OverriddenName". Returns ModMeta
+    with name="OverriddenName", not "AmandsCoolMod".
+    """
     dll_path = tmp_path / "AmandsCoolMod.dll"
     dll_path.write_bytes(b"binary")
 
@@ -170,7 +181,11 @@ def test_meta_from_dll_explicit_name_overrides_stem(tmp_path: Path) -> None:
 
 
 def test_meta_from_dll_uses_version_override(tmp_path: Path) -> None:
-    """Version parameter sets the mod version."""
+    """meta_from_dll version parameter sets ModMeta.version field.
+
+    Creates AmandsCoolMod.dll and passes version="1.2.3". Returns ModMeta with
+    version="1.2.3".
+    """
     dll_path = tmp_path / "AmandsCoolMod.dll"
     dll_path.write_bytes(b"binary")
 
@@ -180,7 +195,11 @@ def test_meta_from_dll_uses_version_override(tmp_path: Path) -> None:
 
 
 def test_meta_from_dll_no_version_override_is_empty(tmp_path: Path) -> None:
-    """Without version override, version field is empty."""
+    """meta_from_dll without version parameter leaves version field empty.
+
+    Creates AmandsCoolMod.dll with no version override. Returns ModMeta with
+    version="" (empty string).
+    """
     dll_path = tmp_path / "AmandsCoolMod.dll"
     dll_path.write_bytes(b"binary")
 
@@ -193,7 +212,13 @@ def test_meta_from_dll_no_version_override_is_empty(tmp_path: Path) -> None:
 
 
 def _sample_mod_info(**overrides: object) -> ModInfo:
-    """Build a ModInfo with standard defaults, allowing overrides."""
+    """Construct a ModInfo with fixed defaults, allowing keyword overrides.
+
+    Sets standard values: name="SAIN", version="3.2.1", mod_type="hybrid",
+    author="Solarint", spt_range="~4.1.0", state="installed", commit="abc1234",
+    date=2026-01-01, forge_id="1234", forge_version_id="56789". Any provided
+    override replaces the corresponding default before instantiation.
+    """
     defaults: dict[str, object] = {
         "name": "SAIN",
         "version": "3.2.1",
@@ -213,7 +238,11 @@ def _sample_mod_info(**overrides: object) -> ModInfo:
 
 
 def test_build_trailers_contains_all_keys_in_order() -> None:
-    """build_trailers includes all defined trailer keys in the canonical order."""
+    """build_trailers returns dict with all MOD_TRAILER_KEYS in exact order.
+
+    Calls build_trailers(_sample_mod_info()). Resulting dict keys must be
+    identical to MOD_TRAILER_KEYS (both keys and order match).
+    """
     mod_info = _sample_mod_info()
 
     trailers = build_trailers(mod_info)
@@ -224,7 +253,12 @@ def test_build_trailers_contains_all_keys_in_order() -> None:
 
 
 def test_build_trailers_maps_field_values() -> None:
-    """Each ModInfo field maps to the corresponding trailer value."""
+    """build_trailers maps ModInfo fields to trailer keys with exact values.
+
+    build_trailers(_sample_mod_info()) produces: trailers["Mod"]="SAIN",
+    trailers["Mod-Version"]="3.2.1", trailers["Mod-Author"]="Solarint",
+    trailers["Mod-Type"]="hybrid", trailers["Mod-SPT"]="~4.1.0", etc.
+    """
     mod_info = _sample_mod_info()
 
     trailers = build_trailers(mod_info)
@@ -241,7 +275,12 @@ def test_build_trailers_maps_field_values() -> None:
 
 
 def test_build_trailers_keeps_empty_values() -> None:
-    """Empty field values are preserved in trailers (not omitted)."""
+    """build_trailers preserves empty string values in trailer dict.
+
+    Calls build_trailers with guid="", forge_id="", forge_version_id="".
+    Resulting trailers["Mod-Guid"]="", trailers["Mod-Forge-Id"]="",
+    trailers["Mod-Forge-Version-Id"]="" (not omitted, present and empty).
+    """
     mod_info = _sample_mod_info(guid="", forge_id="", forge_version_id="")
 
     trailers = build_trailers(mod_info)
@@ -270,7 +309,11 @@ def test_build_trailers_with_previous_version_adds_the_key() -> None:
 
 
 def test_mod_info_from_commit_returns_none_without_mod_trailer() -> None:
-    """Missing Mod trailer means commit is not a mod install; return None."""
+    """mod_info_from_commit returns None when Mod trailer is absent.
+
+    Creates CommitInfo with subject "snapshot: 2026-01-01" and empty trailers dict.
+    mod_info_from_commit returns None (not a mod install commit).
+    """
     commit = CommitInfo(
         hash="abc1234",
         subject="snapshot: 2026-01-01",
@@ -298,9 +341,7 @@ def test_mod_info_from_commit_returns_none_for_unrelated_trailers() -> None:
     [("Mod-Type", "not-a-type"), ("Mod-State", "not-a-state")],
     ids=["invalid-mod-type", "invalid-mod-state"],
 )
-def test_mod_info_from_commit_raises_on_an_out_of_enum_trailer(
-    trailer: str, value: str
-) -> None:
+def test_mod_info_from_commit_raises_on_an_out_of_enum_trailer(trailer: str, value: str) -> None:
     """Invalid enum value in Mod-Type or Mod-State raises InvalidMetadataError."""
     trailers = {
         "Mod": "SAIN",
@@ -327,7 +368,11 @@ def test_mod_info_from_commit_raises_on_an_out_of_enum_trailer(
 
 
 def test_build_trailers_roundtrips_through_mod_info_from_commit() -> None:
-    """ModInfo → trailers → commit → parsed ModInfo recovers the original."""
+    """build_trailers and mod_info_from_commit roundtrip ModInfo identically.
+
+    Converts _sample_mod_info() → build_trailers() → CommitInfo → mod_info_from_commit().
+    Result matches original ModInfo exactly, proving serialization is lossless.
+    """
     mod_info = _sample_mod_info()
     trailers = build_trailers(mod_info)
     commit = CommitInfo(
@@ -356,7 +401,12 @@ def test_build_trailers_roundtrips_through_mod_info_from_commit() -> None:
 def test_build_trailers_roundtrips_with_variant_fields(
     overrides: dict[str, object],
 ) -> None:
-    """Roundtrip works for all valid enum values and optional fields."""
+    """Roundtrip works for all enum variants (mod_type, state) and forge fields.
+
+    Parametrized with guid="com.sain.mod", forge_id/forge_version_id, and all
+    combinations of mod_type (server/client/hybrid) and state (disabled/removed).
+    Each variant survives the trailers→commit→parse cycle identically.
+    """
     mod_info = _sample_mod_info(**overrides)
     trailers = build_trailers(mod_info)
     commit = CommitInfo(
@@ -407,7 +457,12 @@ def test_build_trailers_roundtrips_with_variant_fields(
     ],
 )
 def test_version_matches_true_cases(version: str, range_spec: str) -> None:
-    """version_matches returns True for all valid version-range combinations."""
+    """version_matches returns True for versions satisfying range specifications.
+
+    Parametrized with 27 cases including exact matches (1.2.3), semver ranges
+    (^1.2.0, ~1.2.0), comparators (>=, <, <=, >), wildcards (1.x, *), multi-part
+    ranges (>=1.0.0 <2.0.0), and edge cases (empty range, bare major version).
+    """
     assert version_matches(version, range_spec) is True
 
 
@@ -430,12 +485,22 @@ def test_version_matches_true_cases(version: str, range_spec: str) -> None:
     ],
 )
 def test_version_matches_false_cases(version: str, range_spec: str) -> None:
-    """version_matches returns False when version does not satisfy range."""
+    """version_matches returns False for versions outside specified ranges.
+
+    Parametrized with 13 rejection cases: exact mismatch (1.3.0 vs 1.2.3), caret
+    overflow (2.0.0 vs ^1.2.0), tilde overflow (1.3.0 vs ~1.2.0), comparator
+    violations, wildcard mismatches (2.0.0 vs 1.x), and multi-part range boundary
+    violations (2.0.0/2.0.1 vs >=1.0.0 <2.0.0).
+    """
     assert version_matches(version, range_spec) is False
 
 
 def test_version_matches_leading_v_on_the_version_argument() -> None:
-    """Leading 'v' on version is stripped before matching."""
+    """version_matches strips leading 'v' from version argument before comparing.
+
+    Calls version_matches("v1.2.3", "1.2.3") and expects True (leading v is
+    discarded, then 1.2.3 matches 1.2.3 exactly).
+    """
     assert version_matches("v1.2.3", "1.2.3") is True
 
 
@@ -475,9 +540,7 @@ def test_version_matches_non_numeric_version_raises() -> None:
         ("0.5.0", "^0.x"),  # npm: ^0.x := >=0.0.0 <1.0.0
     ],
 )
-def test_version_matches_caret_omitted_leading_parts_true(
-    version: str, range_spec: str
-) -> None:
+def test_version_matches_caret_omitted_leading_parts_true(version: str, range_spec: str) -> None:
     """Caret with leading zero and omitted parts follows npm semantics."""
     assert version_matches(version, range_spec) is True
 
@@ -490,10 +553,12 @@ def test_version_matches_caret_omitted_leading_parts_true(
         ("1.0.0", "^0.x"),  # outside npm's <1.0.0 upper bound
     ],
 )
-def test_version_matches_caret_omitted_leading_parts_false(
-    version: str, range_spec: str
-) -> None:
-    """Versions outside caret bounds with omitted parts fail as expected."""
+def test_version_matches_caret_omitted_leading_parts_false(version: str, range_spec: str) -> None:
+    """version_matches rejects versions outside caret bounds (npm semantics).
+
+    Tests: "0.1.0" vs "^0.0" (outside <0.1.0), "1.0.0" vs "^0" (outside <1.0.0),
+    "1.0.0" vs "^0.x" (outside <1.0.0). Each must return False per npm caret rules.
+    """
     assert version_matches(version, range_spec) is False
 
 
@@ -520,7 +585,11 @@ def test_read_package_json_dependencies_skips_non_string_ranges(
 
 
 def test_version_matches_uppercase_x_wildcard() -> None:
-    """Uppercase X is treated the same as lowercase x for wildcards."""
+    """version_matches treats uppercase X as wildcard identical to lowercase x.
+
+    Tests version_matches("1.5.0", "1.X") returns True and version_matches("2.0.0",
+    "1.X") returns False, proving uppercase X wildcards work like lowercase x.
+    """
     assert version_matches("1.5.0", "1.X") is True
     assert version_matches("2.0.0", "1.X") is False
 
@@ -539,26 +608,34 @@ def test_version_matches_prerelease_version_argument_raises() -> None:
     [("v", "1.2.3"), ("1.2.3", "v")],
     ids=["bare-v-as-version", "bare-v-as-range-token"],
 )
-def test_version_matches_bare_v_with_nothing_after_it_raises(
-    version: str, range_spec: str
-) -> None:
+def test_version_matches_bare_v_with_nothing_after_it_raises(version: str, range_spec: str) -> None:
     """Bare 'v' without numeric parts raises UnsupportedRangeError."""
     with pytest.raises(UnsupportedRangeError):
         version_matches(version, range_spec)
 
 
 def test_version_matches_bare_equals_comparator_true() -> None:
-    """Bare equals (=) acts as an exact match comparator."""
+    """version_matches treats bare = as exact-match comparator (success case).
+
+    version_matches("1.2.3", "=1.2.3") returns True (= prefix means exact match).
+    """
     assert version_matches("1.2.3", "=1.2.3") is True
 
 
 def test_version_matches_bare_equals_comparator_false() -> None:
-    """Bare equals fails when versions do not match."""
+    """version_matches treats bare = as exact-match comparator (failure case).
+
+    version_matches("1.2.4", "=1.2.3") returns False (exact match required).
+    """
     assert version_matches("1.2.4", "=1.2.3") is False
 
 
 def test_version_matches_caret_with_no_numeric_parts_matches_everything() -> None:
-    """Caret with no numeric parts (^x) matches all versions."""
+    """version_matches with ^x (no numeric parts) matches any version.
+
+    Caret with no numeric parts reduces to an unconstrained range. version_matches
+    ("5.3.1", "^x") and version_matches("0.0.0", "^x") both return True.
+    """
     # "^x" reduces to zero numeric parts, which _token_matches treats the
     # same as an unconstrained caret range.
     assert version_matches("5.3.1", "^x") is True
@@ -566,6 +643,10 @@ def test_version_matches_caret_with_no_numeric_parts_matches_everything() -> Non
 
 
 def test_version_matches_bare_wildcard_version_argument_raises() -> None:
-    """Bare wildcard as version argument raises error."""
+    """version_matches raises UnsupportedRangeError when version is bare 'x'.
+
+    Calling version_matches("x", "1.2.3") raises UnsupportedRangeError because
+    the version argument cannot be a bare wildcard.
+    """
     with pytest.raises(UnsupportedRangeError):
         version_matches("x", "1.2.3")

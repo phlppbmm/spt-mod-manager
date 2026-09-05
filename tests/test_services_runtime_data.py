@@ -43,7 +43,11 @@ def _clean_repo(path: Path) -> Repo:
 def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """Untracked files in mod directories don't appear in status report."""
+    """status() omits untracked files under an active mod's directory from the report.
+
+    Untracked BepInEx/plugins/ClientMod/EditorDefaults.json and nested cache files
+    written by the game while the mod was active result in an empty StatusReport.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -89,7 +93,11 @@ def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
 def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """Status ignores runtime data in patcher directories."""
+    """status() leaves untracked files under a patcher mod directory out of the report.
+
+    BepInEx/patchers/PatchMod/cache.bin (untracked runtime data) results in an empty
+    report with no manual_mods or other_untracked entries.
+    """
     install_commit(
         clean_repo,
         "PatchMod",
@@ -110,7 +118,11 @@ def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
 def test_install_of_another_mod_is_not_blocked_by_runtime_data(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
-    """Installing another mod succeeds even with runtime data present."""
+    """install_from_archive for NewMod succeeds despite untracked files in ClientMod's dir.
+
+    An untracked EditorDefaults.json in BepInEx/plugins/ClientMod does not block
+    install of another mod; no snapshot commit is made and the untracked file survives.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -133,7 +145,11 @@ def test_install_of_another_mod_is_not_blocked_by_runtime_data(
 def test_install_still_blocks_on_a_foreign_directory_and_omits_owned_runtime_paths(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
-    """Install still blocks on unmanaged mods, omitting owned runtime data from the error."""
+    """install_from_archive still blocks on foreign directories but omits runtime data.
+
+    Manual SPT/user/mods/Foreign/x.txt causes DirtyTreeError; the error message names
+    Foreign but not the untracked EditorDefaults.json in the owned ClientMod directory.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -190,15 +206,17 @@ def test_install_with_profile_changes_and_runtime_data_snapshots_exactly_once(
 def test_install_still_blocks_on_a_modified_tracked_file_inside_an_owned_dir(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
-    """Modified tracked files still block install even in owned mod directories."""
+    """install_from_archive blocks on modified tracked files even in owned mod directories.
+
+    Modifying BepInEx/plugins/ClientMod/ClientMod.dll (tracked in an earlier commit)
+    causes DirtyTreeError even though the mod directory is owned by the active mod.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
         files={"BepInEx/plugins/ClientMod/ClientMod.dll": "v1"},
     )
-    (clean_repo.path / "BepInEx/plugins/ClientMod/ClientMod.dll").write_text(
-        "tampered", encoding="utf-8"
-    )
+    (clean_repo.path / "BepInEx/plugins/ClientMod/ClientMod.dll").write_text("tampered", encoding="utf-8")
     archive = make_archive({"BepInEx/plugins/NewMod.dll": b"dll-bytes"}, "zip")
 
     with pytest.raises(DirtyTreeError) as excinfo:
@@ -220,7 +238,12 @@ def test_removing_or_disabling_deletes_runtime_data_and_the_now_empty_directory(
     clean_repo: Repo,
     install_commit: InstallCommit,
 ) -> None:
-    """remove_mod and disable_mod delete runtime data and empty mod directories."""
+    """remove_mod and disable_mod delete both tracked files and runtime data completely.
+
+    Calling remove_mod or disable_mod on ClientMod deletes the entire
+    BepInEx/plugins/ClientMod directory including tracked ClientMod.dll and untracked
+    Editor.json and nested cache files.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -231,9 +254,7 @@ def test_removing_or_disabling_deletes_runtime_data_and_the_now_empty_directory(
     )
     runtime_file = clean_repo.path / "BepInEx/plugins/ClientMod/Editor.json"
     runtime_file.write_text("generated", encoding="utf-8")
-    nested_runtime = (
-        clean_repo.path / "BepInEx/plugins/ClientMod/sub/other/leftover.txt"
-    )
+    nested_runtime = clean_repo.path / "BepInEx/plugins/ClientMod/sub/other/leftover.txt"
     nested_runtime.parent.mkdir(parents=True)
     nested_runtime.write_text("nested leftover", encoding="utf-8")
 
@@ -274,7 +295,11 @@ def test_removing_or_disabling_clears_a_patcher_dir_but_keeps_the_patchers_root(
 def test_enable_mod_after_disable_restores_only_the_recorded_files(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """enable_mod restores only tracked files, not runtime data that was deleted."""
+    """enable_mod restores only tracked files, leaving deleted runtime data absent.
+
+    After disabling ClientMod, enable_mod restores BepInEx/plugins/ClientMod/ClientMod.dll
+    with original content but does not restore the untracked Editor.json that was deleted.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -295,7 +320,11 @@ def test_enable_mod_after_disable_restores_only_the_recorded_files(
 def test_remove_mod_keeps_a_second_active_mods_files_in_a_shared_directory(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """remove_mod only removes files belonging to the mod, preserving other mods' files."""
+    """remove_mod deletes only the specified mod's files, preserving other mods in the dir.
+
+    Removing ModA leaves ModB's BepInEx/plugins/SharedDir/b.txt intact and also removes
+    the untracked runtime.json because it was generated while both mods were active.
+    """
     install_commit(
         clean_repo,
         "ModA",
@@ -326,7 +355,11 @@ def test_remove_mod_keeps_a_second_active_mods_files_in_a_shared_directory(
 def test_a_directory_owned_only_by_a_disabled_mod_resurfaces_as_manual(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """A directory owned only by a disabled mod is reported as a manual mod."""
+    """A directory with files added after a mod was disabled is reported as manual.
+
+    After disabling ClientMod, adding ReAdded.dll to BepInEx/plugins/ClientMod causes
+    status() to report the directory as a manual_mod with path and files.
+    """
     install_commit(
         clean_repo,
         "ClientMod",
@@ -348,9 +381,7 @@ def test_a_directory_owned_only_by_a_disabled_mod_resurfaces_as_manual(
 # --- runtime-data cleanup is best-effort under filesystem permission errors --
 
 
-def test_remove_mod_leaves_an_unremovable_leftover_in_place(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
+def test_remove_mod_leaves_an_unremovable_leftover_in_place(clean_repo: Repo, install_commit: InstallCommit) -> None:
     """A leftover the OS refuses to delete (its containing directory is not
     writable) must not abort remove_mod; it simply stays. If the `except
     OSError: continue` around the unlink were removed, this fails: the

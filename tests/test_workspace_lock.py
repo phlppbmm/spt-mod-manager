@@ -81,9 +81,7 @@ def _held(path: Path, raw_content: str) -> Generator[Path]:
 
 
 def _holder_content(operation: str, *, pid: int | None = None) -> str:
-    return json.dumps(
-        {"pid": os.getpid() if pid is None else pid, "operation": operation}
-    )
+    return json.dumps({"pid": os.getpid() if pid is None else pid, "operation": operation})
 
 
 # --- staging_dir ---------------------------------------------------------
@@ -92,10 +90,11 @@ def _holder_content(operation: str, *, pid: int | None = None) -> str:
 def test_staging_dir_honors_xdg_cache_home_and_is_created_on_demand(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """staging_dir() respects XDG_CACHE_HOME env var and creates dir on first call.
+    """staging_dir respects XDG_CACHE_HOME and creates directories on demand.
 
-    Cache home is set to a non-existent path; staging_dir() creates the full
-    path including parent directories.
+    XDG_CACHE_HOME is set to non-existent tmp_path/cache; staging_dir() creates
+    the full path $XDG_CACHE_HOME/sptmod/staging and returns it. Result is_dir()
+    confirms it was created.
     """
     cache_home = tmp_path / "cache"
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
@@ -110,10 +109,10 @@ def test_staging_dir_honors_xdg_cache_home_and_is_created_on_demand(
 def test_staging_dir_sweeps_entries_older_than_a_day_but_keeps_fresh_ones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """staging_dir() removes entries older than 24 hours on each call.
+    """staging_dir removes entries older than 24h; keeps fresh ones on each call.
 
-    Creates: old file and dir (36 hours ago), fresh file (just now). Second
-    call to staging_dir() sweeps; only fresh.txt remains.
+    Creates: old file, old dir, fresh file (old timestamps are 36h ago). Second
+    staging_dir() call sweeps; only fresh.txt remains (verified by iterdir).
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     staging = staging_dir()
@@ -164,10 +163,11 @@ def test_staging_dir_sweep_skips_an_unstattable_entry_without_crashing(
 def test_download_cache_dir_honors_xdg_cache_home_and_is_created_on_demand(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """download_cache_dir() respects XDG_CACHE_HOME env var and creates dir on first call.
+    """download_cache_dir respects XDG_CACHE_HOME and creates directories on demand.
 
-    Cache home is set to a non-existent path; download_cache_dir() creates the
-    full path including parent directories.
+    XDG_CACHE_HOME is non-existent tmp_path/cache; download_cache_dir() creates
+    the full path $XDG_CACHE_HOME/sptmod/downloads and returns it. Result.is_dir()
+    confirms creation.
     """
     cache_home = tmp_path / "cache"
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
@@ -179,9 +179,7 @@ def test_download_cache_dir_honors_xdg_cache_home_and_is_created_on_demand(
     assert result.is_dir()
 
 
-def test_download_cache_dir_is_a_sibling_of_staging_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_download_cache_dir_is_a_sibling_of_staging_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """download_cache_dir() and staging_dir() share a common parent under sptmod."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
@@ -195,20 +193,31 @@ def test_download_cache_dir_is_a_sibling_of_staging_dir(
 
 
 def test_is_locked_false_without_a_lock_file(fake_game_dir: Path) -> None:
-    """is_locked() returns False when no lock file exists."""
+    """is_locked returns False when LOCK_FILE_NAME does not exist.
+
+    No lock file → nothing holds the lock. is_locked() returns False.
+    """
     assert is_locked(fake_game_dir) is False
 
 
 def test_is_locked_true_while_another_operation_holds_the_lock(
     fake_game_dir: Path,
 ) -> None:
-    """is_locked() returns True when another process holds the lock."""
+    """is_locked returns True while another process holds the OS lock.
+
+    Lock file with current pid and "installing SAIN" operation is held via fcntl;
+    is_locked() checks for fcntl lock, finds it, returns True.
+    """
     with _held(fake_game_dir, _holder_content("installing SAIN")):
         assert is_locked(fake_game_dir) is True
 
 
 def test_is_locked_false_for_a_lock_file_nobody_holds(fake_game_dir: Path) -> None:
-    """is_locked() returns False for stale lock files (no lock held by any process)."""
+    """is_locked returns False when lock file exists but no OS lock is held.
+
+    Lock file has current pid and "crashed run" operation (stale entry); no fcntl
+    lock on the file. is_locked() finds no OS lock, returns False.
+    """
     _write_lock(fake_game_dir, pid=os.getpid(), operation="crashed run")
 
     assert is_locked(fake_game_dir) is False
@@ -232,9 +241,10 @@ def test_is_locked_false_when_the_lock_path_cannot_be_opened(
 def test_game_lock_holds_the_lock_for_the_duration_of_the_block(
     clean_repo: Repo,
 ) -> None:
-    """game_lock() holds lock from entry to exit; released immediately on context exit.
+    """game_lock acquires lock on entry and releases on exit.
 
-    Lock is free before, held during block, free after.
+    is_locked() false before block, true during (fcntl held), false after context
+    exit. Lock is immediately released.
     """
     assert is_locked(clean_repo.path) is False
 
@@ -245,10 +255,10 @@ def test_game_lock_holds_the_lock_for_the_duration_of_the_block(
 
 
 def test_game_lock_is_free_again_after_a_successful_block(clean_repo: Repo) -> None:
-    """Second lock acquisition is fast (< 1s) after first lock is released.
+    """Second game_lock call acquires immediately after first releases.
 
-    After successful exit from first block, second caller acquires lock
-    immediately.
+    After first lock block exits successfully, second caller acquires lock within
+    1 second (not waiting).
     """
     with game_lock(clean_repo.path, "testing"):
         pass
@@ -261,9 +271,10 @@ def test_game_lock_is_free_again_after_a_successful_block(clean_repo: Repo) -> N
 
 
 def test_game_lock_is_free_again_when_the_body_raises(clean_repo: Repo) -> None:
-    """Lock is released when block raises an exception (finally-block cleanup).
+    """game_lock releases lock even when block raises exception.
 
-    After an exception, lock is immediately available to next caller.
+    Block raises ValueError("boom"); lock is cleaned up via finally. Next caller
+    acquires lock immediately (< 1s).
     """
     with pytest.raises(ValueError, match="boom"), game_lock(clean_repo.path, "testing"):
         raise ValueError("boom")
@@ -277,9 +288,10 @@ def test_game_lock_is_free_again_when_the_body_raises(clean_repo: Repo) -> None:
 
 
 def test_game_lock_file_content_records_pid_and_operation(clean_repo: Repo) -> None:
-    """Lock file stores JSON with pid and operation name for diagnostic purposes.
+    """Lock file contains JSON dict with pid and operation during lock hold.
 
-    While lock is held, file contains current process pid and operation description.
+    While lock is held, LOCK_FILE_NAME contains JSON with current pid and
+    operation="installing SAIN".
     """
     lock_path = clean_repo.path / LOCK_FILE_NAME
 
@@ -296,18 +308,16 @@ def test_game_lock_file_content_records_pid_and_operation(clean_repo: Repo) -> N
 def test_leftover_lock_file_of_a_dead_process_does_not_block(
     clean_repo: Repo,
 ) -> None:
-    """Stale lock files from dead processes don't block new operations.
+    """game_lock ignores lock file from dead pid and acquires immediately.
 
-    Lock file exists with a dead process pid; new caller acquires lock
-    immediately (< 1s) and overwrites the file.
+    Lock file has a nonexistent pid (_dead_pid()), no OS lock held. New caller
+    game_lock() acquires immediately (< 1s), overwrites with new operation.
     """
     _write_lock(clean_repo.path, pid=_dead_pid(), operation="crashed run")
     started = time.monotonic()
 
     with game_lock(clean_repo.path, "new run"):
-        content = json.loads(
-            (clean_repo.path / LOCK_FILE_NAME).read_text(encoding="utf-8")
-        )
+        content = json.loads((clean_repo.path / LOCK_FILE_NAME).read_text(encoding="utf-8"))
 
     assert content["operation"] == "new run"
     assert time.monotonic() - started < 1.0
@@ -337,9 +347,10 @@ def test_leftover_lock_file_naming_a_live_pid_does_not_block(
 def test_release_leaves_the_lock_file_and_its_content_in_place(
     clean_repo: Repo,
 ) -> None:
-    """Lock file persists after release; content unchanged (OS lock is dropped, file remains).
+    """game_lock release drops OS lock but leaves file unchanged.
 
-    File and its JSON content survive after exiting the block.
+    Lock file and its JSON content persist after block exits. OS fcntl lock is
+    dropped but the file remains with identical content.
     """
     lock_path = clean_repo.path / LOCK_FILE_NAME
 
@@ -353,11 +364,11 @@ def test_release_leaves_the_lock_file_and_its_content_in_place(
 def test_a_waiter_takes_the_lock_right_after_the_holder_releases(
     clean_repo: Repo,
 ) -> None:
-    """Waiter acquires lock shortly after holder releases (concurrent threads).
+    """Concurrent waiter acquires lock when holder releases it.
 
-    Holder thread holds lock for ~0.3s; waiter thread spins with 0.05s poll
-    interval until lock is free. Waiter acquisition time should be roughly
-    between 0.15s and 1.3s.
+    Holder thread holds lock for 0.3s then releases; waiter thread polls (0.05s
+    interval) until lock is free. Waiter acquisition time is between 0.15s and
+    1.3s (allowing for polling delays).
     """
     release_after = 0.3
     holder_ready = threading.Event()
@@ -388,9 +399,7 @@ def test_a_waiter_takes_the_lock_right_after_the_holder_releases(
     ["not json at all", "{}", "[1, 2, 3]", "", "\xff\xfe binary"],
     ids=["invalid-json", "empty-object", "json-array", "empty-file", "invalid-utf8"],
 )
-def test_invalid_or_empty_lock_content_of_a_holder_waits_then_times_out(
-    clean_repo: Repo, raw_content: str
-) -> None:
+def test_invalid_or_empty_lock_content_of_a_holder_waits_then_times_out(clean_repo: Repo, raw_content: str) -> None:
     """Timeout on held lock with unparseable content raises generic message.
 
     Lock file is held but contains unparseable JSON; waiter times out and gets
@@ -435,18 +444,16 @@ def test_timeout_message_omits_the_operation_when_the_lock_file_vanishes_mid_wai
             pass
         deleter.join(timeout=1.0)
 
-    assert str(excinfo.value) == (
-        "Another operation is still running. Try again when it finishes."
-    )
+    assert str(excinfo.value) == ("Another operation is still running. Try again when it finishes.")
 
 
 def test_timeout_error_message_names_the_blocking_operation(
     clean_repo: Repo,
 ) -> None:
-    """Timeout message includes the blocking operation name from lock file.
+    """game_lock timeout message includes the blocking operation name.
 
-    Lock is held with operation="installing SAIN"; waiter times out and gets
-    error message naming the blocking operation.
+    Lock is held (operation="installing SAIN") beyond timeout=0.3; game_lock
+    raises OperationInProgressError with message naming the blocker.
     """
     with (
         _held(clean_repo.path, _holder_content("installing SAIN")),
@@ -460,10 +467,7 @@ def test_timeout_error_message_names_the_blocking_operation(
     ):
         pass
 
-    assert str(excinfo.value) == (
-        "Another operation is still running (installing SAIN). "
-        "Try again when it finishes."
-    )
+    assert str(excinfo.value) == ("Another operation is still running (installing SAIN). Try again when it finishes.")
 
 
 # --- waiting progress ------------------------------------------------------
@@ -472,7 +476,11 @@ def test_timeout_error_message_names_the_blocking_operation(
 def test_waiting_for_a_held_lock_emits_a_progress_event(
     clean_repo: Repo,
 ) -> None:
-    """Waiting for a held lock emits progress events with operation name."""
+    """game_lock emits progress event while waiting for a held lock.
+
+    Lock is held (operation="installing SAIN"); waiter polls with timeout=0.3s.
+    Progress callback receives (step="check", percent=0, message with blocker name).
+    """
     calls: list[tuple[str, int, str]] = []
 
     with (
@@ -481,9 +489,7 @@ def test_waiting_for_a_held_lock_emits_a_progress_event(
         game_lock(
             clean_repo.path,
             "installing something else",
-            progress=lambda step, percent, message: calls.append(
-                (step, percent, message)
-            ),
+            progress=lambda step, percent, message: calls.append((step, percent, message)),
             timeout=0.3,
             poll_interval=0.05,
         ),
@@ -499,7 +505,11 @@ def test_waiting_for_a_held_lock_emits_a_progress_event(
 
 
 def test_no_progress_is_emitted_when_the_lock_is_free(clean_repo: Repo) -> None:
-    """No progress events when lock is free (immediate acquisition)."""
+    """game_lock emits no progress when lock is free (immediate acquisition).
+
+    Lock is not held; game_lock acquires immediately without polling. Progress
+    callback is not invoked.
+    """
     calls: list[tuple[str, int, str]] = []
 
     with game_lock(
@@ -518,7 +528,12 @@ def test_no_progress_is_emitted_when_the_lock_is_free(clean_repo: Repo) -> None:
 def test_install_waits_for_a_held_lock_instead_of_raising_dirty_tree(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
-    """Services wait for lock: concurrent mod installations don't fail with dirty tree."""
+    """install_from_archive waits for held lock instead of raising dirty tree.
+
+    Holder thread holds lock for 0.3s ("installing OtherMod"); install waits and
+    acquires after release. Install succeeds without raising DirtyWorkingTreeError.
+    Lock is free after both complete.
+    """
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     release_after = 0.3
     holder_ready = threading.Event()
@@ -542,13 +557,12 @@ def test_install_waits_for_a_held_lock_instead_of_raising_dirty_tree(
     assert is_locked(clean_repo.path) is False
 
 
-def test_two_installs_of_different_mods_at_once_both_succeed(
-    clean_repo: Repo, make_archive: MakeArchive
-) -> None:
-    """Two concurrent install threads both succeed; lock serializes them and lock is free after.
+def test_two_installs_of_different_mods_at_once_both_succeed(clean_repo: Repo, make_archive: MakeArchive) -> None:
+    """Two concurrent installs both succeed; lock serializes them.
 
-    Two threads start concurrent installations; lock ensures they don't collide.
-    Both mods are installed, both commits exist in history, no errors occur.
+    Two threads call install_from_archive concurrently (ModA and ModB). Lock
+    ensures no collision; both complete, both mods exist, both trailers in
+    history, no errors, lock is free after.
     """
     archive_a = make_archive({"BepInEx/plugins/ModA.dll": b"a-bytes"}, "zip")
     archive_b = make_archive({"BepInEx/plugins/ModB.dll": b"b-bytes"}, "zip")
@@ -609,10 +623,10 @@ def test_read_only_calls_ignore_a_held_lock_and_return_quickly(
 def test_lock_file_never_appears_in_status_and_tree_stays_clean(
     clean_repo: Repo,
 ) -> None:
-    """Lock file is ignored by status checking; tree remains clean.
+    """Lock file is hidden from status; tree stays clean.
 
-    Lock file exists; status() doesn't report it as an untracked file, and
-    is_clean() returns True.
+    LOCK_FILE_NAME exists (written to disk); status() doesn't report it as
+    untracked or modified. is_clean() returns True (locked status is invisible).
     """
     (clean_repo.path / LOCK_FILE_NAME).write_text("{}", encoding="utf-8")
 

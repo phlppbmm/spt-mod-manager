@@ -39,9 +39,7 @@ def _service_function_names() -> list[str]:
     return sorted(
         name
         for name, obj in vars(services).items()
-        if inspect.isfunction(obj)
-        and obj.__module__ == services.__name__
-        and not name.startswith("_")
+        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
     )
 
 
@@ -49,24 +47,37 @@ SERVICE_FUNCTION_NAMES = _service_function_names()
 
 
 def _camel(name: str) -> str:
-    """Convert ``snake_case`` to ``PascalCase``, matching the schema naming."""
+    """Convert snake_case to PascalCase by title-casing each part.
+
+    install_from_archive becomes InstallFromArchiveRequest in the schemas module.
+    """
     return "".join(part.title() for part in name.split("_"))
 
 
 def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
-    """Every public service function is exposed as an RPC endpoint and no
-    other endpoints exist."""
+    """RPC_FUNCTIONS.keys() == SERVICE_FUNCTION_NAMES (no extra, no missing).
+
+    SERVICE_FUNCTION_NAMES is the list of public functions in sptmod.core.services;
+    this pins the contract between core and RPC adapter.
+    """
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
 def test_rpc_functions_has_exactly_thirtyfour_entries() -> None:
-    """The RPC registry contains exactly 34 endpoints."""
+    """len(RPC_FUNCTIONS) == 34; pins the endpoint count against regressions.
+
+    Adding or removing an endpoint must update this assertion to keep the
+    contract explicit.
+    """
     assert len(RPC_FUNCTIONS) == 34
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
 def test_spec_function_is_the_same_named_service_function(name: str) -> None:
-    """Each RPC spec references the actual service function object."""
+    """RPC_FUNCTIONS[name].function is the same object as services.<name>.
+
+    Prevents accidental replication of logic across the adapter boundary.
+    """
     assert RPC_FUNCTIONS[name].function is getattr(services, name)
 
 
@@ -74,7 +85,10 @@ def test_spec_function_is_the_same_named_service_function(name: str) -> None:
 def test_spec_request_resolves_the_same_named_camel_case_request_model(
     name: str,
 ) -> None:
-    """Each RPC spec references the corresponding PascalCase request model."""
+    """RPC_FUNCTIONS[name].request is schemas.<CamelCase>Request (e.g., InitGameDirRequest).
+
+    Prevents request model typos and ensures the schema naming convention.
+    """
     expected = getattr(schemas, f"{_camel(name)}Request")
     assert RPC_FUNCTIONS[name].request is expected
 
@@ -146,11 +160,12 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     SCHEMA_PARITY_PAIRS,
     ids=[dataclass_type.__name__ for dataclass_type, _ in SCHEMA_PARITY_PAIRS],
 )
-def test_schema_declares_every_field_of_its_core_dataclass(
-    dataclass_type: type, schema_type: type[BaseModel]
-) -> None:
-    """Every field in a core dataclass exists in its corresponding Pydantic
-    schema."""
+def test_schema_declares_every_field_of_its_core_dataclass(dataclass_type: type, schema_type: type[BaseModel]) -> None:
+    """Core dataclass fields ⊆ Pydantic schema fields (one-way coverage).
+
+    A schema may have extra fields (e.g., operation_id), but all dataclass
+    fields must be serializable through the schema.
+    """
     dataclass_fields = {field.name for field in dataclasses.fields(dataclass_type)}
     schema_fields = set(schema_type.model_fields.keys())
 
@@ -167,9 +182,7 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
     return [
         obj
         for _, obj in vars(core_errors).items()
-        if inspect.isclass(obj)
-        and issubclass(obj, Exception)
-        and obj.__module__ == core_errors.__name__
+        if inspect.isclass(obj) and issubclass(obj, Exception) and obj.__module__ == core_errors.__name__
     ]
 
 
@@ -177,7 +190,11 @@ CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
 def test_there_are_twentyfive_concrete_core_error_classes() -> None:
-    """Exactly 25 concrete exception classes are defined in sptmod.core.errors."""
+    """len(CONCRETE_CORE_ERROR_CLASSES) == 25 to pin corpus against regressions.
+
+    Adding a new exception class to core.errors requires updating this count
+    so the change is caught by parametrized error tests.
+    """
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
     assert len(CONCRETE_CORE_ERROR_CLASSES) == 25
@@ -191,8 +208,11 @@ def test_there_are_twentyfive_concrete_core_error_classes() -> None:
 def test_every_concrete_core_error_maps_to_a_non_fallback_code(
     error_type: type[Exception],
 ) -> None:
-    """Every core exception class maps to a specific RPC error code (not
-    fallback)."""
+    """error_code(error_type) != FALLBACK_ERROR_CODE and error_type in ERROR_MAPPING.
+
+    All core exceptions must have machine-readable codes; FALLBACK_ERROR_CODE
+    is only for unhandled exceptions outside the core domain.
+    """
     code = error_code(error_type)
 
     assert code != FALLBACK_ERROR_CODE
@@ -210,7 +230,11 @@ def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
 
 
 def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -> None:
-    """Only responses with an operation_id field are marked in the RPC spec."""
+    """Specs with operation_id=True have operation_id field; unmarked specs do not.
+
+    The five marked specs (install_from_archive, sync_catalog, install_mod,
+    update_mod, launch_profile) are the only ones with long-running operations.
+    """
     declares_operation_id = {
         name
         for name, spec in RPC_FUNCTIONS.items()
@@ -231,7 +255,11 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
 
 
 def test_exactly_the_wrapped_specs_wrap_a_result_under_a_named_field() -> None:
-    """Only specified endpoints wrap plain results under named fields."""
+    """Four specs wrap plain results: set_spt_version, export_mods, list/set_favorite.
+
+    Wrapping ensures JSON responses are always objects; plain list/string results
+    are nested under named fields (spt_version, content, mod_ids).
+    """
     # Most wrapped results are plain strings; list_favorites/set_favorite wrap
     # a plain list[int] the same way, under "mod_ids".
     wrapped = {name: spec.wrap for name, spec in RPC_FUNCTIONS.items() if spec.wrap}

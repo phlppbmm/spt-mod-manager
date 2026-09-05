@@ -19,7 +19,11 @@ from sptmod.core.repo import COMMITTER_EMAIL, COMMITTER_NAME, Repo, gitignore_wh
 
 
 def _git(path: Path, *args: str) -> str:
-    """Returns stdout.strip() from git -C <path> <args>; raises on non-zero exit."""
+    """Execute git command and return stdout stripped of whitespace.
+
+    Runs git -C <path> <args> as subprocess and returns result.stdout.strip().
+    Raises CalledProcessError on non-zero exit (check=True).
+    """
     result = subprocess.run(
         ["git", "-C", str(path), *args],
         capture_output=True,
@@ -30,21 +34,32 @@ def _git(path: Path, *args: str) -> str:
 
 
 def test_init_returns_repo_bound_to_the_given_path(fake_game_dir: Path) -> None:
-    """Repo.init() returns a Repo with its path attribute set to the game directory."""
+    """Repo.init returns Repo with path attribute bound to game directory.
+
+    Calls Repo.init(detect_layout(fake_game_dir)). Returned repo.path must
+    equal fake_game_dir exactly.
+    """
     repo = Repo.init(detect_layout(fake_game_dir))
 
     assert repo.path == fake_game_dir
 
 
 def test_init_creates_a_git_repository(fake_game_dir: Path) -> None:
-    """Repo.init() sets up a .git directory in the game directory."""
+    """Repo.init creates .git directory in the game directory.
+
+    Calls Repo.init(detect_layout(fake_game_dir)). Must create .git/ as directory.
+    """
     Repo.init(detect_layout(fake_game_dir))
 
     assert (fake_game_dir / ".git").is_dir()
 
 
 def test_init_writes_the_whitelist_gitignore_verbatim(fake_game_dir: Path) -> None:
-    """Repo.init() writes a .gitignore with the runtime-appropriate whitelist."""
+    """Repo.init writes .gitignore with runtime-appropriate whitelist exactly.
+
+    Calls Repo.init(detect_layout(fake_game_dir)). Must write .gitignore
+    matching gitignore_whitelist("SPT") exactly (for SPT runtime dir).
+    """
     Repo.init(detect_layout(fake_game_dir))
 
     gitignore = fake_game_dir / ".gitignore"
@@ -52,7 +67,11 @@ def test_init_writes_the_whitelist_gitignore_verbatim(fake_game_dir: Path) -> No
 
 
 def test_init_does_not_create_an_initial_commit(fake_game_dir: Path) -> None:
-    """Repo.init() sets up git without making any commits."""
+    """Repo.init initializes git repo with zero commits (no HEAD).
+
+    Calls Repo.init(detect_layout(fake_game_dir)). Running `git log` must fail
+    with exit code != 0 and stderr containing "does not have any commits".
+    """
     Repo.init(detect_layout(fake_game_dir))
 
     # The repository must exist (otherwise the assertion below is meaningless)
@@ -80,24 +99,29 @@ def test_init_sets_local_committer_identity_not_global(fake_game_dir: Path) -> N
 
 
 def test_init_identity_works_without_any_global_git_config(fake_game_dir: Path) -> None:
-    """Repo.init() configures identity so commits work without global git config."""
+    """Repo.init configures local identity enabling commits without global config.
+
+    Fixture isolate_git_config points HOME and GIT_CONFIG_GLOBAL to nonexistent
+    paths (no global git config). Creates a profile json, calls repo.commit(),
+    and verifies commit_hash is non-empty, proving local identity was set.
+    """
     # The autouse isolate_git_config fixture already points HOME and
     # GIT_CONFIG_GLOBAL at nonexistent files. If Repo.init relied on the
     # global config being present it would fail here.
     repo = Repo.init(detect_layout(fake_game_dir))
 
-    (fake_game_dir / "SPT" / "user" / "profiles" / "abc.json").write_text(
-        '{"changed": true}', encoding="utf-8"
-    )
-    commit_hash = repo.commit(
-        "mod: identity smoke test", paths=[Path("SPT/user/profiles/abc.json")]
-    )
+    (fake_game_dir / "SPT" / "user" / "profiles" / "abc.json").write_text('{"changed": true}', encoding="utf-8")
+    commit_hash = repo.commit("mod: identity smoke test", paths=[Path("SPT/user/profiles/abc.json")])
 
     assert commit_hash != ""
 
 
 def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
-    """Repo.init() on an existing repo raises GitError."""
+    """Repo.init raises GitError when called twice on same path.
+
+    Calls Repo.init(detect_layout(fake_game_dir)) twice. Second call must
+    raise GitError (repository already exists).
+    """
     layout = detect_layout(fake_game_dir)
     Repo.init(layout)
 
@@ -108,7 +132,12 @@ def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
 def test_init_raises_not_a_game_dir_error_when_layout_root_is_not_a_directory(
     tmp_path: Path,
 ) -> None:
-    """Repo.init() raises NotAGameDirError when root path is not a directory."""
+    """Repo.init raises NotAGameDirError when layout root is a file, not directory.
+
+    Creates not_a_dir as a regular file (write_text). Passes GameLayout(
+    root=not_a_dir, runtime_dir_name="SPT") to Repo.init(). Must raise
+    NotAGameDirError.
+    """
     not_a_dir = tmp_path / "not-a-directory"
     not_a_dir.write_text("x", encoding="utf-8")
     layout = GameLayout(root=not_a_dir, runtime_dir_name="SPT")
@@ -120,7 +149,11 @@ def test_init_raises_not_a_game_dir_error_when_layout_root_is_not_a_directory(
 def test_init_raises_not_a_game_dir_error_when_layout_root_is_missing(
     tmp_path: Path,
 ) -> None:
-    """Repo.init() raises NotAGameDirError when root path does not exist."""
+    """Repo.init raises NotAGameDirError when layout root does not exist.
+
+    Passes GameLayout(root=tmp_path/"does-not-exist", runtime_dir_name="SPT")
+    to Repo.init(). Must raise NotAGameDirError.
+    """
     layout = GameLayout(root=tmp_path / "does-not-exist", runtime_dir_name="SPT")
 
     with pytest.raises(NotAGameDirError):

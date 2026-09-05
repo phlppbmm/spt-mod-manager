@@ -152,9 +152,7 @@ def _seed_target(
             total=1,
             next_url=None,
         )
-        respx_router.get(f"/mod/{mod_id}/versions").mock(
-            return_value=httpx.Response(200, json=full_versions_page)
-        )
+        respx_router.get(f"/mod/{mod_id}/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
         cat.fetch_versions(client, mod_id)
     return client
 
@@ -217,15 +215,11 @@ def _seed_target_without_fetch_versions(
         total=1,
         next_url=None,
     )
-    respx_router.get(f"/mod/{mod_id}/versions").mock(
-        return_value=httpx.Response(200, json=full_versions_page)
-    )
+    respx_router.get(f"/mod/{mod_id}/versions").mock(return_value=httpx.Response(200, json=full_versions_page))
     return client
 
 
-def _echo_dependencies(
-    respx_router: respx.MockRouter, nodes: list[dict[str, Any]]
-) -> None:
+def _echo_dependencies(respx_router: respx.MockRouter, nodes: list[dict[str, Any]]) -> None:
     """Mock ``/mods/dependencies`` echoing the queried pair as the response key."""
 
     def _handler(request: httpx.Request) -> httpx.Response:
@@ -244,8 +238,11 @@ def _dep_node(
     link: str,
     content_length: int,
 ) -> dict[str, Any]:
-    """Build a Forge dependency node: latest_compatible_version with link/content_length,
-    conflict=False (safe to install), empty dependencies list."""
+    """Build a dependency node dict for the /mods/dependencies API response.
+
+    Returns a dict with latest_compatible_version containing link and content_length,
+    conflict=False, and empty dependencies list.
+    """
     return {
         "id": id,
         "guid": None,
@@ -263,46 +260,39 @@ def _dep_node(
     }
 
 
-def _package_archive(
-    make_archive: MakeArchive, folder: str, name: str, version: str
-) -> Path:
-    """Build a zip archive: SPT/user/mods/{folder}/package.json with name, version, author."""
+def _package_archive(make_archive: MakeArchive, folder: str, name: str, version: str) -> Path:
+    """Create a server mod archive with package.json and return the archive path.
+
+    The archive contains SPT/user/mods/{folder}/package.json with given name,
+    version, and author='Acme'.
+    """
     return make_archive(
-        {
-            f"SPT/user/mods/{folder}/package.json": json.dumps(
-                {"name": name, "version": version, "author": "Acme"}
-            )
-        },
+        {f"SPT/user/mods/{folder}/package.json": json.dumps({"name": name, "version": version, "author": "Acme"})},
         "zip",
     )
 
 
 def _mock_download(respx_router: respx.MockRouter, link: str, archive: Path) -> int:
-    """Mock a download link to serve an archive and return its size."""
+    """Mock a GET request for link to serve archive bytes with Content-Length header.
+
+    Returns the archive size (len(archive.read_bytes())).
+    """
     body = archive.read_bytes()
     respx_router.get(link).mock(
-        return_value=httpx.Response(
-            200, content=body, headers={"Content-Length": str(len(body))}
-        )
+        return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
     )
     return len(body)
 
 
-def _mock_download_route(
-    respx_router: respx.MockRouter, link: str, archive: Path
-) -> respx.Route:
+def _mock_download_route(respx_router: respx.MockRouter, link: str, archive: Path) -> respx.Route:
     """Like ``_mock_download``, but returns the ``Route`` for call counting."""
     body = archive.read_bytes()
     return respx_router.get(link).mock(
-        return_value=httpx.Response(
-            200, content=body, headers={"Content-Length": str(len(body))}
-        )
+        return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
     )
 
 
-def _seed_download_cache_entry(
-    cache_dir: Path, version_id: int, name: str, payload: bytes
-) -> Path:
+def _seed_download_cache_entry(cache_dir: Path, version_id: int, name: str, payload: bytes) -> Path:
     """Write a complete archive directly into the download cache's on-disk
     layout (``<key>/meta.json`` + ``<key>/<name>``, per
     ``sptmod.core.forge.cache``'s module docstring), bypassing any real
@@ -354,9 +344,7 @@ def test_plan_mod_install_orders_dependency_before_the_requested_mod(
         ],
     )
 
-    plan = services.plan_mod_install(
-        clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client
-    )
+    plan = services.plan_mod_install(clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client)
 
     assert plan.spt_version == SPT_VERSION
     assert plan.entries == [
@@ -406,9 +394,7 @@ def test_plan_mod_install_resolves_a_link_missing_from_a_sync_only_catalog(
     )
     _echo_dependencies(respx_router, [])
 
-    plan = services.plan_mod_install(
-        clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client
-    )
+    plan = services.plan_mod_install(clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client)
 
     assert plan.entries[0].link == "https://dl.example/link-mod-1.0.0.zip"
     assert plan.entries[0].content_length == 800
@@ -421,7 +407,7 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
-    """Verify install_mod succeeds when download links must be fetched from the Forge."""
+    """install_mod resolves a missing download link via fetch_versions."""
     archive = _package_archive(make_archive, "LinkMod", "Link Mod", "1.0.0")
     link = "https://dl.example/link-mod-1.0.0.zip"
     content_length = len(archive.read_bytes())
@@ -439,9 +425,7 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
 
-    result = services.install_mod(
-        clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Link Mod", "1.0.0", db_path=db_path, client=client)
 
     assert [entry.mod.name for entry in result.installed] == ["Link Mod"]
     assert (clean_repo.path / "SPT/user/mods/LinkMod/package.json").is_file()
@@ -482,18 +466,12 @@ def test_install_mod_raises_archive_error_when_forge_no_longer_lists_the_version
     client = client_factory()
     with Catalog(db_path) as cat:
         cat.sync(client, full=True)
-    empty_versions = page_envelope(
-        [], current_page=1, last_page=1, total=0, next_url=None
-    )
-    respx_router.get("/mod/910/versions").mock(
-        return_value=httpx.Response(200, json=empty_versions)
-    )
+    empty_versions = page_envelope([], current_page=1, last_page=1, total=0, next_url=None)
+    respx_router.get("/mod/910/versions").mock(return_value=httpx.Response(200, json=empty_versions))
     _echo_dependencies(respx_router, [])
 
     with pytest.raises(ArchiveError):
-        services.install_mod(
-            clean_repo.path, "GhostLink", "1.0.0", db_path=db_path, client=client
-        )
+        services.install_mod(clean_repo.path, "GhostLink", "1.0.0", db_path=db_path, client=client)
 
 
 def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
@@ -510,9 +488,7 @@ def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
     still succeed: extract() detects the archive format from magic bytes
     rather than trusting that name.
     """
-    archive = _package_archive(
-        make_archive, "BareVersionMod", "Bare Version Mod", "2.0.1"
-    )
+    archive = _package_archive(make_archive, "BareVersionMod", "Bare Version Mod", "2.0.1")
     link = "https://dl.example/2.0.1"
     content_length = len(archive.read_bytes())
     client = _seed_target_without_fetch_versions(
@@ -529,14 +505,10 @@ def test_install_mod_succeeds_when_the_download_link_ends_in_a_bare_version(
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
 
-    result = services.install_mod(
-        clean_repo.path, "Bare Version Mod", "2.0.1", db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Bare Version Mod", "2.0.1", db_path=db_path, client=client)
 
     assert [entry.mod.name for entry in result.installed] == ["Bare Version Mod"]
-    assert (
-        clean_repo.path / "SPT/user/mods/BareVersionMod/package.json"
-    ).is_file()
+    assert (clean_repo.path / "SPT/user/mods/BareVersionMod/package.json").is_file()
 
 
 def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
@@ -547,9 +519,7 @@ def test_plan_mod_install_unknown_mod_raises_no_compatible_version_error(
     client = client_factory()
 
     with pytest.raises(NoCompatibleVersionError):
-        services.plan_mod_install(
-            clean_repo.path, "Nonexistent Mod", db_path=db_path, client=client
-        )
+        services.plan_mod_install(clean_repo.path, "Nonexistent Mod", db_path=db_path, client=client)
 
 
 def test_plan_mod_install_raises_not_a_game_dir_when_spt_version_unknown(
@@ -557,15 +527,11 @@ def test_plan_mod_install_raises_not_a_game_dir_when_spt_version_unknown(
 ) -> None:
     """If plan_mod_install's body is `pass`, this fails: no exception raised
     when the game dir's core.json carries no readable SPT version."""
-    (clean_repo.path / "SPT/SPT_Data/configs/core.json").write_text(
-        "not json", encoding="utf-8"
-    )
+    (clean_repo.path / "SPT/SPT_Data/configs/core.json").write_text("not json", encoding="utf-8")
     client = client_factory()
 
     with pytest.raises(NotAGameDirError):
-        services.plan_mod_install(
-            clean_repo.path, "Target Mod", db_path=db_path, client=client
-        )
+        services.plan_mod_install(clean_repo.path, "Target Mod", db_path=db_path, client=client)
 
 
 # --- install_mod --------------------------------------------------------
@@ -608,14 +574,10 @@ def test_install_mod_installs_missing_dependency_as_its_own_commit_before_the_ta
             )
         ],
     )
-    _mock_download(
-        respx_router, "https://dl.example/target-mod-2.0.0.zip", target_archive
-    )
+    _mock_download(respx_router, "https://dl.example/target-mod-2.0.0.zip", target_archive)
     _mock_download(respx_router, "https://dl.example/dep-mod-1.0.0.zip", dep_archive)
 
-    result = services.install_mod(
-        clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client)
 
     assert [entry.name for entry in result.plan.entries] == ["Dep Mod", "Target Mod"]
     assert [item.mod.name for item in result.installed] == ["Dep Mod", "Target Mod"]
@@ -666,9 +628,7 @@ def test_install_mod_writes_the_plan_version_when_the_archive_carries_none(
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
 
-    result = services.install_mod(
-        clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client)
 
     assert result.installed[0].mod.version == "3.2.1"
     commit = Repo(clean_repo.path).log()[0]
@@ -682,7 +642,7 @@ def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
-    """Verify check_updates uses the Forge version for bare-DLL mods (not empty)."""
+    """check_updates sends "904:3.2.1" for a bare-DLL mod with no package.json."""
     archive = make_archive({"BepInEx/plugins/VersionlessMod.dll": b"dll-bytes"}, "zip")
     body = archive.read_bytes()
     link = "https://dl.example/versionless-mod-3.2.1.zip"
@@ -699,9 +659,7 @@ def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
     )
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
-    services.install_mod(
-        clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client
-    )
+    services.install_mod(clean_repo.path, "Versionless Mod", "3.2.1", db_path=db_path, client=client)
 
     captured: dict[str, str] = {}
 
@@ -737,9 +695,7 @@ def test_install_mod_aborts_on_a_file_conflict_without_force(
     """If install_mod's body is `pass`, this fails: no ConflictError is raised
     and the file-conflict check is never reached."""
     archive = _package_archive(make_archive, "Solo Mod", "Solo Mod", "1.0.0")
-    length = _mock_download(
-        respx_router, "https://dl.example/solo-mod-1.0.0.zip", archive
-    )
+    length = _mock_download(respx_router, "https://dl.example/solo-mod-1.0.0.zip", archive)
     client = _seed_target(
         client_factory,
         respx_router,
@@ -762,9 +718,7 @@ def test_install_mod_aborts_on_a_file_conflict_without_force(
     commits_before = len(clean_repo.log())
 
     with pytest.raises(ConflictError):
-        services.install_mod(
-            clean_repo.path, "Solo Mod", "1.0.0", db_path=db_path, client=client
-        )
+        services.install_mod(clean_repo.path, "Solo Mod", "1.0.0", db_path=db_path, client=client)
 
     assert len(clean_repo.log()) == commits_before
 
@@ -780,9 +734,7 @@ def test_install_mod_force_downgrades_the_conflict_and_installs(
     """If install_mod does not forward force= to install_from_archive, this
     fails: the conflicting file blocks the install even with force=True."""
     archive = _package_archive(make_archive, "Solo Mod", "Solo Mod", "1.0.0")
-    length = _mock_download(
-        respx_router, "https://dl.example/solo-mod-1.0.0.zip", archive
-    )
+    length = _mock_download(respx_router, "https://dl.example/solo-mod-1.0.0.zip", archive)
     client = _seed_target(
         client_factory,
         respx_router,
@@ -803,9 +755,7 @@ def test_install_mod_force_downgrades_the_conflict_and_installs(
         files={"SPT/user/mods/Solo Mod/package.json": "existing content"},
     )
 
-    result = services.install_mod(
-        clean_repo.path, "Solo Mod", "1.0.0", force=True, db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Solo Mod", "1.0.0", force=True, db_path=db_path, client=client)
 
     assert result.installed[0].mod.name == "Solo Mod"
     warning_kinds = {warning.kind for warning in result.installed[0].warnings}
@@ -878,9 +828,7 @@ def test_install_mod_partial_failure_raises_partial_install_error_keeping_dep_co
     commits_before = len(clean_repo.log())
 
     with pytest.raises(PartialInstallError) as excinfo:
-        services.install_mod(
-            clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client
-        )
+        services.install_mod(clean_repo.path, "Target Mod", "2.0.0", db_path=db_path, client=client)
 
     error = excinfo.value
     assert [item.mod.name for item in error.installed] == ["Dep Mod"]
@@ -913,9 +861,7 @@ def test_cli_install_prints_mods_installed_before_a_partial_failure(
     )
     monkeypatch.chdir(clean_repo.path)
 
-    result = cli_runner.invoke(
-        cli_app, ["install", "Target Mod", "--version", "2.0.0", "--yes"]
-    )
+    result = cli_runner.invoke(cli_app, ["install", "Target Mod", "--version", "2.0.0", "--yes"])
 
     assert result.exit_code != 0
     assert re.search(r"installed Dep Mod 1\.0\.0 \(\d+ files\) as \w+", result.stdout)
@@ -930,10 +876,12 @@ def _seed_simple_catalog(
     db_path: Path,
     mods: list[JsonDict],
 ) -> None:
-    """Mock /mods endpoint and sync mods into the catalog via full sync (single page, all mods)."""
-    page = page_envelope(
-        mods, current_page=1, last_page=1, total=len(mods), next_url=None
-    )
+    """Mock /mods endpoint and sync mods into the catalog as a single page.
+
+    Mocks respx_router.get("/mods") to return mods in a single page envelope
+    (current_page=1, last_page=1, total=len(mods)), then syncs via Catalog.sync(full=True).
+    """
+    page = page_envelope(mods, current_page=1, last_page=1, total=len(mods), next_url=None)
     respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page))
     client = client_factory()
     with Catalog(db_path) as cat:
@@ -947,8 +895,11 @@ def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
-    """With forge_match=True, sets forge_id and forge_version_id when mod name and version
-    match exactly one cached mod (unambiguous)."""
+    """install_from_archive with forge_match=True sets forge IDs on unambiguous name+version.
+
+    When CoolMod 1.2.3 matches exactly one cached mod (id=401, version_id=4011),
+    the result has forge_id='401' and forge_version_id='4011'.
+    """
     _seed_simple_catalog(
         client_factory,
         respx_router,
@@ -973,9 +924,7 @@ def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
     )
     archive = _package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
 
-    result = services.install_from_archive(
-        clean_repo.path, archive, forge_match=True, db_path=db_path
-    )
+    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
 
     assert result.mod.forge_id == "401"
     assert result.mod.forge_version_id == "4011"
@@ -1017,9 +966,7 @@ def test_install_from_archive_forge_match_leaves_ids_empty_when_the_version_is_u
     )
     archive = _package_archive(make_archive, "CoolMod", "CoolMod", "9.9.9")
 
-    result = services.install_from_archive(
-        clean_repo.path, archive, forge_match=True, db_path=db_path
-    )
+    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
 
     assert result.mod.forge_id == ""
     assert result.mod.forge_version_id == ""
@@ -1032,8 +979,11 @@ def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
-    """With forge_match=True, leaves forge_id and forge_version_id empty when mod name
-    matches multiple cached mods (ambiguous lookup)."""
+    """install_from_archive with forge_match=True leaves forge IDs empty on ambiguous match.
+
+    When CoolMod 1.2.3 matches multiple cached mods (ids 501 and 502, both named CoolMod),
+    the result has forge_id='' and forge_version_id=''.
+    """
     _seed_simple_catalog(
         client_factory,
         respx_router,
@@ -1073,9 +1023,7 @@ def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
     )
     archive = _package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
 
-    result = services.install_from_archive(
-        clean_repo.path, archive, forge_match=True, db_path=db_path
-    )
+    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
 
     assert result.mod.forge_id == ""
     assert result.mod.forge_version_id == ""
@@ -1092,9 +1040,7 @@ def test_install_from_archive_forge_match_leaves_ids_empty_when_no_match(
     # the lookup a no-op.
     archive = _package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
 
-    result = services.install_from_archive(
-        clean_repo.path, archive, forge_match=True, db_path=db_path
-    )
+    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
 
     assert result.mod.forge_id == ""
     assert result.mod.forge_version_id == ""
@@ -1114,9 +1060,7 @@ def test_import_list_apply_installs_exactly_the_missing_mods(
     """If import_list's apply path is `pass`/unimplemented, this fails: the
     missing mod is never installed and diff.installed stays empty."""
     archive = _package_archive(make_archive, "Import Target", "Import Target", "3.0.0")
-    length = _mock_download(
-        respx_router, "https://dl.example/import-target-3.0.0.zip", archive
-    )
+    length = _mock_download(respx_router, "https://dl.example/import-target-3.0.0.zip", archive)
     client = _seed_target(
         client_factory,
         respx_router,
@@ -1132,19 +1076,13 @@ def test_import_list_apply_installs_exactly_the_missing_mods(
     list_file = tmp_path / "mods.txt"
     list_file.write_text("Import Target 3.0.0\n", encoding="utf-8")
 
-    diff = services.import_list(
-        clean_repo.path, list_file=list_file, apply=True, db_path=db_path, client=client
-    )
+    diff = services.import_list(clean_repo.path, list_file=list_file, apply=True, db_path=db_path, client=client)
 
-    assert diff.missing == [
-        services.ImportEntry(name="Import Target", wanted_version="3.0.0")
-    ]
+    assert diff.missing == [services.ImportEntry(name="Import Target", wanted_version="3.0.0")]
     assert diff.different == []
     assert diff.extra == []
     assert len(diff.installed) == 1
-    assert [entry.name for entry in diff.installed[0].plan.entries] == [
-        "Import Target"
-    ]
+    assert [entry.name for entry in diff.installed[0].plan.entries] == ["Import Target"]
     assert diff.installed[0].installed[0].mod.name == "Import Target"
     assert diff.installed[0].installed[0].mod.version == "3.0.0"
 
@@ -1152,10 +1090,12 @@ def test_import_list_apply_installs_exactly_the_missing_mods(
     assert installed_names == ["Import Target"]
 
 
-def test_import_list_content_parameter_yields_the_same_diff_as_a_file(
-    clean_repo: Repo, tmp_path: Path
-) -> None:
-    """import_list returns identical ImportDiff whether given content= string or list_file= path."""
+def test_import_list_content_parameter_yields_the_same_diff_as_a_file(clean_repo: Repo, tmp_path: Path) -> None:
+    """import_list with content= and list_file= parameters produce identical results.
+
+    Parsing "SomeMod 1.0.0\\n" via content= produces the same ImportDiff as parsing
+    from a file; both report missing=[ImportEntry(name='SomeMod', wanted_version='1.0.0')].
+    """
     text = "SomeMod 1.0.0\n"
     list_file = tmp_path / "mods.txt"
     list_file.write_text(text, encoding="utf-8")
@@ -1164,9 +1104,7 @@ def test_import_list_content_parameter_yields_the_same_diff_as_a_file(
     from_content = services.import_list(clean_repo.path, content=text)
 
     assert from_content == from_file
-    assert from_content.missing == [
-        services.ImportEntry(name="SomeMod", wanted_version="1.0.0")
-    ]
+    assert from_content.missing == [services.ImportEntry(name="SomeMod", wanted_version="1.0.0")]
 
 
 # --- clear_catalog_cache --------------------------------------------------
@@ -1189,7 +1127,11 @@ def test_clear_catalog_cache_removes_the_db_file_and_reports_removed(
 
 
 def test_clear_catalog_cache_second_call_reports_not_removed(tmp_path: Path) -> None:
-    """Verify clear_catalog_cache reports removed=False when called on non-existent cache."""
+    """clear_catalog_cache on already-deleted cache returns ClearCacheResult(removed=False).
+
+    After the first clear_catalog_cache call deletes db_path, calling it again
+    returns removed=False (no file to remove).
+    """
     db = tmp_path / "forge-cache.db"
     with Catalog(db):
         pass
@@ -1280,9 +1222,7 @@ def test_reinstalling_a_removed_mod_reuses_the_cached_archive_and_skips_the_down
     _echo_dependencies(respx_router, [])
     route = _mock_download_route(respx_router, link, archive)
 
-    first = services.install_mod(
-        clean_repo.path, "Cache Mod", "1.0.0", db_path=db_path, client=client
-    )
+    first = services.install_mod(clean_repo.path, "Cache Mod", "1.0.0", db_path=db_path, client=client)
     assert route.call_count == 1
     services.remove_mod(clean_repo.path, "Cache Mod")
 
@@ -1318,9 +1258,7 @@ def test_install_mod_redownloads_when_the_cached_archive_size_does_not_match(
     bytes, and the install must still succeed.
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    archive = _package_archive(
-        make_archive, "StaleCacheMod", "Stale Cache Mod", "1.0.0"
-    )
+    archive = _package_archive(make_archive, "StaleCacheMod", "Stale Cache Mod", "1.0.0")
     link = "https://dl.example/stale-cache-mod-1.0.0.zip"
     content_length = len(archive.read_bytes())
     client = _seed_target(
@@ -1338,19 +1276,13 @@ def test_install_mod_redownloads_when_the_cached_archive_size_does_not_match(
     route = _mock_download_route(respx_router, link, archive)
     stale_payload = b"not the real archive; deliberately the wrong size"
     assert len(stale_payload) != content_length
-    _seed_download_cache_entry(
-        download_cache_dir(), 7020, "stale.zip", stale_payload
-    )
+    _seed_download_cache_entry(download_cache_dir(), 7020, "stale.zip", stale_payload)
 
-    result = services.install_mod(
-        clean_repo.path, "Stale Cache Mod", "1.0.0", db_path=db_path, client=client
-    )
+    result = services.install_mod(clean_repo.path, "Stale Cache Mod", "1.0.0", db_path=db_path, client=client)
 
     assert route.call_count == 1
     assert result.installed[0].mod.name == "Stale Cache Mod"
-    assert (
-        clean_repo.path / "SPT/user/mods/StaleCacheMod/package.json"
-    ).is_file()
+    assert (clean_repo.path / "SPT/user/mods/StaleCacheMod/package.json").is_file()
 
 
 def _mock_updates_single(
@@ -1456,9 +1388,7 @@ def test_update_mod_to_a_cached_version_skips_the_download(
     _seed_download_cache_entry(download_cache_dir(), 200, "cached.zip", body)
     client = client_factory()
 
-    result = services.update_mod(
-        clean_repo.path, "UpdateCacheMod", db_path=db_path, client=client
-    )
+    result = services.update_mod(clean_repo.path, "UpdateCacheMod", db_path=db_path, client=client)
 
     assert route.call_count == 0
     assert result.version == "2.0.0"
@@ -1517,9 +1447,7 @@ def test_update_mod_to_an_uncached_version_downloads_once_and_caches_it(
     route = _mock_download_route(respx_router, link, new_archive)
     client = client_factory()
 
-    result = services.update_mod(
-        clean_repo.path, "FreshCacheMod", db_path=db_path, client=client
-    )
+    result = services.update_mod(clean_repo.path, "FreshCacheMod", db_path=db_path, client=client)
 
     assert route.call_count == 1
     assert result.version == "2.0.0"
@@ -1561,9 +1489,7 @@ def test_install_mod_leaves_no_leftover_staging_directories(
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
 
-    services.install_mod(
-        clean_repo.path, "Staging Mod", "1.0.0", db_path=db_path, client=client
-    )
+    services.install_mod(clean_repo.path, "Staging Mod", "1.0.0", db_path=db_path, client=client)
 
     assert list(staging_dir().glob("sptmod-*")) == []
 
@@ -1585,9 +1511,7 @@ def test_no_download_progress_message_during_a_cache_hit_mentions_git_vocabulary
     this feature and out of scope here.
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    archive = _package_archive(
-        make_archive, "PlainWordsMod", "Plain Words Mod", "1.0.0"
-    )
+    archive = _package_archive(make_archive, "PlainWordsMod", "Plain Words Mod", "1.0.0")
     link = "https://dl.example/plain-words-mod-1.0.0.zip"
     content_length = len(archive.read_bytes())
     client = _seed_target(
@@ -1603,9 +1527,7 @@ def test_no_download_progress_message_during_a_cache_hit_mentions_git_vocabulary
     )
     _echo_dependencies(respx_router, [])
     _mock_download(respx_router, link, archive)
-    services.install_mod(
-        clean_repo.path, "Plain Words Mod", "1.0.0", db_path=db_path, client=client
-    )
+    services.install_mod(clean_repo.path, "Plain Words Mod", "1.0.0", db_path=db_path, client=client)
     services.remove_mod(clean_repo.path, "Plain Words Mod")
 
     download_messages: list[str] = []

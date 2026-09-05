@@ -66,7 +66,10 @@ SPT_CONSTRAINT = "^4.0.0"
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure no game processes are detected during CLI tests."""
+    """Patches ``game_dir.running_game_processes`` to return an empty list.
+
+    Every CLI test runs as if no SPT process were running.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -160,9 +163,7 @@ def _seed_forge_mod(
         ],
         total=1,
     )
-    respx_router.get(f"/mod/{mod_id}/versions").mock(
-        return_value=httpx.Response(200, json=versions_page)
-    )
+    respx_router.get(f"/mod/{mod_id}/versions").mock(return_value=httpx.Response(200, json=versions_page))
 
     def _empty_dependencies(request: httpx.Request) -> httpx.Response:
         pair = request.url.params["mods"]
@@ -171,9 +172,7 @@ def _seed_forge_mod(
     respx_router.get("/mods/dependencies").mock(side_effect=_empty_dependencies)
 
 
-def _current_version(
-    *, mod_id: int, name: str, version: str, version_id: int
-) -> dict[str, object]:
+def _current_version(*, mod_id: int, name: str, version: str, version_id: int) -> dict[str, object]:
     """Build a current version object for a Forge update response."""
     return {
         "id": version_id,
@@ -185,9 +184,7 @@ def _current_version(
     }
 
 
-def _updates_payload(
-    kind: str, *, mod_id: int, name: str, version: str
-) -> dict[str, object]:
+def _updates_payload(kind: str, *, mod_id: int, name: str, version: str) -> dict[str, object]:
     """A ``/mods/updates`` envelope with exactly one entry, in the list ``kind``."""
     payload: dict[str, object] = {
         "spt_version": SPT_VERSION,
@@ -199,9 +196,7 @@ def _updates_payload(
     if kind == "blocked":
         payload["blocked_updates"] = [
             {
-                "current_version": _current_version(
-                    mod_id=mod_id, name=name, version=version, version_id=1
-                ),
+                "current_version": _current_version(mod_id=mod_id, name=name, version=version, version_id=1),
                 "latest_version": {
                     "id": 2,
                     "version": "2.0.0",
@@ -317,9 +312,7 @@ def test_install_rejects_both_a_mod_argument_and_file(
     assert "pass either MOD or --file, not both" in result.output
 
 
-def test_install_rejects_neither_a_mod_argument_nor_file(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_rejects_neither_a_mod_argument_nor_file(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the missing-target check is removed, this fails: exit code stays 0
     instead of the BadParameter usage error."""
     _clean_repo(fake_game_dir)
@@ -395,9 +388,7 @@ def test_install_forge_path_success_prints_each_installed_mod(
         content_length=len(body),
     )
     respx_router.get(link).mock(
-        return_value=httpx.Response(
-            200, content=body, headers={"Content-Length": str(len(body))}
-        )
+        return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
     )
     monkeypatch.chdir(fake_game_dir)
     runner.invoke(app, ["sync", "--full"])
@@ -451,9 +442,7 @@ def test_update_reports_a_mod_forge_cannot_identify_as_skipped_and_stops(
     even though the mod carries no Forge ID and Forge lists nothing to
     apply."""
     repo = _clean_repo(fake_game_dir)
-    install_commit(
-        repo, "Ghost Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": ""}
-    )
+    install_commit(repo, "Ghost Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": ""})
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["update"], input="")
@@ -486,15 +475,11 @@ def test_update_check_renders_the_blocked_incompatible_and_uptodate_rows(
     """If ``_updates_table``'s loop for this list is removed, this fails: the
     row's state text never appears even though Forge reported an entry."""
     repo = _clean_repo(fake_game_dir)
-    install_commit(
-        repo, "Some Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "77"}
-    )
+    install_commit(repo, "Some Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "77"})
     respx_router.get("/mods/updates").mock(
         return_value=httpx.Response(
             200,
-            json=success_envelope(
-                _updates_payload(kind, mod_id=77, name="Some Mod", version="1.0.0")
-            ),
+            json=success_envelope(_updates_payload(kind, mod_id=77, name="Some Mod", version="1.0.0")),
         )
     )
     monkeypatch.chdir(fake_game_dir)
@@ -516,16 +501,12 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
     If ``_print_update``'s notice branch is removed, this fails: the second
     (up-to-date) answer's ``notice`` is silently dropped instead of printed."""
     repo = _clean_repo(fake_game_dir)
-    install_commit(
-        repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
-    )
+    install_commit(repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"})
     available = {
         "spt_version": SPT_VERSION,
         "updates": [
             {
-                "current_version": _current_version(
-                    mod_id=10, name="CoolMod", version="1.0.0", version_id=100
-                ),
+                "current_version": _current_version(mod_id=10, name="CoolMod", version="1.0.0", version_id=100),
                 "recommended_version": {
                     "id": 200,
                     "version": "2.0.0",
@@ -541,9 +522,7 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
         "up_to_date": [],
         "incompatible_with_spt": [],
     }
-    up_to_date = _updates_payload(
-        "up_to_date", mod_id=10, name="CoolMod", version="1.0.0"
-    )
+    up_to_date = _updates_payload("up_to_date", mod_id=10, name="CoolMod", version="1.0.0")
     calls = {"n": 0}
 
     def _side_effect(request: httpx.Request) -> httpx.Response:
@@ -596,18 +575,13 @@ def test_enabling_an_already_active_mod_prints_a_notice(
     result = runner.invoke(app, ["enable", "CoolMod"])
 
     assert result.exit_code == 0
-    assert (
-        "notice: CoolMod is installed, not disabled, nothing to enable"
-        in result.stdout
-    )
+    assert "notice: CoolMod is installed, not disabled, nothing to enable" in result.stdout
 
 
 # --- export: invalid format --------------------------------------------------
 
 
-def test_export_rejects_an_unknown_format(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_export_rejects_an_unknown_format(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If ``_export_format``'s raise is removed, this fails: exit code stays
     0 instead of the BadParameter usage error."""
     _clean_repo(fake_game_dir)
@@ -647,9 +621,7 @@ def test_browse_available_filter_excludes_the_installed_mod(
     )
     monkeypatch.chdir(fake_game_dir)
     runner.invoke(app, ["sync", "--full"])
-    install_commit(
-        repo, "Installed Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"}
-    )
+    install_commit(repo, "Installed Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "1"})
 
     result = runner.invoke(app, ["browse", "--available"])
 
@@ -669,9 +641,7 @@ def test_browse_with_no_filter_flag_lists_every_cached_mod(
     lists nothing instead of showing the cached mod."""
     _clean_repo(fake_game_dir)
     respx_router.get("/mods").mock(
-        return_value=httpx.Response(
-            200, json=page_envelope([_mod_json(1, "Cached Mod", "1.0.0")], total=1)
-        )
+        return_value=httpx.Response(200, json=page_envelope([_mod_json(1, "Cached Mod", "1.0.0")], total=1))
     )
     monkeypatch.chdir(fake_game_dir)
     runner.invoke(app, ["sync", "--full"])
@@ -787,9 +757,7 @@ def test_init_prompts_per_pre_existing_mod_and_leaves_it_untracked_on_no(
     result = runner.invoke(app, ["init", str(fake_game_dir)], input="n\n")
 
     assert result.exit_code == 0
-    assert "left untracked, run 'sptmod adopt SPT/user/mods/CoolMod' later" in (
-        result.stdout
-    )
+    assert "left untracked, run 'sptmod adopt SPT/user/mods/CoolMod' later" in (result.stdout)
     assert len(Repo(fake_game_dir).log()) == 1
 
 

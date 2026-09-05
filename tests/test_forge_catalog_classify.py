@@ -28,9 +28,7 @@ __all__ = [
 ]
 
 
-def _seed_classify_mods(
-    client_factory: ClientFactory, respx_router: respx.MockRouter, catalog: Catalog
-) -> None:
+def _seed_classify_mods(client_factory: ClientFactory, respx_router: respx.MockRouter, catalog: Catalog) -> None:
     """Sync four mods used across the classify scenarios.
 
     - Alpha Mod (id=10): two 3.8-compatible versions, 1.0.0 and 1.1.0 (newer).
@@ -138,7 +136,13 @@ def _seed_classify_mods(
 def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Catalog.classify matches installed mods by forge_id first and detects available updates."""
+    """classify() matches by forge_id, then detects available updates.
+
+    Installed mod with forge_id="10" but different name ("Totally Different")
+    matches the cached Alpha Mod (id=10, versions 1.0.0 and 1.1.0) by id, not
+    name. Result: state="update_available", installed_version="1.0.0",
+    latest_version="1.1.0".
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
         # Name deliberately does not match "Alpha Mod": the match must come
@@ -158,7 +162,12 @@ def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
 def test_classify_matches_installed_mod_by_name_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Catalog.classify falls back to name matching (case-insensitive) when forge_id missing."""
+    """classify() falls back to name matching when forge_id missing.
+
+    Installed mod with forge_id="999" (no match) and name="beta mod" matches
+    cached Beta Mod (id=11) by name case-insensitively. Result:
+    state="installed", installed_version="2.0.0".
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
         # forge_id deliberately does not match any cached mod id.
@@ -175,10 +184,11 @@ def test_classify_matches_installed_mod_by_name_case_insensitively(
 def test_classify_marks_never_installed_mods_as_available(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When the installed list is empty but the catalog has mods like Delta
-    (id=13), classify() marks it with state='available' and no installed_version;
-    this distinguishes "never installed" (available to install) from
-    "update available" (already installed).
+    """classify([]) on empty installed list marks all catalog mods "available".
+
+    Delta Mod (id=13) is in the catalog but not installed, so it appears with
+    state="available", installed_version=None; this distinguishes "available to
+    install" from "update_available" (already installed).
     """
     _seed_classify_mods(client_factory, respx_router, catalog)
 
@@ -194,9 +204,11 @@ def test_classify_marks_never_installed_mods_as_available(
 def test_classify_orders_entries_by_mod_name(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """After seeding five mods with varying states and versions, classify()
-    returns them in alphabetical order (Alpha, Beta, Delta, Epsilon, Gamma),
-    guaranteeing consistent UI ordering regardless of catalog iteration order.
+    """classify() returns all entries sorted by name alphabetically.
+
+    Five seeded mods are returned in order (Alpha, Beta, Delta, Epsilon,
+    Gamma), not database iteration order; this ensures UI displays are
+    consistent regardless of how the catalog fetches rows.
     """
     _seed_classify_mods(client_factory, respx_router, catalog)
 
@@ -214,7 +226,11 @@ def test_classify_orders_entries_by_mod_name(
 def test_classify_compatible_with_drops_mods_without_a_compatible_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Catalog.classify filters out mods with no version compatible with given SPT version."""
+    """classify(compatible_with="3.8.5") excludes mods with no 3.8-compatible version.
+
+    Gamma Mod (id=12) has only a 4.0-compatible version, so it is excluded
+    from the result when compatible_with="3.8.5".
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
 
     entries = catalog.classify([], compatible_with="3.8.5")
@@ -225,7 +241,12 @@ def test_classify_compatible_with_drops_mods_without_a_compatible_version(
 def test_classify_compatible_with_restricts_update_check_to_compatible_versions(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Catalog.classify with compatible_with only suggests updates that fit the constraint."""
+    """classify(compatible_with) filters update candidates to fitting versions.
+
+    Epsilon Mod installed as 1.0.0 (3.8-compatible) has newer version 2.0.0
+    (4.0-only). Without filter, state="update_available"; with
+    compatible_with="3.8.5", state="installed" (1.0.0 is the newest 3.8 fit).
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
     # Epsilon Mod's newest version overall (2.0.0) is only 4.0-compatible;
     # the installed 1.0.0 already is the newest 3.8-compatible version.

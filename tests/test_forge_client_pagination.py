@@ -21,7 +21,13 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_iter_mods_walks_every_page_exactly_once_in_order(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Follows links.next sequentially; fetches /mods once per page, yields each item once."""
+    """iter_mods() fetches all pages sequentially via links.next without repeating.
+
+    Two pages are set up: page 1 has mods id=1,2 (current_page=1, last_page=2,
+    next_url=/mods?page=2) and page 2 has mod id=3 (current_page=2, last_page=2,
+    next_url=None). iter_mods() makes exactly 2 HTTP calls and yields all 3 items
+    in order: (1, "Mod One"), (2, "Mod Two"), (3, "Mod Three").
+    """
     page1 = page_envelope(
         [
             mod_json_minimal(id=1, name="Mod One"),
@@ -53,10 +59,13 @@ def test_iter_mods_walks_every_page_exactly_once_in_order(
     assert route.call_count == 2
 
 
-def test_iter_mods_stops_at_last_page(
-    client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """Stops when current_page >= last_page; does not follow links.next if it points backward."""
+def test_iter_mods_stops_at_last_page(client_factory: ClientFactory, respx_router: respx.MockRouter) -> None:
+    """iter_mods() stops iteration when current_page >= last_page.
+
+    A single-page response (current_page=1, last_page=1) with 1 item yields
+    only that item and makes 1 HTTP call; _iter_pages() checks current_page >= last_page
+    before following links.next, so iteration stops even if next_url is present.
+    """
     single_page = page_envelope(
         [mod_json_minimal(id=1, name="Only Mod")],
         current_page=1,
@@ -64,9 +73,7 @@ def test_iter_mods_stops_at_last_page(
         total=1,
         next_url=None,
     )
-    route = respx_router.get("/mods").mock(
-        return_value=httpx.Response(200, json=single_page)
-    )
+    route = respx_router.get("/mods").mock(return_value=httpx.Response(200, json=single_page))
     client = client_factory()
 
     items = list(client.iter_mods())
@@ -107,9 +114,7 @@ def test_iter_mods_stops_when_next_url_repeats_an_already_fetched_url(
         if call_count["n"] > 3:
             # Bail out fast instead of relying only on the pytest-timeout
             # guard if a broken implementation loops forever.
-            raise AssertionError(
-                "iter_mods kept re-fetching a next url it had already fetched"
-            )
+            raise AssertionError("iter_mods kept re-fetching a next url it had already fetched")
         return responses[min(call_count["n"], len(responses)) - 1]
 
     route = respx_router.get("/mods").mock(side_effect=side_effect)
@@ -206,9 +211,7 @@ def test_mods_per_page_is_clamped_to_50(
     expected_sent: str,
 ) -> None:
     """mods() clamps per_page to MAX_PER_PAGE (50) before sending the request."""
-    route = respx_router.get("/mods").mock(
-        return_value=httpx.Response(200, json=page_envelope([]))
-    )
+    route = respx_router.get("/mods").mock(return_value=httpx.Response(200, json=page_envelope([])))
     client = client_factory()
 
     client.mods(per_page=requested_per_page)

@@ -12,7 +12,11 @@ RELATIVE = Path("SPT/user/mods/ModA/file.txt")
 
 
 def _write(repo: Repo, relative: Path, content: str) -> None:
-    """Write a file to the repo, creating parent directories as needed."""
+    """Write text file to repo, creating parent directories as needed.
+
+    Creates full.parent with mkdir(parents=True, exist_ok=True) and writes
+    content to repo.path/relative as UTF-8 text.
+    """
     full = repo.path / relative
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
@@ -75,7 +79,12 @@ def test_show_files_reports_deleted_file(initialized_repo: Repo) -> None:
 def test_show_file_content_returns_historical_content_not_working_tree(
     initialized_repo: Repo,
 ) -> None:
-    """Repo.show_file_content() reads file content from a commit, not disk."""
+    """Repo.show_file_content reads historical content from commit, not disk.
+
+    Commits file (v1), updates to v2, then deletes. File no longer on disk.
+    show_file_content(v1_hash, RELATIVE) must return "v1\\n" (from commit,
+    not disk where it was deleted).
+    """
     _write(initialized_repo, RELATIVE, "v1\n")
     v1_hash = initialized_repo.commit(
         "mod: ModA install",
@@ -121,7 +130,11 @@ def test_show_file_content_on_a_binary_blob_raises_git_error(
 def test_last_touching_returns_the_most_recent_commit_with_trailers(
     initialized_repo: Repo,
 ) -> None:
-    """last_touching() returns a Commit with populated trailers (from the most recent edit)."""
+    """Repo.last_touching returns most recent commit with populated trailers.
+
+    Commits file (v1.0.0), updates to v2 (v1.1.0). Calls last_touching(RELATIVE).
+    Returns commit with hash=update_hash, trailers["Mod-Version"]="1.1.0".
+    """
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -143,7 +156,11 @@ def test_last_touching_returns_the_most_recent_commit_with_trailers(
 
 
 def test_last_touching_follows_up_to_a_delete_commit(initialized_repo: Repo) -> None:
-    """Repo.last_touching() includes delete commits in its search."""
+    """Repo.last_touching includes delete commits in history search.
+
+    Commits file install, then delete commit. Calls last_touching(RELATIVE).
+    Returns delete commit (remove_hash) with trailers["Mod-State"]="removed".
+    """
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -167,7 +184,11 @@ def test_last_touching_follows_up_to_a_delete_commit(initialized_repo: Repo) -> 
 def test_last_touching_returns_none_for_an_untouched_path(
     initialized_repo: Repo,
 ) -> None:
-    """last_touching() returns None when path has no commit history (untouched edge case)."""
+    """Repo.last_touching returns None when path has no commit history.
+
+    Commits one file, then calls last_touching on a different path that was
+    never committed. Must return None (untouched edge case).
+    """
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",

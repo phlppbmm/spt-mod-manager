@@ -130,9 +130,7 @@ def test_corrupt_favorites_file_reads_as_empty_and_the_next_set_overwrites_it(
 
 
 @pytest.fixture
-def isolated_default_favorites_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Path:
+def isolated_default_favorites_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point ``default_favorites_path()`` at an isolated location.
 
     Mirrors ``isolated_default_db_path`` in ``test_services_catalog.py``.
@@ -163,17 +161,13 @@ def test_set_favorite_without_a_path_writes_to_the_default_favorites_path(
     result = services.set_favorite(11, True)
 
     assert result == [11]
-    assert json.loads(isolated_default_favorites_path.read_text(encoding="utf-8")) == [
-        11
-    ]
+    assert json.loads(isolated_default_favorites_path.read_text(encoding="utf-8")) == [11]
 
 
 # --- survives clear_catalog_cache -----------------------------------------
 
 
-def test_favorites_survive_clear_catalog_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_favorites_survive_clear_catalog_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Favorites live beside the catalog db in the same config dir; clearing
     the catalog cache must not touch them.
 

@@ -35,14 +35,8 @@ def _resolve_source(layout: ArchiveLayout, target: Path) -> Path:
     Works regardless of whether ``mappings`` is one entry per anchor root or
     one entry per file -- both are valid readings of the stub's docstring.
     """
-    candidates = [
-        m
-        for m in layout.mappings
-        if target == m.target or target.is_relative_to(m.target)
-    ]
-    assert candidates, (
-        f"target {target} is not covered by any mapping in {layout.mappings}"
-    )
+    candidates = [m for m in layout.mappings if target == m.target or target.is_relative_to(m.target)]
+    assert candidates, f"target {target} is not covered by any mapping in {layout.mappings}"
     mapping = max(candidates, key=lambda m: len(m.target.parts))
     if target == mapping.target:
         return mapping.source
@@ -75,9 +69,7 @@ def _assert_layout_matches(
             target_str.startswith(CLIENT_PLUGINS_TARGET.as_posix())
         )
         source_path = _resolve_source(layout, target)
-        assert source_path.is_file(), (
-            f"{source_path} (for target {target}) is not a file"
-        )
+        assert source_path.is_file(), f"{source_path} (for target {target}) is not a file"
         assert source_path.read_text(encoding="utf-8") == content
 
 
@@ -106,9 +98,7 @@ LAYOUT_VARIANTS = [
     ),
     pytest.param(
         {
-            "Wrapper1/Wrapper2/Wrapper3/SPT/user/mods/CoolMod/package.json": (
-                "server-package"
-            ),
+            "Wrapper1/Wrapper2/Wrapper3/SPT/user/mods/CoolMod/package.json": ("server-package"),
         },
         {
             Path("SPT/user/mods/CoolMod/package.json"): "server-package",
@@ -193,9 +183,7 @@ LAYOUT_VARIANTS = [
 ]
 
 
-@pytest.mark.parametrize(
-    ("tree_entries", "expected_files", "expected_mod_type"), LAYOUT_VARIANTS
-)
+@pytest.mark.parametrize(("tree_entries", "expected_files", "expected_mod_type"), LAYOUT_VARIANTS)
 def test_find_anchor_layout_variants(
     tmp_path: Path,
     tree_entries: dict[str, str],
@@ -217,8 +205,12 @@ def test_find_anchor_layout_variants(
 
 
 def test_find_anchor_raises_when_no_anchor_present(tmp_path: Path) -> None:
-    """ArchiveError includes a sample of content paths when neither SPT/user/mods
-    nor BepInEx/plugins anchors exist, helping users understand what went wrong."""
+    """find_anchor raises ArchiveError when extracted tree has no SPT or BepInEx anchor.
+
+    Creates an extracted directory with unrelated files (Readme.txt, InstallInstructions/)
+    without any SPT/user/mods or BepInEx/plugins anchor. Error message must include
+    samples from the directory listing to guide the user (both files appear in message).
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(
@@ -238,7 +230,11 @@ def test_find_anchor_raises_when_no_anchor_present(tmp_path: Path) -> None:
 
 
 def test_find_anchor_raises_on_empty_directory(tmp_path: Path) -> None:
-    """find_anchor raises ArchiveError for empty extracted directory (no content sample in error)."""
+    """find_anchor raises ArchiveError for extracted directory with no files.
+
+    Creates an empty extracted directory and verifies that find_anchor raises
+    ArchiveError with the message "The archive contains no mod files."
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
 
@@ -252,9 +248,7 @@ def test_find_anchor_raises_message_truncated_with_a_count_past_thirty_entries(
     """Error message listing unanchored files is truncated after 30 entries."""
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
-    _write_tree(
-        extracted_root, {f"junk/file-{i:02d}.txt": "junk" for i in range(35)}
-    )
+    _write_tree(extracted_root, {f"junk/file-{i:02d}.txt": "junk" for i in range(35)})
 
     with pytest.raises(ArchiveError) as excinfo:
         find_anchor(extracted_root)
@@ -294,10 +288,7 @@ def test_find_anchor_ignores_unrelated_bare_plugins_dir(tmp_path: Path) -> None:
     assert layout.mod_type == "server"
     assert set(layout.files) == {Path("SPT/user/mods/CoolMod/package.json")}
     assert Path("BepInEx/plugins/icon.png") not in layout.files
-    assert not any(
-        m.target.as_posix().startswith(CLIENT_PLUGINS_TARGET.as_posix())
-        for m in layout.mappings
-    )
+    assert not any(m.target.as_posix().startswith(CLIENT_PLUGINS_TARGET.as_posix()) for m in layout.mappings)
 
 
 def test_find_anchor_ignores_unrelated_bare_user_mods_dir(tmp_path: Path) -> None:

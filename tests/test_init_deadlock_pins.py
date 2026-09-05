@@ -30,7 +30,10 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure no game processes are detected during init tests."""
+    """Patches ``game_dir.running_game_processes`` to return an empty list.
+
+    Every init test runs as if no SPT process were running.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -54,9 +57,7 @@ def test_init_on_a_zero_commit_half_init_repo_continues(
     fake_game_dir_runtime: Path,
 ) -> None:
     """Init proceeds when git is initialized but has zero commits."""
-    subprocess.run(
-        ["git", "init", "--quiet"], cwd=fake_game_dir_runtime, check=True
-    )
+    subprocess.run(["git", "init", "--quiet"], cwd=fake_game_dir_runtime, check=True)
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
 
@@ -70,8 +71,12 @@ def test_init_on_a_zero_commit_half_init_repo_continues(
 def test_init_on_a_repo_with_commits_still_refuses(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """init_game_dir raises GitError (not AlreadyInitializedError) when the repo
-    already has commits, confirming the regression fix holds."""
+    """Calling init_game_dir twice raises GitError on the second call.
+
+    The first init succeeds and creates commits; the second init() call must
+    raise GitError (the real "repo has commits" error, not a stale
+    AlreadyInitializedError from earlier implementations).
+    """
     services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
 
     with pytest.raises(GitError):
@@ -84,7 +89,12 @@ def test_init_on_a_repo_with_commits_still_refuses(
 def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """CLI init with undetectable version and no input errors gracefully."""
+    """CLI init fails gracefully when version cannot be detected and EOF on prompt.
+
+    Runs ``sptmod init`` on a dir with no detectable SPT version (no core.json,
+    no PE, no prior git config) and no --spt-version flag, feeding EOF (empty
+    input); must exit non-zero and leave no .git directory.
+    """
     result = runner.invoke(cli_app, ["init", str(fake_game_dir_runtime)], input="")
 
     assert result.exit_code != 0
@@ -97,13 +107,13 @@ def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
 def test_explicit_spt_version_overrides_a_detectable_core_json_version(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Explicit --spt-version overrides detected core.json version."""
-    core_config_path = (
-        fake_game_dir_runtime / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json"
-    )
-    core_config_path.write_text(
-        json.dumps({"sptVersion": "1.0.0"}), encoding="utf-8"
-    )
+    """The spt_version parameter overrides core.json's sptVersion field.
+
+    Creates core.json with "1.0.0" and calls init_game_dir(..., spt_version=
+    "9.9.9"); the result and the commit trailer must both use "9.9.9".
+    """
+    core_config_path = fake_game_dir_runtime / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json"
+    core_config_path.write_text(json.dumps({"sptVersion": "1.0.0"}), encoding="utf-8")
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="9.9.9")
 
@@ -115,7 +125,11 @@ def test_explicit_spt_version_overrides_a_detectable_core_json_version(
 def test_explicit_spt_version_overrides_a_detectable_pe_version(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Explicit --spt-version overrides detected PE executable version."""
+    """The spt_version parameter overrides the PE executable's version resource.
+
+    Writes a synthetic SPT.Server.exe with version "1.0.0" and calls
+    init_game_dir(..., spt_version="9.9.9"); the result must use "9.9.9".
+    """
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "1.0.0")
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="9.9.9")
@@ -129,7 +143,12 @@ def test_explicit_spt_version_overrides_a_detectable_pe_version(
 def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(
     tmp_path: Path,
 ) -> None:
-    """PE reader returns None quickly when section claims giant size."""
+    """PE reader returns None in <2s when section header claims ~4GB size.
+
+    Crafts a truncated PE where the section header's raw_size field is 0xFFFFFFFF
+    but the file ends immediately after the header (no ~4GB of data); the parser
+    must detect the mismatch and return None without attempting a multi-GB read.
+    """
     real = bytearray(build_synthetic_exe("4.1.2"))
     # Section header layout (see _SECTION_HEADER_SIZE / _read_sections):
     # name(8) + virtual_size(4) + virtual_address(4) + raw_size(4) + ...
@@ -157,7 +176,12 @@ def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(
 
 
 def _build_spt_core_and_real_mod_fixture(root: Path) -> None:
-    """Create SPT core files and a real mod to test init's file classification."""
+    """Set up a directory with SPT core plugins/patchers and one real user mod.
+
+    Creates BepInEx/plugins/spt/spt-core.dll, BepInEx/patchers/spt-prepatch.dll,
+    and SPT_Runtime/user/mods/RealMod/package.json; used by two tests that verify
+    init excludes core files from pre_existing_mods but commits them.
+    """
     core_plugin_dir = root / "BepInEx" / "plugins" / "spt"
     core_plugin_dir.mkdir(parents=True)
     (core_plugin_dir / "spt-core.dll").write_bytes(b"spt-core-binary")
@@ -177,7 +201,12 @@ def _build_spt_core_and_real_mod_fixture(root: Path) -> None:
 def test_init_excludes_spt_core_files_from_pre_existing_mods_but_tracks_them(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Init excludes SPT core files from pre_existing_mods but commits them."""
+    """Init returns RealMod in pre_existing_mods but commits both real and core files.
+
+    Sets up spt-core.dll, spt-prepatch.dll, and RealMod; init_game_dir() must
+    report only RealMod in pre_existing_mods, yet all three paths appear in
+    the committed files.
+    """
     _build_spt_core_and_real_mod_fixture(fake_game_dir_runtime)
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
@@ -192,12 +221,14 @@ def test_init_excludes_spt_core_files_from_pre_existing_mods_but_tracks_them(
 def test_init_yes_adopts_only_the_real_mod_and_status_has_no_manual_entries(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Init --yes adopts only real mods, excludes SPT core files."""
+    """Init with adopt=True includes only RealMod, excludes core files from both.
+
+    Sets up core files + RealMod and calls init_game_dir(..., adopt=True);
+    result.adopted must be ["RealMod"], and status().manual_mods must be empty.
+    """
     _build_spt_core_and_real_mod_fixture(fake_game_dir_runtime)
 
-    result = services.init_game_dir(
-        fake_game_dir_runtime, adopt=True, spt_version="4.1.2"
-    )
+    result = services.init_game_dir(fake_game_dir_runtime, adopt=True, spt_version="4.1.2")
 
     assert [mod.name for mod in result.adopted] == ["RealMod"]
 

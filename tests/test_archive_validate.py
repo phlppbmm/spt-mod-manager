@@ -33,10 +33,7 @@ SAFE_MEMBER_PATHS: dict[str, str] = {
     "short-nested-file": "a/b.txt",
 }
 
-SAFE_MEMBERS = [
-    pytest.param(member, id=member_id)
-    for member_id, member in SAFE_MEMBER_PATHS.items()
-]
+SAFE_MEMBERS = [pytest.param(member, id=member_id) for member_id, member in SAFE_MEMBER_PATHS.items()]
 
 
 @pytest.mark.parametrize("member", UNSAFE_MEMBERS)
@@ -61,10 +58,20 @@ def test_validate_member_paths_accepts_safe_member(member: str) -> None:
 
 
 def test_validate_member_paths_accepts_all_safe_members_together() -> None:
-    """All safe-path categories (nested, server/client anchors, dotted names) pass together."""
+    """validate_member_paths accepts mixed safe members (nested, anchors, dots).
+
+    Calls validate_member_paths() with 6 different safe path categories:
+    "package.json" (top-level), "a/b.txt" (nested), "a/b/c.txt" (deep),
+    "SPT/user/mods/CoolMod/package.json" (server anchor), "BepInEx/plugins/CoolPlugin.dll"
+    (client anchor), and "weird..name/file.txt" (dots in name, not traversal). None raise.
+    """
     validate_member_paths(list(SAFE_MEMBER_PATHS.values()))
 
 
 def test_validate_member_paths_accepts_empty_sequence() -> None:
-    """validate_member_paths([]) raises nothing (edge case of empty member list)."""
+    """validate_member_paths accepts empty member list without raising.
+
+    Edge case test: passing [] to validate_member_paths() succeeds and returns
+    without error, as there are no paths to validate.
+    """
     validate_member_paths([])

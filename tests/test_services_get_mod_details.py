@@ -43,10 +43,7 @@ __all__ = [
 # (newline break), inline markup that is dropped but keeps its text, a
 # <script> block whose text must not appear, and a <style> block likewise.
 _DESCRIPTION_HTML = (
-    "<p>Hello <b>world</b>.</p>"
-    "<script>var x = 1;</script>"
-    "<style>.a{color:red}</style>"
-    "<p>Second paragraph.</p>"
+    "<p>Hello <b>world</b>.</p><script>var x = 1;</script><style>.a{color:red}</style><p>Second paragraph.</p>"
 )
 _DESCRIPTION_TEXT = "Hello world.\nSecond paragraph."
 
@@ -91,9 +88,7 @@ def _seed(
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
-            json=page_envelope(
-                mods, current_page=1, last_page=1, total=len(mods), next_url=None
-            ),
+            json=page_envelope(mods, current_page=1, last_page=1, total=len(mods), next_url=None),
         )
     )
     with Catalog(db_path) as cat:
@@ -133,9 +128,7 @@ def test_get_mod_details_strips_html_and_fetches_missing_version_links(
     assert result.mod is not None
     assert result.mod.name == "Alpha Mod"
     assert result.description == _DESCRIPTION_TEXT
-    assert [version.link for version in result.versions] == [
-        "https://cdn.example/alpha-1.0.0.zip"
-    ]
+    assert [version.link for version in result.versions] == ["https://cdn.example/alpha-1.0.0.zip"]
 
 
 @pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])
@@ -167,18 +160,14 @@ def test_get_mod_details_skips_refetching_versions_that_already_have_a_link(
     assert versions_route.call_count == 1
 
     respx_router.get("/mod/2").mock(
-        return_value=httpx.Response(
-            200, json=success_envelope(_mod_detail_json(2, "Beta Mod", "<p>Text.</p>"))
-        )
+        return_value=httpx.Response(200, json=success_envelope(_mod_detail_json(2, "Beta Mod", "<p>Text.</p>")))
     )
     call_client = seed_client if use_client else None
 
     result = services.get_mod_details(2, db_path=db_path, client=call_client)
 
     assert result.description == "Text."
-    assert [version.link for version in result.versions] == [
-        "https://cdn.example/beta-1.0.0.zip"
-    ]
+    assert [version.link for version in result.versions] == ["https://cdn.example/beta-1.0.0.zip"]
     assert versions_route.call_count == 1
 
 
@@ -214,9 +203,7 @@ def test_get_mod_details_owned_client_fetches_missing_version_links(
     result = services.get_mod_details(3, db_path=db_path)
 
     assert result.description == "Owned."
-    assert [version.link for version in result.versions] == [
-        "https://cdn.example/gamma-1.0.0.zip"
-    ]
+    assert [version.link for version in result.versions] == ["https://cdn.example/gamma-1.0.0.zip"]
 
 
 def test_get_mod_details_degrades_to_cached_data_when_forge_is_unreachable(
@@ -251,20 +238,14 @@ def test_get_mod_details_reraises_when_nothing_is_cached_and_forge_is_unreachabl
         services.get_mod_details(999, db_path=db_path, client=client)
 
 
-def _detail_route(
-    respx_router: respx.MockRouter, mod_id: int, name: str, html: str
-) -> respx.Route:
+def _detail_route(respx_router: respx.MockRouter, mod_id: int, name: str, html: str) -> respx.Route:
     """Mock the /mod/{id} detail endpoint returning ``html`` as description."""
     return respx_router.get(f"/mod/{mod_id}").mock(
-        return_value=httpx.Response(
-            200, json=success_envelope(_mod_detail_json(mod_id, name, html))
-        )
+        return_value=httpx.Response(200, json=success_envelope(_mod_detail_json(mod_id, name, html)))
     )
 
 
-def _versions_route(
-    respx_router: respx.MockRouter, mod_id: int, link: str | None
-) -> respx.Route:
+def _versions_route(respx_router: respx.MockRouter, mod_id: int, link: str | None) -> respx.Route:
     """Mock the /mod/{id}/versions endpoint returning one version."""
     return respx_router.get(f"/mod/{mod_id}/versions").mock(
         return_value=httpx.Response(
@@ -299,9 +280,7 @@ def test_get_mod_details_serves_the_stored_description_without_a_request(
     second = services.get_mod_details(5, db_path=db_path, client=call_client)
 
     assert second.description == first.description == _DESCRIPTION_TEXT
-    assert [version.link for version in second.versions] == [
-        "https://cdn.example/eps.zip"
-    ]
+    assert [version.link for version in second.versions] == ["https://cdn.example/eps.zip"]
     assert detail.call_count == 1
     assert versions.call_count == 1
 

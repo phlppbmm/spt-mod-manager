@@ -15,14 +15,20 @@ TRACKED_FILE = Path("SPT/user/mods/TestMod/mod.dll")
 
 
 def test_is_clean_true_right_after_a_commit(committed_repo: tuple[Repo, str]) -> None:
-    """is_clean() returns True when no modifications exist (baseline: clean state after commit)."""
+    """Repo.is_clean returns True right after a commit (baseline: clean state).
+
+    After a commit fixture, repo.is_clean() must return True (no modifications).
+    """
     repo, _ = committed_repo
 
     assert repo.is_clean() is True
 
 
 def test_status_is_empty_right_after_a_commit(committed_repo: tuple[Repo, str]) -> None:
-    """Repo.status() reports no modified or untracked files immediately after commit."""
+    """Repo.status returns RepoStatus() with no modified/untracked right after commit.
+
+    After a commit fixture, repo.status() == RepoStatus() (empty/clean state).
+    """
     repo, _ = committed_repo
 
     assert repo.status() == RepoStatus()
@@ -31,7 +37,11 @@ def test_status_is_empty_right_after_a_commit(committed_repo: tuple[Repo, str]) 
 def test_status_reports_a_modified_tracked_file(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.status() lists committed files that have been modified."""
+    """Repo.status lists modified committed files (tracked modifications).
+
+    Modifies SPT/user/mods/TestMod/mod.dll. repo.status().modified must contain
+    it, repo.status().untracked must be [] (empty).
+    """
     repo, _ = committed_repo
     (repo.path / TRACKED_FILE).write_bytes(b"binary-mod-content-v2")
 
@@ -44,7 +54,10 @@ def test_status_reports_a_modified_tracked_file(
 def test_is_clean_false_when_a_tracked_file_is_modified(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.is_clean() returns False when any committed file is modified."""
+    """Repo.is_clean returns False when any tracked file is modified.
+
+    Modifies SPT/user/mods/TestMod/mod.dll. repo.is_clean() must return False.
+    """
     repo, _ = committed_repo
     (repo.path / TRACKED_FILE).write_bytes(b"binary-mod-content-v2")
 
@@ -54,7 +67,11 @@ def test_is_clean_false_when_a_tracked_file_is_modified(
 def test_status_reports_an_untracked_file_under_a_trackable_prefix(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.status() detects new files in whitelisted directories."""
+    """Repo.status detects untracked files in whitelisted directories.
+
+    Creates SPT/user/mods/OtherMod/other.dll. repo.status().untracked must
+    include it, repo.status().modified must be [] (empty).
+    """
     repo, _ = committed_repo
     other = repo.path / "SPT" / "user" / "mods" / "OtherMod" / "other.dll"
     other.parent.mkdir(parents=True)
@@ -69,7 +86,10 @@ def test_status_reports_an_untracked_file_under_a_trackable_prefix(
 def test_is_clean_false_when_an_untracked_whitelisted_file_exists(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.is_clean() returns False when new files exist in whitelisted dirs."""
+    """Repo.is_clean returns False when untracked files exist in whitelisted dirs.
+
+    Creates BepInEx/config/new.cfg. repo.is_clean() must return False.
+    """
     repo, _ = committed_repo
     other = repo.path / "BepInEx" / "config" / "new.cfg"
     other.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +101,12 @@ def test_is_clean_false_when_an_untracked_whitelisted_file_exists(
 def test_untracked_under_scopes_to_the_given_prefix_only(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.untracked_under() lists only untracked files below the given directory."""
+    """Repo.untracked_under scopes results to given directory prefix only.
+
+    Creates mods_file (SPT/user/mods/OtherMod/other.dll) and config_file
+    (BepInEx/config/new.cfg). Calls untracked_under for each prefix; each must
+    return only files below that prefix.
+    """
     repo, _ = committed_repo
     mods_file = repo.path / "SPT" / "user" / "mods" / "OtherMod" / "other.dll"
     mods_file.parent.mkdir(parents=True)
@@ -100,7 +125,11 @@ def test_untracked_under_scopes_to_the_given_prefix_only(
 def test_status_and_is_clean_see_a_staged_but_uncommitted_change(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """Repo.status() and is_clean() report staged changes as uncommitted."""
+    """Repo.status and is_clean report staged changes as uncommitted.
+
+    Modifies file and stages it (git add, bypassing Repo.commit). repo.status()
+    must include TRACKED_FILE in .modified, repo.is_clean() must return False.
+    """
     repo, _ = committed_repo
     (repo.path / TRACKED_FILE).write_bytes(b"binary-mod-content-staged")
     # Stage the change directly (bypassing Repo.commit) so it sits in the
@@ -116,7 +145,11 @@ def test_status_and_is_clean_see_a_staged_but_uncommitted_change(
 def test_untracked_under_returns_empty_list_when_nothing_new(
     committed_repo: tuple[Repo, str],
 ) -> None:
-    """untracked_under() returns empty [] when prefix has no new files (baseline: no false positives)."""
+    """Repo.untracked_under returns [] when prefix has no new files (baseline).
+
+    After a commit (baseline clean state), calling untracked_under must return
+    [] (empty, no false positives).
+    """
     repo, _ = committed_repo
 
     assert repo.untracked_under(Path("SPT/user/mods")) == []

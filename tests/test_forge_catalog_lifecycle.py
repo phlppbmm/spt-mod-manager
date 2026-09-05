@@ -44,7 +44,11 @@ def _open_handles_on(path: Path) -> int:
 
 
 def test_init_on_a_non_sqlite_file_raises_database_error(tmp_path: Path) -> None:
-    """Catalog.__init__ rejects invalid database files with sqlite3.DatabaseError."""
+    """Catalog(garbage.db) raises sqlite3.DatabaseError for non-SQLite files.
+
+    File containing junk bytes (not SQLite magic) raises DatabaseError on open,
+    failing fast instead of silently corrupting the cache.
+    """
     garbage = tmp_path / "garbage.db"
     garbage.write_bytes(b"not a sqlite database, just plain junk padding" * 5)
 
@@ -52,13 +56,15 @@ def test_init_on_a_non_sqlite_file_raises_database_error(tmp_path: Path) -> None
         Catalog(garbage)
 
 
-@pytest.mark.skipif(
-    not _FD_DIR.is_dir(), reason="needs /proc to observe open file descriptors"
-)
+@pytest.mark.skipif(not _FD_DIR.is_dir(), reason="needs /proc to observe open file descriptors")
 def test_init_failure_leaves_no_open_handle_on_the_database_file(
     tmp_path: Path,
 ) -> None:
-    """When Catalog.__init__ fails, the database file is not left open."""
+    """Catalog.__init__ exception closes the database file, leaving no FD leak.
+
+    After Catalog(garbage.db) raises DatabaseError, _open_handles_on(garbage)
+    returns 0, confirming the failed connection was properly cleaned up.
+    """
     garbage = tmp_path / "garbage.db"
     garbage.write_bytes(b"not a sqlite database, just plain junk padding" * 5)
 
@@ -95,8 +101,7 @@ def test_init_upgrades_a_database_created_without_the_newer_columns(
     with sqlite3.connect(old_db) as connection:
         connection.executescript(_PRE_DESCRIPTION_SCHEMA)
         connection.execute(
-            "INSERT INTO mods (id, name, slug, author, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO mods (id, name, slug, author, updated_at) VALUES (?, ?, ?, ?, ?)",
             (7, "Old Mod", "old-mod", "Author", "2025-06-01T00:00:00Z"),
         )
     connection.close()
@@ -126,8 +131,7 @@ def test_init_upgrades_a_database_without_first_seen_at_reads_it_as_none(
     with sqlite3.connect(old_db) as connection:
         connection.executescript(_PRE_DESCRIPTION_SCHEMA)
         connection.execute(
-            "INSERT INTO mods (id, name, slug, author, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO mods (id, name, slug, author, updated_at) VALUES (?, ?, ?, ?, ?)",
             (7, "Old Mod", "old-mod", "Author", "2025-06-01T00:00:00Z"),
         )
     connection.close()
@@ -148,8 +152,7 @@ def test_legacy_mod_without_first_seen_at_keeps_it_none_after_a_later_sync(
     with sqlite3.connect(old_db) as connection:
         connection.executescript(_PRE_DESCRIPTION_SCHEMA)
         connection.execute(
-            "INSERT INTO mods (id, name, slug, author, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO mods (id, name, slug, author, updated_at) VALUES (?, ?, ?, ?, ?)",
             (1, "Alpha Mod", "alpha-mod", "Alice", "2025-01-01T00:00:00Z"),
         )
     connection.close()
@@ -170,9 +173,7 @@ def test_legacy_mod_without_first_seen_at_keeps_it_none_after_a_later_sync(
         respx_router.get("/mods").mock(
             return_value=httpx.Response(
                 200,
-                json=page_envelope(
-                    [updated_mod], current_page=1, last_page=1, total=1, next_url=None
-                ),
+                json=page_envelope([updated_mod], current_page=1, last_page=1, total=1, next_url=None),
             )
         )
         client = client_factory()
@@ -203,16 +204,17 @@ CREATE TABLE versions (
 def test_init_upgrades_a_versions_table_without_fika_compatibility_reads_none(
     tmp_path: Path,
 ) -> None:
-    """A database created before the fika_compatibility column was added to
-    the versions table migrates silently on open, and existing version rows
-    read back with fika_compatibility=None rather than raising a schema error.
+    """Catalog() auto-migrates pre-fika_compatibility version rows to fika=None.
+
+    Old database without fika_compatibility column on versions table opens
+    successfully; version 900 reads back with fika_compatibility=None instead
+    of raising a schema error, enabling seamless database evolution.
     """
     old_db = tmp_path / "old-forge-catalog.db"
     with sqlite3.connect(old_db) as connection:
         connection.executescript(_PRE_FIKA_VERSIONS_SCHEMA)
         connection.execute(
-            "INSERT INTO versions (id, mod_id, version, spt_version_constraint)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO versions (id, mod_id, version, spt_version_constraint) VALUES (?, ?, ?, ?)",
             (900, 1, "1.0.0", "^3.8.0"),
         )
     connection.close()

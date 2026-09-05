@@ -32,6 +32,7 @@ class FakeClock:
         return self.value
 
     def advance(self, seconds: float) -> None:
+        """Moves the fake clock forward by ``seconds``."""
         self.value += seconds
 
 
@@ -52,7 +53,12 @@ class RecordingSleep:
 
 @pytest.fixture
 def fake_clock() -> FakeClock:
-    """FakeClock that returns a constant value unless advance() increments it."""
+    """Fixture providing a FakeClock instance initialized to 1000.0.
+
+    The clock returns a constant monotonic value (1000.0) until advance(seconds)
+    is called; this allows tests to control time precisely for throttle and retry
+    logic without blocking.
+    """
     return FakeClock()
 
 
@@ -63,9 +69,7 @@ def recording_sleep() -> RecordingSleep:
 
 
 @pytest.fixture
-def client_factory(
-    fake_clock: FakeClock, recording_sleep: RecordingSleep
-) -> Iterator[ClientFactory]:
+def client_factory(fake_clock: FakeClock, recording_sleep: RecordingSleep) -> Iterator[ClientFactory]:
     """Build ``ForgeClient`` instances wired to the fake clock/recording sleep.
 
     Every client built through the factory is closed on teardown.
@@ -73,7 +77,12 @@ def client_factory(
     made: list[ForgeClient] = []
 
     def _make(**kwargs: Any) -> ForgeClient:
-        """Create a ForgeClient with injected test doubles."""
+        """Build a ForgeClient with injected clock and sleep test doubles.
+
+        The client is wired to use fake_clock (controlled time) and recording_sleep
+        (non-blocking duration recording); all instances are automatically closed
+        during fixture teardown.
+        """
         client = ForgeClient(clock=fake_clock, sleep=recording_sleep, **kwargs)
         made.append(client)
         return client
@@ -94,12 +103,21 @@ def respx_router() -> Iterator[respx.MockRouter]:
 
 
 def success_envelope(data: Any) -> dict[str, Any]:
-    """Build a success envelope response with the given data payload."""
+    """Build a Forge API success envelope with the given data payload.
+
+    Returns {"success": True, "data": data}, the wrapper required by all
+    successful Forge API responses (e.g., /mod/{id}, /mods/updates).
+    """
     return {"success": True, "data": data}
 
 
 def error_envelope(code: str, message: str) -> dict[str, Any]:
-    """Build an error envelope response with the given error code and message."""
+    """Build a Forge API error envelope with code and message.
+
+    Returns {"success": False, "code": code, "message": message}, the wrapper
+    for API errors (e.g., VALIDATION_FAILED, NOT_FOUND); _fetch() unwraps this
+    to raise ForgeApiError.
+    """
     return {"success": False, "code": code, "message": message}
 
 

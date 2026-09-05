@@ -35,10 +35,12 @@ __all__ = [
 _ISO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
-def _mod(
-    mod_id: int, name: str, *, updated_at: str, downloads: int = 1
-) -> JsonDict:
-    """Build a minimal mod dict for first_seen_at tests."""
+def _mod(mod_id: int, name: str, *, updated_at: str, downloads: int = 1) -> JsonDict:
+    """Build a mod dict for first_seen_at tests with minimal required fields.
+
+    Generates dict with id, name, slug, owner, downloads, updated_at, and
+    empty versions; used by test functions to seed the catalog.
+    """
     return mod_json_full(
         id=mod_id,
         name=name,
@@ -55,13 +57,15 @@ def _sync_page(
     respx_router: respx.MockRouter,
     client_factory: ClientFactory,
 ) -> ForgeClient:
-    """Mock a /mods page response with given mods and return a configured client."""
+    """Mock GET /mods to return mods list and build a ForgeClient.
+
+    Sets up respx to return mods as a single-page response (current=1,
+    last=1); returns a client ready for catalog.sync() calls.
+    """
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
-            json=page_envelope(
-                mods, current_page=1, last_page=1, total=len(mods), next_url=None
-            ),
+            json=page_envelope(mods, current_page=1, last_page=1, total=len(mods), next_url=None),
         )
     )
     return client_factory()
@@ -70,9 +74,11 @@ def _sync_page(
 def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When a new mod is synced, its first_seen_at field contains an ISO-8601
-    timestamp matching the current time (within one second); this enables time-
-    series analysis of when each mod was first discovered.
+    """sync() stamps new mods with first_seen_at=now in ISO-8601 format.
+
+    Syncing Alpha Mod (id=1) sets first_seen_at to a timestamp within
+    ±1 second of sync start time; the stamp enables time-series tracking of
+    when mods were first cached.
     """
     before = datetime.now(UTC).timestamp()
     client = _sync_page(
@@ -88,9 +94,7 @@ def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
     assert mod is not None
     assert mod.first_seen_at is not None
     assert _ISO_STAMP.fullmatch(mod.first_seen_at)
-    stamped = datetime.strptime(mod.first_seen_at, "%Y-%m-%dT%H:%M:%SZ").replace(
-        tzinfo=UTC
-    )
+    stamped = datetime.strptime(mod.first_seen_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     # Second-granularity comparison; allow one second of slack on either side.
     assert before - 1 <= stamped.timestamp() <= after + 1
 
@@ -98,7 +102,12 @@ def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
 def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updated(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """Syncing an unchanged mod preserves its first_seen_at and reports zero updates."""
+    """sync() preserves first_seen_at for unchanged mods and reports zero updates.
+
+    After first sync sets Alpha Mod's first_seen_at, second sync with
+    identical mod data reports new_mods=0, updated_mods=0, and preserves
+    the original stamp unchanged.
+    """
     mods = [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")]
     client = _sync_page(mods, respx_router, client_factory)
     catalog.sync(client, full=True)
@@ -119,9 +128,11 @@ def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updat
 def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """When Alpha Mod (id=1) is synced with a changed name and download count,
-    its first_seen_at stamp from the prior sync is preserved, not updated;
-    this ensures the "when first seen" timestamp is immutable once set.
+    """sync() preserves first_seen_at even when mod metadata changes.
+
+    Alpha Mod (id=1) synced first with name="Alpha Mod", then later with
+    name="Alpha Mod Renamed" and downloads=999. Sync reports updated_mods=1
+    but first_seen_at remains unchanged; the stamp is immutable once set.
     """
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
@@ -133,9 +144,7 @@ def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
     assert original is not None
     original_stamp = original.first_seen_at
 
-    changed = _mod(
-        1, "Alpha Mod Renamed", updated_at="2025-06-02T00:00:00Z", downloads=999
-    )
+    changed = _mod(1, "Alpha Mod Renamed", updated_at="2025-06-02T00:00:00Z", downloads=999)
     client = _sync_page([changed], respx_router, client_factory)
     result = catalog.sync(client, full=True)
 
@@ -149,7 +158,12 @@ def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
 def test_mod_appearing_only_in_a_later_delta_sync_gets_a_later_stamp_and_is_counted_new(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
-    """A mod discovered in delta sync gets a fresh first_seen_at stamp later than prior syncs."""
+    """Delta sync assigns new mods a fresh first_seen_at later than prior syncs.
+
+    Full sync of Alpha Mod sets first sync watermark and its first_seen_at.
+    After sleeping 1.1s, delta sync finds Beta Mod (updated_at=2025-06-05)
+    and assigns it a new first_seen_at > alpha_stamp. Result: new_mods=1.
+    """
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
         respx_router,

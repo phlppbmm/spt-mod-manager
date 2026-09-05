@@ -31,17 +31,17 @@ from sptmod.core.forge.catalog import (
         ("   ", "3.8.5", False),
     ],
 )
-def test_is_compatible_matches_semver_constraint(
-    constraint: str, spt_version: str, expected: bool
-) -> None:
+def test_is_compatible_matches_semver_constraint(constraint: str, spt_version: str, expected: bool) -> None:
     """is_compatible() enforces semver caret ranges; empty constraint is unknown."""
     assert is_compatible(constraint, spt_version) is expected
 
 
 def test_is_compatible_returns_false_for_unsupported_range_syntax() -> None:
-    """Constraint syntax outside the supported semver range (e.g. "||") returns
-    False instead of raising; the function gracefully downgrades invalid syntax
-    to a mismatch, preventing a parse error from breaking a compatibility check.
+    """is_compatible() returns False for unsupported syntax, not raising.
+
+    Constraint "^3.8.0 || ^4.0.0" (OR syntax not supported) triggers
+    UnsupportedRangeError internally but is_compatible() swallows it and
+    returns False, preventing a parse error from breaking a compatibility filter.
     """
     # "||" is explicitly outside the semver matcher's supported syntax and
     # raises UnsupportedRangeError; is_compatible must swallow it as False.
@@ -57,17 +57,17 @@ def test_is_compatible_returns_false_for_unsupported_range_syntax() -> None:
         ("2.0.0", "1.9.9", True),
     ],
 )
-def test_is_newer_compares_versions_strictly(
-    candidate: str, installed: str, expected: bool
-) -> None:
+def test_is_newer_compares_versions_strictly(candidate: str, installed: str, expected: bool) -> None:
     """is_newer() returns True only if candidate is strictly greater than installed."""
     assert is_newer(candidate, installed) is expected
 
 
 def test_is_newer_returns_false_for_unparseable_candidate() -> None:
-    """A candidate version "bad-version" that cannot be parsed as semver
-    returns False from is_newer(), not raising UnsupportedRangeError; this
-    prevents version comparison errors from breaking version resolution.
+    """is_newer() returns False for unparseable versions, not raising.
+
+    Candidate "bad-version" (no numeric parts) triggers UnsupportedRangeError
+    internally but is_newer() returns False, allowing version comparisons to
+    degrade gracefully instead of crashing.
     """
     # "bad-version" has no numeric parts and is not a dotted numeric version;
     # is_newer must swallow the resulting UnsupportedRangeError as False.
@@ -85,10 +85,11 @@ def test_default_db_path_has_expected_file_name() -> None:
 
 
 def test_default_db_path_lives_under_the_app_config_directory() -> None:
-    """default_db_path() returns a path whose immediate parent directory is
-    named "sptmod" (APP_NAME), and "sptmod" appears in the full path;
-    this ensures the catalog is placed in the app's config directory, not
-    some shared or system location.
+    """default_db_path() returns a path under app config dir sptmod/.
+
+    Path's parent is named "sptmod" (APP_NAME) and "sptmod" appears in
+    path.parts; this places the catalog in the app's config directory,
+    not a shared or system location.
     """
     path = default_db_path()
 

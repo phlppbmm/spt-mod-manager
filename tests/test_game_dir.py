@@ -41,16 +41,17 @@ def _make_game_dir(root: Path) -> Path:
 
 
 def test_is_game_dir_true_for_valid_layout(tmp_path: Path) -> None:
-    """Valid SPT game directory layout is recognized by is_game_dir()."""
+    """is_game_dir() returns True for a directory with SPT and BepInEx.
+
+    Creates the required subdirectories; must return True.
+    """
     game_dir = _make_game_dir(tmp_path / "game")
 
     assert is_game_dir(game_dir) is True
 
 
 @pytest.mark.parametrize("present_dir", ["BepInEx", "SPT"])
-def test_is_game_dir_false_when_a_required_dir_is_missing(
-    tmp_path: Path, present_dir: str
-) -> None:
+def test_is_game_dir_false_when_a_required_dir_is_missing(tmp_path: Path, present_dir: str) -> None:
     """Missing required directories (SPT or BepInEx) are rejected by is_game_dir()."""
     game_dir = tmp_path / "game"
     (game_dir / present_dir).mkdir(parents=True)
@@ -59,7 +60,10 @@ def test_is_game_dir_false_when_a_required_dir_is_missing(
 
 
 def test_is_game_dir_false_when_path_is_a_file(tmp_path: Path) -> None:
-    """Files are rejected by is_game_dir() (not directories)."""
+    """is_game_dir() returns False when the path is a file, not a directory.
+
+    Creates a file at the path; must return False.
+    """
     file_path = tmp_path / "not_a_dir"
     file_path.write_text("x", encoding="utf-8")
 
@@ -67,21 +71,25 @@ def test_is_game_dir_false_when_path_is_a_file(tmp_path: Path) -> None:
 
 
 def test_is_game_dir_false_when_path_does_not_exist(tmp_path: Path) -> None:
-    """Non-existent paths are rejected by is_game_dir()."""
+    """is_game_dir() returns False for non-existent paths.
+
+    Passes a path that doesn't exist; must return False (not raise).
+    """
     assert is_game_dir(tmp_path / "does-not-exist") is False
 
 
 def test_validate_game_dir_accepts_valid_layout(tmp_path: Path) -> None:
-    """Valid game directory layout is accepted by validate_game_dir()."""
+    """validate_game_dir() does not raise for a valid directory layout.
+
+    Creates SPT and BepInEx; must return without raising.
+    """
     game_dir = _make_game_dir(tmp_path / "game")
 
     validate_game_dir(game_dir)  # must not raise
 
 
 @pytest.mark.parametrize("present_dir", ["BepInEx", "SPT"])
-def test_validate_game_dir_raises_when_a_required_dir_is_missing(
-    tmp_path: Path, present_dir: str
-) -> None:
+def test_validate_game_dir_raises_when_a_required_dir_is_missing(tmp_path: Path, present_dir: str) -> None:
     """NotAGameDirError is raised when required directories are missing."""
     game_dir = tmp_path / "game"
     (game_dir / present_dir).mkdir(parents=True)
@@ -136,7 +144,11 @@ def test_is_game_process_name_matches_game_processes(name: str) -> None:
     ],
 )
 def test_is_game_process_name_rejects_unrelated_processes(name: str) -> None:
-    """Non-game process names are rejected."""
+    """is_game_process_name() returns False for non-game process names.
+
+    Parametrized over explorer, steam, python, empty string, and notepad;
+    each must return False.
+    """
     assert is_game_process_name(name) is False
 
 
@@ -146,7 +158,11 @@ def test_is_game_process_name_rejects_unrelated_processes(name: str) -> None:
 def test_ensure_game_not_running_passes_when_no_processes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No error is raised when no game processes are running."""
+    """ensure_game_not_running() does not raise when no processes detected.
+
+    Patches running_game_processes() to return an empty list; must return
+    without raising.
+    """
     monkeypatch.setattr("sptmod.core.game_dir.running_game_processes", lambda: [])
 
     ensure_game_not_running()  # must not raise
@@ -242,7 +258,11 @@ def test_running_game_processes_reports_a_real_process_named_like_the_server(
     ["SPT.Server.exe", "spt.server.exe", "SPT.Server.Linux", "SPT.Server"],
 )
 def test_game_process_kind_matches_the_server(name: str) -> None:
-    """Server process names are correctly classified."""
+    """game_process_kind() returns "server" for SPT.Server processes.
+
+    Parametrized over case variations and platform names; each must return
+    "server".
+    """
     assert game_process_kind(name) == "server"
 
 
@@ -255,13 +275,20 @@ def test_game_process_kind_matches_the_server(name: str) -> None:
     ],
 )
 def test_game_process_kind_matches_the_client(name: str) -> None:
-    """Client process names are correctly classified."""
+    """game_process_kind() returns "client" for EscapeFromTarkov processes.
+
+    Parametrized over case variations and paths with wine; each must return
+    "client".
+    """
     assert game_process_kind(name) == "client"
 
 
 @pytest.mark.parametrize("name", ["explorer.exe", "steam.exe", ""])
 def test_game_process_kind_returns_none_for_unrelated_processes(name: str) -> None:
-    """Non-game process names return None."""
+    """game_process_kind() returns None for non-game process names.
+
+    Parametrized over explorer, steam, and empty string; each must return None.
+    """
     assert game_process_kind(name) is None
 
 
@@ -269,20 +296,20 @@ def test_game_process_kind_returns_none_for_unrelated_processes(name: str) -> No
 
 
 class _FakeProcess:
-    """A stand-in for a real ``psutil.Process`` returned by ``process_iter``."""
+    """A mock psutil.Process for testing process discovery and filtering."""
 
     def __init__(self, pid: int, name: str, created: float) -> None:
-        """Initialize with pid, process name, and creation time."""
+        """Initialize with pid, process name, and creation timestamp."""
         self.pid = pid
         self._name = name
         self._created = created
 
     def name(self) -> str:
-        """Return the stored process name."""
+        """Return the configured process name."""
         return self._name
 
     def create_time(self) -> float:
-        """Return the stored creation timestamp."""
+        """Return the configured creation timestamp."""
         return self._created
 
 
@@ -303,9 +330,7 @@ def test_game_processes_reports_server_and_client_with_pid_and_started_at(
 
     assert game_processes() == [
         GameProcess(pid=111, name="SPT.Server.Linux", kind="server", started_at=1000.0),
-        GameProcess(
-            pid=222, name="EscapeFromTarkov.exe", kind="client", started_at=2000.5
-        ),
+        GameProcess(pid=222, name="EscapeFromTarkov.exe", kind="client", started_at=2000.5),
     ]
 
 
@@ -329,9 +354,7 @@ def test_running_game_processes_is_the_name_projection_of_game_processes(
         "sptmod.core.game_dir.game_processes",
         lambda: [
             GameProcess(pid=1, name="SPT.Server.Linux", kind="server", started_at=1.0),
-            GameProcess(
-                pid=2, name="EscapeFromTarkov.exe", kind="client", started_at=2.0
-            ),
+            GameProcess(pid=2, name="EscapeFromTarkov.exe", kind="client", started_at=2.0),
         ],
     )
 
@@ -383,31 +406,33 @@ def test_process_alive_false_when_the_start_time_no_longer_matches(
 
 
 class _ZombieProcess:
-    """A stand-in for a real zombie ``psutil.Process``."""
+    """A mock psutil.Process that reports zombie status to test cleanup logic."""
 
     def __init__(self, created: float) -> None:
         """Initialize with creation timestamp."""
         self._created = created
 
     def is_running(self) -> bool:
-        """Return True to simulate a zombie still in process table."""
+        """Return True (zombie still in process table)."""
         return True
 
     def status(self) -> str:
-        """Return zombie status."""
+        """Return the zombie status code."""
         return psutil.STATUS_ZOMBIE
 
     def create_time(self) -> float:
-        """Return the stored creation timestamp."""
+        """Return the configured creation timestamp."""
         return self._created
 
 
 def test_process_alive_false_for_a_zombie_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Zombie processes are not considered alive."""
-    monkeypatch.setattr(
-        "sptmod.core.game_dir.psutil.Process", lambda pid: _ZombieProcess(5.0)
-    )
+    """process_alive() returns False for a zombie process.
+
+    Patches psutil.Process to return a _ZombieProcess with matching creation
+    time; must return False (zombie is not alive).
+    """
+    monkeypatch.setattr("sptmod.core.game_dir.psutil.Process", lambda pid: _ZombieProcess(5.0))
 
     assert process_alive(4242, 5.0) is False

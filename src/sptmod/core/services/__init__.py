@@ -24,7 +24,6 @@ from sptmod.core.conflicts import (
 )
 from sptmod.core.errors import (
     AlreadyInitializedError,
-    ArchiveError,
     CatalogUnavailableError,
     ConflictError,
     DependencyError,
@@ -32,13 +31,10 @@ from sptmod.core.errors import (
     InvalidPathError,
     ModNotFoundError,
     NotAGameDirError,
-    PartialInstallError,
     SptVersionUnknownError,
 )
-from sptmod.core.forge.catalog import Catalog, default_db_path
+from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import ForgeClient, UpdatesResult
-from sptmod.core.forge.download import download_cached
-from sptmod.core.forge.resolve import plan_install
 from sptmod.core.game_dir import (
     BEPINEX_CONFIG_DIR,
     PLUGINS_DIR,
@@ -67,13 +63,11 @@ from sptmod.core.models import (
     TRAILER_MOD_PREVIOUS_VERSION,
     TRAILER_MOD_STATE,
     Conflict,
-    InstallPlan,
     Json,
     ModFile,
     ModInfo,
     ModState,
     ModType,
-    PlanEntry,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -118,6 +112,18 @@ from sptmod.core.services.common import (
     required_spt_version,
     resolve_mod,
 )
+from sptmod.core.services.install_archive import (
+    InstallResult,
+    install_from_archive,
+    read_meta,
+    reject_multiline_metadata,
+)
+from sptmod.core.services.install_forge import (
+    InstallModResult,
+    download_entry,
+    install_mod,
+    plan_mod_install,
+)
 from sptmod.core.services.profiles import (
     CleanupPlan,
     CleanupResult,
@@ -142,7 +148,6 @@ from sptmod.core.services.state import (
 )
 from sptmod.core.workspace import (
     game_lock,
-    is_locked,
     staging_dir,
 )
 
@@ -226,8 +231,6 @@ SPT_VERSION_TRAILER: Final = "Spt-Version"
 UNKNOWN_SPT_VERSION: Final = "unknown"
 
 
-
-
 type ExportFormat = Literal["text", "json"]
 
 EXPORT_FORMATS: Final[tuple[ExportFormat, ...]] = ("text", "json")
@@ -261,25 +264,6 @@ class InitResult:
     warnings: list[str] = field(default_factory=list[str])
     pre_existing_mods: list[Path] = field(default_factory=list[Path])
     adopted: list[ModInfo] = field(default_factory=list[ModInfo])
-
-
-@dataclass(frozen=True)
-class InstallResult:
-    """Outcome of :func:`install_from_archive`.
-
-    ``warnings`` holds the non-blocking findings of the conflict checks,
-    including the ones ``force`` downgraded from errors.
-    """
-
-    mod: ModInfo
-    files: list[Path] = field(default_factory=list[Path])
-    warnings: list[Conflict] = field(default_factory=list[Conflict])
-
-
-
-
-
-
 
 
 @dataclass(frozen=True)
@@ -321,12 +305,6 @@ class AdoptResult:
     files: list[Path] = field(default_factory=list[Path])
 
 
-
-
-
-
-
-
 @dataclass(frozen=True)
 class ExportEntry:
     """One mod of an exported mod list.
@@ -357,18 +335,6 @@ class ImportEntry:
 
 
 @dataclass(frozen=True)
-class InstallModResult:
-    """Outcome of :func:`install_mod`.
-
-    ``installed`` holds one entry per mod of ``plan``, in the order they were
-    installed, so dependencies come before the mod that needed them.
-    """
-
-    plan: InstallPlan
-    installed: list[InstallResult] = field(default_factory=list[InstallResult])
-
-
-@dataclass(frozen=True)
 class ImportDiff:
     """The difference between an imported mod list and the installed mods.
 
@@ -380,8 +346,6 @@ class ImportDiff:
     different: list[ImportEntry] = field(default_factory=list[ImportEntry])
     extra: list[ImportEntry] = field(default_factory=list[ImportEntry])
     installed: list[InstallModResult] = field(default_factory=list[InstallModResult])
-
-
 
 
 @dataclass(frozen=True)
@@ -769,146 +733,6 @@ def set_spt_version(path: Path, version: str) -> str:
     return cleaned
 
 
-def install_from_archive(
-    path: Path,
-    archive: Path,
-    name_override: str | None = None,
-    version_override: str | None = None,
-    force: bool = False,
-    progress: Progress | None = None,
-    *,
-    forge_id: str = "",
-    forge_version_id: str = "",
-    source: str | None = None,
-    forge_match: bool = False,
-    db_path: Path | None = None,
-) -> InstallResult:
-    """Install the mod archive ``archive`` into the game directory ``path``.
-
-    The shared install core, also used by the Forge path. Steps, each reported
-    through ``progress`` in the order of ``INSTALL_STEPS``:
-
-    ``check``
-        The working tree is clean and neither server nor client is running.
-    ``extract``
-        The archive is unpacked into a temporary directory, which is removed
-        again on success and on failure.
-    ``anchor``
-        The mod trees are located inside the extraction and the mod type is
-        determined.
-    ``metadata``
-        ``package.json`` for server and hybrid mods, DLL file name for
-        client-only mods. Trailers are validated pre-copy to prevent
-        half-installed states. ``name_override`` and ``version_override``
-        override extracted values.
-    ``conflicts``
-        File, DLL and dependency checks; ``force`` downgrades them to warnings.
-    ``copy``
-        The anchored files are copied into the game directory.
-    ``commit``
-        One commit ``mod: <name> <version>`` with the full set of mod trailers,
-        ``Mod-State: installed`` and ``Mod-Source`` set to the archive file
-        name, or to ``source`` where the caller passes one.
-
-    On commit failure, newly-copied files and empty parent directories are
-    rolled back. Pre-existing files that were overwritten are not restored;
-    this is acceptable because the game tree remains consistent and invalid
-    states can be fixed by later operations.
-
-    ``forge_id`` and ``forge_version_id`` are written as ``Mod-Forge-Id`` and
-    ``Mod-Forge-Version-Id``; :func:`install_mod` fills them from the install
-    plan. Without them, ``forge_match`` looks the installed name and version up
-    in the cached catalog and sets both trailers on an unambiguous match,
-    leaving them empty otherwise. The lookup is skipped when the catalog cache
-    does not exist yet.
-
-    Raises:
-        NotAGameDirError: ``path`` is no SPT game directory.
-        DirtyTreeError: the working tree has uncommitted or untracked changes.
-        GameRunningError: the SPT server or client is running.
-        ArchiveError: the archive is unreadable, unsafe, has no anchor or
-            holds no mod file.
-        InvalidMetadataError: mandatory mod metadata is missing.
-        ConflictError: a file or DLL conflict blocks the install and ``force``
-            is not set.
-        DependencyError: a required dependency is missing or has an
-            incompatible version and ``force`` is not set.
-        GitError: git failed or metadata contains invalid trailer values.
-    """
-    game_layout = detect_layout(path)
-    repo = Repo(path)
-    report_step(progress, "check", "checking the working tree and running processes")
-    if not is_locked(path):
-        ensure_installable(repo)
-
-    with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
-        temp = Path(temp_name)
-        report_step(progress, "extract", f"extracting {archive.name}")
-        extract(archive, temp)
-
-        report_step(progress, "anchor", "searching the mod anchor")
-        layout = for_game_layout(find_anchor(temp), game_layout)
-
-        report_step(progress, "metadata", "reading the mod metadata")
-        meta = read_meta(
-            layout, game_layout.mods_dir, name_override, version_override, archive
-        )
-
-        with game_lock(path, f"installing {meta.name}", progress):
-            ensure_installable(repo)
-
-            report_step(progress, "conflicts", "checking conflicts and dependencies")
-            warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
-
-            report_step(progress, "copy", f"copying {len(layout.files)} files")
-            added = [file for file in layout.files if not (path / file).exists()]
-            for mapping in layout.mappings:
-                shutil.copytree(
-                    mapping.source, path / mapping.target, dirs_exist_ok=True
-                )
-
-            report_step(progress, "commit", f"committing {meta.name} {meta.version}")
-            matched_id, matched_version_id = (
-                _catalog_match(meta.name, meta.version, db_path)
-                if forge_match and not forge_id
-                else ("", "")
-            )
-            draft = ModInfo(
-                name=meta.name,
-                version=meta.version,
-                mod_type=layout.mod_type,
-                author=meta.author,
-                spt_range=meta.spt_range,
-                state="installed",
-                commit="",
-                date=UNSET_DATE,
-                forge_id=forge_id or matched_id,
-                forge_version_id=forge_version_id or matched_version_id,
-                guid=meta.guid,
-                source=archive.name if source is None else source,
-            )
-            try:
-                commit_hash = repo.commit(
-                    f"mod: {meta.name} {meta.version}",
-                    trailers=build_trailers(draft),
-                    paths=layout.files,
-                )
-            except Exception:
-                _remove_copied(path, added, game_layout)
-                raise
-            committed = repo.log()[0]
-    report_step(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
-    return InstallResult(
-        mod=replace(draft, commit=commit_hash, date=committed.date),
-        files=list(layout.files),
-        warnings=warnings,
-    )
-
-
-
-
-
-
 def remove_mod(
     path: Path, name: str, force: bool = False, clean_profiles: bool = False
 ) -> RemoveResult:
@@ -978,22 +802,6 @@ def remove_mod(
         warnings=warnings,
         cleanup=cleanup,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def disable_mod(path: Path, name: str) -> ToggleResult:
@@ -1192,12 +1000,6 @@ def adopt_mod_at(
     )
 
 
-
-
-
-
-
-
 def export_mods(
     path: Path,
     export_format: ExportFormat = "text",
@@ -1267,12 +1069,6 @@ def export_mods(
     )
 
 
-
-
-
-
-
-
 def launch_profile(
     path: Path,
     profile_id: str,
@@ -1325,136 +1121,6 @@ def stop_game(path: Path) -> StopResult:
     saved yet is lost, so callers ask before calling this.
     """
     return _stop_game(path)
-
-
-
-
-
-
-
-
-
-
-
-
-def plan_mod_install(
-    path: Path,
-    mod_id_or_name: int | str,
-    version: str | None = None,
-    *,
-    db_path: Path | None = None,
-    client: ForgeClient | None = None,
-) -> InstallPlan:
-    """Resolve what installing ``mod_id_or_name`` into ``path`` would download.
-
-    Picks the version from the cached catalog, asks Forge for its dependency
-    tree and drops the dependencies the game directory already satisfies. The
-    plan is what a caller presents for confirmation before running
-    :func:`install_mod`; nothing is downloaded or written here.
-
-    Args:
-        path: The tracked game directory.
-        mod_id_or_name: The numeric Forge mod ID or the mod name, matched
-            case-insensitively.
-        version: The exact version to install; without it the highest version
-            compatible with the SPT version of ``path`` wins.
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
-        client: Forge API client; a default one is built when omitted.
-
-    Returns:
-        The plan with dependencies before the mods needing them and the
-        requested mod last.
-
-    Raises:
-        NotAGameDirError: the SPT version of ``path`` cannot be determined, so
-            no plan can be resolved for it.
-        NoCompatibleVersionError: the catalog knows no version of the mod
-            matching ``version`` and the SPT version.
-        UnresolvableDependencyError: a dependency conflicts, has no compatible
-            version or takes part in a cycle.
-        ForgeUnavailableError: the Forge API is unreachable.
-        ForgeApiError: the Forge API answered with an error envelope.
-        GitError: git failed.
-    """
-    if client is not None:
-        return _resolve_plan(path, mod_id_or_name, version, db_path, client)
-    with ForgeClient() as owned:
-        return _resolve_plan(path, mod_id_or_name, version, db_path, owned)
-
-
-def install_mod(
-    path: Path,
-    mod_id_or_name: int | str,
-    version: str | None = None,
-    force: bool = False,
-    progress: Progress | None = None,
-    *,
-    db_path: Path | None = None,
-    client: ForgeClient | None = None,
-) -> InstallModResult:
-    """Install ``mod_id_or_name`` and its missing dependencies from Forge.
-
-    Resolves the plan of :func:`plan_mod_install` and works it off in order:
-    every entry is downloaded into a temporary directory and installed through
-    :func:`install_from_archive`, so each mod becomes its own commit with the
-    conflict and profile rules of a local install. The commits carry
-    ``Mod-Forge-Id`` and ``Mod-Forge-Version-Id`` of the planned entry and
-    ``Mod-Source`` set to the download URL. ``force`` is passed to every
-    install of the plan.
-
-    Progress is reported through the ``download`` step while an archive
-    arrives and through the steps of :func:`install_from_archive` while it is
-    installed, each prefixed by the entry it belongs to in its message.
-
-    The plan is resolved again here rather than taken from the caller, so the
-    download links are fresh. A plan a caller showed for confirmation can
-    therefore differ from the one that is installed when Forge changes in
-    between; that race is accepted for the prototype.
-
-    An install that fails partway leaves the commits of the entries installed
-    before it in place; the game directory therefore stays consistent and the
-    call can be repeated once the cause is fixed.
-
-    Args:
-        path: The tracked game directory.
-        mod_id_or_name: The numeric Forge mod ID or the mod name.
-        version: The exact version of the requested mod; without it the highest
-            compatible one.
-        force: Install despite conflicts, missing dependencies or an
-            incompatible SPT version.
-        progress: Optional callback for download and install progress.
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
-        client: Forge API client; a default one is built when omitted.
-
-    Returns:
-        The plan that was worked off and one install result per entry.
-
-    Raises:
-        NotAGameDirError: the SPT version of ``path`` cannot be determined.
-        NoCompatibleVersionError: the catalog knows no matching version.
-        UnresolvableDependencyError: a dependency cannot be resolved.
-        ArchiveError: a planned entry has no download link, or an archive is
-            incomplete, unreadable or unsafe.
-        PartialInstallError: an entry failed after an earlier one was already
-            installed; it carries the finished installs and the cause.
-        DirtyTreeError: the working tree has uncommitted or untracked changes.
-        GameRunningError: the SPT server or client is running.
-        ConflictError: a file or DLL conflict blocks an install and ``force``
-            is not set.
-        DependencyError: a dependency check blocks an install and ``force`` is
-            not set.
-        ForgeUnavailableError: the Forge API or a download URL is unreachable.
-        ForgeApiError: the Forge API answered with an error envelope.
-        GitError: git failed.
-    """
-    if client is not None:
-        return _install_plan(
-            path, mod_id_or_name, version, force, progress, db_path, client
-        )
-    with ForgeClient() as owned:
-        return _install_plan(
-            path, mod_id_or_name, version, force, progress, db_path, owned
-        )
 
 
 def check_updates(
@@ -1665,121 +1331,6 @@ def _apply_import(
         )
         for entry in diff.missing
     ]
-
-
-
-
-
-
-def _resolve_plan(
-    path: Path,
-    mod_id_or_name: int | str,
-    version: str | None,
-    db_path: Path | None,
-    client: ForgeClient,
-) -> InstallPlan:
-    installed = required_spt_version(path)
-    with open_catalog(db_path) as catalog:
-        plan = plan_install(
-            mod_id_or_name, version, catalog, client, list_mods(path), installed
-        )
-        return replace(
-            plan,
-            entries=[_with_link(entry, catalog, client) for entry in plan.entries],
-        )
-
-
-def _with_link(entry: PlanEntry, catalog: Catalog, client: ForgeClient) -> PlanEntry:
-    """Fill the download link of ``entry`` from Forge when the cache has none.
-
-    A synced catalog holds version summaries without a link; only
-    :meth:`Catalog.fetch_versions` loads the full version records.
-    """
-    if entry.link:
-        return entry
-    versions = catalog.fetch_versions(client, entry.mod_id)
-    fetched = next(v for v in versions if v.id == entry.version_id)
-    return replace(entry, link=fetched.link, content_length=fetched.content_length)
-
-
-def _install_plan(
-    path: Path,
-    mod_id_or_name: int | str,
-    version: str | None,
-    force: bool,
-    progress: Progress | None,
-    db_path: Path | None,
-    client: ForgeClient,
-) -> InstallModResult:
-    plan = _resolve_plan(path, mod_id_or_name, version, db_path, client)
-    installed: list[InstallResult] = []
-    for entry in plan.entries:
-        try:
-            installed.append(_install_entry(path, entry, force, progress, client))
-        except Exception as error:
-            if not installed:
-                raise
-            raise PartialInstallError(
-                f"{entry.name} {entry.version} failed after "
-                f"{len(installed)} of {len(plan.entries)} mods were "
-                f"installed: {error}",
-                installed,
-                error,
-            ) from error
-    return InstallModResult(plan=plan, installed=installed)
-
-
-def _install_entry(
-    path: Path,
-    entry: PlanEntry,
-    force: bool,
-    progress: Progress | None,
-    client: ForgeClient,
-) -> InstallResult:
-    """Download one planned entry and install it as its own commit."""
-    reporter = prefixed_progress(progress, f"{entry.name} {entry.version}")
-    archive = download_entry(
-        client,
-        entry.link,
-        entry.content_length,
-        entry.version_id,
-        entry.name,
-        reporter,
-    )
-    return install_from_archive(
-        path,
-        archive,
-        version_override=entry.version,
-        force=force,
-        progress=reporter,
-        forge_id=str(entry.mod_id),
-        forge_version_id=str(entry.version_id),
-        source=entry.link,
-    )
-
-
-def download_entry(
-    client: ForgeClient,
-    link: str | None,
-    content_length: int | None,
-    version_id: int,
-    name: str,
-    progress: Progress | None,
-) -> Path:
-    """Download ``link`` into the download cache, reusing an earlier copy.
-
-    Raises:
-        ArchiveError: Forge published no download link for the mod.
-    """
-    if not link:
-        raise ArchiveError(f"Forge publishes no download link for {name}")
-    return download_cached(
-        client,
-        link,
-        str(version_id),
-        progress=progress,
-        expected_length=content_length,
-    )
 
 
 def _query_updates(
@@ -2058,76 +1609,6 @@ def _no_update_notice(mod: ModInfo, report: UpdatesReport) -> str:
     return f"Forge reports no update for {mod.name} {mod.version}"
 
 
-
-
-
-
-
-
-def _check_install_conflicts(
-    repo: Repo,
-    game_layout: GameLayout,
-    layout: ArchiveLayout,
-    meta: ModMeta,
-    force: bool,
-) -> list[Conflict]:
-    """Seam for the file, DLL and dependency checks of ``core.conflicts``.
-
-    Runs the file, DLL, dependency and SPT-compatibility checks, applies
-    ``force`` to their findings and returns the remaining warnings. Blocking
-    findings raise ``ConflictError`` for file and DLL problems and
-    ``DependencyError`` for dependency problems; both carry the complete list
-    of findings, warnings included.
-    """
-    active = [mod for mod in current_mods(repo) if mod.state in ACTIVE_STATES]
-    findings = apply_force(
-        [
-            *check_file_conflicts(repo, layout.files),
-            *check_dll_duplicates(repo.path, layout.files),
-            *check_dependencies(active, meta),
-            *check_spt_compat(
-                resolve_spt_version(game_layout, repo) or "", meta.spt_range
-            ),
-        ],
-        force,
-    )
-    blocking = [finding for finding in findings if finding.severity == "error"]
-    files = [finding for finding in blocking if finding.kind not in DEPENDENCY_KINDS]
-    if files:
-        raise ConflictError(blocked_message(meta.name, blocking), findings)
-    if blocking:
-        raise DependencyError(blocked_message(meta.name, blocking), findings)
-    return findings
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _remove_copied(root: Path, files: Sequence[Path], layout: GameLayout) -> None:
-    """Undo a copy step so a rejected install leaves no files behind."""
-    for file in files:
-        (root / file).unlink(missing_ok=True)
-    for directory in sorted({(root / file).parent for file in files}, reverse=True):
-        prune_empty(root, directory, mod_prefixes(layout))
-
-
 def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None:
     """Delete the runtime data left in the directories ``commit_hash`` emptied.
 
@@ -2161,137 +1642,8 @@ def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None
                 continue
 
 
-
-
-
-
-
-
-
-
-
-
-def read_meta(
-    layout: ArchiveLayout,
-    mods_dir: Path,
-    name_override: str | None,
-    version_override: str | None,
-    archive: Path,
-) -> ModMeta:
-    """Return the metadata of the extracted archive, with the overrides applied.
-
-    Raises:
-        InvalidMetadataError: no metadata source exists, or a value would
-            break the git trailers it is written to.
-    """
-    if layout.mod_type == "client":
-        meta = _dll_meta(layout, name_override, version_override, archive.stem)
-    else:
-        mod_dir = _server_mod_dir(layout, mods_dir)
-        if mod_dir is not None:
-            meta = read_package_json(mod_dir)
-        else:
-            # Real server mods regularly ship no package.json at all, just a
-            # DLL and data folders; the DLL name or the overrides carry the
-            # metadata then.
-            meta = _dll_meta(layout, name_override, version_override, archive.stem)
-            if not (name_override or meta.name):
-                raise InvalidMetadataError(
-                    f"{archive.name} carries no {PACKAGE_JSON_NAME} below "
-                    f"{mods_dir.as_posix()} and no DLL to derive a name from; "
-                    f"pass a name and a version"
-                )
-    resolved = replace(
-        meta,
-        name=name_override or meta.name,
-        version=version_override or meta.version,
-    )
-    reject_multiline_metadata(resolved)
-    return resolved
-
-
-def reject_multiline_metadata(meta: ModMeta) -> None:
-    """Reject metadata that git would refuse as a trailer value.
-
-    Runs before anything is copied, so a value the commit would choke on
-    cannot leave a half-installed game directory behind.
-    """
-    for field_name, value in (
-        ("name", meta.name),
-        ("version", meta.version),
-        ("author", meta.author),
-        ("sptVersion", meta.spt_range),
-        ("guid", meta.guid),
-    ):
-        if "\n" in value or "\r" in value:
-            raise GitError(
-                f"mod metadata field {field_name!r} must not contain line breaks"
-            )
-
-
-def _server_mod_dir(layout: ArchiveLayout, mods_dir: Path) -> Path | None:
-    """Return the mod folder carrying the ``package.json``, if the archive has one."""
-    sources = [
-        mapping.source for mapping in layout.mappings if mapping.target == mods_dir
-    ]
-    for source in sources:
-        for child in sorted(source.iterdir()):
-            if (child / PACKAGE_JSON_NAME).is_file():
-                return child
-    return None
-
-
-def _dll_meta(
-    layout: ArchiveLayout,
-    name_override: str | None,
-    version_override: str | None,
-    archive_stem: str,
-) -> ModMeta:
-    dlls = [path for path in layout.files if path.suffix.lower() == ".dll"]
-    if not dlls:
-        return ModMeta(name=name_override or "", version=version_override or "")
-    dll, derived_name = _preferred_dll(dlls, archive_stem)
-    return meta_from_dll(dll, name_override or derived_name, version_override)
-
-
-def _preferred_dll(dlls: Sequence[Path], archive_stem: str) -> tuple[Path, str]:
-    """Pick the DLL naming the mod and the name it yields.
-
-    Plugin folders ship helper assemblies next to the main DLL, so the archive
-    file name decides: the longest DLL stem -- or dot-separated segment of one
-    -- that occurs in it wins (``Tyfon-UIFixes-6.0.2.zip`` with
-    ``Tyfon.UIFixes.dll`` and ``Tyfon.UIFixes.Net.dll`` yields ``UIFixes``).
-    Without any match the first DLL and its full stem are used.
-    """
-    lowered_stem = archive_stem.lower()
-    matches = [
-        (candidate, dll)
-        for dll in dlls
-        for candidate in (dll.stem, *dll.stem.split("."))
-        if candidate and candidate.lower() in lowered_stem
-    ]
-    if not matches:
-        return dlls[0], dlls[0].stem
-    candidate, dll = max(
-        matches, key=lambda match: (len(match[0]), -len(match[1].stem))
-    )
-    return dll, candidate
-
-
-
-
-
-
-
-
-
-
 def _joined(paths: Sequence[Path]) -> str:
     return ", ".join(path.as_posix() for path in paths)
-
-
-
-
 
 
 def _sequencer_conflict(
@@ -2358,38 +1710,6 @@ def _adopt_meta(
         )
     reject_multiline_metadata(resolved)
     return resolved
-
-
-
-
-def _catalog_match(name: str, version: str, db_path: Path | None) -> tuple[str, str]:
-    """Return the Forge mod and version ID cached for ``name`` and ``version``.
-
-    Both are empty unless exactly one cached mod carries that name and exactly
-    one of its cached versions is ``version``, and when the catalog cache does
-    not exist yet.
-    """
-    cache = db_path or default_db_path()
-    if not cache.exists():
-        return "", ""
-    with Catalog(cache) as catalog:
-        mods = [
-            mod
-            for mod in catalog.search(name)
-            if mod.name.casefold() == name.casefold()
-        ]
-        if len(mods) != 1:
-            return "", ""
-        versions = [
-            cached
-            for cached in catalog.get_versions(mods[0].id)
-            if cached.version == version
-        ]
-    if len(versions) != 1:
-        return "", ""
-    return str(mods[0].id), str(versions[0].id)
-
-
 
 
 def _catalog_links(mods: Sequence[ModInfo], db_path: Path | None) -> dict[str, str]:
@@ -2494,16 +1814,6 @@ def _parse_mod_list_text(source: str, raw: str) -> list[ExportEntry]:
             ExportEntry(name=" ".join(head[:-1]), version=head[-1], link=link)
         )
     return entries
-
-
-
-
-
-
-
-
-
-
 
 
 def _mod_entries(untracked: Sequence[Path], layout: GameLayout) -> list[Path]:

@@ -1023,11 +1023,11 @@ def forge_trailers(mod_id: str, version_id: str | None = None) -> JsonDict:
 
 
 def service_function_names() -> list[str]:
-    """Every public, module-defined function of ``sptmod.core.services``."""
+    """Every public function of ``sptmod.core.services``, as declared by ``__all__``."""
     return sorted(
         name
-        for name, obj in vars(services).items()
-        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
+        for name in services.__all__
+        if inspect.isfunction(getattr(services, name)) and not name.startswith("_")
     )
 
 

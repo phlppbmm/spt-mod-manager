@@ -161,7 +161,7 @@ Before any mod operation: game-running check, then — if the tree is dirty —
 changed profiles/configs are secured in an AUTOMATIC snapshot commit and the
 operation proceeds (that state is the normal aftermath of playing). Only
 unmanaged files (manual mod copies, tampered tracked files) block, with a
-plain-language message suggesting adopt. `_ensure_installable` in services.py.
+plain-language message suggesting adopt. `ensure_installable` in services.py.
 Untracked files an active mod writes inside its own directory (settings a mod
 generates while playing) are runtime data: `status` leaves them out of the
 report, so they never block and are never snapshotted. `remove` and `disable`
@@ -243,7 +243,7 @@ to SPT's own format when the profile is unchanged.
 
 After any profile changes, a snapshot commit is created with the message
 `snapshot: cleaned profiles for <mod>` and **no Mod trailers**. A `Mod:` trailer
-would make the profile commit look like a mod's own commit, so `_current_mods`
+would make the profile commit look like a mod's own commit, so `current_mods`
 would take it as the mod's head and forget its db files.
 
 ### `remove_mod(clean_profiles=True)` ordering
@@ -291,7 +291,7 @@ blocks — a lock file nobody holds is simply taken. Its JSON content only names
 the running operation for the waiter's message. A colliding apply waits (up to
 five minutes, reporting that operation through the progress callback) before
 raising `OperationInProgressError` (`OPERATION_IN_PROGRESS`); read-only calls
-never lock. `_ensure_installable` runs inside the lock; its pre-download run
+never lock. `ensure_installable` runs inside the lock; its pre-download run
 is skipped while another apply holds the lock, because that apply's
 not-yet-committed files would look like manual installs.
 
@@ -335,7 +335,7 @@ download cache.
 - A hybrid archive must anchor both halves or fail — never silently install
   the client half only.
 - Canonical internal target is `SPT/user/mods`; services translate it to the
-  detected runtime dir on copy (`_for_game_layout`).
+  detected runtime dir on copy (`for_game_layout`).
 - Extraction: traversal-validated member names for all formats; encrypted
   archives raise typed `ArchiveError`; rar via rarfile with the bsdtar
   backend (rar CREATION is impossible in tests — real samples live in

@@ -3,7 +3,6 @@
 import json
 import os.path
 import shutil
-import sqlite3
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -14,8 +13,6 @@ from pathlib import Path
 from typing import Final, Literal
 
 from sptmod.core.archive import (
-    CLIENT_PATCHERS_TARGET,
-    SERVER_MODS_TARGET,
     ArchiveLayout,
     extract,
     find_anchor,
@@ -29,7 +26,6 @@ from sptmod.core.conflicts import (
 )
 from sptmod.core.errors import (
     AlreadyInitializedError,
-    AmbiguousModError,
     ArchiveError,
     CatalogUnavailableError,
     ConflictError,
@@ -87,15 +83,12 @@ from sptmod.core.launch import launch_status as _launch_status
 from sptmod.core.launch import stop_game as _stop_game
 from sptmod.core.models import (
     ACTIVE_STATES,
-    MOD_STATES,
     MOD_TYPES,
     TRAILER_MOD,
     TRAILER_MOD_PREVIOUS_VERSION,
     TRAILER_MOD_STATE,
-    TRAILER_MOD_TYPE,
     CommitInfo,
     Conflict,
-    ConflictKind,
     InstallPlan,
     Json,
     ModFile,
@@ -113,7 +106,6 @@ from sptmod.core.modmeta import (
     ModMeta,
     build_trailers,
     meta_from_dll,
-    mod_info_from_commit,
     read_package_json,
 )
 from sptmod.core.profile import (
@@ -128,6 +120,28 @@ from sptmod.core.profile import (
     write_profile,
 )
 from sptmod.core.repo import Repo
+from sptmod.core.services.common import (
+    DEPENDENCY_KINDS,
+    INSTALL_STEPS,
+    UNSET_DATE,
+    InstallStep,
+    blocked_message,
+    current_mods,
+    detected_spt_version,
+    for_game_layout,
+    install_commit,
+    last_touching_mod,
+    mod_prefix_of,
+    mod_prefixes,
+    open_catalog,
+    owned_prefixes,
+    owning_mod_dir,
+    prefixed_progress,
+    prune_empty,
+    report_step,
+    required_spt_version,
+    resolve_mod,
+)
 from sptmod.core.workspace import (
     download_cache_dir,
     game_lock,
@@ -135,48 +149,93 @@ from sptmod.core.workspace import (
     staging_dir,
 )
 
+# The public surface of this module: the service functions behind the CLI and
+# the RPC adapter, their result types, and the constants consumers read.
+__all__ = [
+    "ACTIVE_STATES",
+    "AdoptResult",
+    "BlockedUpdate",
+    "BrowseFilter",
+    "CleanupPlan",
+    "CleanupResult",
+    "ClearCacheResult",
+    "DirectoryEntry",
+    "DirectoryListing",
+    "EXPORT_FORMATS",
+    "ExportEntry",
+    "ExportFormat",
+    "INSTALL_STEPS",
+    "ImportDiff",
+    "ImportEntry",
+    "IncompatibleMod",
+    "InitResult",
+    "InstallModResult",
+    "InstallResult",
+    "InstallStep",
+    "InvalidPathError",
+    "LaunchResult",
+    "LaunchStatus",
+    "LocatedDirectory",
+    "ManualMod",
+    "ModDetails",
+    "RemoveResult",
+    "SPT_VERSION_TRAILER",
+    "SnapshotResult",
+    "StatusReport",
+    "StopResult",
+    "ToggleResult",
+    "UNKNOWN_SPT_VERSION",
+    "UntouchedResidue",
+    "UpdateCandidate",
+    "UpdateResult",
+    "UpdatesReport",
+    "adopt_mod",
+    "browse_catalog",
+    "check_profiles",
+    "check_updates",
+    "clean_profile",
+    "clear_catalog_cache",
+    "disable_mod",
+    "enable_mod",
+    "export_mods",
+    "get_mod_details",
+    "history",
+    "import_list",
+    "init_game_dir",
+    "install_from_archive",
+    "install_mod",
+    "launch_profile",
+    "launch_status",
+    "list_directories",
+    "list_favorites",
+    "list_mods",
+    "list_profiles",
+    "locate_directory",
+    "mod_files",
+    "plan_mod_install",
+    "plan_profile_cleanup",
+    "remove_mod",
+    "search_catalog",
+    "set_favorite",
+    "set_spt_version",
+    "snapshot",
+    "status",
+    "stop_game",
+    "sync_catalog",
+    "update_mod",
+]
+
 SPT_VERSION_TRAILER: Final = "Spt-Version"
 UNKNOWN_SPT_VERSION: Final = "unknown"
 
-type InstallStep = Literal[
-    "check",
-    "extract",
-    "anchor",
-    "metadata",
-    "conflicts",
-    "copy",
-    "commit",
-]
 
-INSTALL_STEPS: Final[tuple[InstallStep, ...]] = (
-    "check",
-    "extract",
-    "anchor",
-    "metadata",
-    "conflicts",
-    "copy",
-    "commit",
-)
 
-_STEP_PERCENT: Final[dict[InstallStep, int]] = {
-    "check": 0,
-    "extract": 10,
-    "anchor": 30,
-    "metadata": 45,
-    "conflicts": 60,
-    "copy": 75,
-    "commit": 90,
-}
 
 type BrowseFilter = Literal["all", "installed", "available"]
 type ExportFormat = Literal["text", "json"]
 
 EXPORT_FORMATS: Final[tuple[ExportFormat, ...]] = ("text", "json")
 
-_DEPENDENCY_KINDS: Final[tuple[ConflictKind, ...]] = (
-    "missing-dependency",
-    "dependency-version",
-)
 
 _CLIENT_TYPES: Final[tuple[ModType, ...]] = ("client", "hybrid")
 _SNAPSHOT_TIME_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
@@ -187,7 +246,6 @@ _UNTOUCHED_REASON: Final = (
 )
 _LINK_MARKER: Final = "://"
 _CONTENT_SOURCE: Final = "the given mod list"
-_UNSET_DATE: Final = datetime.min
 _LOCATE_MOUNTS: Final[tuple[str, ...]] = ("/mnt", "/media", "/opt")
 _LOCATE_SKIP_NAMES: Final[frozenset[str]] = frozenset(
     {"node_modules", "__pycache__", "proc", "sys", "dev"}
@@ -733,7 +791,7 @@ def init_game_dir(
                 store_spt_version(repo, version)
             untracked = repo.untracked_under(Path("."))
             baseline = [
-                entry for entry in untracked if _mod_prefix_of(entry, layout) is None
+                entry for entry in untracked if mod_prefix_of(entry, layout) is None
             ]
             commit_hash = repo.commit(
                 f"chore: clean SPT {version}",
@@ -742,7 +800,7 @@ def init_game_dir(
             )
             pre_existing = _mod_entries(untracked, layout)
             selected = (pre_existing if adopt else []) if isinstance(adopt, bool) else list(adopt)
-            adopted = [_adopt_mod(path, entry).mod for entry in selected]
+            adopted = [adopt_mod_at(path, entry).mod for entry in selected]
         except Exception:
             if created:
                 shutil.rmtree(path / ".git", ignore_errors=True)
@@ -887,37 +945,37 @@ def install_from_archive(
     """
     game_layout = detect_layout(path)
     repo = Repo(path)
-    _report(progress, "check", "checking the working tree and running processes")
+    report_step(progress, "check", "checking the working tree and running processes")
     if not is_locked(path):
-        _ensure_installable(repo)
+        ensure_installable(repo)
 
     with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
-        _report(progress, "extract", f"extracting {archive.name}")
+        report_step(progress, "extract", f"extracting {archive.name}")
         extract(archive, temp)
 
-        _report(progress, "anchor", "searching the mod anchor")
-        layout = _for_game_layout(find_anchor(temp), game_layout)
+        report_step(progress, "anchor", "searching the mod anchor")
+        layout = for_game_layout(find_anchor(temp), game_layout)
 
-        _report(progress, "metadata", "reading the mod metadata")
-        meta = _read_meta(
+        report_step(progress, "metadata", "reading the mod metadata")
+        meta = read_meta(
             layout, game_layout.mods_dir, name_override, version_override, archive
         )
 
         with game_lock(path, f"installing {meta.name}", progress):
-            _ensure_installable(repo)
+            ensure_installable(repo)
 
-            _report(progress, "conflicts", "checking conflicts and dependencies")
+            report_step(progress, "conflicts", "checking conflicts and dependencies")
             warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
 
-            _report(progress, "copy", f"copying {len(layout.files)} files")
+            report_step(progress, "copy", f"copying {len(layout.files)} files")
             added = [file for file in layout.files if not (path / file).exists()]
             for mapping in layout.mappings:
                 shutil.copytree(
                     mapping.source, path / mapping.target, dirs_exist_ok=True
                 )
 
-            _report(progress, "commit", f"committing {meta.name} {meta.version}")
+            report_step(progress, "commit", f"committing {meta.name} {meta.version}")
             matched_id, matched_version_id = (
                 _catalog_match(meta.name, meta.version, db_path)
                 if forge_match and not forge_id
@@ -931,7 +989,7 @@ def install_from_archive(
                 spt_range=meta.spt_range,
                 state="installed",
                 commit="",
-                date=_UNSET_DATE,
+                date=UNSET_DATE,
                 forge_id=forge_id or matched_id,
                 forge_version_id=forge_version_id or matched_version_id,
                 guid=meta.guid,
@@ -947,7 +1005,7 @@ def install_from_archive(
                 _remove_copied(path, added, game_layout)
                 raise
             committed = repo.log()[0]
-    _report(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
+    report_step(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
     return InstallResult(
         mod=replace(draft, commit=commit_hash, date=committed.date),
         files=list(layout.files),
@@ -966,7 +1024,7 @@ def list_mods(path: Path, include_all: bool = False) -> list[ModInfo]:
     Raises:
         GitError: git failed.
     """
-    mods = _current_mods(Repo(path))
+    mods = current_mods(Repo(path))
     if include_all:
         return mods
     return [mod for mod in mods if mod.state in ACTIVE_STATES]
@@ -984,7 +1042,7 @@ def mod_files(path: Path, name: str) -> list[ModFile]:
         GitError: git failed.
     """
     repo = Repo(path)
-    mod = _resolve(_current_mods(repo), name)
+    mod = resolve_mod(current_mods(repo), name)
     return repo.show_files(mod.commit)
 
 
@@ -1030,15 +1088,15 @@ def remove_mod(
     """
     repo = Repo(path)
     with game_lock(path, f"removing {name}"):
-        _ensure_installable(repo)
+        ensure_installable(repo)
 
-        active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
-        mod = _resolve(active, name)
-        cleanup = _clean_profiles_inline(repo, mod) if clean_profiles else None
+        active = [mod for mod in current_mods(repo) if mod.state in ACTIVE_STATES]
+        mod = resolve_mod(active, name)
+        cleanup = clean_profiles_inline(repo, mod) if clean_profiles else None
         warnings = (
             list(cleanup.warnings)
             if cleanup is not None
-            else _check_profile_residue(repo, mod, force)
+            else check_profile_residue(repo, mod, force)
         )
 
         try:
@@ -1108,8 +1166,8 @@ def plan_profile_cleanup(path: Path, mod_name: str) -> CleanupPlan:
     """
     repo = Repo(path)
     layout = detect_layout(path)
-    mod = _resolve(_current_mods(repo), mod_name)
-    ids = collect_mod_ids(repo, _install_commit(repo, mod.name), layout)
+    mod = resolve_mod(current_mods(repo), mod_name)
+    ids = collect_mod_ids(repo, install_commit(repo, mod.name), layout)
     warnings = list(ids.warnings)
     profiles: list[str] = []
     removals: list[ProfileResidue] = []
@@ -1168,9 +1226,9 @@ def clean_profile(
     """
     repo = Repo(path)
     with game_lock(path, f"cleaning profiles for {mod_name}"):
-        _ensure_installable(repo)
-        mod = _resolve(_current_mods(repo), mod_name)
-        return _clean_profiles_inline(repo, mod, profiles)
+        ensure_installable(repo)
+        mod = resolve_mod(current_mods(repo), mod_name)
+        return clean_profiles_inline(repo, mod, profiles)
 
 
 def history(path: Path, name: str | None = None) -> list[CommitInfo]:
@@ -1188,7 +1246,7 @@ def history(path: Path, name: str | None = None) -> list[CommitInfo]:
     repo = Repo(path)
     if name is None:
         return repo.log()
-    mod = _resolve(_current_mods(repo), name)
+    mod = resolve_mod(current_mods(repo), name)
     return repo.log(trailer_filter={TRAILER_MOD: mod.name})
 
 
@@ -1227,9 +1285,9 @@ def sync_catalog(
     # caller here; every service function takes it for a uniform RPC contract.
     del path
     if client is not None:
-        with _open_catalog(db_path) as catalog:
+        with open_catalog(db_path) as catalog:
             return catalog.sync(client, full=full, progress=progress)
-    with ForgeClient() as owned, _open_catalog(db_path) as catalog:
+    with ForgeClient() as owned, open_catalog(db_path) as catalog:
         return catalog.sync(owned, full=full, progress=progress)
 
 
@@ -1262,7 +1320,7 @@ def search_catalog(
     """
     installed = list_mods(path)
     compatible_with = _compatible_with(path, compatible_only)
-    with _open_catalog(db_path) as catalog:
+    with open_catalog(db_path) as catalog:
         matched = {
             mod.id for mod in catalog.search(query, compatible_with=compatible_with)
         }
@@ -1298,7 +1356,7 @@ def browse_catalog(
         GitError: git failed.
     """
     installed = list_mods(path)
-    with _open_catalog(db_path) as catalog:
+    with open_catalog(db_path) as catalog:
         entries = _classified(catalog, installed, path, compatible_only)
     if catalog_filter == "all":
         return entries
@@ -1328,14 +1386,14 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
     """
     repo = Repo(path)
     with game_lock(path, f"disabling {name}"):
-        mod = _resolve(_current_mods(repo), name)
+        mod = resolve_mod(current_mods(repo), name)
         if mod.state not in ACTIVE_STATES:
             return ToggleResult(
                 name=mod.name,
                 state=mod.state,
                 notice=f"{mod.name} is already {mod.state}, nothing to disable",
             )
-        _ensure_installable(repo)
+        ensure_installable(repo)
 
         try:
             commit_hash = repo.revert(
@@ -1378,18 +1436,18 @@ def enable_mod(path: Path, name: str) -> ToggleResult:
     """
     repo = Repo(path)
     with game_lock(path, f"enabling {name}"):
-        mod = _resolve(_current_mods(repo), name)
+        mod = resolve_mod(current_mods(repo), name)
         if mod.state != "disabled":
             return ToggleResult(
                 name=mod.name,
                 state=mod.state,
                 notice=f"{mod.name} is {mod.state}, not disabled, nothing to enable",
             )
-        _ensure_installable(repo)
+        ensure_installable(repo)
 
         try:
             commit_hash = repo.cherry_pick(
-                _install_commit(repo, mod.name),
+                install_commit(repo, mod.name),
                 extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "enabled"},
             )
         except GitError as error:
@@ -1437,10 +1495,10 @@ def adopt_mod(
         GitError: git failed or metadata contains invalid trailer values.
     """
     with game_lock(path, f"adopting {target.name}"):
-        return _adopt_mod(path, target, name_override, version_override)
+        return adopt_mod_at(path, target, name_override, version_override)
 
 
-def _adopt_mod(
+def adopt_mod_at(
     path: Path,
     target: Path,
     name_override: str | None = None,
@@ -1454,7 +1512,7 @@ def _adopt_mod(
         raise ConflictError(
             f"cannot adopt {relative.as_posix()}: it is part of SPT itself, not a mod"
         )
-    if _mod_prefix_of(relative, layout) is None:
+    if mod_prefix_of(relative, layout) is None:
         raise NotAGameDirError(
             f"cannot adopt {relative.as_posix()}: it is below neither "
             f"{layout.mods_dir.as_posix()} nor {PLUGINS_DIR.as_posix()}"
@@ -1462,9 +1520,9 @@ def _adopt_mod(
     if not (path / relative).exists():
         raise ModNotFoundError(f"{relative.as_posix()} does not exist in {path}")
 
-    owner = _last_touching_mod(repo, relative)
+    owner = last_touching_mod(repo, relative)
     if owner and any(
-        mod.name == owner and mod.state in ACTIVE_STATES for mod in _current_mods(repo)
+        mod.name == owner and mod.state in ACTIVE_STATES for mod in current_mods(repo)
     ):
         raise ConflictError(
             f"cannot adopt {relative.as_posix()}: it is already provided by {owner}"
@@ -1485,7 +1543,7 @@ def _adopt_mod(
         spt_range=meta.spt_range,
         state="installed",
         commit="",
-        date=_UNSET_DATE,
+        date=UNSET_DATE,
         forge_id="",
         forge_version_id="",
         guid=meta.guid,
@@ -1535,9 +1593,9 @@ def status(path: Path) -> StatusReport:
 
     owned = _active_mod_dirs(repo, raw.untracked, layout)
     for entry in raw.untracked:
-        if _owning_mod_dir(entry, layout) in owned:
+        if owning_mod_dir(entry, layout) in owned:
             continue
-        prefix = _mod_prefix_of(entry, layout)
+        prefix = mod_prefix_of(entry, layout)
         if prefix is not None:
             top = prefix / entry.relative_to(prefix).parts[0]
             manual_files.setdefault(top, []).append(entry)
@@ -1570,10 +1628,10 @@ def snapshot(path: Path, message: str | None = None) -> SnapshotResult:
         GitError: neither profiles nor configs changed, or git failed.
     """
     with game_lock(path, "securing your profile"):
-        return _snapshot(path, message)
+        return take_snapshot(path, message)
 
 
-def _snapshot(path: Path, message: str | None) -> SnapshotResult:
+def take_snapshot(path: Path, message: str | None) -> SnapshotResult:
     """Commit profile and config changes without taking the lock."""
     repo = Repo(path)
     text = message or datetime.now().strftime(_SNAPSHOT_TIME_FORMAT)
@@ -1887,7 +1945,7 @@ def get_mod_details(
     """
     cached: CatalogMod | None = None
     versions: list[CatalogVersion] = []
-    with _open_catalog(db_path) as catalog:
+    with open_catalog(db_path) as catalog:
         cached = catalog.get_mod(mod_id)
         versions = catalog.get_versions(mod_id)
         stamp = None if cached is None else cached.updated_at
@@ -2246,30 +2304,8 @@ def _apply_import(
     ]
 
 
-def _required_spt_version(path: Path) -> str:
-    """Return the SPT version of ``path``, which Forge queries need exactly.
-
-    Raises:
-        NotAGameDirError: the version cannot be read.
-    """
-    version = _detected_spt_version(path)
-    if version is None:
-        raise NotAGameDirError(
-            f"the SPT version of {path} cannot be read, so Forge cannot be "
-            f"queried for it"
-        )
-    return version
 
 
-def _prefixed(progress: Progress | None, prefix: str) -> Progress | None:
-    """Return ``progress`` with ``prefix`` put in front of every message."""
-    if progress is None:
-        return None
-
-    def report(step: str, percent: int, message: str) -> None:
-        progress(step, percent, f"{prefix}: {message}")
-
-    return report
 
 
 def _resolve_plan(
@@ -2279,8 +2315,8 @@ def _resolve_plan(
     db_path: Path | None,
     client: ForgeClient,
 ) -> InstallPlan:
-    installed = _required_spt_version(path)
-    with _open_catalog(db_path) as catalog:
+    installed = required_spt_version(path)
+    with open_catalog(db_path) as catalog:
         plan = plan_install(
             mod_id_or_name, version, catalog, client, list_mods(path), installed
         )
@@ -2338,8 +2374,8 @@ def _install_entry(
     client: ForgeClient,
 ) -> InstallResult:
     """Download one planned entry and install it as its own commit."""
-    reporter = _prefixed(progress, f"{entry.name} {entry.version}")
-    archive = _download_entry(
+    reporter = prefixed_progress(progress, f"{entry.name} {entry.version}")
+    archive = download_entry(
         client,
         entry.link,
         entry.content_length,
@@ -2359,7 +2395,7 @@ def _install_entry(
     )
 
 
-def _download_entry(
+def download_entry(
     client: ForgeClient,
     link: str | None,
     content_length: int | None,
@@ -2389,10 +2425,10 @@ def _query_updates(
     db_path: Path | None,
     client: ForgeClient,
 ) -> UpdatesReport:
-    version = _required_spt_version(path)
+    version = required_spt_version(path)
     active = list_mods(path)
     if names is not None:
-        active = [_resolve(active, name) for name in names]
+        active = [resolve_mod(active, name) for name in names]
 
     identified: dict[str, ModInfo] = {}
     skipped: list[str] = []
@@ -2478,9 +2514,9 @@ def _apply_update(
 ) -> UpdateResult:
     game_layout = detect_layout(path)
     repo = Repo(path)
-    active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
-    mod = _resolve(active, name)
-    _ensure_installable(repo)
+    active = [mod for mod in current_mods(repo) if mod.state in ACTIVE_STATES]
+    mod = resolve_mod(active, name)
+    ensure_installable(repo)
 
     report = _query_updates(path, [mod.name], db_path, client)
     candidate = next(
@@ -2493,13 +2529,13 @@ def _apply_update(
             notice=_no_update_notice(mod, report),
         )
 
-    reporter = _prefixed(progress, f"{mod.name} {candidate.new_version}")
+    reporter = prefixed_progress(progress, f"{mod.name} {candidate.new_version}")
     obsolete = _replaceable_files(repo, mod)
 
     with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
-        _report(reporter, "check", "downloading the new version")
-        archive = _download_entry(
+        report_step(reporter, "check", "downloading the new version")
+        archive = download_entry(
             client,
             candidate.link,
             candidate.content_length,
@@ -2509,27 +2545,27 @@ def _apply_update(
         )
         unpacked = temp / "unpacked"
         unpacked.mkdir()
-        _report(reporter, "extract", f"extracting {archive.name}")
+        report_step(reporter, "extract", f"extracting {archive.name}")
         extract(archive, unpacked)
 
-        _report(reporter, "anchor", "searching the mod anchor")
-        layout = _for_game_layout(find_anchor(unpacked), game_layout)
+        report_step(reporter, "anchor", "searching the mod anchor")
+        layout = for_game_layout(find_anchor(unpacked), game_layout)
 
-        _report(reporter, "metadata", "reading the mod metadata")
-        meta = _read_meta(
+        report_step(reporter, "metadata", "reading the mod metadata")
+        meta = read_meta(
             layout, game_layout.mods_dir, mod.name, candidate.new_version, archive
         )
 
         with game_lock(path, f"updating {mod.name}", reporter):
-            _ensure_installable(repo)
+            ensure_installable(repo)
 
-            _report(reporter, "conflicts", "checking conflicts and dependencies")
+            report_step(reporter, "conflicts", "checking conflicts and dependencies")
             warnings = _check_update_conflicts(
                 repo, game_layout, layout, meta, mod, force
             )
 
             removed = [file for file in obsolete if file not in set(layout.files)]
-            _report(reporter, "copy", f"copying {len(layout.files)} files")
+            report_step(reporter, "copy", f"copying {len(layout.files)} files")
             for file in removed:
                 (path / file).unlink(missing_ok=True)
             for mapping in layout.mappings:
@@ -2539,9 +2575,9 @@ def _apply_update(
             for directory in sorted(
                 {(path / file).parent for file in removed}, reverse=True
             ):
-                _prune_empty(path, directory, _mod_prefixes(game_layout))
+                prune_empty(path, directory, mod_prefixes(game_layout))
 
-            _report(
+            report_step(
                 reporter, "commit", f"committing {mod.name} {candidate.new_version}"
             )
             draft = replace(
@@ -2564,7 +2600,7 @@ def _apply_update(
                 paths=[*removed, *layout.files],
             )
 
-    _report(
+    report_step(
         reporter,
         "commit",
         f"updated {mod.name} to {candidate.new_version}",
@@ -2588,7 +2624,7 @@ def _replaceable_files(repo: Repo, mod: ModInfo) -> list[Path]:
     """
     return [
         entry.path
-        for entry in repo.show_files(_install_commit(repo, mod.name))
+        for entry in repo.show_files(install_commit(repo, mod.name))
         if entry.change != "deleted"
         and not entry.path.is_relative_to(BEPINEX_CONFIG_DIR)
     ]
@@ -2609,7 +2645,7 @@ def _check_update_conflicts(
     """
     active = [
         other
-        for other in _current_mods(repo)
+        for other in current_mods(repo)
         if other.state in ACTIVE_STATES and other.name != mod.name
     ]
     findings = apply_force(
@@ -2628,11 +2664,11 @@ def _check_update_conflicts(
         force,
     )
     blocking = [finding for finding in findings if finding.severity == "error"]
-    files = [finding for finding in blocking if finding.kind not in _DEPENDENCY_KINDS]
+    files = [finding for finding in blocking if finding.kind not in DEPENDENCY_KINDS]
     if files:
-        raise ConflictError(_blocked_message(mod.name, blocking), findings)
+        raise ConflictError(blocked_message(mod.name, blocking), findings)
     if blocking:
-        raise DependencyError(_blocked_message(mod.name, blocking), findings)
+        raise DependencyError(blocked_message(mod.name, blocking), findings)
     return findings
 
 
@@ -2673,7 +2709,7 @@ def _classified(
     the resolver would refuse. Without ``compatible_only`` those mods stay in
     the list.
     """
-    spt_version = _detected_spt_version(path)
+    spt_version = detected_spt_version(path)
     compatible = catalog.classify(installed, compatible_with=spt_version)
     if compatible_only or spt_version is None:
         return compatible
@@ -2691,12 +2727,9 @@ def _classified(
 
 
 def _compatible_with(path: Path, compatible_only: bool) -> str | None:
-    return _detected_spt_version(path) if compatible_only else None
+    return detected_spt_version(path) if compatible_only else None
 
 
-def _detected_spt_version(path: Path) -> str | None:
-    """Return the SPT version of the game directory at ``path``, or ``None``."""
-    return resolve_spt_version(detect_layout(path), Repo(path))
 
 
 def _check_install_conflicts(
@@ -2714,7 +2747,7 @@ def _check_install_conflicts(
     ``DependencyError`` for dependency problems; both carry the complete list
     of findings, warnings included.
     """
-    active = [mod for mod in _current_mods(repo) if mod.state in ACTIVE_STATES]
+    active = [mod for mod in current_mods(repo) if mod.state in ACTIVE_STATES]
     findings = apply_force(
         [
             *check_file_conflicts(repo, layout.files),
@@ -2727,20 +2760,17 @@ def _check_install_conflicts(
         force,
     )
     blocking = [finding for finding in findings if finding.severity == "error"]
-    files = [finding for finding in blocking if finding.kind not in _DEPENDENCY_KINDS]
+    files = [finding for finding in blocking if finding.kind not in DEPENDENCY_KINDS]
     if files:
-        raise ConflictError(_blocked_message(meta.name, blocking), findings)
+        raise ConflictError(blocked_message(meta.name, blocking), findings)
     if blocking:
-        raise DependencyError(_blocked_message(meta.name, blocking), findings)
+        raise DependencyError(blocked_message(meta.name, blocking), findings)
     return findings
 
 
-def _blocked_message(name: str, blocking: Sequence[Conflict]) -> str:
-    details = "; ".join(finding.message for finding in blocking)
-    return f"cannot install {name}: {details} (use --force to install anyway)"
 
 
-def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
+def check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
     """Search every profile for content IDs of ``mod``.
 
     Returns the collection warnings of ``collect_mod_ids`` and raises
@@ -2759,7 +2789,7 @@ def _check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
     return ids.warnings
 
 
-def _clean_profiles_inline(
+def clean_profiles_inline(
     repo: Repo, mod: ModInfo, profiles: list[str] | None = None
 ) -> CleanupResult:
     """Clean the profiles of ``mod`` without taking the lock.
@@ -2769,7 +2799,7 @@ def _clean_profiles_inline(
     afterwards leaves the tree clean for whatever the caller does next.
     """
     layout = detect_layout(repo.path)
-    ids = collect_mod_ids(repo, _install_commit(repo, mod.name), layout)
+    ids = collect_mod_ids(repo, install_commit(repo, mod.name), layout)
     snapshot_message = f"cleaned profiles for {mod.name}"
     stamp = datetime.now(UTC).strftime(_BACKUP_TIME_FORMAT)
     backup_dir = layout.root / layout.profile_backups_dir / stamp
@@ -2794,7 +2824,7 @@ def _clean_profiles_inline(
             write_profile(target, cleaned.document)
         except OSError as error:
             if changed:
-                _snapshot(repo.path, snapshot_message)
+                take_snapshot(repo.path, snapshot_message)
             raise SptmodError(_cleanup_failed(target, changed, error)) from error
         changed.append(target.stem)
         backups.append(backup.relative_to(layout.root))
@@ -2804,7 +2834,7 @@ def _clean_profiles_inline(
         # No mod trailer: the youngest commit carrying one is taken as the
         # mod's own, which would point it at a profile commit holding none of
         # its files.
-        snapshot_hash = _snapshot(repo.path, snapshot_message).commit
+        snapshot_hash = take_snapshot(repo.path, snapshot_message).commit
     return CleanupResult(
         mod=mod.name,
         profiles=changed,
@@ -2874,18 +2904,6 @@ def _residue_message(name: str, residues: Sequence[ProfileResidue]) -> str:
     )
 
 
-def _report(
-    progress: Progress | None,
-    step: InstallStep,
-    message: str,
-    percent: int | None = None,
-) -> None:
-    if progress is not None:
-        progress(
-            step=step,
-            percent=_STEP_PERCENT[step] if percent is None else percent,
-            message=message,
-        )
 
 
 def _remove_copied(root: Path, files: Sequence[Path], layout: GameLayout) -> None:
@@ -2893,7 +2911,7 @@ def _remove_copied(root: Path, files: Sequence[Path], layout: GameLayout) -> Non
     for file in files:
         (root / file).unlink(missing_ok=True)
     for directory in sorted({(root / file).parent for file in files}, reverse=True):
-        _prune_empty(root, directory, _mod_prefixes(layout))
+        prune_empty(root, directory, mod_prefixes(layout))
 
 
 def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None:
@@ -2905,11 +2923,11 @@ def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None
     same directory stays. The cleanup is best-effort: whatever cannot be
     deleted simply stays in place.
     """
-    boundary = _owned_prefixes(layout)
+    boundary = owned_prefixes(layout)
     directories = {
         directory
         for mod_file in repo.show_files(commit_hash)
-        if (directory := _owning_mod_dir(mod_file.path, layout)) is not None
+        if (directory := owning_mod_dir(mod_file.path, layout)) is not None
     }
     for directory in directories:
         if not (repo.path / directory).is_dir():
@@ -2924,24 +2942,14 @@ def _drop_runtime_data(repo: Repo, commit_hash: str, layout: GameLayout) -> None
             parents.add((repo.path / leftover).parent)
         for parent in sorted(parents, reverse=True):
             try:
-                _prune_empty(repo.path, parent, boundary)
+                prune_empty(repo.path, parent, boundary)
             except OSError:
                 continue
 
 
-def _prune_empty(root: Path, directory: Path, boundary: tuple[Path, ...]) -> None:
-    current = directory
-    while (
-        current != root
-        and current.relative_to(root) not in boundary
-        and current.is_dir()
-        and not any(current.iterdir())
-    ):
-        current.rmdir()
-        current = current.parent
 
 
-def _ensure_installable(repo: Repo) -> None:
+def ensure_installable(repo: Repo) -> None:
     """Ensure the game is closed and the working tree is clean.
 
     Changed profiles and BepInEx configs are the normal aftermath of playing
@@ -2957,7 +2965,7 @@ def _ensure_installable(repo: Repo) -> None:
     _reject_unmanaged(report)
     if not (report.modified_profiles or report.modified_configs):
         return
-    _snapshot(repo.path, "automatic snapshot before changing mods")
+    take_snapshot(repo.path, "automatic snapshot before changing mods")
 
 
 def _reject_unmanaged(report: StatusReport) -> None:
@@ -2973,40 +2981,23 @@ def _reject_unmanaged(report: StatusReport) -> None:
     )
 
 
-def _for_game_layout(layout: ArchiveLayout, game_layout: GameLayout) -> ArchiveLayout:
-    """Point the canonical server targets of ``layout`` at the detected runtime dir.
-
-    Archives ship their content below ``SPT/`` or ``SPT_Runtime/`` regardless
-    of the installation they are meant for, so ``find_anchor`` normalizes both
-    to the canonical ``SPT/user/mods`` and the install translates that prefix
-    to the runtime directory the game directory actually uses.
-    """
-    if game_layout.mods_dir == SERVER_MODS_TARGET:
-        return layout
-    return replace(
-        layout,
-        mappings=[
-            replace(mapping, target=_to_game_layout(mapping.target, game_layout))
-            for mapping in layout.mappings
-        ],
-        files=[_to_game_layout(file, game_layout) for file in layout.files],
-    )
 
 
-def _to_game_layout(target: Path, game_layout: GameLayout) -> Path:
-    """Translate one canonical archive target to the detected layout."""
-    if not target.is_relative_to(SERVER_MODS_TARGET):
-        return target
-    return game_layout.mods_dir / target.relative_to(SERVER_MODS_TARGET)
 
 
-def _read_meta(
+def read_meta(
     layout: ArchiveLayout,
     mods_dir: Path,
     name_override: str | None,
     version_override: str | None,
     archive: Path,
 ) -> ModMeta:
+    """Return the metadata of the extracted archive, with the overrides applied.
+
+    Raises:
+        InvalidMetadataError: no metadata source exists, or a value would
+            break the git trailers it is written to.
+    """
     if layout.mod_type == "client":
         meta = _dll_meta(layout, name_override, version_override, archive.stem)
     else:
@@ -3029,11 +3020,11 @@ def _read_meta(
         name=name_override or meta.name,
         version=version_override or meta.version,
     )
-    _reject_multiline_metadata(resolved)
+    reject_multiline_metadata(resolved)
     return resolved
 
 
-def _reject_multiline_metadata(meta: ModMeta) -> None:
+def reject_multiline_metadata(meta: ModMeta) -> None:
     """Reject metadata that git would refuse as a trailer value.
 
     Runs before anything is copied, so a value the commit would choke on
@@ -3101,87 +3092,20 @@ def _preferred_dll(dlls: Sequence[Path], archive_stem: str) -> tuple[Path, str]:
     return dll, candidate
 
 
-def _current_mods(repo: Repo) -> list[ModInfo]:
-    """Return one entry per mod, newest first.
-
-    Commits that only change a mod's state -- reverts and cherry-picks --
-    carry ``Mod`` and ``Mod-State`` but none of the descriptive trailers, so
-    a mod is described by its youngest full mod commit while state, commit
-    hash and date come from its youngest commit of any kind.
-    """
-    heads: dict[str, CommitInfo] = {}
-    described: dict[str, ModInfo] = {}
-    for commit in repo.log():
-        name = commit.trailers.get(TRAILER_MOD, "")
-        if not name:
-            continue
-        heads.setdefault(name, commit)
-        full = _described_mod(commit)
-        if full is not None:
-            described.setdefault(name, full)
-
-    mods: list[ModInfo] = []
-    for name, head in heads.items():
-        detail = described.get(name)
-        if detail is None:
-            # Every install writes the full trailer set, so a mod without a
-            # descriptive commit exists only in histories written by hand.
-            continue
-        state = _state_of(head)
-        mods.append(
-            replace(
-                detail,
-                state=state or detail.state,
-                commit=head.hash,
-                date=head.date,
-            )
-        )
-    return mods
 
 
-def _described_mod(commit: CommitInfo) -> ModInfo | None:
-    if commit.trailers.get(TRAILER_MOD_TYPE, "") not in MOD_TYPES:
-        return None
-    return mod_info_from_commit(commit)
 
 
-def _state_of(commit: CommitInfo) -> ModState | None:
-    state = commit.trailers.get(TRAILER_MOD_STATE, "")
-    return next((known for known in MOD_STATES if known == state), None)
 
 
-def _resolve(mods: Sequence[ModInfo], name: str) -> ModInfo:
-    matches = [mod for mod in mods if mod.name.casefold() == name.casefold()]
-    candidates = {mod.name for mod in matches}
-    if not matches:
-        raise ModNotFoundError(f"no installed mod named {name!r}")
-    if len(candidates) > 1:
-        raise AmbiguousModError(name, sorted(candidates))
-    return matches[0]
 
 
 def _joined(paths: Sequence[Path]) -> str:
     return ", ".join(path.as_posix() for path in paths)
 
 
-def _last_touching_mod(repo: Repo, path: Path) -> str:
-    commit = repo.last_touching(path)
-    return commit.trailers.get(TRAILER_MOD, "") if commit is not None else ""
 
 
-def _install_commit(repo: Repo, name: str) -> str:
-    """Return the youngest commit of ``name`` carrying the full trailer set.
-
-    That is the commit an ``enable`` cherry-picks: the install commit, the
-    commit of the newest update, or the cherry-pick of a previous ``enable``,
-    which copies the message it was picked from. State-only commits -- reverts
-    from ``disable`` and ``remove`` -- carry no ``Mod-Type`` and are skipped.
-    """
-    return next(
-        commit.hash
-        for commit in repo.log(trailer_filter={TRAILER_MOD: name})
-        if _described_mod(commit) is not None
-    )
 
 
 def _sequencer_conflict(
@@ -3191,7 +3115,7 @@ def _sequencer_conflict(
         return ConflictError(f"cannot {verb} {mod.name}: {error.message}")
     blockers: dict[str, list[Path]] = {}
     for path in error.conflicting_paths:
-        name = _last_touching_mod(repo, path)
+        name = last_touching_mod(repo, path)
         if name:
             blockers.setdefault(name, []).append(path)
     if not blockers:
@@ -3246,7 +3170,7 @@ def _adopt_meta(
             f"cannot adopt {relative.as_posix()}: it has no {PACKAGE_JSON_NAME}, "
             f"pass --name and --version"
         )
-    _reject_multiline_metadata(resolved)
+    reject_multiline_metadata(resolved)
     return resolved
 
 
@@ -3293,19 +3217,6 @@ def _catalog_match(name: str, version: str, db_path: Path | None) -> tuple[str, 
     return str(mods[0].id), str(versions[0].id)
 
 
-def _open_catalog(db_path: Path | None) -> Catalog:
-    """Open the catalog cache, mapping filesystem and SQLite failures to a type.
-
-    Raises:
-        CatalogUnavailableError: the cache file or its directory cannot be
-            created or opened.
-    """
-    try:
-        return Catalog(db_path)
-    except (OSError, sqlite3.Error) as error:
-        raise CatalogUnavailableError(
-            f"the catalog cache cannot be opened: {error}"
-        ) from error
 
 
 def _catalog_links(mods: Sequence[ModInfo], db_path: Path | None) -> dict[str, str]:
@@ -3317,7 +3228,7 @@ def _catalog_links(mods: Sequence[ModInfo], db_path: Path | None) -> dict[str, s
     """
     by_forge_id = {mod.forge_id: mod for mod in mods if mod.forge_id}
     links: dict[str, str] = {}
-    with _open_catalog(db_path) as catalog:
+    with open_catalog(db_path) as catalog:
         for entry in catalog.classify(mods):
             if entry.installed_version is None:
                 continue
@@ -3412,28 +3323,10 @@ def _parse_mod_list_text(source: str, raw: str) -> list[ExportEntry]:
     return entries
 
 
-def _mod_prefixes(layout: GameLayout) -> tuple[Path, ...]:
-    """Return the game-dir-relative paths mod content lives under."""
-    return (layout.mods_dir, PLUGINS_DIR)
 
 
-def _owned_prefixes(layout: GameLayout) -> tuple[Path, ...]:
-    """Return every game-dir-relative path a mod may own a directory under."""
-    return (*_mod_prefixes(layout), CLIENT_PATCHERS_TARGET)
 
 
-def _owning_mod_dir(entry: Path, layout: GameLayout) -> Path | None:
-    """Return the mod directory ``entry`` lies inside, or ``None``.
-
-    A file directly below a mod path -- a loose DLL in ``BepInEx/plugins/`` --
-    belongs to no directory and yields ``None``.
-    """
-    for prefix in _owned_prefixes(layout):
-        if not entry.is_relative_to(prefix):
-            continue
-        top = prefix / entry.relative_to(prefix).parts[0]
-        return top if top != entry else None
-    return None
 
 
 def _active_mod_dirs(
@@ -3448,31 +3341,24 @@ def _active_mod_dirs(
     candidates = {
         directory
         for entry in entries
-        if (directory := _owning_mod_dir(entry, layout)) is not None
+        if (directory := owning_mod_dir(entry, layout)) is not None
     }
     if not candidates:
         return candidates
-    active = {mod.name for mod in _current_mods(repo) if mod.state in ACTIVE_STATES}
+    active = {mod.name for mod in current_mods(repo) if mod.state in ACTIVE_STATES}
     return {
         directory
         for directory in candidates
-        if _last_touching_mod(repo, directory) in active
+        if last_touching_mod(repo, directory) in active
     }
 
 
-def _mod_prefix_of(entry: Path, layout: GameLayout) -> Path | None:
-    if is_spt_own_path(entry):
-        return None
-    return next(
-        (prefix for prefix in _mod_prefixes(layout) if entry.is_relative_to(prefix)),
-        None,
-    )
 
 
 def _mod_entries(untracked: Sequence[Path], layout: GameLayout) -> list[Path]:
     entries: list[Path] = []
     for entry in untracked:
-        prefix = _mod_prefix_of(entry, layout)
+        prefix = mod_prefix_of(entry, layout)
         if prefix is None:
             continue
         top = prefix / entry.relative_to(prefix).parts[0]

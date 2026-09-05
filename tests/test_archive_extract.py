@@ -10,16 +10,14 @@ backend, via rar_backend_available().
 
 import contextlib
 import os
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import rarfile
 
+from fixture_types import MakeArchive
 from sptmod.core.archive import RAR_INSTALL_HINT, extract, rar_backend_available
 from sptmod.core.errors import ArchiveError
-
-MakeArchive = Callable[[dict[str, str | bytes], str], Path]
 
 
 @pytest.mark.parametrize("fmt", ["zip", "7z"])

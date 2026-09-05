@@ -6,6 +6,7 @@ respx; no test opens a real socket.
 import json
 import zlib
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -135,7 +136,7 @@ def test_probe_sends_the_raw_response_header() -> None:
     ],
 )
 def test_probe_reports_foreign_for_a_stranger(
-    status_code: int, body_kwargs: dict
+    status_code: int, body_kwargs: dict[str, Any]
 ) -> None:
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).respond(status_code, **body_kwargs)

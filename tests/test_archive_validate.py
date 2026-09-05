@@ -22,13 +22,20 @@ UNSAFE_MEMBERS = [
     pytest.param("a\\..\\..\\evil.txt", id="windows-backslash-dotdot"),
 ]
 
+# Keyed by the parametrize id so the "all together" test can reuse the exact
+# same member names without going back through ``pytest.param`` objects.
+SAFE_MEMBER_PATHS: dict[str, str] = {
+    "nested-file": "a/b/c.txt",
+    "top-level-file": "package.json",
+    "server-anchor-path": "SPT/user/mods/CoolMod/package.json",
+    "client-anchor-path": "BepInEx/plugins/CoolPlugin.dll",
+    "dots-in-name-not-traversal": "weird..name/file.txt",
+    "short-nested-file": "a/b.txt",
+}
+
 SAFE_MEMBERS = [
-    pytest.param("a/b/c.txt", id="nested-file"),
-    pytest.param("package.json", id="top-level-file"),
-    pytest.param("SPT/user/mods/CoolMod/package.json", id="server-anchor-path"),
-    pytest.param("BepInEx/plugins/CoolPlugin.dll", id="client-anchor-path"),
-    pytest.param("weird..name/file.txt", id="dots-in-name-not-traversal"),
-    pytest.param("a/b.txt", id="short-nested-file"),
+    pytest.param(member, id=member_id)
+    for member_id, member in SAFE_MEMBER_PATHS.items()
 ]
 
 
@@ -52,7 +59,7 @@ def test_validate_member_paths_accepts_safe_member(member: str) -> None:
 
 
 def test_validate_member_paths_accepts_all_safe_members_together() -> None:
-    validate_member_paths([p.values[0] for p in SAFE_MEMBERS])
+    validate_member_paths(list(SAFE_MEMBER_PATHS.values()))
 
 
 def test_validate_member_paths_accepts_empty_sequence() -> None:

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from fixture_types import InstallCommit, JsonDict, MakeProfile
 from sptmod.core.errors import GitError
 from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.models import ProfileResidue
@@ -41,13 +42,13 @@ RECIPE_ID = "5c0d1b8b86f7744bb2683cfd"
 ACHIEVEMENT_ID = "achievement-mod"
 
 
-def _make_profile(tmp_path: Path, name: str, content: dict) -> Path:
+def _make_profile(tmp_path: Path, name: str, content: JsonDict) -> Path:
     path = tmp_path / f"{name}.json"
     path.write_text(json.dumps(content), encoding="utf-8")
     return path
 
 
-def _empty_pmc_profile() -> dict:
+def _empty_pmc_profile() -> JsonDict:
     return {
         "characters": {
             "pmc": {
@@ -65,7 +66,7 @@ def _empty_pmc_profile() -> dict:
 
 
 def test_collect_mod_ids_reads_item_trader_and_quest_ids_from_the_commit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps(
@@ -102,7 +103,7 @@ def test_collect_mod_ids_reads_item_trader_and_quest_ids_from_the_commit(
 
 
 def test_collect_mod_ids_trader_id_includes_both_folder_name_and_base_json_id(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     folder_name = "customtrader"
     files = {
@@ -120,7 +121,7 @@ def test_collect_mod_ids_trader_id_includes_both_folder_name_and_base_json_id(
 
 
 def test_collect_mod_ids_finds_item_ids_below_an_items_path_segment(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/templates/items/custom.json": json.dumps(
@@ -137,7 +138,7 @@ def test_collect_mod_ids_finds_item_ids_below_an_items_path_segment(
 
 
 def test_collect_mod_ids_broken_json_warns_and_keeps_scanning_other_files(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/templates/items.json": "{not valid json",
@@ -158,7 +159,7 @@ def test_collect_mod_ids_broken_json_warns_and_keeps_scanning_other_files(
 
 
 def test_collect_mod_ids_ignores_files_under_the_mod_dir_but_not_below_db(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/assets/icon.json": json.dumps({"color": "red"}),
@@ -173,7 +174,7 @@ def test_collect_mod_ids_ignores_files_under_the_mod_dir_but_not_below_db(
 
 
 def test_collect_mod_ids_mod_without_db_dir_yields_no_ids_and_no_warnings(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     commit_hash = install_commit(
         clean_repo, "ClientMod", files={"BepInEx/plugins/ClientMod.dll": "content"}
@@ -192,7 +193,7 @@ def test_collect_mod_ids_raises_git_error_for_an_unknown_commit(
 
 
 def test_collect_mod_ids_trader_folder_non_base_file_registers_only_the_folder(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     folder_name = "customtrader"
     files = {
@@ -212,7 +213,7 @@ def test_collect_mod_ids_trader_folder_non_base_file_registers_only_the_folder(
 
 
 def test_collect_mod_ids_malformed_quest_entries_are_skipped_without_crashing(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/quests/quests.json": json.dumps(
@@ -558,14 +559,14 @@ def test_find_residues_skips_non_dict_entries_in_quests_but_counts_the_rest(
 # --------------------------------------------------------------------------
 
 
-def _delete_at(doc: dict, path: tuple) -> None:
+def _delete_at(doc: JsonDict, path: tuple[str, ...]) -> None:
     node = doc
     for key in path[:-1]:
         node = node[key]
     del node[path[-1]]
 
 
-def _corrupt_at(doc: dict, path: tuple) -> None:
+def _corrupt_at(doc: JsonDict, path: tuple[str, ...]) -> None:
     node = doc
     for key in path[:-1]:
         node = node[key]
@@ -795,7 +796,7 @@ def _corrupt_at(doc: dict, path: tuple) -> None:
 )
 def test_find_residues_reports_a_hit_for_every_category(
     tmp_path: Path,
-    make_profile: Callable[..., dict],
+    make_profile: MakeProfile,
     hit: str,
     character: str,
     category: str,
@@ -826,7 +827,7 @@ def test_find_residues_reports_a_hit_for_every_category(
     ]
 
 
-_UNIFORM_CATEGORY_CASES: list[tuple[str, tuple, ModIds]] = [
+_UNIFORM_CATEGORY_CASES: list[tuple[str, tuple[str, ...], ModIds]] = [
     ("item", ("characters", "pmc", "Inventory", "items"), ModIds(items={ITEM_A})),
     ("encyclopedia", ("characters", "pmc", "Encyclopedia"), ModIds(items={ITEM_A})),
     ("wishlist", ("characters", "pmc", "WishList"), ModIds(items={ITEM_A})),
@@ -886,10 +887,10 @@ _UNIFORM_CATEGORY_CASES: list[tuple[str, tuple, ModIds]] = [
 @pytest.mark.parametrize("corrupt", [_delete_at, _corrupt_at])
 def test_find_residues_missing_or_wrong_type_container_yields_no_residue(
     tmp_path: Path,
-    make_profile: Callable[..., dict],
-    corrupt: Callable[[dict, tuple], None],
+    make_profile: MakeProfile,
+    corrupt: Callable[[JsonDict, tuple[str, ...]], None],
     category: str,
-    path: tuple,
+    path: tuple[str, ...],
     ids: ModIds,
 ) -> None:
     doc = make_profile()
@@ -900,7 +901,7 @@ def test_find_residues_missing_or_wrong_type_container_yields_no_residue(
 
 
 def test_find_residues_reports_pmc_and_scav_item_hits_separately_with_distinct_ids(
-    tmp_path: Path, make_profile: Callable[..., dict]
+    tmp_path: Path, make_profile: MakeProfile
 ) -> None:
     doc = make_profile(hits=frozenset({"pmc:item"}), item_id=ITEM_A)
     doc["characters"]["scav"]["Inventory"]["items"][1]["_tpl"] = ITEM_B
@@ -917,7 +918,7 @@ def test_find_residues_reports_pmc_and_scav_item_hits_separately_with_distinct_i
 
 
 def test_find_residues_orders_character_major_then_category_then_string_last(
-    tmp_path: Path, make_profile: Callable[..., dict]
+    tmp_path: Path, make_profile: MakeProfile
 ) -> None:
     marker = "string-only-marker-id"
     doc = make_profile(
@@ -1048,7 +1049,7 @@ def test_find_residues_string_fallback_excludes_matched_ids_but_keeps_unmatched(
 # --------------------------------------------------------------------------
 
 
-def _pmc_with_repeatable(active: list) -> dict:
+def _pmc_with_repeatable(active: list[JsonDict]) -> JsonDict:
     content = _empty_pmc_profile()
     content["characters"]["pmc"]["RepeatableQuests"] = [
         {
@@ -1075,7 +1076,7 @@ def _pmc_with_repeatable(active: list) -> dict:
     ],
 )
 def test_find_residues_repeatable_quest_matches_by_id_templateid_or_qid(
-    tmp_path: Path, quest_entry: dict
+    tmp_path: Path, quest_entry: JsonDict
 ) -> None:
     ids = ModIds(quests={QUEST_ID})
     content = _pmc_with_repeatable([quest_entry])
@@ -1660,7 +1661,7 @@ def test_find_residues_hideout_area_no_hit_leaves_no_residue(
 
 
 def test_collect_mod_ids_recipes_from_recipe_list_keys_below_hideout(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/hideout/production.json": json.dumps(
@@ -1687,7 +1688,7 @@ def test_collect_mod_ids_recipes_from_recipe_list_keys_below_hideout(
 
 
 def test_collect_mod_ids_recipes_from_a_plain_list_below_hideout(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/hideout/areas.json": json.dumps(
@@ -1704,7 +1705,7 @@ def test_collect_mod_ids_recipes_from_a_plain_list_below_hideout(
 
 
 def test_collect_mod_ids_achievements_from_achievements_json_uses_id_field(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/templates/achievements.json": json.dumps(
@@ -1722,7 +1723,7 @@ def test_collect_mod_ids_achievements_from_achievements_json_uses_id_field(
 
 
 def test_collect_mod_ids_achievements_from_an_achievement_path_segment(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/achievement/custom.json": json.dumps(
@@ -1770,7 +1771,7 @@ def test_profile_paths_returns_empty_list_when_profiles_dir_is_missing(
 
 
 def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_x = "5c0d1b8b86f7744bb2683cf1"
     item_y = "5c0d1b8b86f7744bb2683cf2"
@@ -1829,7 +1830,9 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
     ]
 
 
-def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit) -> None:
+def test_check_all_skips_removed_mods(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
     item_x = "5c0d1b8b86f7744bb2683cf1"
     commit_hash = install_commit(
         clean_repo,
@@ -1865,7 +1868,7 @@ def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit) -> None:
 
 
 def test_check_all_prefixes_collection_warnings_with_the_mod_name(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -1883,7 +1886,7 @@ def test_check_all_prefixes_collection_warnings_with_the_mod_name(
 
 
 def test_check_all_does_not_modify_the_repository_or_profiles(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_x = "5c0d1b8b86f7744bb2683cf1"
     install_commit(
@@ -1917,7 +1920,7 @@ def test_check_all_does_not_modify_the_repository_or_profiles(
 
 
 def test_collect_mod_ids_accepts_db_files_saved_with_a_utf8_bom(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     files = {
         "SPT/user/mods/ServerMod/db/templates/items.json": (

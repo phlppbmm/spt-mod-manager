@@ -57,6 +57,7 @@ def test_init_does_not_create_an_initial_commit(fake_game_dir: Path) -> None:
         ["git", "-C", str(fake_game_dir), "log", "--oneline"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert "does not have any commits" in result.stderr.lower()

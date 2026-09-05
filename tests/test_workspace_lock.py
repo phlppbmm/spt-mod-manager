@@ -16,13 +16,14 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
 import psutil
 import pytest
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import game_dir, services
 from sptmod.core.errors import OperationInProgressError
 from sptmod.core.repo import Repo
@@ -59,7 +60,7 @@ def _write_lock(path: Path, *, pid: int, operation: str = "") -> Path:
 
 
 @contextmanager
-def _held(path: Path, raw_content: str) -> Iterator[Path]:
+def _held(path: Path, raw_content: str) -> Generator[Path]:
     """Really hold the lock on ``path`` with ``raw_content`` in its file.
 
     Takes the same operating-system lock the production code takes, directly
@@ -439,7 +440,7 @@ def test_no_progress_is_emitted_when_the_lock_is_free(clean_repo: Repo) -> None:
 
 
 def test_install_waits_for_a_held_lock_instead_of_raising_dirty_tree(
-    clean_repo: Repo, make_archive
+    clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     release_after = 0.3
@@ -465,7 +466,7 @@ def test_install_waits_for_a_held_lock_instead_of_raising_dirty_tree(
 
 
 def test_two_installs_of_different_mods_at_once_both_succeed(
-    clean_repo: Repo, make_archive
+    clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
     archive_a = make_archive({"BepInEx/plugins/ModA.dll": b"a-bytes"}, "zip")
     archive_b = make_archive({"BepInEx/plugins/ModB.dll": b"b-bytes"}, "zip")
@@ -500,7 +501,7 @@ def test_two_installs_of_different_mods_at_once_both_succeed(
 
 
 def test_read_only_calls_ignore_a_held_lock_and_return_quickly(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 

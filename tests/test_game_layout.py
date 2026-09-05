@@ -13,11 +13,13 @@ list_mods, check_profiles).
 
 import json
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app as cli_app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import GitError, NotAGameDirError
@@ -176,7 +178,7 @@ def _build_pe_around_version_data(version_data: bytes) -> bytes:
     return header_blob + rsrc_padded
 
 
-def _build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
+def build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
     """Build a minimal PE32+ image whose VS_VERSION_INFO carries ``key_name``."""
     return _build_pe_around_version_data(_build_version_resource(version, key_name))
 
@@ -188,9 +190,9 @@ def _patched(data: bytes, offset: int, replacement: bytes) -> bytes:
     return bytes(patched)
 
 
-def _write_server_exe(root: Path, runtime_dir_name: str, version: str) -> Path:
+def write_server_exe(root: Path, runtime_dir_name: str, version: str) -> Path:
     exe_path = root / runtime_dir_name / "SPT.Server.exe"
-    exe_path.write_bytes(_build_synthetic_exe(version))
+    exe_path.write_bytes(build_synthetic_exe(version))
     return exe_path
 
 
@@ -201,7 +203,7 @@ class TestSyntheticExeBuilderSanityCheck:
         self, tmp_path: Path
     ) -> None:
         exe = tmp_path / "SPT.Server.exe"
-        exe.write_bytes(_build_synthetic_exe("4.1.2"))
+        exe.write_bytes(build_synthetic_exe("4.1.2"))
 
         assert read_pe_file_version(exe) == "4.1.2"
 
@@ -360,10 +362,10 @@ def _corrupt_version_block_declares_an_impossible_length(data: bytes) -> bytes:
     ids=lambda fn: fn.__name__.removeprefix("_corrupt_"),
 )
 def test_read_pe_file_version_none_for_a_malformed_resource_section(
-    tmp_path: Path, corrupt
+    tmp_path: Path, corrupt: Callable[[bytes], bytes]
 ) -> None:
     exe = tmp_path / "SPT.Server.exe"
-    exe.write_bytes(corrupt(_build_synthetic_exe("1.2.3")))
+    exe.write_bytes(corrupt(build_synthetic_exe("1.2.3")))
 
     assert read_pe_file_version(exe) is None
 
@@ -372,7 +374,7 @@ def test_read_pe_file_version_none_when_neither_file_nor_product_version_present
     tmp_path: Path,
 ) -> None:
     exe = tmp_path / "SPT.Server.exe"
-    exe.write_bytes(_build_synthetic_exe("1.2.3", key_name="Comments"))
+    exe.write_bytes(build_synthetic_exe("1.2.3", key_name="Comments"))
 
     assert read_pe_file_version(exe) is None
 
@@ -630,7 +632,7 @@ def test_read_pe_file_version_reads_the_version_resource(
     tmp_path: Path, key_name: str, version: str
 ) -> None:
     exe = tmp_path / "SPT.Server.exe"
-    exe.write_bytes(_build_synthetic_exe(version, key_name))
+    exe.write_bytes(build_synthetic_exe(version, key_name))
 
     assert read_pe_file_version(exe) == version
 
@@ -717,7 +719,7 @@ def _build_layout_and_repo(
         core_config["sptVersion"] = core_version
     _write_core_json(layout, json.dumps(core_config))
     if exe_version is not None:
-        _write_server_exe(layout.root, layout.runtime_dir_name, exe_version)
+        write_server_exe(layout.root, layout.runtime_dir_name, exe_version)
     repo = Repo.init(layout)
     return layout, repo
 
@@ -845,7 +847,7 @@ def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(
     fake_game_dir_runtime: Path,
 ) -> None:
     (fake_game_dir_runtime / "SPT").mkdir()
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = runner.invoke(cli_app, ["init", str(fake_game_dir_runtime)])
 
@@ -862,7 +864,7 @@ def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(
 def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
     fake_game_dir_runtime: Path,
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
 
@@ -879,7 +881,7 @@ def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
 def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
     fake_game_dir_runtime: Path,
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
 
@@ -896,9 +898,9 @@ def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
 
 
 def test_install_from_archive_translates_the_spt_prefix_to_the_runtime_dir(
-    fake_game_dir_runtime: Path, make_archive
+    fake_game_dir_runtime: Path, make_archive: MakeArchive
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     services.init_game_dir(fake_game_dir_runtime)
     archive = make_archive(
         {
@@ -919,9 +921,9 @@ def test_install_from_archive_translates_the_spt_prefix_to_the_runtime_dir(
 
 
 def test_list_mods_and_status_work_on_the_runtime_layout(
-    fake_game_dir_runtime: Path, make_archive
+    fake_game_dir_runtime: Path, make_archive: MakeArchive
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     services.init_game_dir(fake_game_dir_runtime)
     archive = make_archive(
         {
@@ -951,9 +953,9 @@ def test_list_mods_and_status_work_on_the_runtime_layout(
 
 
 def test_check_profiles_finds_residue_on_the_runtime_layout(
-    fake_game_dir_runtime: Path, install_commit
+    fake_game_dir_runtime: Path, install_commit: InstallCommit
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     repo = Repo.init(detect_layout(fake_game_dir_runtime))
     repo.commit(
         "chore: clean SPT 4.1.2", trailers={"Spt-Version": "4.1.2"}, paths=None

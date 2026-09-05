@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from fixture_types import InstallCommit
 from sptmod.core.conflicts import (
     apply_force,
     check_dependencies,
@@ -58,7 +59,7 @@ def test_check_file_conflicts_ignores_files_that_do_not_exist_yet(
 
 
 def test_check_file_conflicts_reports_tracked_file_naming_owning_mod(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -110,7 +111,7 @@ def test_check_file_conflicts_reports_untracked_file_with_adopt_hint(
 
 
 def test_check_file_conflicts_keeps_the_order_of_target_files(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(
         clean_repo,
@@ -133,7 +134,7 @@ def test_check_file_conflicts_keeps_the_order_of_target_files(
 
 
 def test_check_file_conflicts_propagates_git_error(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     """A broken repository surfaces as an error instead of a silent finding."""
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})

@@ -3,7 +3,7 @@
 import json
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +11,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from fixture_types import InstallCommit, JsonDict, MakeArchive, MakeProfile
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
@@ -194,7 +195,7 @@ def committed_repo(initialized_repo: Repo) -> Iterator[tuple[Repo, str]]:
 
 
 @pytest.fixture
-def make_profile():
+def make_profile() -> MakeProfile:
     """Build a realistic minimal SPT 4.1.3 profile document.
 
     Both characters (``pmc``, ``scav``), every container the residue category
@@ -228,17 +229,17 @@ def make_profile():
         other_recipe_id: str = "5c0d1b8b86f7744bb2683c01",
         achievement_id: str = "achievement-mod",
         other_achievement_id: str = "achievement-unrelated",
-    ) -> dict:
+    ) -> JsonDict:
         def v(placement: str, mod_value: object, other_value: object) -> object:
             return mod_value if placement in hits else other_value
 
-        def character(name: str, *, achievements: bool, repeatable: bool) -> dict:
+        def character(name: str, *, achievements: bool, repeatable: bool) -> JsonDict:
             root_id = f"{name}-stash-root"
             container_id = f"{name}-container"
             child_id = f"{name}-child"
             grandchild_id = f"{name}-grandchild"
             unrelated_id = f"{name}-unrelated"
-            data: dict = {
+            data: JsonDict = {
                 "Inventory": {
                     "items": [
                         {"_id": root_id, "_tpl": other_item_id, "slotId": "stash"},
@@ -528,7 +529,7 @@ def make_profile():
 
 
 @pytest.fixture
-def make_archive(tmp_path: Path):
+def make_archive(tmp_path: Path) -> MakeArchive:
     """Factory building a real archive file from ``{relpath: content}`` entries.
 
     Returns a callable ``make_archive(files, fmt) -> Path`` where ``fmt`` is
@@ -546,7 +547,7 @@ def make_archive(tmp_path: Path):
 
     counter = itertools.count()
 
-    def _make(files: dict[str, str | bytes], fmt: str) -> Path:
+    def _make(files: Mapping[str, str | bytes], fmt: str) -> Path:
         archive_path = tmp_path / f"archive-{next(counter)}.{fmt}"
         if fmt == "zip":
             import zipfile
@@ -612,7 +613,7 @@ def clean_repo(initialized_repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Repo:
 
 
 @pytest.fixture
-def install_commit(monkeypatch: pytest.MonkeyPatch):
+def install_commit(monkeypatch: pytest.MonkeyPatch) -> InstallCommit:
     """Factory writing a mod's files and committing them with full mod trailers.
 
     Builds git history directly (bypassing the stubbed ``install_from_archive``
@@ -637,7 +638,7 @@ def install_commit(monkeypatch: pytest.MonkeyPatch):
         *,
         mod_type: str = "client",
         state: str = "installed",
-        files: dict[str, str | bytes] | None = None,
+        files: Mapping[str, str | bytes] | None = None,
         minute: int = 1,
         **trailer_overrides: str,
     ) -> str:
@@ -710,13 +711,16 @@ def _write_stub_binary(path: Path) -> None:
     os.chmod(path, 0o755)
 
 
-def stub_dump(binary_path: Path) -> dict:
+def stub_dump(binary_path: Path) -> JsonDict:
     """Read back the argv/cwd/env a stub process at ``binary_path`` recorded.
 
     Raises ``FileNotFoundError`` until the stub has actually started and
     wound; callers poll on it after ``launch_profile`` returns.
     """
-    return json.loads(Path(f"{binary_path}.dump.json").read_text(encoding="utf-8"))
+    dump: JsonDict = json.loads(
+        Path(f"{binary_path}.dump.json").read_text(encoding="utf-8")
+    )
+    return dump
 
 
 @dataclass(frozen=True)

@@ -46,9 +46,98 @@ mypy_path = "src"
 module = "rarfile"
 ignore_missing_imports = true
 
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+# Strict-mode rules that are reachable without cast/Any noise.
+reportMissingParameterType = "error"
+reportMissingTypeArgument = "error"
+reportUnknownParameterType = "error"
+reportPrivateUsage = "error"
+reportDeprecated = "error"
+reportUnusedFunction = "error"
+reportUnusedVariable = "error"
+reportUnusedImport = "error"
+reportUnusedExpression = "error"
+reportUnnecessaryComparison = "error"
+reportUnnecessaryIsInstance = "error"
+reportConstantRedefinition = "error"
+reportIncompatibleMethodOverride = "error"
+reportUntypedFunctionDecorator = "error"
+reportUntypedBaseClass = "error"
+reportUntypedNamedTuple = "error"
+reportTypeCommentUsage = "error"
+reportInvalidStubStatement = "error"
+reportSelfClsParameterName = "error"
+# Off: strict's Unknown-propagation family. Those findings come from
+# json.load/psutil/Popen returning Any; removing them needs TypedDicts and casts
+# across core JSON handling, and mypy --strict already covers that ground.
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+# rarfile ships no py.typed marker and no stub package exists on PyPI
+# (same reason as the mypy override above).
+reportMissingTypeStubs = "none"
+
+[tool.pylint.main]
+# workspace.py imports msvcrt under a sys.platform == "win32" guard (Windows-only).
+ignored-modules = ["msvcrt"]
+
+[tool.pylint."messages control"]
+disable = [
+    # Test names are the documentation and ruff's pydocstyle rules are not
+    # enabled, so this only produces noise.
+    "missing-function-docstring",
+    # Every pytest fixture argument shadows the fixture function.
+    "redefined-outer-name",
+    # Parallel arrange blocks are intentional; the suite is the Rust-port spec
+    # and must stay readable per test.
+    "duplicate-code",
+    # `== []` / `== {}` are exact-value assertions in tests; rewriting them to
+    # `not x` would weaken them.
+    "use-implicit-booleaness-not-comparison",
+    # Service functions keep a uniform (path, ...) signature for the RPC
+    # contract (services.sync_catalog ignores `path`), and fixtures are
+    # requested for their effects.
+    "unused-argument",
+    # ruff's isort (lint select "I") owns import order; pylint mis-sorts the
+    # sys.path-based test-helper imports.
+    "wrong-import-order",
+    # Deliberate lazy imports (cli.py -> sptmod.server.rpc) and per-test imports.
+    "import-outside-toplevel",
+    # Detached Popen processes (launch.py) and test stub processes outlive the
+    # enclosing block.
+    "consider-using-with",
+    # `format` and `filter` are part of the service-function/CLI contract names.
+    "redefined-builtin",
+    # ruff E501 owns line length (88); pylint's 100 disagrees and does not
+    # honour ruff's pragma-comment exemption.
+    "line-too-long",
+    # rpc.py's `except Exception` is the RPC error boundary by design.
+    "broad-exception-caught",
+]
+
+[tool.pylint.design]
+# Raised, not disabled: keeps a ceiling. Max observed in parentheses.
+max-args = 12                 # (11)
+max-positional-arguments = 12 # (9)
+max-locals = 30               # (27)
+max-attributes = 30           # (27)
+max-returns = 10              # (9)
+min-public-methods = 0        # frozen dataclasses have none
+
+[tool.pylint.format]
+max-module-lines = 4000       # (services.py 3480)
+
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
+    "pylint>=4.0.8",
+    "pyright[nodejs]>=1.1.411",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",

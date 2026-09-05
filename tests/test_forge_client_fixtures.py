@@ -52,11 +52,13 @@ class RecordingSleep:
 
 @pytest.fixture
 def fake_clock() -> FakeClock:
+    """FakeClock that returns a constant value unless advance() increments it."""
     return FakeClock()
 
 
 @pytest.fixture
 def recording_sleep() -> RecordingSleep:
+    """A mock sleep function that records requested sleep durations without blocking."""
     return RecordingSleep()
 
 
@@ -71,6 +73,7 @@ def client_factory(
     made: list[ForgeClient] = []
 
     def _make(**kwargs: Any) -> ForgeClient:
+        """Create a ForgeClient with injected test doubles."""
         client = ForgeClient(clock=fake_clock, sleep=recording_sleep, **kwargs)
         made.append(client)
         return client
@@ -82,6 +85,7 @@ def client_factory(
 
 @pytest.fixture
 def respx_router() -> Iterator[respx.MockRouter]:
+    """A respx HTTP mocking router set to the Forge's default base URL."""
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         yield router
 
@@ -90,10 +94,12 @@ def respx_router() -> Iterator[respx.MockRouter]:
 
 
 def success_envelope(data: Any) -> dict[str, Any]:
+    """Build a success envelope response with the given data payload."""
     return {"success": True, "data": data}
 
 
 def error_envelope(code: str, message: str) -> dict[str, Any]:
+    """Build an error envelope response with the given error code and message."""
     return {"success": False, "code": code, "message": message}
 
 
@@ -106,6 +112,7 @@ def page_envelope(
     total: int | None = None,
     next_url: str | None = None,
 ) -> dict[str, Any]:
+    """Build a paginated response envelope with success=true, items, links, and metadata."""
     resolved_total = len(items) if total is None else total
     return {
         "success": True,
@@ -129,6 +136,7 @@ def page_envelope(
 
 
 def owner_json(**overrides: Any) -> dict[str, Any]:
+    """Build a ForgeUser (owner) object with default values, overridable by kwargs."""
     data = {
         "id": 10,
         "name": "Alice",
@@ -140,6 +148,7 @@ def owner_json(**overrides: Any) -> dict[str, Any]:
 
 
 def mod_json_minimal(**overrides: Any) -> dict[str, Any]:
+    """Build a minimal ForgeMod object (as from /mods list) with default values, overridable by kwargs."""
     data: dict[str, Any] = {
         "id": 1,
         "hub_id": 100,
@@ -168,6 +177,7 @@ def mod_json_minimal(**overrides: Any) -> dict[str, Any]:
 
 
 def mod_json_full(**overrides: Any) -> dict[str, Any]:
+    """Build a full ForgeMod object (as from /mod/{id} detail) with include fields, overridable by kwargs."""
     data = mod_json_minimal(
         description="Full description.",
         custom_ai_disclosure="Uses AI for translation.",
@@ -188,6 +198,7 @@ def mod_json_full(**overrides: Any) -> dict[str, Any]:
 
 
 def version_json(**overrides: Any) -> dict[str, Any]:
+    """Build a ForgeVersion object with embedded dependencies and metadata, overridable by kwargs."""
     data: dict[str, Any] = {
         "id": 900,
         "hub_id": 800,

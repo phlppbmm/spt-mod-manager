@@ -22,6 +22,7 @@ from sptmod.core.models import ModType
 
 
 def _write_tree(root: Path, entries: dict[str, str]) -> None:
+    """Write relative paths as text files under root (dict keys as paths, values as content)."""
     for relpath, content in entries.items():
         path = root / relpath
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +55,7 @@ def _assert_layout_matches(
     expected: dict[Path, str],
     expected_mod_type: ModType,
 ) -> None:
+    """Assert an ArchiveLayout's mod type, files, mappings and roundtrip content."""
     assert layout.mod_type == expected_mod_type
     assert set(layout.files) == set(expected)
 
@@ -200,6 +202,11 @@ def test_find_anchor_layout_variants(
     expected_files: dict[Path, str],
     expected_mod_type: ModType,
 ) -> None:
+    """Archive layouts are detected correctly from directory trees (server/client/hybrid).
+
+    Tests that ``find_anchor`` normalizes path casing, detects mod type, and
+    produces mappings that roundtrip file content to the normalized targets.
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(extracted_root, tree_entries)
@@ -210,6 +217,8 @@ def test_find_anchor_layout_variants(
 
 
 def test_find_anchor_raises_when_no_anchor_present(tmp_path: Path) -> None:
+    """ArchiveError includes a sample of content paths when neither SPT/user/mods
+    nor BepInEx/plugins anchors exist, helping users understand what went wrong."""
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(
@@ -229,6 +238,7 @@ def test_find_anchor_raises_when_no_anchor_present(tmp_path: Path) -> None:
 
 
 def test_find_anchor_raises_on_empty_directory(tmp_path: Path) -> None:
+    """find_anchor raises ArchiveError for empty extracted directory (no content sample in error)."""
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
 
@@ -239,6 +249,7 @@ def test_find_anchor_raises_on_empty_directory(tmp_path: Path) -> None:
 def test_find_anchor_raises_message_truncated_with_a_count_past_thirty_entries(
     tmp_path: Path,
 ) -> None:
+    """Error message listing unanchored files is truncated after 30 entries."""
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(
@@ -263,6 +274,11 @@ def test_find_anchor_raises_message_truncated_with_a_count_past_thirty_entries(
 
 
 def test_find_anchor_ignores_unrelated_bare_plugins_dir(tmp_path: Path) -> None:
+    """A bare 'plugins' folder nested under other content is not anchored as client.
+
+    Only plugins directories reachable from root without passing through an
+    already-detected anchor qualify as client anchors.
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(
@@ -285,6 +301,11 @@ def test_find_anchor_ignores_unrelated_bare_plugins_dir(tmp_path: Path) -> None:
 
 
 def test_find_anchor_ignores_unrelated_bare_user_mods_dir(tmp_path: Path) -> None:
+    """A bare 'user/mods' folder nested under other content is not anchored as server.
+
+    Only user/mods directories reachable from root without passing through an
+    already-detected anchor qualify as server anchors.
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(
@@ -396,6 +417,11 @@ def test_find_anchor_does_not_trust_a_junk_dir_that_merely_starts_with_spt(
 def test_find_anchor_raises_for_a_junk_spt_prefixed_dir_with_no_other_content(
     tmp_path: Path,
 ) -> None:
+    """ArchiveError is raised for a junk directory merely starting with 'spt' and no mods.
+
+    Without real mod content (no package.json), a 'spt*'-prefixed directory like
+    'spticons' must not be mistaken for an installer prefix.
+    """
     extracted_root = tmp_path / "extracted"
     extracted_root.mkdir()
     _write_tree(extracted_root, {"spticons/user/mods/readme.png": "not-a-mod"})

@@ -39,6 +39,7 @@ def _write_state_file(
     server: dict[str, Any] | None = None,
     client: dict[str, Any] | None = None,
 ) -> None:
+    """Write a launch state file with the specified process and configuration state."""
     payload = {
         "profile_id": "p",
         "stop_server_on_exit": stop_server_on_exit,
@@ -52,6 +53,7 @@ def _write_state_file(
 def _ref(
     pid: int, started_at: float, *, started_by_sptmod: bool | None = None
 ) -> dict[str, Any]:
+    """Build a process reference object for the launch state file."""
     payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
     if started_by_sptmod is not None:
         payload["started_by_sptmod"] = started_by_sptmod
@@ -61,6 +63,7 @@ def _ref(
 def _live_ref(
     process: subprocess.Popen[bytes], *, started_by_sptmod: bool | None = None
 ) -> dict[str, Any]:
+    """Build a process reference from a running process."""
     return _ref(
         process.pid,
         psutil.Process(process.pid).create_time(),
@@ -78,6 +81,7 @@ def _dead_ref(spawn: Callable[[], subprocess.Popen[bytes]]) -> dict[str, Any]:
 
 
 def _spawner(executable: Path) -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
+    """Yield a spawner that tracks and cleans up all spawned processes on exit."""
     spawned: list[subprocess.Popen[bytes]] = []
 
     def _spawn() -> subprocess.Popen[bytes]:
@@ -94,6 +98,7 @@ def _spawner(executable: Path) -> Iterator[Callable[[], subprocess.Popen[bytes]]
 
 @pytest.fixture
 def spawn_sleeper() -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
+    """Factory spawning throwaway real processes that just sleep."""
     sleep_bin = shutil.which("sleep")
     assert sleep_bin is not None
     yield from _spawner(Path(sleep_bin))
@@ -140,10 +145,12 @@ def _ticking(
 
 
 def _nothing(_tick: int) -> None:
+    """A no-op tick callback for tests that don't need to adjust processes per cycle."""
     return None
 
 
 def _state_file(root: Path) -> Path:
+    """Return the path to the launch state file in a root directory."""
     return root / LAUNCH_STATE_FILE_NAME
 
 
@@ -153,6 +160,10 @@ def _state_file(root: Path) -> Path:
 
 
 def test_watch_game_returns_immediately_with_no_state_file(tmp_path: Path) -> None:
+    """watch_game returns immediately without sleeping when no state file exists.
+
+    No state file means no launch to watch; sleep is never called.
+    """
     watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
 
     assert not _state_file(tmp_path).exists()
@@ -161,6 +172,10 @@ def test_watch_game_returns_immediately_with_no_state_file(tmp_path: Path) -> No
 def test_watch_game_returns_immediately_with_a_malformed_state_file(
     tmp_path: Path,
 ) -> None:
+    """watch_game returns immediately without sleeping when state file is malformed JSON.
+
+    Malformed state cannot be parsed; file is left untouched, sleep never called.
+    """
     _state_file(tmp_path).write_text("not json", encoding="utf-8")
 
     watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
@@ -169,6 +184,11 @@ def test_watch_game_returns_immediately_with_a_malformed_state_file(
 
 
 def test_watch_game_returns_immediately_with_no_client_recorded(tmp_path: Path) -> None:
+    """watch_game returns immediately when state has server but no client process.
+
+    Only the server is recorded; no client to wait for. State file is left
+    untouched, sleep never called.
+    """
     _write_state_file(tmp_path, server=_ref(1, 1.0, started_by_sptmod=True))
 
     watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
@@ -182,6 +202,7 @@ def test_watch_game_returns_immediately_with_no_client_recorded(tmp_path: Path) 
 
 
 def _watch_until_client_exits(tmp_path: Path, client: subprocess.Popen[bytes]) -> None:
+    """Run the watcher with a fake clock that kills the client after the first poll."""
     def _on_tick(tick: int) -> None:
         if tick == 1:
             client.kill()
@@ -194,6 +215,11 @@ def _watch_until_client_exits(tmp_path: Path, client: subprocess.Popen[bytes]) -
 def test_watch_game_stops_the_server_when_it_started_it_and_was_asked_to(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """watch_game stops server when client exits and stop_server_on_exit is true.
+
+    Server is marked started_by_sptmod; client is alive. After client exits,
+    watch_game terminates server and clears state.
+    """
     server = spawn_sleeper()
     client = spawn_sleeper()
     _write_state_file(
@@ -214,6 +240,12 @@ def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     spawn_client: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
+    """watch_game finds game by name scan when recorded client pid is already gone.
+
+    State records a dead client pid (wrapper exited); scan finds a live
+    EscapeFromTarkov.exe process (the game itself). watch_game waits for the
+    scanned game, stops the server when it exits.
+    """
     # What a Linux launch looks like: the process sptmod spawned was only the
     # wrapper and is already gone, while the game itself runs under Wine.
     server = spawn_sleeper()
@@ -236,6 +268,12 @@ def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     spawn_client: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
+    """watch_game waits within grace_seconds for game to appear by name before monitoring.
+
+    State records dead client pid. Grace period is 30s; game appears on tick 2
+    (at 6s elapsed) within the grace. watch_game waits for it to exit, stops
+    the server, clears state.
+    """
     server = spawn_sleeper()
     _write_state_file(
         tmp_path,
@@ -262,6 +300,12 @@ def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
 def test_watch_game_keeps_waiting_while_the_recorded_process_is_still_alive(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """watch_game waits for recorded process even after grace period expires if it's still alive.
+
+    Grace period is 0s (expired immediately), no game name appears in scan, but
+    recorded client pid is still alive. watch_game waits for it to exit rather
+    than giving up at grace expiry.
+    """
     # Nothing carries the game's name, the grace period is over from the
     # first look -- but the process the launch spawned still runs, so it is
     # the game (or the wrapper hosting it) and gets waited for.
@@ -291,6 +335,11 @@ def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     spawn_client: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
+    """watch_game leaves server running when stop_server_on_exit is false.
+
+    Server started_by_sptmod, but flag is false. After client exits, server
+    is not terminated; only state file is cleared.
+    """
     server = spawn_sleeper()
     client = spawn_client()
     _write_state_file(
@@ -311,6 +360,11 @@ def test_watch_game_leaves_a_server_it_did_not_start(
     spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     spawn_client: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
+    """watch_game leaves server alone when started_by_sptmod is false.
+
+    Server was not started by sptmod (started externally); even though
+    stop_server_on_exit is true, the server is not terminated. State is cleared.
+    """
     server = spawn_sleeper()
     client = spawn_client()
     _write_state_file(
@@ -329,6 +383,11 @@ def test_watch_game_leaves_a_server_it_did_not_start(
 def test_watch_game_clears_state_with_no_server_recorded_at_all(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """watch_game clears state file when client exits and server was never recorded.
+
+    No server entry in state (perhaps launched without one). After client exits,
+    state is cleared.
+    """
     client = spawn_sleeper()
     _write_state_file(tmp_path, stop_server_on_exit=True, client=_live_ref(client))
 
@@ -345,6 +404,11 @@ def test_watch_game_clears_state_with_no_server_recorded_at_all(
 def test_watch_game_stops_the_server_and_notes_why_when_no_game_appears(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """watch_game stops server and records failure when game doesn't appear within grace period.
+
+    Grace period is 9s; game never appears (tick callback does nothing). After
+    grace expires, watch_game stops the server and writes failure note to state.
+    """
     server = spawn_sleeper()
     _write_state_file(
         tmp_path,
@@ -364,6 +428,12 @@ def test_watch_game_stops_the_server_and_notes_why_when_no_game_appears(
 def test_watch_game_notes_the_failure_when_the_recorded_pid_was_reused(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """watch_game records failure when recorded client pid was reused by a different process.
+
+    PID reuse: state records a pid with start time 1.0, but the process at that
+    pid started much later (stranger). watch_game ignores it, waits for grace
+    period, then records failure.
+    """
     # A real, running process, but a started_at that does not match it --
     # exactly what a pid reused by an unrelated process would look like.
     stranger = spawn_sleeper()
@@ -380,6 +450,11 @@ def test_watch_game_notes_the_failure_when_the_recorded_pid_was_reused(
 def test_the_noted_failure_survives_reading_the_state_file_back(
     tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
+    """Failure note persists in state file; launch_status still reads other fields like profile_id.
+
+    watch_game writes failure note; state file is not deleted. launch_status can
+    still read the profile_id field from the state despite the failure.
+    """
     _write_state_file(tmp_path, client=_dead_ref(spawn_sleeper))
 
     sleep, clock = _ticking(_nothing)
@@ -399,6 +474,7 @@ def test_the_noted_failure_survives_reading_the_state_file_back(
 def test_main_reports_usage_and_exits_2_with_the_wrong_argument_count(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """main() exits 2 and prints usage to stderr when called with no arguments."""
     assert main([]) == 2
     assert USAGE in capsys.readouterr().err
 
@@ -406,11 +482,17 @@ def test_main_reports_usage_and_exits_2_with_the_wrong_argument_count(
 def test_main_reports_usage_and_exits_2_with_too_many_arguments(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """main() exits 2 and prints usage to stderr when called with too many arguments."""
     assert main(["a", "b"]) == 2
     assert USAGE in capsys.readouterr().err
 
 
 def test_main_watches_the_given_directory_and_returns_0(tmp_path: Path) -> None:
+    """main() parses directory argument, calls watch_game, returns exit code 0.
+
+    No state file; watch_game returns immediately. This proves main() parses
+    the path and calls watch_game end-to-end.
+    """
     # No state file at all: watch_game returns immediately, so this proves
     # main() actually calls watch_game with the parsed path, end to end.
     assert main([str(tmp_path)]) == 0
@@ -419,6 +501,11 @@ def test_main_watches_the_given_directory_and_returns_0(tmp_path: Path) -> None:
 def test_run_module_as_main_watches_and_exits_0(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """sptmod.watch can be run as __main__ and exits with code 0.
+
+    Module's __main__ block calls main() with sys.argv. State has server but no
+    client; watch_game returns immediately. SystemExit(0) is raised.
+    """
     # Mirrors tests/test_dump_openapi.py's coverage of the __main__ guard: a
     # state file naming no client at all makes watch_game return immediately.
     _write_state_file(tmp_path, server=_ref(1, 1.0, started_by_sptmod=True))

@@ -17,10 +17,12 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure no game processes are detected during CLI tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a game directory repository and commit the baseline configuration."""
     repo = Repo.init(detect_layout(path))
     repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
@@ -29,6 +31,7 @@ def _clean_repo(path: Path) -> Repo:
 def test_init_happy_path_exits_zero_and_reports_the_spt_version(
     fake_game_dir: Path,
 ) -> None:
+    """init command exits 0 and stdout contains "4.1.0" from the detected layout."""
     result = runner.invoke(app, ["init", str(fake_game_dir)])
 
     assert result.exit_code == 0
@@ -38,6 +41,7 @@ def test_init_happy_path_exits_zero_and_reports_the_spt_version(
 def test_init_on_a_non_game_dir_exits_with_code_3_and_reports_on_stderr(
     tmp_path: Path,
 ) -> None:
+    """Init rejects non-game directories with exit code 3."""
     not_a_game_dir = tmp_path / "not-a-game"
     not_a_game_dir.mkdir()
 
@@ -68,6 +72,7 @@ def test_install_file_without_a_resolvable_version_prints_a_hint(
 def test_install_file_with_a_version_override_prints_no_versionless_hint(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
+    """Install with explicit --version suppresses the version hint."""
     _clean_repo(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
@@ -83,6 +88,7 @@ def test_install_file_with_a_version_override_prints_no_versionless_hint(
 def test_list_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """list command exits 0 when the game directory has mods."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -95,6 +101,7 @@ def test_list_happy_path_exits_zero(
 def test_files_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """files command exits 0 for an installed mod name."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -107,6 +114,7 @@ def test_files_happy_path_exits_zero(
 def test_history_happy_path_exits_zero(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """history command exits 0 when repo has commits."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -119,6 +127,7 @@ def test_history_happy_path_exits_zero(
 def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """Remove command succeeds and prints the removed mod name."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -142,6 +151,7 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
     monkeypatch: pytest.MonkeyPatch,
     install_commit: InstallCommit,
 ) -> None:
+    """Remove prompts for confirmation and leaves mod when declined."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -156,6 +166,7 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
 def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """Remove proceeds when user confirms the prompt."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -171,6 +182,7 @@ def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
 def test_remove_with_yes_flag_skips_the_confirmation_prompt(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """--yes flag bypasses the confirmation prompt."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -186,6 +198,7 @@ def test_remove_with_yes_flag_skips_the_confirmation_prompt(
 def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Removing a non-existent mod fails with exit code 11."""
     _clean_repo(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -198,6 +211,7 @@ def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
 def test_install_with_invalid_metadata_exits_with_code_13(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
+    """Installing a mod with invalid metadata fails with exit code 13."""
     _clean_repo(fake_game_dir)
     # "version" is mandatory in package.json; missing it makes read_package_json
     # raise InvalidMetadataError, which the CLI must map to its own exit code.
@@ -229,6 +243,8 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
     make_archive: MakeArchive,
     install_commit: InstallCommit,
 ) -> None:
+    """Dirty tree, game running, and ambiguous mod errors exit with codes 4, 5,
+    and 12 respectively."""
     if scenario == "dirty_tree":
         # No baseline commit: the tracked profile is still untracked.
         Repo.init(detect_layout(fake_game_dir))

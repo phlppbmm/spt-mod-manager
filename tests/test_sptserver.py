@@ -20,10 +20,12 @@ BASE_URL = "https://127.0.0.1:6969"
 
 
 def _layout(root: Path) -> GameLayout:
+    """Create a GameLayout for the SPT_Runtime directory structure."""
     return GameLayout(root=root, runtime_dir_name="SPT_Runtime")
 
 
 def _write_http_config(root: Path, config: object) -> None:
+    """Write an http.json config file for the server to read."""
     config_dir = root / "SPT_Runtime" / "SPT_Data" / "configs"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "http.json").write_text(
@@ -37,6 +39,10 @@ def _write_http_config(root: Path, config: object) -> None:
 
 
 def test_server_base_url_reads_ip_and_port_from_http_json(tmp_path: Path) -> None:
+    """server_base_url() reads ip and port from http.json and builds the URL.
+
+    http.json has ip="10.0.0.5" and port=7000; result is https://10.0.0.5:7000.
+    """
     _write_http_config(tmp_path, {"ip": "10.0.0.5", "port": 7000})
 
     assert server_base_url(_layout(tmp_path)) == "https://10.0.0.5:7000"
@@ -46,18 +52,25 @@ def test_server_base_url_reads_ip_and_port_from_http_json(tmp_path: Path) -> Non
 def test_server_base_url_maps_any_interface_hosts_to_loopback(
     tmp_path: Path, host: str
 ) -> None:
+    """server_base_url() maps any-interface addresses (0.0.0.0, ::, etc.) to loopback.
+
+    Any-interface placeholders (0.0.0.0, ::, [::]empty string, whitespace) are
+    replaced with 127.0.0.1 so local connections work.
+    """
     _write_http_config(tmp_path, {"ip": host, "port": 6969})
 
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
 
 
 def test_server_base_url_falls_back_when_the_file_is_missing(tmp_path: Path) -> None:
+    """server_base_url() uses defaults (127.0.0.1:6969) when http.json is missing."""
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
 
 
 def test_server_base_url_falls_back_when_the_file_is_invalid_json(
     tmp_path: Path,
 ) -> None:
+    """server_base_url() uses defaults when http.json contains invalid JSON."""
     _write_http_config(tmp_path, "not json")
 
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
@@ -66,24 +79,28 @@ def test_server_base_url_falls_back_when_the_file_is_invalid_json(
 def test_server_base_url_falls_back_when_the_file_is_not_a_json_object(
     tmp_path: Path,
 ) -> None:
+    """server_base_url() uses defaults when http.json is not a JSON object."""
     _write_http_config(tmp_path, [1, 2, 3])
 
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
 
 
 def test_server_base_url_ignores_a_non_string_ip_field(tmp_path: Path) -> None:
+    """server_base_url() ignores invalid ip type and uses default IP."""
     _write_http_config(tmp_path, {"ip": 12345, "port": 7000})
 
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:7000"
 
 
 def test_server_base_url_ignores_a_non_int_port_field(tmp_path: Path) -> None:
+    """server_base_url() ignores invalid port type and uses default port."""
     _write_http_config(tmp_path, {"ip": "10.0.0.5", "port": "7000"})
 
     assert server_base_url(_layout(tmp_path)) == "https://10.0.0.5:6969"
 
 
 def test_server_base_url_ignores_a_boolean_port_field(tmp_path: Path) -> None:
+    """server_base_url() explicitly rejects bool (despite int subclass) as port."""
     # bool is an int subclass in Python; the guard must reject it explicitly.
     _write_http_config(tmp_path, {"ip": "10.0.0.5", "port": True})
 
@@ -96,6 +113,7 @@ def test_server_base_url_ignores_a_boolean_port_field(tmp_path: Path) -> None:
 
 
 def test_probe_reports_free_when_nothing_accepts_the_connection() -> None:
+    """probe() returns 'free' when the server is not listening (connection refused)."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).mock(side_effect=httpx.ConnectError("refused"))
 
@@ -103,6 +121,7 @@ def test_probe_reports_free_when_nothing_accepts_the_connection() -> None:
 
 
 def test_probe_reports_spt_for_a_raw_json_pong() -> None:
+    """probe() returns 'spt' when the server responds with a valid JSON pong."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).respond(200, json={"Response": "Pong!"})
 
@@ -110,6 +129,11 @@ def test_probe_reports_spt_for_a_raw_json_pong() -> None:
 
 
 def test_probe_reports_spt_for_a_zlib_compressed_pong() -> None:
+    """probe() returns 'spt' when server responds with zlib-compressed pong.
+
+    Even if server ignores responsecompressed:0 header and sends compressed
+    data, probe() decompresses it and recognizes the pong.
+    """
     # Covers the _decode fallback: a server that ignores responsecompressed:0.
     body = zlib.compress(json.dumps({"Response": "Pong!"}).encode())
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
@@ -119,6 +143,7 @@ def test_probe_reports_spt_for_a_zlib_compressed_pong() -> None:
 
 
 def test_probe_sends_the_raw_response_header() -> None:
+    """probe() sets the responsecompressed:0 header to request uncompressed responses."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         route = router.get(PING_PATH).respond(200, json={"Response": "Pong!"})
 
@@ -138,6 +163,10 @@ def test_probe_sends_the_raw_response_header() -> None:
 def test_probe_reports_foreign_for_a_stranger(
     status_code: int, body_kwargs: dict[str, Any]
 ) -> None:
+    """probe() returns 'foreign' for non-SPT responses: wrong response, non-JSON, bad status.
+
+    Parameterized cases: wrong response text, non-JSON body, and bad HTTP status.
+    """
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).respond(status_code, **body_kwargs)
 
@@ -145,6 +174,7 @@ def test_probe_reports_foreign_for_a_stranger(
 
 
 def test_probe_reports_foreign_on_a_non_connect_non_timeout_transport_error() -> None:
+    """probe() returns 'foreign' for protocol errors (not connect or timeout)."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).mock(
             side_effect=httpx.RemoteProtocolError("garbled response")
@@ -154,6 +184,7 @@ def test_probe_reports_foreign_on_a_non_connect_non_timeout_transport_error() ->
 
 
 def test_probe_reports_timeout_for_a_connection_that_never_answers() -> None:
+    """probe() returns 'timeout' when the server does not respond within time limits."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.get(PING_PATH).mock(side_effect=httpx.ReadTimeout("slow"))
 
@@ -166,6 +197,7 @@ def test_probe_reports_timeout_for_a_connection_that_never_answers() -> None:
 
 
 def test_login_sends_a_zlib_compressed_put_body_and_the_raw_response_header() -> None:
+    """login() sends zlib-compressed username and responsecompressed:0 header."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         route = router.put(LOGIN_PATH).respond(200, json={"Response": True})
 
@@ -179,6 +211,7 @@ def test_login_sends_a_zlib_compressed_put_body_and_the_raw_response_header() ->
 
 
 def test_login_returns_false_when_the_server_does_not_know_the_profile() -> None:
+    """login() returns False when the server rejects the profile (Response: false)."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.put(LOGIN_PATH).respond(200, json={"Response": False})
 
@@ -186,6 +219,7 @@ def test_login_returns_false_when_the_server_does_not_know_the_profile() -> None
 
 
 def test_login_accepts_a_zlib_compressed_response() -> None:
+    """login() handles zlib-compressed responses in addition to raw JSON."""
     body = zlib.compress(json.dumps({"Response": True}).encode())
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.put(LOGIN_PATH).respond(200, content=body)
@@ -194,6 +228,7 @@ def test_login_accepts_a_zlib_compressed_response() -> None:
 
 
 def test_login_returns_false_for_an_undecodable_response() -> None:
+    """login() returns False when the response is not valid JSON or binary."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.put(LOGIN_PATH).respond(200, content=b"garbage")
 
@@ -201,6 +236,7 @@ def test_login_returns_false_for_an_undecodable_response() -> None:
 
 
 def test_login_raises_launch_error_when_the_server_stops_answering() -> None:
+    """login() raises LaunchError when the server connection fails (not profile rejection)."""
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
         router.put(LOGIN_PATH).mock(side_effect=httpx.ConnectError("refused"))
 

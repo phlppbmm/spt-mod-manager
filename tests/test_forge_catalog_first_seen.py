@@ -38,6 +38,7 @@ _ISO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 def _mod(
     mod_id: int, name: str, *, updated_at: str, downloads: int = 1
 ) -> JsonDict:
+    """Build a minimal mod dict for first_seen_at tests."""
     return mod_json_full(
         id=mod_id,
         name=name,
@@ -54,6 +55,7 @@ def _sync_page(
     respx_router: respx.MockRouter,
     client_factory: ClientFactory,
 ) -> ForgeClient:
+    """Mock a /mods page response with given mods and return a configured client."""
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
@@ -68,6 +70,10 @@ def _sync_page(
 def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When a new mod is synced, its first_seen_at field contains an ISO-8601
+    timestamp matching the current time (within one second); this enables time-
+    series analysis of when each mod was first discovered.
+    """
     before = datetime.now(UTC).timestamp()
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
@@ -92,6 +98,7 @@ def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
 def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updated(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Syncing an unchanged mod preserves its first_seen_at and reports zero updates."""
     mods = [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")]
     client = _sync_page(mods, respx_router, client_factory)
     catalog.sync(client, full=True)
@@ -112,6 +119,10 @@ def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updat
 def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When Alpha Mod (id=1) is synced with a changed name and download count,
+    its first_seen_at stamp from the prior sync is preserved, not updated;
+    this ensures the "when first seen" timestamp is immutable once set.
+    """
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
         respx_router,
@@ -138,6 +149,7 @@ def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
 def test_mod_appearing_only_in_a_later_delta_sync_gets_a_later_stamp_and_is_counted_new(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """A mod discovered in delta sync gets a fresh first_seen_at stamp later than prior syncs."""
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
         respx_router,

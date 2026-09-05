@@ -91,6 +91,10 @@ def _seed_search_mods(
 def test_get_mod_returns_the_cached_mod(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Seeding three mods into the catalog, get_mod(2) returns Beta Mod
+    with all cached fields (id, name, author) intact; this verifies the cache
+    round-trips mod metadata correctly and the numeric-id lookup path works.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     mod = catalog.get_mod(2)
@@ -102,12 +106,19 @@ def test_get_mod_returns_the_cached_mod(
 
 
 def test_get_mod_returns_none_for_unknown_id(catalog: Catalog) -> None:
+    """An empty cache returns None for any lookup; this guards against callers
+    accidentally treating an absent mod lookup as an error instead of a miss.
+    """
     assert catalog.get_mod(99999) is None
 
 
 def test_find_mod_matches_name_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """After seeding three mods, find_mod("aLpHa MoD") returns the Alpha Mod
+    record despite differing case; this guards against case-sensitive string
+    comparison breaking mod lookups from user input.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     mod = catalog.find_mod("aLpHa MoD")
@@ -119,6 +130,9 @@ def test_find_mod_matches_name_case_insensitively(
 def test_find_mod_returns_none_when_no_name_matches(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """After seeding three mods, find_mod() for a name not in the cache
+    returns None; this ensures failed lookups do not raise an exception.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     assert catalog.find_mod("Does Not Exist") is None
@@ -127,6 +141,10 @@ def test_find_mod_returns_none_when_no_name_matches(
 def test_search_matches_name_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Search with all-caps "ALPHA" returns only the mod containing that
+    substring (Alpha Mod, id=1), confirming case-insensitive substring matching
+    in mod names.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     results = catalog.search("ALPHA")
@@ -137,6 +155,10 @@ def test_search_matches_name_case_insensitively(
 def test_search_matches_author_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Search with lowercase "bob" returns the Beta Mod (id=2) whose author
+    is "Bob"; this verifies search queries also apply to mod author fields
+    with case-insensitive matching.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     results = catalog.search("bob")
@@ -147,6 +169,10 @@ def test_search_matches_author_case_insensitively(
 def test_search_with_empty_query_returns_every_mod_ordered_by_name(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """An empty search query returns all three seeded mods in alphabetical order
+    (Alpha, Beta, Gamma); this guards against the common "empty = error" bug
+    and verifies that no filter is the same as matching everything.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     results = catalog.search("")
@@ -157,6 +183,10 @@ def test_search_with_empty_query_returns_every_mod_ordered_by_name(
 def test_search_with_no_match_returns_empty_list(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """A search query matching nothing in a populated cache returns an empty
+    list rather than None or raising; this guards against None-handling bugs
+    when displaying search results.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     assert catalog.search("no-such-mod-anywhere") == []
@@ -165,6 +195,10 @@ def test_search_with_no_match_returns_empty_list(
 def test_search_compatible_with_excludes_mods_without_a_compatible_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When searching for "mod" with compatible_with="3.8.5", Gamma Mod (which
+    only has a 4.0-compatible version) is excluded from results; this ensures
+    the SPT version filter is applied to search results, not just direct lookups.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     results = catalog.search("mod", compatible_with="3.8.5")
@@ -215,6 +249,7 @@ def _seed_versions_for_resolve(
 def test_get_versions_orders_by_published_at_desc_then_id_desc(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.get_versions returns versions ordered by published_at DESC, tiebroken by id DESC."""
     mod = mod_json_full(
         id=1,
         name="Alpha Mod",
@@ -257,6 +292,10 @@ def test_get_versions_orders_by_published_at_desc_then_id_desc(
 def test_get_versions_compatible_with_filters_out_incompatible_versions(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When Alpha Mod has three versions (1.0.0 for 3.8, 1.1.0 for 3.9, 2.0.0
+    for 4.0), get_versions(1, compatible_with="3.8.5") returns only 1.0.0;
+    this ensures the version list is filtered by SPT compatibility, not returned raw.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     versions = catalog.get_versions(1, compatible_with="3.8.5")
@@ -267,6 +306,10 @@ def test_get_versions_compatible_with_filters_out_incompatible_versions(
 def test_resolve_version_picks_newest_by_default(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """With three versions cached (1.0.0, 1.1.0, 2.0.0), resolve_version(1)
+    with no constraints returns 2.0.0; this ensures the default is the
+    semantically newest version, not the newest published or any other sort.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     version = catalog.resolve_version(1)
@@ -277,6 +320,10 @@ def test_resolve_version_picks_newest_by_default(
 def test_resolve_version_picks_newest_compatible_with_spt_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """With three versions cached for different SPT ranges, resolve_version(1,
+    spt_version="3.8.5") returns 1.0.0, the newest version compatible with 3.8;
+    this verifies the compatibility filter narrows before picking the newest.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     version = catalog.resolve_version(1, spt_version="3.8.5")
@@ -287,6 +334,10 @@ def test_resolve_version_picks_newest_compatible_with_spt_version(
 def test_resolve_version_honours_explicit_wanted_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """With three versions cached (1.0.0, 1.1.0, 2.0.0), resolve_version(1,
+    wanted="1.1.0") returns exactly version id=202 (1.1.0), not the newest;
+    this ensures wanted version pinning overrides default newest-version logic.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     version = catalog.resolve_version(1, wanted="1.1.0")
@@ -297,6 +348,10 @@ def test_resolve_version_honours_explicit_wanted_version(
 def test_resolve_version_by_name_case_insensitive(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """resolve_version("alpha mod") with lowercase name finds the Alpha Mod mod
+    and returns version 2.0.0; this ensures the name-based lookup path works
+    and applies the same newest-version logic as numeric-id lookup.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     version = catalog.resolve_version("alpha mod")
@@ -305,6 +360,10 @@ def test_resolve_version_by_name_case_insensitive(
 
 
 def test_resolve_version_raises_for_unknown_mod(catalog: Catalog) -> None:
+    """An empty cache looking up a nonexistent mod id raises
+    NoCompatibleVersionError, not KeyError or returning None; this prevents
+    callers from handling lookup failure as an exception-free miss.
+    """
     with pytest.raises(NoCompatibleVersionError):
         catalog.resolve_version(99999)
 
@@ -312,6 +371,10 @@ def test_resolve_version_raises_for_unknown_mod(catalog: Catalog) -> None:
 def test_resolve_version_raises_for_unknown_wanted_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When three versions are cached but wanted="9.9.9" is not among them,
+    resolve_version raises NoCompatibleVersionError; this prevents callers from
+    accidentally getting a different version as a fallback.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     with pytest.raises(NoCompatibleVersionError):
@@ -321,6 +384,10 @@ def test_resolve_version_raises_for_unknown_wanted_version(
 def test_resolve_version_raises_when_no_version_is_compatible(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """With versions for SPT 3.8, 3.9, and 4.0, requesting SPT 5.0.0 raises
+    NoCompatibleVersionError; this ensures version mismatches fail rather than
+    returning the newest version regardless of compatibility.
+    """
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     with pytest.raises(NoCompatibleVersionError):
@@ -335,6 +402,7 @@ def _sync_single_mod_with_versions(
     name: str,
     versions: list[dict[str, object]],
 ) -> None:
+    """Sync a single mod with specified versions into the catalog."""
     mod = mod_json_full(
         id=mod_id, name=name, owner=owner_json(name="Alice"), versions=versions
     )
@@ -345,6 +413,7 @@ def _sync_single_mod_with_versions(
 
 
 def _version_row(version_id: int, version: str, published_at: str) -> dict[str, object]:
+    """Build a version dict row with given id, version string, and published_at timestamp."""
     return {
         "id": version_id,
         "version": version,
@@ -398,6 +467,7 @@ def test_resolve_version_default_pick(
     versions: list[dict[str, object]],
     expected_id: int,
 ) -> None:
+    """Catalog.resolve_version prefers semantically-parseable versions over publication order."""
     _sync_single_mod_with_versions(
         client_factory,
         respx_router,
@@ -415,6 +485,7 @@ def test_resolve_version_default_pick(
 def test_search_matches_unicode_name_and_author_via_casefold(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.search handles Unicode characters in mod names and authors correctly."""
     mod = mod_json_full(
         id=1,
         name="Örakel",
@@ -436,6 +507,7 @@ def test_search_matches_unicode_name_and_author_via_casefold(
 def test_find_mod_matches_unicode_name_via_casefold(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.find_mod handles Unicode characters in mod names correctly."""
     mod = mod_json_full(
         id=1, name="Örakel", owner=owner_json(name="Müller"), versions=[]
     )
@@ -453,6 +525,7 @@ def test_find_mod_matches_unicode_name_via_casefold(
 def test_search_treats_percent_and_underscore_as_literal_characters(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.search treats SQL wildcard characters as literals, not patterns."""
     # SQL LIKE treats "_" as "match any single character"; an unescaped
     # search must not let "a_b" accidentally match an unrelated "aXb" mod.
     literal = mod_json_full(
@@ -474,6 +547,7 @@ def test_search_treats_percent_and_underscore_as_literal_characters(
 def test_resolve_version_error_names_the_spt_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """NoCompatibleVersionError message includes the requested SPT version for clarity."""
     # Real data: every cached version of Boss Notifier targets SPT 3.x or
     # carries no constraint at all, so SPT 4.1.3 has nothing to install.
     _sync_single_mod_with_versions(
@@ -514,12 +588,20 @@ def test_resolve_version_error_names_the_spt_version(
 
 
 def test_get_description_returns_none_for_an_unknown_mod(catalog: Catalog) -> None:
+    """An empty cache returns None for get_description(99999) rather than
+    raising; this guards against description lookups for nonexistent mods
+    becoming unhandled exceptions.
+    """
     assert catalog.get_description(99999) is None
 
 
 def test_get_description_returns_none_before_a_description_is_stored(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """After seeding mods, get_description(1) returns None without raising,
+    indicating that descriptions are not synced from the Forge by default
+    and must be fetched separately.
+    """
     _seed_search_mods(client_factory, respx_router, catalog)
 
     assert catalog.get_description(1) is None
@@ -534,6 +616,7 @@ def test_store_description_round_trips_text_and_stamp(
     respx_router: respx.MockRouter,
     stamp: str | None,
 ) -> None:
+    """Catalog.store_description persists text and timestamp, retrievable via get_description."""
     _seed_search_mods(client_factory, respx_router, catalog)
 
     catalog.store_description(1, "Plain text.", stamp)
@@ -547,6 +630,10 @@ def test_store_description_round_trips_text_and_stamp(
 def test_store_description_for_an_unknown_mod_stores_nothing(
     catalog: Catalog,
 ) -> None:
+    """Calling store_description on a nonexistent mod id silently succeeds
+    (no exception) but leaves nothing behind; this prevents description updates
+    from failing when a mod was deleted between the last sync and the store call.
+    """
     catalog.store_description(99999, "Plain text.", "2025-06-01T00:00:00Z")
 
     assert catalog.get_description(99999) is None
@@ -555,6 +642,7 @@ def test_store_description_for_an_unknown_mod_stores_nothing(
 def test_store_description_survives_a_later_sync_of_the_same_mod(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Stored descriptions are preserved when the mod's catalog entry is updated."""
     _seed_search_mods(client_factory, respx_router, catalog)
     catalog.store_description(1, "Plain text.", "2025-06-01T00:00:00Z")
     updated = mod_json_full(

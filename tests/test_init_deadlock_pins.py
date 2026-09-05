@@ -30,6 +30,7 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure no game processes are detected during init tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -39,6 +40,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_init_leaves_no_git_residue_when_version_cannot_be_resolved(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Init fails before git init when SPT version cannot be detected."""
     with pytest.raises(SptVersionUnknownError):
         services.init_game_dir(fake_game_dir_runtime)
 
@@ -51,6 +53,7 @@ def test_init_leaves_no_git_residue_when_version_cannot_be_resolved(
 def test_init_on_a_zero_commit_half_init_repo_continues(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Init proceeds when git is initialized but has zero commits."""
     subprocess.run(
         ["git", "init", "--quiet"], cwd=fake_game_dir_runtime, check=True
     )
@@ -67,6 +70,8 @@ def test_init_on_a_zero_commit_half_init_repo_continues(
 def test_init_on_a_repo_with_commits_still_refuses(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """init_game_dir raises GitError (not AlreadyInitializedError) when the repo
+    already has commits, confirming the regression fix holds."""
     services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
 
     with pytest.raises(GitError):
@@ -79,6 +84,7 @@ def test_init_on_a_repo_with_commits_still_refuses(
 def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """CLI init with undetectable version and no input errors gracefully."""
     result = runner.invoke(cli_app, ["init", str(fake_game_dir_runtime)], input="")
 
     assert result.exit_code != 0
@@ -91,6 +97,7 @@ def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
 def test_explicit_spt_version_overrides_a_detectable_core_json_version(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Explicit --spt-version overrides detected core.json version."""
     core_config_path = (
         fake_game_dir_runtime / "SPT_Runtime" / "SPT_Data" / "configs" / "core.json"
     )
@@ -108,6 +115,7 @@ def test_explicit_spt_version_overrides_a_detectable_core_json_version(
 def test_explicit_spt_version_overrides_a_detectable_pe_version(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Explicit --spt-version overrides detected PE executable version."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "1.0.0")
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="9.9.9")
@@ -121,6 +129,7 @@ def test_explicit_spt_version_overrides_a_detectable_pe_version(
 def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(
     tmp_path: Path,
 ) -> None:
+    """PE reader returns None quickly when section claims giant size."""
     real = bytearray(build_synthetic_exe("4.1.2"))
     # Section header layout (see _SECTION_HEADER_SIZE / _read_sections):
     # name(8) + virtual_size(4) + virtual_address(4) + raw_size(4) + ...
@@ -148,6 +157,7 @@ def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(
 
 
 def _build_spt_core_and_real_mod_fixture(root: Path) -> None:
+    """Create SPT core files and a real mod to test init's file classification."""
     core_plugin_dir = root / "BepInEx" / "plugins" / "spt"
     core_plugin_dir.mkdir(parents=True)
     (core_plugin_dir / "spt-core.dll").write_bytes(b"spt-core-binary")
@@ -167,6 +177,7 @@ def _build_spt_core_and_real_mod_fixture(root: Path) -> None:
 def test_init_excludes_spt_core_files_from_pre_existing_mods_but_tracks_them(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Init excludes SPT core files from pre_existing_mods but commits them."""
     _build_spt_core_and_real_mod_fixture(fake_game_dir_runtime)
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
@@ -181,6 +192,7 @@ def test_init_excludes_spt_core_files_from_pre_existing_mods_but_tracks_them(
 def test_init_yes_adopts_only_the_real_mod_and_status_has_no_manual_entries(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Init --yes adopts only real mods, excludes SPT core files."""
     _build_spt_core_and_real_mod_fixture(fake_game_dir_runtime)
 
     result = services.init_game_dir(

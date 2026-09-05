@@ -22,6 +22,7 @@ FULL_TRAILERS = {
 
 
 def _add_mod_file(repo: Repo, name: str = "SAIN") -> Path:
+    """Create a test mod DLL file and return its relative path."""
     mod_dir = repo.path / "SPT" / "user" / "mods" / name
     mod_dir.mkdir(parents=True)
     (mod_dir / "plugin.dll").write_bytes(b"content")
@@ -29,6 +30,7 @@ def _add_mod_file(repo: Repo, name: str = "SAIN") -> Path:
 
 
 def test_commit_returns_a_real_git_hash(initialized_repo: Repo) -> None:
+    """Repo.commit() returns a non-empty hexadecimal commit hash."""
     _add_mod_file(initialized_repo)
 
     commit_hash = initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
@@ -38,6 +40,7 @@ def test_commit_returns_a_real_git_hash(initialized_repo: Repo) -> None:
 
 
 def test_commit_trailers_roundtrip_through_log(initialized_repo: Repo) -> None:
+    """Trailers stored in a commit are exactly recovered by Repo.log()."""
     _add_mod_file(initialized_repo)
     initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
 
@@ -50,6 +53,7 @@ def test_commit_trailers_roundtrip_through_log(initialized_repo: Repo) -> None:
 def test_commit_empty_value_trailer_is_kept_as_present_but_empty(
     initialized_repo: Repo,
 ) -> None:
+    """Trailers with empty values are preserved as present keys with empty strings."""
     _add_mod_file(initialized_repo)
     initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
 
@@ -61,6 +65,7 @@ def test_commit_empty_value_trailer_is_kept_as_present_but_empty(
 
 
 def test_commit_subject_is_preserved(initialized_repo: Repo) -> None:
+    """Repo.log() returns the exact commit subject line."""
     _add_mod_file(initialized_repo)
     initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
 
@@ -71,6 +76,7 @@ def test_commit_subject_is_preserved(initialized_repo: Repo) -> None:
 
 
 def test_log_is_newest_first(initialized_repo: Repo) -> None:
+    """Repo.log() lists commits in reverse chronological order."""
     path1 = _add_mod_file(initialized_repo, "First")
     first_hash = initialized_repo.commit(
         "mod: First 1.0.0", trailers={**FULL_TRAILERS, "Mod": "First"}, paths=[path1]
@@ -88,6 +94,7 @@ def test_log_is_newest_first(initialized_repo: Repo) -> None:
 
 
 def test_log_trailer_filter_matches_case_insensitively(initialized_repo: Repo) -> None:
+    """Repo.log() trailer_filter matching is case-insensitive."""
     _add_mod_file(initialized_repo)
     initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
 
@@ -98,6 +105,7 @@ def test_log_trailer_filter_matches_case_insensitively(initialized_repo: Repo) -
 
 
 def test_log_trailer_filter_ands_conditions(initialized_repo: Repo) -> None:
+    """Repo.log() trailer_filter requires all conditions to match."""
     path1 = _add_mod_file(initialized_repo, "First")
     initialized_repo.commit(
         "mod: First 1.0.0",
@@ -122,6 +130,7 @@ def test_log_trailer_filter_ands_conditions(initialized_repo: Repo) -> None:
 def test_log_trailer_filter_excludes_non_matching_commits(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.log() returns empty list when trailer_filter matches nothing."""
     path1 = _add_mod_file(initialized_repo, "First")
     initialized_repo.commit(
         "mod: First 1.0.0",
@@ -137,6 +146,7 @@ def test_log_trailer_filter_excludes_non_matching_commits(
 def test_commit_with_explicit_paths_only_stages_those_paths(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.commit() with paths parameter commits only those files."""
     path = _add_mod_file(initialized_repo, "OnlyThis")
     unrelated = Path("SPT/user/profiles/abc.json")
     (initialized_repo.path / unrelated).write_text(
@@ -153,6 +163,7 @@ def test_commit_with_explicit_paths_only_stages_those_paths(
 
 
 def test_commit_with_nothing_to_commit_raises_git_error(initialized_repo: Repo) -> None:
+    """Repo.commit() raises GitError when no changes are staged."""
     with pytest.raises(GitError):
         initialized_repo.commit("mod: nothing here", paths=[])
 
@@ -161,6 +172,7 @@ def test_commit_with_nothing_to_commit_raises_git_error(initialized_repo: Repo) 
 def test_commit_rejects_trailer_values_containing_newlines(
     initialized_repo: Repo, bad_value: str
 ) -> None:
+    """Repo.commit() rejects trailer values containing line breaks to prevent injection."""
     _add_mod_file(initialized_repo)
 
     with pytest.raises(GitError):
@@ -170,6 +182,7 @@ def test_commit_rejects_trailer_values_containing_newlines(
 def test_commit_rejecting_an_injected_trailer_value_does_not_create_extra_trailers(
     initialized_repo: Repo,
 ) -> None:
+    """Rejecting a malicious trailer prevents the commit entirely (atomicity)."""
     _add_mod_file(initialized_repo)
 
     with pytest.raises(GitError):

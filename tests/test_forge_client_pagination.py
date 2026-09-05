@@ -21,6 +21,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_iter_mods_walks_every_page_exactly_once_in_order(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Follows links.next sequentially; fetches /mods once per page, yields each item once."""
     page1 = page_envelope(
         [
             mod_json_minimal(id=1, name="Mod One"),
@@ -55,6 +56,7 @@ def test_iter_mods_walks_every_page_exactly_once_in_order(
 def test_iter_mods_stops_at_last_page(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Stops when current_page >= last_page; does not follow links.next if it points backward."""
     single_page = page_envelope(
         [mod_json_minimal(id=1, name="Only Mod")],
         current_page=1,
@@ -203,6 +205,7 @@ def test_mods_per_page_is_clamped_to_50(
     requested_per_page: int,
     expected_sent: str,
 ) -> None:
+    """mods() clamps per_page to MAX_PER_PAGE (50) before sending the request."""
     route = respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
     )

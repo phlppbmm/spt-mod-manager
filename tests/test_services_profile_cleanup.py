@@ -54,6 +54,7 @@ MOD_NAME = "TestMod"
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the game process check to prevent GameRunningError during profile cleanup tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -287,6 +288,7 @@ def _full_profile() -> JsonDict:
 def test_plan_profile_cleanup_does_not_modify_the_profile_repo_or_history(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup only reports what would be cleaned, without modifying state."""
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
     before_bytes = profile_path.read_bytes()
@@ -308,6 +310,7 @@ def test_plan_profile_cleanup_does_not_modify_the_profile_repo_or_history(
 def test_plan_and_apply_report_identical_removals_for_the_same_input(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup and clean_profile report same removals for same input."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
 
@@ -321,6 +324,7 @@ def test_plan_and_apply_report_identical_removals_for_the_same_input(
 def test_plan_profile_cleanup_works_for_an_already_removed_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup finds residues even after the mod has been removed."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
     services.remove_mod(clean_repo.path, MOD_NAME, force=True)
@@ -334,6 +338,7 @@ def test_plan_profile_cleanup_works_for_an_already_removed_mod(
 def test_plan_profile_cleanup_skips_an_unreadable_profile_and_warns(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup skips malformed profiles and reports them as warnings."""
     _install_mod(clean_repo, install_commit)
     broken_relpath = Path("SPT/user/profiles/broken.json")
     (clean_repo.path / broken_relpath).write_text(
@@ -350,6 +355,7 @@ def test_plan_profile_cleanup_skips_an_unreadable_profile_and_warns(
 def test_plan_profile_cleanup_only_lists_profiles_that_have_a_hit(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup only reports profiles containing mod residues."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "hit", _full_profile())
     _write_profile(
@@ -366,6 +372,7 @@ def test_plan_profile_cleanup_only_lists_profiles_that_have_a_hit(
 def test_plan_profile_cleanup_raises_mod_not_found_for_unknown_name(
     clean_repo: Repo,
 ) -> None:
+    """plan_profile_cleanup raises ModNotFoundError for non-existent mods."""
     with pytest.raises(ModNotFoundError):
         services.plan_profile_cleanup(clean_repo.path, "Ghost")
 
@@ -373,6 +380,7 @@ def test_plan_profile_cleanup_raises_mod_not_found_for_unknown_name(
 def test_plan_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup raises AmbiguousModError for case-variant matches."""
     _install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
@@ -388,6 +396,7 @@ def test_plan_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
 def test_clean_profile_removes_every_category_hit_and_keeps_unrelated_ids(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile removes all residue categories and preserves unrelated content."""
     _install_mod(clean_repo, install_commit)
     original = _full_profile()
     profile_path = _write_profile(clean_repo, "abc", original)
@@ -497,6 +506,7 @@ def test_clean_profile_removes_every_category_hit_and_keeps_unrelated_ids(
 def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile leaves profiles untouched when they have no residues."""
     _install_mod(clean_repo, install_commit)
     untouched_profile = {
         "characters": {
@@ -527,6 +537,7 @@ def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup
 def test_clean_profile_writes_compact_json_and_preserves_key_order_and_non_ascii(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile writes JSON in compact format matching SPT's own format."""
     _install_mod(clean_repo, install_commit)
     original = _full_profile()
     profile_path = _write_profile(clean_repo, "abc", original)
@@ -550,6 +561,7 @@ def test_clean_profile_writes_compact_json_and_preserves_key_order_and_non_ascii
 def test_clean_profile_writes_a_backup_with_the_pre_clean_bytes_within_a_utc_window(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile creates timestamped backup of original profile before cleaning."""
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
     before_bytes = profile_path.read_bytes()
@@ -577,6 +589,7 @@ def test_clean_profile_writes_a_backup_with_the_pre_clean_bytes_within_a_utc_win
 def test_clean_profile_snapshot_has_no_mod_trailer_and_leaves_the_tree_clean(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile creates snapshot commit without Mod trailer."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
 
@@ -592,6 +605,7 @@ def test_clean_profile_snapshot_has_no_mod_trailer_and_leaves_the_tree_clean(
 def test_clean_profile_secures_a_dirty_profile_with_an_automatic_snapshot_first(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile auto-snapshots dirty profiles before cleaning."""
     _install_mod(clean_repo, install_commit)
     profile_path = clean_repo.path / "SPT/user/profiles/abc.json"
     profile_path.write_text(json.dumps(_full_profile()), encoding="utf-8")
@@ -614,6 +628,7 @@ def test_clean_profile_secures_a_dirty_profile_with_an_automatic_snapshot_first(
 def test_clean_profile_profiles_param_restricts_cleaning_to_the_named_stem(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile with profiles parameter cleans only specified profiles."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
     other_path = _write_profile(clean_repo, "def", _full_profile())
@@ -628,6 +643,7 @@ def test_clean_profile_profiles_param_restricts_cleaning_to_the_named_stem(
 def test_clean_profile_raises_invalid_path_error_for_an_unknown_profile_stem(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile raises InvalidPathError for non-existent profile stems."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
 
@@ -638,6 +654,7 @@ def test_clean_profile_raises_invalid_path_error_for_an_unknown_profile_stem(
 def test_clean_profile_skips_an_unreadable_profile_and_warns(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile skips malformed profiles and warns without stopping."""
     _install_mod(clean_repo, install_commit)
     good_path = _write_profile(clean_repo, "abc", _full_profile())
     broken_relpath = Path("SPT/user/profiles/broken.json")
@@ -657,6 +674,7 @@ def test_clean_profile_skips_an_unreadable_profile_and_warns(
 def test_clean_profile_raises_game_running_error_while_the_game_runs(
     clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """clean_profile raises GameRunningError when the game is running."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
     monkeypatch.setattr(
@@ -670,6 +688,7 @@ def test_clean_profile_raises_game_running_error_while_the_game_runs(
 def test_clean_profile_raises_mod_not_found_for_unknown_name(
     clean_repo: Repo,
 ) -> None:
+    """clean_profile raises ModNotFoundError for non-existent mods."""
     with pytest.raises(ModNotFoundError):
         services.clean_profile(clean_repo.path, "Ghost")
 
@@ -677,6 +696,7 @@ def test_clean_profile_raises_mod_not_found_for_unknown_name(
 def test_clean_profile_raises_ambiguous_mod_error_for_case_variants(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile raises AmbiguousModError for case-variant matches."""
     _install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
@@ -687,6 +707,7 @@ def test_clean_profile_raises_ambiguous_mod_error_for_case_variants(
 def test_clean_profile_write_failure_surfaces_as_sptmod_error(
     clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """clean_profile surfaces write failures as SptmodError."""
     _install_mod(clean_repo, install_commit)
     profile_path = _write_profile(clean_repo, "abc", _full_profile())
     before_bytes = profile_path.read_bytes()
@@ -707,6 +728,7 @@ def test_clean_profile_write_failure_surfaces_as_sptmod_error(
 def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
     clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """clean_profile snapshots successfully cleaned profiles before failure."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
     failing_path = _write_profile(clean_repo, "xyz", _full_profile())
@@ -743,6 +765,7 @@ def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
 def test_remove_mod_default_clean_profiles_false_leaves_cleanup_none(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod with default clean_profiles=False skips profile cleanup."""
     install_commit(clean_repo, "ModA")
 
     result = services.remove_mod(clean_repo.path, "ModA")
@@ -753,6 +776,7 @@ def test_remove_mod_default_clean_profiles_false_leaves_cleanup_none(
 def test_remove_mod_clean_profiles_true_cleans_before_reverting_in_history_order(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod with clean_profiles=True cleans profiles before reverting install."""
     _install_mod(clean_repo, install_commit)
     _write_profile(clean_repo, "abc", _full_profile())
 
@@ -776,6 +800,7 @@ def test_remove_mod_clean_profiles_true_cleans_before_reverting_in_history_order
 def test_remove_mod_clean_profiles_true_skips_the_residue_guard_without_force(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod with clean_profiles=True skips untouchable residue check."""
     _install_mod(clean_repo, install_commit)
     profile = _full_profile()
     # An ID sptmod cannot structurally attribute: only the string fallback
@@ -797,6 +822,7 @@ def test_remove_mod_clean_profiles_true_skips_the_residue_guard_without_force(
 def test_remove_mod_clean_profiles_true_merges_cleanup_warnings(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod with clean_profiles=True merges cleanup warnings into result."""
     _install_mod(clean_repo, install_commit)
     broken_relpath = Path("SPT/user/profiles/broken.json")
     broken_path = clean_repo.path / broken_relpath
@@ -819,6 +845,7 @@ def test_remove_mod_clean_profiles_true_merges_cleanup_warnings(
 def test_clean_profile_tolerates_malformed_entries_mixed_with_real_hits(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile continues cleaning without raising when profiles have malformed entries."""
     _install_mod(clean_repo, install_commit)
     profile = {
         "characters": {

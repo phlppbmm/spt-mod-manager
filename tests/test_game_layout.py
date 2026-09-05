@@ -40,6 +40,7 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable live game-process detection to allow synthetic EXEs without a running game."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -53,16 +54,19 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _utf16z(s: str) -> bytes:
+    """Encode a string as UTF-16LE with a null terminator."""
     return (s + "\0").encode("utf-16-le")
 
 
 def _pad4(data: bytes) -> bytes:
+    """Pad bytes to a 4-byte-aligned length with null bytes."""
     return data + b"\0" * ((-len(data)) % 4)
 
 
 def _version_block(
     key: str, value_word_count: int, value: bytes, children: bytes = b""
 ) -> bytes:
+    """Build a single version-info block per Microsoft VS_VERSIONINFO binary layout."""
     key_bytes = _utf16z(key)
     head = struct.pack("<HHH", 0, value_word_count, 1 if value else 0) + key_bytes
     body = _pad4(head) + _pad4(value) if value else _pad4(head)
@@ -73,6 +77,7 @@ def _version_block(
 
 
 def _build_version_resource(version: str, key_name: str) -> bytes:
+    """Build a VS_VERSION_INFO resource with a single string-table entry."""
     fixed_file_info = struct.pack(
         "<13I", 0xFEEF04BD, 0x10000, 0, 0, 0, 0, 0x3F, 0, 4, 1, 0, 0, 0
     )
@@ -191,6 +196,7 @@ def _patched(data: bytes, offset: int, replacement: bytes) -> bytes:
 
 
 def write_server_exe(root: Path, runtime_dir_name: str, version: str) -> Path:
+    """Write a synthetic PE EXE with the given version to the expected server location."""
     exe_path = root / runtime_dir_name / "SPT.Server.exe"
     exe_path.write_bytes(build_synthetic_exe(version))
     return exe_path
@@ -202,6 +208,7 @@ class TestSyntheticExeBuilderSanityCheck:
     def test_builder_produces_a_pe_read_pe_file_version_can_parse(
         self, tmp_path: Path
     ) -> None:
+        """The builder's synthetic PE must yield a version string on round-trip."""
         exe = tmp_path / "SPT.Server.exe"
         exe.write_bytes(build_synthetic_exe("4.1.2"))
 
@@ -364,6 +371,7 @@ def _corrupt_version_block_declares_an_impossible_length(data: bytes) -> bytes:
 def test_read_pe_file_version_none_for_a_malformed_resource_section(
     tmp_path: Path, corrupt: Callable[[bytes], bytes]
 ) -> None:
+    """Each PE/resource-directory corruption must degrade gracefully to None, not crash."""
     exe = tmp_path / "SPT.Server.exe"
     exe.write_bytes(corrupt(build_synthetic_exe("1.2.3")))
 
@@ -373,6 +381,7 @@ def test_read_pe_file_version_none_for_a_malformed_resource_section(
 def test_read_pe_file_version_none_when_neither_file_nor_product_version_present(
     tmp_path: Path,
 ) -> None:
+    """Without FileVersion or ProductVersion string, return None."""
     exe = tmp_path / "SPT.Server.exe"
     exe.write_bytes(build_synthetic_exe("1.2.3", key_name="Comments"))
 
@@ -451,6 +460,7 @@ def test_read_pe_file_version_skips_a_binary_typed_string_entry_and_finds_the_ne
 
 
 def test_detect_layout_accepts_runtime_only(tmp_path: Path) -> None:
+    """SPT_Runtime alone (4.1+ layout) is a valid, unambiguous game directory."""
     root = tmp_path / "game"
     (root / "SPT_Runtime").mkdir(parents=True)
     (root / "BepInEx").mkdir(parents=True)
@@ -462,6 +472,7 @@ def test_detect_layout_accepts_runtime_only(tmp_path: Path) -> None:
 
 
 def test_detect_layout_accepts_spt_only(tmp_path: Path) -> None:
+    """SPT alone (4.0 layout) is a valid, unambiguous game directory."""
     root = tmp_path / "game"
     (root / "SPT").mkdir(parents=True)
     (root / "BepInEx").mkdir(parents=True)
@@ -473,6 +484,7 @@ def test_detect_layout_accepts_spt_only(tmp_path: Path) -> None:
 
 
 def test_detect_layout_prefers_runtime_over_spt_and_warns(tmp_path: Path) -> None:
+    """Both dirs present: use SPT_Runtime but warn about the ambiguity."""
     root = tmp_path / "game"
     (root / "SPT_Runtime").mkdir(parents=True)
     (root / "SPT").mkdir(parents=True)
@@ -488,6 +500,7 @@ def test_detect_layout_prefers_runtime_over_spt_and_warns(tmp_path: Path) -> Non
 def test_detect_layout_raises_when_neither_runtime_dir_exists_and_names_both(
     tmp_path: Path,
 ) -> None:
+    """Missing both runtime dirs raises error naming both."""
     root = tmp_path / "game"
     (root / "BepInEx").mkdir(parents=True)
 
@@ -502,6 +515,7 @@ def test_detect_layout_raises_when_neither_runtime_dir_exists_and_names_both(
 def test_detect_layout_raises_when_bepinex_missing_and_names_it(
     tmp_path: Path,
 ) -> None:
+    """Missing BepInEx (even with SPT_Runtime present) raises error naming it."""
     root = tmp_path / "game"
     (root / "SPT_Runtime").mkdir(parents=True)
 
@@ -512,6 +526,7 @@ def test_detect_layout_raises_when_bepinex_missing_and_names_it(
 
 
 def test_detect_layout_rejects_a_flat_spt_3x_installation(tmp_path: Path) -> None:
+    """SPT 3.x flat layout (SPT_Data/Server + user/mods) is explicitly rejected."""
     root = tmp_path / "game"
     (root / "BepInEx").mkdir(parents=True)
     (root / "SPT_Data" / "Server").mkdir(parents=True)
@@ -535,6 +550,7 @@ def test_detect_layout_rejects_a_flat_spt_3x_installation(tmp_path: Path) -> Non
 def test_game_layout_accessors_are_relative_to_the_runtime_dir(
     runtime_dir_name: str,
 ) -> None:
+    """All GameLayout paths resolve relative to the detected runtime directory."""
     layout = GameLayout(root=Path("/game"), runtime_dir_name=runtime_dir_name)
 
     assert layout.runtime_dir == Path(runtime_dir_name)
@@ -557,6 +573,7 @@ def test_game_layout_accessors_are_relative_to_the_runtime_dir(
 
 
 def _layout(tmp_path: Path, runtime_dir_name: str = "SPT_Runtime") -> GameLayout:
+    """Create a minimal GameLayout with core.json directory structure."""
     (tmp_path / "game" / runtime_dir_name / "SPT_Data" / "configs").mkdir(
         parents=True, exist_ok=True
     )
@@ -564,12 +581,14 @@ def _layout(tmp_path: Path, runtime_dir_name: str = "SPT_Runtime") -> GameLayout
 
 
 def _write_core_json(layout: GameLayout, content: str) -> None:
+    """Write content to core.json at the expected location."""
     (layout.root / layout.core_config_file).write_text(content, encoding="utf-8")
 
 
 def test_read_core_json_version_returns_the_field_when_present(
     tmp_path: Path,
 ) -> None:
+    """Extract sptVersion from well-formed core.json."""
     layout = _layout(tmp_path)
     _write_core_json(layout, json.dumps({"sptVersion": "4.1.0"}))
 
@@ -579,6 +598,7 @@ def test_read_core_json_version_returns_the_field_when_present(
 def test_read_core_json_version_none_for_a_4x_style_config_without_the_key(
     tmp_path: Path,
 ) -> None:
+    """core.json without sptVersion key returns None."""
     layout = _layout(tmp_path)
     _write_core_json(
         layout, json.dumps({"projectName": "SPT", "compatibleTarkovVersion": "1.0"})
@@ -588,12 +608,14 @@ def test_read_core_json_version_none_for_a_4x_style_config_without_the_key(
 
 
 def test_read_core_json_version_none_when_file_missing(tmp_path: Path) -> None:
+    """Missing core.json file returns None."""
     layout = _layout(tmp_path)
 
     assert read_core_json_version(layout) is None
 
 
 def test_read_core_json_version_none_when_json_malformed(tmp_path: Path) -> None:
+    """Malformed JSON in core.json returns None."""
     layout = _layout(tmp_path)
     _write_core_json(layout, "{not valid json")
 
@@ -603,6 +625,7 @@ def test_read_core_json_version_none_when_json_malformed(tmp_path: Path) -> None
 def test_read_core_json_version_none_for_an_empty_string_value(
     tmp_path: Path,
 ) -> None:
+    """Whitespace-only sptVersion is treated as empty."""
     layout = _layout(tmp_path)
     _write_core_json(layout, json.dumps({"sptVersion": "   "}))
 
@@ -612,6 +635,7 @@ def test_read_core_json_version_none_for_an_empty_string_value(
 def test_read_core_json_version_none_for_a_valid_json_non_object_root(
     tmp_path: Path,
 ) -> None:
+    """Non-object JSON root (e.g., array) returns None."""
     layout = _layout(tmp_path)
     _write_core_json(layout, json.dumps([1, 2, 3]))
 
@@ -631,6 +655,7 @@ def test_read_core_json_version_none_for_a_valid_json_non_object_root(
 def test_read_pe_file_version_reads_the_version_resource(
     tmp_path: Path, key_name: str, version: str
 ) -> None:
+    """Parse FileVersion; if missing, fall back to ProductVersion."""
     exe = tmp_path / "SPT.Server.exe"
     exe.write_bytes(build_synthetic_exe(version, key_name))
 
@@ -638,6 +663,7 @@ def test_read_pe_file_version_reads_the_version_resource(
 
 
 def test_read_pe_file_version_none_for_garbage_bytes(tmp_path: Path) -> None:
+    """Non-PE file content returns None."""
     exe = tmp_path / "SPT.Server.exe"
     exe.write_bytes(b"not a PE file at all, just some junk bytes" * 4)
 
@@ -645,6 +671,7 @@ def test_read_pe_file_version_none_for_garbage_bytes(tmp_path: Path) -> None:
 
 
 def test_read_pe_file_version_none_for_a_missing_file(tmp_path: Path) -> None:
+    """Missing file returns None."""
     assert read_pe_file_version(tmp_path / "does-not-exist.exe") is None
 
 
@@ -654,16 +681,19 @@ def test_read_pe_file_version_none_for_a_missing_file(tmp_path: Path) -> None:
 
 
 def test_config_get_returns_none_for_an_unset_key(initialized_repo: Repo) -> None:
+    """Unset key returns None."""
     assert initialized_repo.config_get("sptmod.unset-key") is None
 
 
 def test_config_set_then_get_roundtrips_the_value(initialized_repo: Repo) -> None:
+    """Set and get operations preserve the value."""
     initialized_repo.config_set("sptmod.testkey", "hello-value")
 
     assert initialized_repo.config_get("sptmod.testkey") == "hello-value"
 
 
 def test_config_set_overwrites_an_existing_value(initialized_repo: Repo) -> None:
+    """Repeated set calls overwrite the previous value."""
     initialized_repo.config_set("sptmod.testkey", "first")
     initialized_repo.config_set("sptmod.testkey", "second")
 
@@ -692,10 +722,12 @@ def test_config_get_raises_git_error_for_a_reason_other_than_an_unset_key(
 def test_read_stored_version_none_when_nothing_was_stored(
     initialized_repo: Repo,
 ) -> None:
+    """When no version was stored, read_stored_version returns None."""
     assert read_stored_version(initialized_repo) is None
 
 
 def test_store_then_read_stored_version_roundtrips(initialized_repo: Repo) -> None:
+    """Store and read operations preserve the version string in git config."""
     store_spt_version(initialized_repo, "4.1.2")
 
     assert read_stored_version(initialized_repo) == "4.1.2"
@@ -713,6 +745,7 @@ def _build_layout_and_repo(
     core_version: str | None = None,
     exe_version: str | None = None,
 ) -> tuple[GameLayout, Repo]:
+    """Create a GameLayout and initialized Repo with optional version sources."""
     layout = _layout(tmp_path)
     core_config: dict[str, str] = {"projectName": "SPT"}
     if core_version is not None:
@@ -746,6 +779,7 @@ def test_resolve_spt_version_walks_the_fallback_chain(
     stored: str | None,
     expected: str | None,
 ) -> None:
+    """Fallback chain: core.json → PE → git config → None."""
     layout, repo = _build_layout_and_repo(
         tmp_path, core_version=core_version, exe_version=exe_version
     )
@@ -763,6 +797,7 @@ def test_resolve_spt_version_walks_the_fallback_chain(
 def test_set_spt_version_stores_and_returns_the_stripped_value(
     initialized_repo: Repo,
 ) -> None:
+    """Store version with whitespace trimmed."""
     result = services.set_spt_version(initialized_repo.path, "  4.1.2  ")
 
     assert result == "4.1.2"
@@ -772,6 +807,7 @@ def test_set_spt_version_stores_and_returns_the_stripped_value(
 def test_set_spt_version_raises_value_error_for_an_empty_version(
     initialized_repo: Repo,
 ) -> None:
+    """Empty version string raises ValueError."""
     with pytest.raises(ValueError, match="empty"):
         services.set_spt_version(initialized_repo.path, "")
 
@@ -779,6 +815,7 @@ def test_set_spt_version_raises_value_error_for_an_empty_version(
 def test_set_spt_version_raises_not_a_game_dir_error_for_a_non_game_dir(
     tmp_path: Path,
 ) -> None:
+    """Non-game directory raises NotAGameDirError."""
     empty = tmp_path / "not-a-game-dir"
     empty.mkdir()
 
@@ -789,6 +826,7 @@ def test_set_spt_version_raises_not_a_game_dir_error_for_a_non_game_dir(
 def test_set_spt_version_raises_git_error_when_not_yet_a_repository(
     fake_game_dir: Path,
 ) -> None:
+    """Uninitiated repository raises GitError."""
     with pytest.raises(GitError):
         services.set_spt_version(fake_game_dir, "4.1.2")
 
@@ -801,6 +839,7 @@ def test_set_spt_version_raises_git_error_when_not_yet_a_repository(
 def test_rpc_set_spt_version_stores_and_returns_the_stripped_value(
     fake_game_dir: Path,
 ) -> None:
+    """RPC endpoint for set_spt_version returns result event with trimmed version."""
     services.init_game_dir(fake_game_dir)
 
     result = runner.invoke(
@@ -823,6 +862,7 @@ def test_rpc_set_spt_version_stores_and_returns_the_stripped_value(
 def test_cli_init_with_spt_version_option_stores_it_and_skips_the_prompt(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """CLI --spt-version option stores version and bypasses interactive prompt."""
     result = runner.invoke(
         cli_app,
         ["init", str(fake_game_dir_runtime), "--spt-version", "4.1.2"],
@@ -835,6 +875,7 @@ def test_cli_init_with_spt_version_option_stores_it_and_skips_the_prompt(
 def test_cli_init_without_spt_version_prompts_and_stores_the_answer(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """CLI init without --spt-version interactively prompts and stores answer."""
     result = runner.invoke(
         cli_app, ["init", str(fake_game_dir_runtime)], input="4.1.2\n"
     )
@@ -846,6 +887,7 @@ def test_cli_init_without_spt_version_prompts_and_stores_the_answer(
 def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """CLI init with both runtime dirs present warns about ambiguity."""
     (fake_game_dir_runtime / "SPT").mkdir()
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
@@ -864,6 +906,7 @@ def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(
 def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Init on SPT_Runtime layout commits only .gitignore and profile to whitelist."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
@@ -881,6 +924,7 @@ def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
 def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
     fake_game_dir_runtime: Path,
 ) -> None:
+    """Ignored paths (logs, core.json, backups, game data) are not committed."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
@@ -900,6 +944,7 @@ def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
 def test_install_from_archive_translates_the_spt_prefix_to_the_runtime_dir(
     fake_game_dir_runtime: Path, make_archive: MakeArchive
 ) -> None:
+    """Archive mod paths like SPT/... are translated to detected runtime dir."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     services.init_game_dir(fake_game_dir_runtime)
     archive = make_archive(
@@ -923,6 +968,7 @@ def test_install_from_archive_translates_the_spt_prefix_to_the_runtime_dir(
 def test_list_mods_and_status_work_on_the_runtime_layout(
     fake_game_dir_runtime: Path, make_archive: MakeArchive
 ) -> None:
+    """list_mods and status operations work with SPT_Runtime layout."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     services.init_game_dir(fake_game_dir_runtime)
     archive = make_archive(
@@ -955,6 +1001,7 @@ def test_list_mods_and_status_work_on_the_runtime_layout(
 def test_check_profiles_finds_residue_on_the_runtime_layout(
     fake_game_dir_runtime: Path, install_commit: InstallCommit
 ) -> None:
+    """check_profiles detects mod residue (orphaned IDs) in SPT_Runtime layout."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
     repo = Repo.init(detect_layout(fake_game_dir_runtime))
     repo.commit(

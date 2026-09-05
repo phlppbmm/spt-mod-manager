@@ -28,6 +28,7 @@ def test_third_request_within_window_sleeps_a_sane_duration(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
+    """The third request within the rate window sleeps for a reasonable duration."""
     respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
     )
@@ -49,6 +50,7 @@ def test_ping_bypasses_the_throttle(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
+    """ping() bypasses the rate throttle even when called repeatedly."""
     respx_router.get("/ping").mock(
         return_value=httpx.Response(200, json={"success": True})
     )
@@ -65,6 +67,7 @@ def test_429_then_retries_with_growing_backoff_then_succeeds(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
+    """429 responses trigger retry with exponentially increasing backoff until success."""
     attempts = {"n": 0}
 
     def side_effect(request: httpx.Request) -> httpx.Response:
@@ -89,6 +92,7 @@ def test_429_honors_retry_after_header(
     recording_sleep: RecordingSleep,
     respx_router: respx.MockRouter,
 ) -> None:
+    """A numeric Retry-After header on 429 is respected for the sleep duration."""
     attempts = {"n": 0}
 
     def side_effect(request: httpx.Request) -> httpx.Response:
@@ -145,6 +149,7 @@ def test_persistent_failure_exhausts_retries_and_raises_forge_unavailable(
     side_effect: Callable[[httpx.Request], httpx.Response] | Exception,
     client_kwargs: dict[str, int],
 ) -> None:
+    """Persistent errors (429, 5xx, connection) exhaust retries and raise ForgeUnavailableError."""
     route = respx_router.get("/mods").mock(side_effect=side_effect)
     client = client_factory(**client_kwargs)
 

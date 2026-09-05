@@ -12,12 +12,14 @@ RELATIVE = Path("SPT/user/mods/ModA/file.txt")
 
 
 def _write(repo: Repo, relative: Path, content: str) -> None:
+    """Write a file to the repo, creating parent directories as needed."""
     full = repo.path / relative
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
 
 
 def test_show_files_reports_added_file(initialized_repo: Repo) -> None:
+    """Repo.show_files() marks newly added files with change='added'."""
     _write(initialized_repo, RELATIVE, "v1\n")
     commit_hash = initialized_repo.commit(
         "mod: ModA install",
@@ -31,6 +33,7 @@ def test_show_files_reports_added_file(initialized_repo: Repo) -> None:
 
 
 def test_show_files_reports_modified_file(initialized_repo: Repo) -> None:
+    """Repo.show_files() marks changed files with change='modified'."""
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -50,6 +53,7 @@ def test_show_files_reports_modified_file(initialized_repo: Repo) -> None:
 
 
 def test_show_files_reports_deleted_file(initialized_repo: Repo) -> None:
+    """Repo.show_files() marks deleted files with change='deleted'."""
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -71,6 +75,7 @@ def test_show_files_reports_deleted_file(initialized_repo: Repo) -> None:
 def test_show_file_content_returns_historical_content_not_working_tree(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.show_file_content() reads file content from a commit, not disk."""
     _write(initialized_repo, RELATIVE, "v1\n")
     v1_hash = initialized_repo.commit(
         "mod: ModA install",
@@ -98,6 +103,7 @@ def test_show_file_content_returns_historical_content_not_working_tree(
 def test_show_file_content_on_a_binary_blob_raises_git_error(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.show_file_content() raises GitError for binary files."""
     binary_relative = Path("SPT/user/mods/ModA/asset.bin")
     full = initialized_repo.path / binary_relative
     full.parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +121,7 @@ def test_show_file_content_on_a_binary_blob_raises_git_error(
 def test_last_touching_returns_the_most_recent_commit_with_trailers(
     initialized_repo: Repo,
 ) -> None:
+    """last_touching() returns a Commit with populated trailers (from the most recent edit)."""
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -136,6 +143,7 @@ def test_last_touching_returns_the_most_recent_commit_with_trailers(
 
 
 def test_last_touching_follows_up_to_a_delete_commit(initialized_repo: Repo) -> None:
+    """Repo.last_touching() includes delete commits in its search."""
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",
@@ -159,6 +167,7 @@ def test_last_touching_follows_up_to_a_delete_commit(initialized_repo: Repo) -> 
 def test_last_touching_returns_none_for_an_untouched_path(
     initialized_repo: Repo,
 ) -> None:
+    """last_touching() returns None when path has no commit history (untouched edge case)."""
     _write(initialized_repo, RELATIVE, "v1\n")
     initialized_repo.commit(
         "mod: ModA install",

@@ -24,6 +24,7 @@ from sptmod.core.errors import ArchiveError
 def test_extract_roundtrip_lands_files_with_content(
     make_archive: MakeArchive, tmp_path: Path, fmt: str
 ) -> None:
+    """extract() writes archive members to disk with exact content preserved."""
     archive = make_archive(
         {
             "package.json": '{"name": "CoolMod"}',
@@ -45,6 +46,7 @@ def test_extract_roundtrip_lands_files_with_content(
 
 
 def test_extract_unknown_suffix_raises_archive_error(tmp_path: Path) -> None:
+    """extract() raises ArchiveError for unsupported suffix (.tar), error message names the suffix."""
     archive = tmp_path / "archive.tar"
     archive.write_bytes(b"not a real archive")
     dest = tmp_path / "dest"
@@ -68,6 +70,7 @@ def test_extract_unknown_suffix_raises_archive_error(tmp_path: Path) -> None:
 def test_extract_traversal_member_is_rejected_before_writing_outside(
     make_archive: MakeArchive, tmp_path: Path, fmt: str
 ) -> None:
+    """Path-traversal members (e.g. ../evil.txt) are rejected before extraction."""
     archive = make_archive({"../evil.txt": "pwned"}, fmt)
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -82,6 +85,7 @@ def test_extract_traversal_member_is_rejected_before_writing_outside(
 def test_extract_zip_traversal_absolute_member_is_rejected(
     make_archive: MakeArchive, tmp_path: Path
 ) -> None:
+    """Absolute-path members (e.g. /etc/evil.txt) are rejected before extraction."""
     archive = make_archive({"/etc/evil.txt": "pwned"}, "zip")
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -101,6 +105,7 @@ def test_extract_zip_traversal_absolute_member_is_rejected(
 def test_extract_encrypted_zip_raises_archive_error_not_runtime_error(
     tmp_path: Path,
 ) -> None:
+    """Encrypted zip archives raise ArchiveError (not raw RuntimeError)."""
     archive = Path(__file__).parent / "data" / "encrypted.zip"
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -112,6 +117,7 @@ def test_extract_encrypted_zip_raises_archive_error_not_runtime_error(
 def test_extract_encrypted_7z_raises_archive_error_not_password_required(
     tmp_path: Path,
 ) -> None:
+    """Encrypted 7z archives raise ArchiveError (not py7zr.PasswordRequired)."""
     import py7zr
 
     stage = tmp_path / "stage"
@@ -136,6 +142,7 @@ def test_extract_encrypted_7z_raises_archive_error_not_password_required(
 def test_extract_rar_without_backend_raises_helpful_archive_error(
     tmp_path: Path,
 ) -> None:
+    """ArchiveError for .rar files without a backend includes install hints."""
     archive = tmp_path / "archive.rar"
     archive.write_bytes(b"Rar!\x1a\x07\x01\x00placeholder-not-a-real-rar")
     dest = tmp_path / "dest"
@@ -178,6 +185,7 @@ RAR_SAMPLE_DIRS = [
 def test_extract_rar_roundtrip_lands_files_with_content(
     tmp_path: Path, sample_name: str
 ) -> None:
+    """Real .rar archives are extracted correctly (rar3 and rar5 formats)."""
     archive = Path(__file__).parent / "data" / sample_name
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -241,6 +249,7 @@ def test_extract_detects_format_from_magic_bytes_regardless_of_file_name(
 def test_extract_rar_detects_format_from_magic_bytes_regardless_of_file_name(
     tmp_path: Path, misleading_name: str
 ) -> None:
+    """Format detection from magic bytes works for .rar even with misleading filenames."""
     sample = Path(__file__).parent / "data" / "rar5-subdirs.rar"
     renamed = tmp_path / misleading_name
     renamed.write_bytes(sample.read_bytes())
@@ -256,6 +265,7 @@ def test_extract_rar_detects_format_from_magic_bytes_regardless_of_file_name(
 
 
 def test_extract_unknown_suffix_error_names_supported_formats(tmp_path: Path) -> None:
+    """Error message for unsupported formats lists all supported formats."""
     archive = tmp_path / "archive.tar"
     archive.write_bytes(b"not a real archive")
     dest = tmp_path / "dest"
@@ -307,6 +317,7 @@ def test_extract_rar_without_backend_on_path_raises_archive_error_naming_the_hin
 def test_extract_rar_raises_archive_error_when_the_destination_is_read_only(
     tmp_path: Path,
 ) -> None:
+    """extract() raises ArchiveError when dest dir is chmod(0o500), error names the archive file."""
     archive = Path(__file__).parent / "data" / "rar5-subdirs.rar"
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -323,6 +334,7 @@ def test_extract_rar_raises_archive_error_when_the_destination_is_read_only(
 def test_extract_non_archive_with_no_suffix_raises_archive_error(
     tmp_path: Path,
 ) -> None:
+    """extract() raises ArchiveError; error message names the file and lists supported formats."""
     archive = tmp_path / "not-an-archive-at-all"
     archive.write_bytes(b"just some plain bytes, no magic number here")
     dest = tmp_path / "dest"
@@ -361,6 +373,7 @@ def test_extract_zip_named_directory_raises_archive_error_naming_the_directory(
 def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
     tmp_path: Path,
 ) -> None:
+    """Corrupt zip archives (with valid magic bytes) raise ArchiveError."""
     archive = tmp_path / "archive.zip"
     archive.write_bytes(b"PK\x03\x04" + b"not a real zip central directory" * 4)
     dest = tmp_path / "dest"
@@ -375,6 +388,7 @@ def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
 def test_extract_corrupt_7z_with_valid_magic_bytes_raises_archive_error(
     tmp_path: Path,
 ) -> None:
+    """Corrupt 7z archives (with valid magic bytes) raise ArchiveError."""
     archive = tmp_path / "archive.7z"
     archive.write_bytes(
         b"7z\xbc\xaf\x27\x1c" + b"not a real 7z header or body" * 4

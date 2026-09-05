@@ -49,12 +49,20 @@ def _named_zip(tmp_path: Path, name: str, files: dict[str, str | bytes]) -> Path
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub OS process check to prevent running game from failing tests.
+
+    Prevents GameRunningError during tests if SPT is actually running on the
+    test host. This fixture is auto-used to ensure deterministic test runs
+    regardless of the developer's current session state.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def test_server_only_install_places_the_file_at_the_canonical_path(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """A server-only archive (SPT/user/mods/ only) is extracted to the canonical
+    SPT/user/mods/ directory, never to an alternate layout like SPT_Runtime/."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -73,6 +81,9 @@ def test_server_only_install_places_the_file_at_the_canonical_path(
 def test_server_only_install_returns_mod_info_from_package_json(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """ModInfo.mod is populated from package.json fields (name, version, author,
+    sptVersion) and ModInfo.files lists the extracted files. The returned
+    mod_type is 'server' and source is the archive's filename."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -102,6 +113,9 @@ def test_server_only_install_returns_mod_info_from_package_json(
 def test_server_only_install_commit_has_complete_and_correct_trailers(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """The install commit carries all MOD_TRAILER_KEYS with correct values: Mod,
+    Mod-Version, Mod-Type (server), Mod-Author, Mod-SPT, Mod-Source, Mod-State
+    (installed), and empty Forge/guid trailers if no match."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -136,6 +150,8 @@ def test_server_only_install_commit_has_complete_and_correct_trailers(
 def test_client_only_dll_install_names_the_mod_after_the_dll(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """A BepInEx-only archive (no SPT/user/mods/) has mod_type 'client'. The mod
+    name is inferred from the DLL filename stem (not parent, not package.json)."""
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
 
     result = services.install_from_archive(clean_repo.path, archive)
@@ -151,6 +167,9 @@ def test_client_only_dll_install_names_the_mod_after_the_dll(
 def test_name_and_version_override_win_over_extracted_metadata(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """When name_override and version_override are supplied, they replace the
+    values read from package.json (or DLL metadata) in both ModInfo and the
+    commit subject."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -178,6 +197,9 @@ def test_name_and_version_override_win_over_extracted_metadata(
 def test_hybrid_install_copies_both_trees_and_reads_package_json(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """An archive with both SPT/user/mods/ and BepInEx/plugins/ is detected as
+    'hybrid', both trees are copied, and package.json (server) provides metadata
+    (name, version)."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -235,6 +257,7 @@ def test_hybrid_install_into_a_runtime_layout_translates_only_the_server_half(
 def test_install_on_dirty_tree_raises_before_any_change(
     initialized_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """Verify install_from_archive rejects a dirty tree before making any changes."""
     # initialized_repo has no baseline commit yet, so the tracked profile is
     # still untracked -- the tree is dirty from the very start.
     assert initialized_repo.is_clean() is False
@@ -250,6 +273,7 @@ def test_install_on_dirty_tree_raises_before_any_change(
 def test_install_with_game_running_raises_before_any_change(
     clean_repo: Repo, make_archive: MakeArchive, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Verify install_from_archive rejects if the game is running before making any changes."""
     monkeypatch.setattr(
         game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"]
     )
@@ -266,6 +290,7 @@ def test_install_with_game_running_raises_before_any_change(
 def test_install_reports_progress_steps_in_order_with_monotonic_percent(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """Verify progress callback is invoked with steps in order and monotonically increasing percent."""
     archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -300,6 +325,7 @@ def test_install_cleans_up_the_temp_dir_after_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Verify install_from_archive cleans up the staging directory after a successful install."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
 
@@ -311,6 +337,11 @@ def test_install_cleans_up_the_temp_dir_after_success(
 def test_install_rolls_back_copied_files_when_the_commit_is_rejected(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """Verify install_from_archive rolls back files if the commit fails.
+
+    The commit happens after copying files. If it fails (e.g., due to invalid
+    metadata), the copied files must be removed and the tree left clean.
+    """
     # A newline in a trailer value is rejected by Repo.commit itself, but
     # only *after* install_from_archive has already copied the anchored
     # files into the game directory (the commit happens as the last step).
@@ -389,6 +420,7 @@ def test_install_cleans_up_the_temp_dir_after_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Verify install_from_archive cleans up the staging directory even on failure."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     # No SPT/user/mods or BepInEx/plugins anchor in this archive: extraction
     # succeeds but the anchor-search step fails.
@@ -546,6 +578,12 @@ def test_multi_dll_client_install_prefers_the_dll_matching_the_archive_stem(
     clean_repo: Repo,
     tmp_path: Path,
 ) -> None:
+    """Verify multi-DLL client mods are named after the DLL matching the archive stem.
+
+    When an archive contains multiple client DLLs (e.g., SAIN.dll and
+    SAIN.Preset.Shared.dll), the mod name must be derived from the DLL whose
+    stem matches the archive filename, not from the alphabetically first DLL.
+    """
     archive = _named_zip(tmp_path, archive_name, files)
 
     result = services.install_from_archive(clean_repo.path, archive)
@@ -573,6 +611,12 @@ def test_install_auto_snapshots_changed_profiles_instead_of_failing(
 def test_install_blocks_on_unmanaged_changes_in_plain_language(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Verify install_from_archive rejects a tree with unmanaged file modifications.
+
+    If a tracked file (part of an installed mod) has been manually edited and
+    the tree is dirty, install_from_archive must reject it with a clear error
+    message that explains the conflict in user-friendly language.
+    """
     install_commit(clean_repo, "ModA", "1.0.0")
     (clean_repo.path / "BepInEx/plugins/ModA.dll").write_bytes(b"tampered")
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")

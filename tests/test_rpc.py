@@ -95,10 +95,12 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub game process checking to always report no running processes."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a repo and commit a baseline configuration."""
     repo = Repo.init(detect_layout(path))
     repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
@@ -141,6 +143,8 @@ def inject_error(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, Exception], 
 def test_success_envelope_carries_event_result_and_the_service_return_value(
     tmp_path: Path,
 ) -> None:
+    """The RPC response envelope contains 'event' and 'data' fields with the
+    service function's result."""
     (tmp_path / "Sub").mkdir()
 
     exit_code, lines = _invoke("list_directories", {"path": str(tmp_path)})
@@ -167,6 +171,7 @@ def test_success_envelope_carries_event_result_and_the_service_return_value(
 def _install_request(
     fake_game_dir: Path, make_archive: MakeArchive, **overrides: Any
 ) -> dict[str, Any]:
+    """Build an install_from_archive request with a test mod archive."""
     _clean_repo(fake_game_dir)
     archive = make_archive(
         {
@@ -184,6 +189,8 @@ def _install_request(
 def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
     fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
+    """Progress messages precede the final result line and all lines are
+    valid JSON."""
     request = _install_request(fake_game_dir, make_archive)
 
     result = runner.invoke(
@@ -202,6 +209,7 @@ def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
 def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
     fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
+    """The caller's operation_id is echoed on every output line."""
     request = _install_request(fake_game_dir, make_archive, operation_id="caller-op")
 
     exit_code, lines = _invoke("install_from_archive", request)
@@ -214,6 +222,8 @@ def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
 def test_operation_id_is_generated_as_32_hex_chars_when_absent_and_identical_everywhere(
     fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
+    """A missing operation_id is auto-generated as 32 hex characters and is
+    consistent across all output lines."""
     request = _install_request(fake_game_dir, make_archive)
 
     exit_code, lines = _invoke("install_from_archive", request)
@@ -234,6 +244,7 @@ def test_operation_id_is_generated_as_32_hex_chars_when_absent_and_identical_eve
 def test_set_spt_version_wraps_its_plain_string_result_under_spt_version(
     fake_game_dir: Path,
 ) -> None:
+    """A plain string result is wrapped under the 'spt_version' field."""
     repo = _clean_repo(fake_game_dir)
 
     exit_code, lines = _invoke(
@@ -247,6 +258,7 @@ def test_set_spt_version_wraps_its_plain_string_result_under_spt_version(
 def test_export_mods_wraps_its_plain_string_result_under_content(
     fake_game_dir: Path, tmp_path: Path
 ) -> None:
+    """A plain string result is wrapped under the 'content' field."""
     repo = _clean_repo(fake_game_dir)
     db_path = tmp_path / "unused-catalog.db"
 
@@ -259,6 +271,7 @@ def test_export_mods_wraps_its_plain_string_result_under_content(
 
 
 def test_list_favorites_wraps_its_list_result_under_mod_ids(tmp_path: Path) -> None:
+    """A list result is wrapped under the 'mod_ids' field."""
     favorites_path = tmp_path / "favorites.json"
 
     exit_code, lines = _invoke(
@@ -298,6 +311,7 @@ def test_set_favorite_and_list_favorites_round_trip_through_the_rpc_layer(
 def test_conflict_error_details_carry_only_the_conflicts_list(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """ConflictError details include the conflicts list and empty residues."""
     conflict = Conflict(
         kind="tracked-file",
         severity="error",
@@ -327,6 +341,8 @@ def test_conflict_error_details_carry_only_the_conflicts_list(
 def test_dependency_error_details_carry_only_the_conflicts_list(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """DependencyError details include the conflicts list and a dependency
+    field."""
     conflict = Conflict(kind="missing-dependency", severity="error", message="needs Y")
     inject_error("status", DependencyError("boom", conflicts=[conflict]))
 
@@ -342,6 +358,8 @@ def test_dependency_error_details_carry_only_the_conflicts_list(
 def test_unresolvable_dependency_error_details_carry_dependency_and_reason(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """UnresolvableDependencyError details include dependency name, reason,
+    and empty conflicts list."""
     inject_error(
         "status",
         UnresolvableDependencyError("DepMod", "no compatible version published"),
@@ -360,6 +378,7 @@ def test_unresolvable_dependency_error_details_carry_dependency_and_reason(
 def test_partial_install_error_details_carry_the_installed_mod_names(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """PartialInstallError details include the list of installed mod names."""
     installed = [
         services.InstallResult(mod=_mod_info("First")),
         services.InstallResult(mod=_mod_info("Second")),
@@ -379,6 +398,7 @@ def test_partial_install_error_details_carry_the_installed_mod_names(
 def test_profile_residue_error_details_carry_the_residues_list(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """ProfileResidueError details include the list of residues."""
     residue = ProfileResidue(profile="abc", category="item", ids=["1", "2"], count=2)
     inject_error("status", ProfileResidueError("boom", residues=[residue]))
 
@@ -402,6 +422,7 @@ def test_profile_residue_error_details_carry_the_residues_list(
 def test_git_error_details_carry_the_conflicting_paths(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """GitError details include the list of conflicting file paths."""
     inject_error(
         "status", GitError("boom", conflicting_paths=[Path("a/b.txt"), Path("c.txt")])
     )
@@ -417,6 +438,8 @@ def test_git_error_details_carry_the_conflicting_paths(
 def test_ambiguous_mod_error_details_carry_name_and_candidates_unsorted(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """AmbiguousModError details include mod name and candidate names in
+    error order (not sorted)."""
     inject_error("status", AmbiguousModError("Foo", ["FooB", "FooA"]))
 
     exit_code, lines = _invoke("status", {"path": "/whatever"})
@@ -433,6 +456,7 @@ def test_ambiguous_mod_error_details_carry_name_and_candidates_unsorted(
 def test_forge_api_error_details_carry_the_upstream_code_and_status(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """ForgeApiError details include upstream API code and HTTP status code."""
     inject_error("status", ForgeApiError("NOT_FOUND", "mod is gone", 404))
 
     exit_code, lines = _invoke("status", {"path": "/whatever"})
@@ -449,6 +473,8 @@ def test_forge_api_error_details_carry_the_upstream_code_and_status(
 def test_error_without_structured_payload_gets_empty_details(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """Exceptions without structured details fields map to empty details
+    object."""
     inject_error("status", ArchiveError("archive is corrupt"))
 
     exit_code, lines = _invoke("status", {"path": "/whatever"})
@@ -473,6 +499,7 @@ def test_error_without_structured_payload_gets_empty_details(
 def test_unexpected_exception_maps_to_internal_error_with_a_well_formed_line(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """Unhandled exceptions map to INTERNAL_ERROR with the exception message."""
     inject_error("status", RuntimeError("kaboom"))
 
     result = runner.invoke(app, ["rpc", "status"], input=json.dumps({"path": "/x"}))
@@ -511,6 +538,8 @@ def test_unexpected_exception_maps_to_internal_error_with_a_well_formed_line(
 def test_request_errors_exit_two_with_validation_error(
     name: str, stdin: str, expected_substring: str | None
 ) -> None:
+    """Malformed requests, unknown functions, and validation failures exit
+    with code 2 and code VALIDATION_ERROR."""
     result = runner.invoke(app, ["rpc", name], input=stdin)
 
     assert result.exit_code == 2
@@ -529,6 +558,8 @@ def test_request_errors_exit_two_with_validation_error(
 def test_sync_catalog_reaches_forge_through_respx_and_reports_the_page_count(
     tmp_path: Path,
 ) -> None:
+    """sync_catalog reaches the Forge API and reports page count through RPC
+    envelope."""
     db_path = tmp_path / "catalog.db"
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         empty_page = page_envelope([], current_page=1, last_page=1, total=0)
@@ -561,6 +592,7 @@ def test_rpc_output_does_not_depend_on_the_current_working_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
+    """RPC output is independent of the current working directory."""
     repo = _clean_repo(fake_game_dir)
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     monkeypatch.chdir(elsewhere)
@@ -626,6 +658,8 @@ def test_locate_directory_serialises_every_matched_directory(
 def test_init_game_dir_reports_spt_version_and_no_pre_existing_mods(
     fake_game_dir: Path,
 ) -> None:
+    """init_game_dir reports detected SPT version and empty lists of
+    pre-existing and adopted mods."""
     exit_code, lines = _invoke("init_game_dir", {"path": str(fake_game_dir)})
 
     assert exit_code == 0
@@ -646,6 +680,7 @@ def test_init_game_dir_reports_spt_version_and_no_pre_existing_mods(
 def test_list_mods_returns_the_installed_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """list_mods returns all installed mods with their version and state."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke("list_mods", {"path": str(clean_repo.path)})
@@ -660,6 +695,8 @@ def test_list_mods_returns_the_installed_mod(
 def test_mod_files_returns_the_files_of_the_install_commit(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """mod_files returns the files added by a mod's install commit with change
+    annotations."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke(
@@ -675,6 +712,8 @@ def test_mod_files_returns_the_files_of_the_install_commit(
 def test_history_without_name_returns_commits_newest_first(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history without a name filter returns all commits in reverse
+    chronological order."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke("history", {"path": str(clean_repo.path)})
@@ -687,6 +726,7 @@ def test_history_without_name_returns_commits_newest_first(
 def test_history_with_name_matches_case_insensitively(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history with a name filter matches mod names case-insensitively."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke(
@@ -701,6 +741,8 @@ def test_history_with_name_matches_case_insensitively(
 def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """disable_mod reverts the install commit and the mod no longer appears
+    in list_mods."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke(
@@ -721,6 +763,8 @@ def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
 def test_enable_mod_restores_a_disabled_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """enable_mod restores a previously disabled mod and it reappears in
+    list_mods."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
     _invoke("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
@@ -741,6 +785,8 @@ def test_enable_mod_restores_a_disabled_mod(
 def test_remove_mod_deletes_the_files_and_reports_them(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod deletes a mod's files from disk and reports them in the
+    result."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke(
@@ -758,6 +804,8 @@ def test_remove_mod_deletes_the_files_and_reports_them(
 def test_check_profiles_reports_no_residue_for_a_db_free_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """check_profiles reports no residue for mods without database
+    templates."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke("check_profiles", {"path": str(clean_repo.path)})
@@ -769,6 +817,8 @@ def test_check_profiles_reports_no_residue_for_a_db_free_mod(
 def test_plan_profile_cleanup_reports_removals_through_rpc(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """plan_profile_cleanup reports items that would be removed from profiles
+    if the mod is uninstalled."""
     item_id = "5c0d1b8b86f7744bb2683cf7"
     install_commit(
         clean_repo,
@@ -812,6 +862,8 @@ def test_plan_profile_cleanup_reports_removals_through_rpc(
 def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """clean_profile removes residual database entries from profiles and
+    reports a snapshot commit."""
     item_id = "5c0d1b8b86f7744bb2683cf8"
     install_commit(
         clean_repo,
@@ -854,6 +906,7 @@ def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
 def test_clean_profile_maps_invalid_path_error_to_the_invalid_path_code(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
+    """InvalidPathError from clean_profile maps to INVALID_PATH error code."""
     inject_error("clean_profile", InvalidPathError("no such profile"))
 
     exit_code, lines = _invoke(
@@ -865,6 +918,7 @@ def test_clean_profile_maps_invalid_path_error_to_the_invalid_path_code(
 
 
 def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:
+    """adopt_mod tracks an untracked mod directory and reports the mod info."""
     mod_dir = clean_repo.path / "SPT" / "user" / "mods" / "ManualMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -886,6 +940,7 @@ def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:
 
 
 def test_snapshot_commits_a_modified_profile(clean_repo: Repo) -> None:
+    """snapshot commits a profile modification with a user-supplied message."""
     profile_path = clean_repo.path / "SPT/user/profiles/abc.json"
     profile_path.write_text(
         json.dumps({"Inventory": {"items": [1]}, "TradersInfo": {}, "Quests": []}),
@@ -911,6 +966,8 @@ def test_snapshot_commits_a_modified_profile(clean_repo: Repo) -> None:
 def test_search_catalog_finds_a_synced_mod_by_name(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """search_catalog finds synced mods by name and reports state and
+    installed version."""
     db_path = tmp_path / "catalog.db"
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
@@ -939,6 +996,8 @@ def test_search_catalog_finds_a_synced_mod_by_name(
 def test_browse_catalog_available_filter_keeps_the_uninstalled_synced_mod(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """browse_catalog with 'available' filter shows only uninstalled mods and
+    'installed' filter shows only installed mods."""
     db_path = tmp_path / "catalog.db"
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
@@ -976,6 +1035,7 @@ def test_browse_catalog_available_filter_keeps_the_uninstalled_synced_mod(
 def test_browse_catalog_exposes_the_first_seen_at_stamp_of_a_synced_mod(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """browse_catalog includes the first_seen_at timestamp in mod details."""
     db_path = tmp_path / "catalog.db"
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
@@ -1002,6 +1062,8 @@ def test_browse_catalog_exposes_the_first_seen_at_stamp_of_a_synced_mod(
 def test_clear_catalog_cache_deletes_the_db_file_and_reports_removed_false_on_retry(
     tmp_path: Path,
 ) -> None:
+    """clear_catalog_cache deletes the database file and reports removed=false
+    on retry."""
     db = tmp_path / "forge-cache.db"
     with Catalog(db):
         pass
@@ -1129,6 +1191,8 @@ def _seed_forge_mod(
 def test_get_mod_details_combines_cached_data_with_the_live_description(
     tmp_path: Path,
 ) -> None:
+    """get_mod_details combines cached mod data with live API description and
+    removes HTML tags."""
     db_path = tmp_path / "catalog.db"
     mod = mod_json_full(
         id=42,
@@ -1193,6 +1257,8 @@ def test_get_mod_details_combines_cached_data_with_the_live_description(
 def test_plan_mod_install_resolves_the_target_and_its_download_link(
     fake_game_dir: Path, tmp_path: Path
 ) -> None:
+    """plan_mod_install resolves a mod by name or ID and reports download
+    link and other details."""
     _clean_repo(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
@@ -1237,6 +1303,8 @@ def test_plan_mod_install_resolves_the_target_and_its_download_link(
 def test_install_mod_downloads_and_installs_the_target(
     fake_game_dir: Path, tmp_path: Path, make_archive: MakeArchive
 ) -> None:
+    """install_mod downloads a mod archive from the resolved link and
+    installs it with Forge metadata."""
     _clean_repo(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     archive = make_archive(
@@ -1294,6 +1362,8 @@ def test_install_mod_downloads_and_installs_the_target(
 def test_check_updates_reports_an_available_update(
     fake_game_dir: Path, tmp_path: Path, install_commit: TrailerInstallCommit
 ) -> None:
+    """check_updates queries the Forge for available updates to installed
+    mods."""
     repo = _clean_repo(fake_game_dir)
     install_commit(
         repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
@@ -1355,6 +1425,8 @@ def test_update_mod_applies_the_recommended_version(
     install_commit: TrailerInstallCommit,
     make_archive: MakeArchive,
 ) -> None:
+    """update_mod downloads and installs a newer version of an installed
+    mod."""
     repo = _clean_repo(fake_game_dir)
     install_commit(
         repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"}
@@ -1429,6 +1501,7 @@ def test_update_mod_applies_the_recommended_version(
 def test_import_list_reports_a_mod_only_the_list_has_as_missing(
     fake_game_dir: Path, tmp_path: Path
 ) -> None:
+    """import_list reports mods listed in the file but not installed."""
     _clean_repo(fake_game_dir)
     list_file = tmp_path / "mods.txt"
     list_file.write_text("GhostMod 2.0.0\n", encoding="utf-8")
@@ -1455,6 +1528,8 @@ def test_import_list_reports_a_mod_only_the_list_has_as_missing(
 def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
     fake_game_dir: Path, tmp_path: Path, make_archive: MakeArchive
 ) -> None:
+    """import_list with apply=True installs missing mods and reports progress
+    for each installation."""
     _clean_repo(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     archive = make_archive(

@@ -18,6 +18,7 @@ DOWNLOAD_URL = "https://cdn.example.com/releases/mod-1.0.0.zip"
 def test_stream_delivers_chunks_and_exposes_headers(
     client_factory: ClientFactory,
 ) -> None:
+    """stream() yields chunks and exposes response headers from the context manager."""
     body = b"0123456789" * 50  # 500 bytes
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
@@ -45,6 +46,7 @@ def test_stream_delivers_chunks_and_exposes_headers(
 
 
 def test_stream_of_empty_body_yields_no_chunks(client_factory: ClientFactory) -> None:
+    """stream() with 0-byte body yields an empty iterator; chunks list is []."""
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
             return_value=httpx.Response(

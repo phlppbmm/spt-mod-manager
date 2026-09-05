@@ -9,6 +9,7 @@ from sptmod.core.repo import Repo
 
 
 def _add_and_commit(repo: Repo, relative: Path, content: str, message: str) -> str:
+    """Create a file, stage it, and commit with mod metadata trailers."""
     full = repo.path / relative
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
@@ -18,6 +19,7 @@ def _add_and_commit(repo: Repo, relative: Path, content: str, message: str) -> s
 
 
 def _modify_and_commit(repo: Repo, relative: Path, content: str, message: str) -> str:
+    """Modify an existing file, stage it, and commit with mod metadata trailers."""
     full = repo.path / relative
     full.write_text(content, encoding="utf-8")
     return repo.commit(
@@ -28,6 +30,7 @@ def _modify_and_commit(repo: Repo, relative: Path, content: str, message: str) -
 def test_revert_removes_the_files_added_by_the_reverted_commit(
     initialized_repo: Repo,
 ) -> None:
+    """revert() inverts the reverted commit's changes: files added are deleted, deleted are restored."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -39,6 +42,7 @@ def test_revert_removes_the_files_added_by_the_reverted_commit(
 
 
 def test_revert_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
+    """Repo.revert() returns a new commit hash distinct from the original."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -55,6 +59,7 @@ def test_revert_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
 def test_revert_adds_the_extra_trailers_to_the_new_commit(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.revert() includes extra_trailers in the revert commit metadata."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -71,6 +76,7 @@ def test_revert_adds_the_extra_trailers_to_the_new_commit(
 
 
 def test_cherry_pick_reintroduces_the_removed_file(initialized_repo: Repo) -> None:
+    """Repo.cherry_pick() re-applies the changes from a commit (e.g., re-enabling a mod)."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -86,6 +92,7 @@ def test_cherry_pick_reintroduces_the_removed_file(initialized_repo: Repo) -> No
 
 
 def test_cherry_pick_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
+    """Repo.cherry_pick() returns a new commit hash distinct from the original."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -103,6 +110,7 @@ def test_cherry_pick_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
 def test_cherry_pick_adds_the_extra_trailers_to_the_new_commit(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.cherry_pick() includes extra_trailers in the new commit metadata."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -120,6 +128,9 @@ def test_cherry_pick_adds_the_extra_trailers_to_the_new_commit(
 def test_revert_conflict_raises_git_error_with_conflicting_path_and_leaves_clean_tree(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.revert() on a conflicting change raises GitError and aborts, leaving
+    no merge artifacts or staged changes.
+    """
     # Track the fixture's own whitelisted files (.gitignore, abc.json) first,
     # so the only untracked file below the scenario builds is the one we
     # explicitly create to prove revert doesn't absorb it.
@@ -152,6 +163,7 @@ def test_revert_conflict_raises_git_error_with_conflicting_path_and_leaves_clean
 def test_revert_conflict_leaves_the_working_tree_content_untouched(
     initialized_repo: Repo,
 ) -> None:
+    """A failed revert leaves the working tree content as it was before the attempt."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "base\n", "mod: ModA install"
@@ -171,6 +183,7 @@ def test_revert_conflict_leaves_the_working_tree_content_untouched(
 def test_revert_does_not_stage_an_unrelated_untracked_file(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.revert() commits only the reverted change, not other untracked files."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -191,6 +204,7 @@ def test_revert_does_not_stage_an_unrelated_untracked_file(
 def test_cherry_pick_does_not_stage_an_unrelated_untracked_file(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.cherry_pick() commits only the picked change, not other untracked files."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -212,6 +226,7 @@ def test_cherry_pick_does_not_stage_an_unrelated_untracked_file(
 def test_revert_rejects_extra_trailer_values_containing_newlines(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.revert() raises GitError when extra_trailers contain newlines."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -224,6 +239,7 @@ def test_revert_rejects_extra_trailer_values_containing_newlines(
 
 
 def test_revert_without_extra_trailers_still_succeeds(initialized_repo: Repo) -> None:
+    """Repo.revert() succeeds with no extra_trailers and produces a revert commit."""
     relative = Path("SPT/user/mods/ModA/file.txt")
     add_hash = _add_and_commit(
         initialized_repo, relative, "content-v1\n", "mod: ModA install"
@@ -262,6 +278,9 @@ def test_revert_when_the_abort_itself_fails_names_the_abort_failure(
 def test_cherry_pick_conflict_raises_git_error_and_leaves_clean_tree(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.cherry_pick() on a conflicting commit raises GitError and aborts,
+    leaving no merge artifacts or staged changes.
+    """
     # Track the fixture's own whitelisted files first, otherwise they show up
     # as legitimately untracked ("??") and is_clean() would correctly be False.
     initialized_repo.commit("baseline", paths=None)

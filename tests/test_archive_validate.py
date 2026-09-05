@@ -41,6 +41,7 @@ SAFE_MEMBERS = [
 
 @pytest.mark.parametrize("member", UNSAFE_MEMBERS)
 def test_validate_member_paths_rejects_unsafe_member(member: str) -> None:
+    """Paths with directory traversal (../) or absolute addressing are rejected."""
     with pytest.raises(ArchiveError) as excinfo:
         validate_member_paths([member])
     assert member in str(excinfo.value)
@@ -55,12 +56,15 @@ def test_validate_member_paths_rejects_unsafe_member_mixed_with_safe_ones() -> N
 
 @pytest.mark.parametrize("member", SAFE_MEMBERS)
 def test_validate_member_paths_accepts_safe_member(member: str) -> None:
+    """Safe member paths (nested, server/client anchors) are accepted."""
     validate_member_paths([member])
 
 
 def test_validate_member_paths_accepts_all_safe_members_together() -> None:
+    """All safe-path categories (nested, server/client anchors, dotted names) pass together."""
     validate_member_paths(list(SAFE_MEMBER_PATHS.values()))
 
 
 def test_validate_member_paths_accepts_empty_sequence() -> None:
+    """validate_member_paths([]) raises nothing (edge case of empty member list)."""
     validate_member_paths([])

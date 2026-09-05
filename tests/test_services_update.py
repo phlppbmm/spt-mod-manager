@@ -87,6 +87,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 
 def _mock_updates(respx_router: respx.MockRouter, data: JsonDict) -> None:
+    """Mock the Forge /mods/updates endpoint to return a given payload."""
     respx_router.get("/mods/updates").mock(
         return_value=httpx.Response(200, json=success_envelope(data))
     )
@@ -95,6 +96,7 @@ def _mock_updates(respx_router: respx.MockRouter, data: JsonDict) -> None:
 def _current_version(
     *, id: int, mod_id: int, name: str, version: str, slug: str | None = None
 ) -> JsonDict:
+    """Build a Forge current-version entry for use in mock /mods/updates payload."""
     return {
         "id": id,
         "mod_id": mod_id,
@@ -275,6 +277,8 @@ def test_check_updates_unknown_name_raises_mod_not_found(
     db_path: Path,
     install_commit: InstallCommit,
 ) -> None:
+    """Querying check_updates by a name that is not installed raises ModNotFoundError
+    instead of silently returning an empty UpdatesReport."""
     install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server")
     client = client_factory()
 
@@ -290,6 +294,12 @@ def test_check_updates_ambiguous_name_raises_ambiguous_mod(
     db_path: Path,
     install_commit: InstallCommit,
 ) -> None:
+    """Verify check_updates raises AmbiguousModError when a name query matches multiple mods.
+
+    When case-different variants of the same mod name are installed (e.g.,
+    CoolMod and coolmod), a query by name must fail to disambiguate rather
+    than silently picking one.
+    """
     install_commit(
         clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("1")
     )
@@ -618,6 +628,13 @@ def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
     db_path: Path,
     install_commit: InstallCommit,
 ) -> None:
+    """Verify update_mod is a no-op for up-to-date, blocked, or incompatible mods.
+
+    When Forge reports a mod as up-to-date, blocked by a dependency, or
+    incompatible with the SPT version, update_mod must return an empty result
+    (no commit, no version change) but provide a descriptive notice explaining
+    why the update did not proceed.
+    """
     install_commit(
         clean_repo, "CoolMod", mod_version, mod_type="server", **_forge_trailers("10")
     )
@@ -639,6 +656,7 @@ def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
 def test_update_mod_unknown_name_raises_mod_not_found(
     clean_repo: Repo, client_factory: Callable[..., ForgeClient], db_path: Path
 ) -> None:
+    """Verify update_mod raises ModNotFoundError when the mod is not installed."""
     client = client_factory()
 
     with pytest.raises(ModNotFoundError):
@@ -683,6 +701,7 @@ def test_update_mod_absent_from_every_report_list_is_a_noop_with_generic_notice(
 def _mock_update_recommendation(
     respx_router: respx.MockRouter, link: str, content_length: int
 ) -> None:
+    """Mock a single available update for ModA in /mods/updates response."""
     _mock_updates(
         respx_router,
         {
@@ -836,6 +855,7 @@ def test_update_mod_missing_dependency_aborts_without_committing(
 
 
 def _available_update_data(link: str, content_length: int) -> JsonDict:
+    """Build a /mods/updates payload reporting an available update for CoolMod."""
     return {
         "spt_version": SPT_VERSION,
         "updates": [
@@ -871,6 +891,7 @@ def test_cli_update_check_never_prompts(
     install_commit: InstallCommit,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify `sptmod update --check` prints the report without prompting the user."""
     install_commit(
         clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )
@@ -919,6 +940,7 @@ def test_cli_update_without_yes_prompts_and_applies_on_yes(
     make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify `sptmod update` prompts for confirmation and applies on 'yes' response."""
     install_commit(
         clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10")
     )

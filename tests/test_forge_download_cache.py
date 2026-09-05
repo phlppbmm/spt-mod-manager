@@ -34,9 +34,11 @@ class RecordingProgress:
     """A ``Progress`` callback stand-in recording every call as a tuple."""
 
     def __init__(self) -> None:
+        """Initialize with empty calls list."""
         self.calls: list[tuple[str, int, str]] = []
 
     def __call__(self, step: str, percent: int, message: str) -> None:
+        """Record a progress callback invocation."""
         self.calls.append((step, percent, message))
 
 
@@ -71,6 +73,7 @@ class _RaisingAfterFirstChunk(httpx.SyncByteStream):
 def test_first_call_downloads_and_second_call_hits_the_cache(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Second call with matching expected_length skips HTTP; returns same path, updates mtime."""
     body = b"archive-bytes-for-hit-test"
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(
@@ -120,6 +123,7 @@ def test_first_call_downloads_and_second_call_hits_the_cache(
 def test_resume_continues_from_the_leftover_offset_on_a_206_response(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Resumes partial download when server sends 206 Partial Content with matching Content-Range."""
     total = 70_000
     full_payload = bytes(i % 251 for i in range(total))
     offset = 30_000
@@ -176,6 +180,7 @@ def test_resume_continues_from_the_leftover_offset_on_a_206_response(
 def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """When server ignores range request and sends 200 OK, download restarts from offset 0."""
     total = 40
     full_payload = bytes(range(total))
     offset = 10
@@ -235,6 +240,7 @@ def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
     range_status: int,
     range_headers: dict[str, str],
 ) -> None:
+    """Resume fails validation (mismatched total, malformed header, wrong offset) and restarts."""
     total = 40
     full_payload = bytes(range(total))
     offset = 10
@@ -281,6 +287,7 @@ def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
 def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Stream interruption saves partial download and re-raises; subsequent call resumes."""
     total = DEFAULT_CHUNK_SIZE + 5_000
     full_payload = bytes(i % 251 for i in range(total))
     with respx.mock() as router:
@@ -337,6 +344,7 @@ def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
 def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Deletes cached file when size mismatches; downloads fresh copy and makes exactly 1 HTTP call."""
     entry = cache_dir / "46"
     entry.mkdir()
     (entry / "mod-archive.zip").write_bytes(b"stale-wrong-size-content")
@@ -372,6 +380,7 @@ def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
 def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """ArchiveError on size mismatch; no entry in cache.find() result; directory not created."""
     body = b"actual-body-of-eighteen-b"
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
@@ -393,6 +402,7 @@ def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
 def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """With expected_length=None, cached file is reused without HTTP call or size check."""
     entry = cache_dir / "48"
     entry.mkdir()
     (entry / "mod-archive.zip").write_bytes(b"whatever-size-content-here")
@@ -428,6 +438,7 @@ def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
 def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
     client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Publish failure (final rename) raises ArchiveError but preserves .part for resume."""
     body = b"body-for-publish-failure-test"
     real_replace = os.replace
 
@@ -478,6 +489,7 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
 def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Fresh download receiving 416 Range Not Satisfiable raises ForgeUnavailableError."""
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(416))
         client = client_factory()
@@ -502,6 +514,7 @@ def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
 def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
     client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Successful download triggers cache sweep that evicts older entries to stay under cap."""
     old_entry = cache_dir / "old-key"
     old_entry.mkdir()
     (old_entry / "old.zip").write_bytes(b"O" * 5_000)
@@ -539,6 +552,7 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
 def test_progress_messages_never_mention_git_vocabulary(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:
+    """Progress messages use user-facing language, not git/commit/revert terminology."""
     body = b"body-for-vocabulary-test"
     all_messages: list[str] = []
     with respx.mock() as router:

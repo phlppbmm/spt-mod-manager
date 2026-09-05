@@ -24,9 +24,11 @@ class RecordingProgress:
     """A ``Progress`` callback stand-in recording every call as a tuple."""
 
     def __init__(self) -> None:
+        """Initialize with empty calls list."""
         self.calls: list[tuple[str, int, str]] = []
 
     def __call__(self, step: str, percent: int, message: str) -> None:
+        """Record a progress callback invocation."""
         self.calls.append((step, percent, message))
 
 
@@ -40,6 +42,7 @@ def dest_dir(tmp_path: Path) -> Path:
 def test_download_progress_is_monotonic_and_reaches_100_with_known_length(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """Progress percentage increases monotonically and reaches exactly 100% when Content-Length is provided."""
     body = b"x" * 300_000  # several 64 KiB chunks at the client's default chunk size
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
@@ -66,6 +69,7 @@ def test_download_progress_is_monotonic_and_reaches_100_with_known_length(
 def test_download_progress_stays_at_zero_while_total_size_is_unknown(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """Progress remains at 0% throughout when response lacks Content-Length header."""
     body = b"y" * 200_000
     with respx.mock() as router:
         # A streamed (iterator) body carries no Content-Length header, unlike
@@ -89,6 +93,7 @@ def test_download_progress_stays_at_zero_while_total_size_is_unknown(
 def test_download_progress_stays_at_zero_when_content_length_is_malformed(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """Progress remains at 0% when Content-Length header cannot be parsed."""
     body = b"z" * 200_000
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
@@ -145,6 +150,7 @@ def test_download_derives_the_file_name_from_header_url_or_fallback(
     url: str,
     expected_name: str,
 ) -> None:
+    """File name derives from Content-Disposition header, URL path, or fallback in that order."""
     body = b"archive-bytes"
     headers = (
         {}
@@ -167,6 +173,7 @@ def test_download_derives_the_file_name_from_header_url_or_fallback(
 def test_download_size_match_succeeds_and_returns_final_path(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """Download succeeds when downloaded file size matches expected_length."""
     body = b"exact-size-content"
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
@@ -181,6 +188,7 @@ def test_download_size_match_succeeds_and_returns_final_path(
 def test_download_size_mismatch_raises_archive_error_and_removes_temp_file(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """Size mismatch raises ArchiveError and cleans up the partial download."""
     body = b"exact-size-content"
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
@@ -195,6 +203,7 @@ def test_download_size_mismatch_raises_archive_error_and_removes_temp_file(
 def test_download_expected_length_none_skips_the_size_check(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """When expected_length is None, size validation is bypassed even if Content-Length differs."""
     body = b"a-body-of-777-declared-content-length"
     with respx.mock() as router:
         # Content-Length header lies about the body size; only expected_length
@@ -235,6 +244,7 @@ def test_download_follows_a_redirect_to_the_final_url(
 def test_download_propagates_forge_unavailable_error_and_leaves_no_temp_file(
     client_factory: ClientFactory, dest_dir: Path
 ) -> None:
+    """HTTP connection failure raises ForgeUnavailableError and leaves no partial file."""
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(side_effect=httpx.ConnectError("boom"))
         client = client_factory()

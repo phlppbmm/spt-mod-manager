@@ -138,6 +138,7 @@ def _seed_classify_mods(
 def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.classify matches installed mods by forge_id first and detects available updates."""
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
         # Name deliberately does not match "Alpha Mod": the match must come
@@ -157,6 +158,7 @@ def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
 def test_classify_matches_installed_mod_by_name_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.classify falls back to name matching (case-insensitive) when forge_id missing."""
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
         # forge_id deliberately does not match any cached mod id.
@@ -173,6 +175,11 @@ def test_classify_matches_installed_mod_by_name_case_insensitively(
 def test_classify_marks_never_installed_mods_as_available(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When the installed list is empty but the catalog has mods like Delta
+    (id=13), classify() marks it with state='available' and no installed_version;
+    this distinguishes "never installed" (available to install) from
+    "update available" (already installed).
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
 
     entries = catalog.classify([])
@@ -187,6 +194,10 @@ def test_classify_marks_never_installed_mods_as_available(
 def test_classify_orders_entries_by_mod_name(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """After seeding five mods with varying states and versions, classify()
+    returns them in alphabetical order (Alpha, Beta, Delta, Epsilon, Gamma),
+    guaranteeing consistent UI ordering regardless of catalog iteration order.
+    """
     _seed_classify_mods(client_factory, respx_router, catalog)
 
     entries = catalog.classify([])
@@ -203,6 +214,7 @@ def test_classify_orders_entries_by_mod_name(
 def test_classify_compatible_with_drops_mods_without_a_compatible_version(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.classify filters out mods with no version compatible with given SPT version."""
     _seed_classify_mods(client_factory, respx_router, catalog)
 
     entries = catalog.classify([], compatible_with="3.8.5")
@@ -213,6 +225,7 @@ def test_classify_compatible_with_drops_mods_without_a_compatible_version(
 def test_classify_compatible_with_restricts_update_check_to_compatible_versions(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Catalog.classify with compatible_with only suggests updates that fit the constraint."""
     _seed_classify_mods(client_factory, respx_router, catalog)
     # Epsilon Mod's newest version overall (2.0.0) is only 4.0-compatible;
     # the installed 1.0.0 already is the newest 3.8-compatible version.

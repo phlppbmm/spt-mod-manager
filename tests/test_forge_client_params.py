@@ -19,6 +19,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_mods_serializes_query_filters_sort_include_fields(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """mods() encodes query, filters, sort, include, and fields into request params."""
     route = respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
     )
@@ -48,6 +49,7 @@ def test_mods_serializes_query_filters_sort_include_fields(
 def test_mod_versions_serializes_filters_and_sort(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """mod_versions() encodes filters, sort, and include into request params."""
     route = respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
     )
@@ -70,6 +72,7 @@ def test_mod_versions_serializes_filters_and_sort(
 def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """updates() encodes mod pairs as id:version and spt_version in request params."""
     minimal_data = {
         "spt_version": "3.11.5",
         "updates": [],
@@ -94,6 +97,7 @@ def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
 def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """dependencies() encodes mod pairs as id:version and spt_version in request params."""
     route = respx_router.get("/mods/dependencies").mock(
         return_value=httpx.Response(200, json=success_envelope({}))
     )
@@ -111,6 +115,7 @@ def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
 def test_updates_serializes_single_pair_without_trailing_comma(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """updates() serializes a single mod pair without a trailing comma."""
     minimal_data = {
         "spt_version": "3.11.5",
         "updates": [],

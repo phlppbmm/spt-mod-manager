@@ -22,7 +22,8 @@ from sptmod.core.forge.catalog import default_db_path
 def test_list_favorites_on_an_empty_state_returns_an_empty_list_no_crash(
     tmp_path: Path,
 ) -> None:
-    """If the body is `pass`, this fails: returns None instead of []."""
+    """When no favorites file exists yet, list_favorites returns an empty list
+    (not None, not an exception) without creating the file."""
     path = tmp_path / "favorites.json"
 
     assert services.list_favorites(favorites_path=path) == []
@@ -30,7 +31,8 @@ def test_list_favorites_on_an_empty_state_returns_an_empty_list_no_crash(
 
 
 def test_set_favorite_true_marks_the_id_as_a_favorite(tmp_path: Path) -> None:
-    """If the body is `pass`, this fails: returns None instead of [7]."""
+    """set_favorite(7, True) returns [7] (not None) and writes the file, making
+    the ID retrievable by list_favorites."""
     path = tmp_path / "favorites.json"
 
     result = services.set_favorite(7, True, favorites_path=path)
@@ -50,7 +52,8 @@ def test_set_favorite_true_twice_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_set_favorite_false_removes_a_previously_favored_id(tmp_path: Path) -> None:
-    """If the body is `pass`, this fails: returns None instead of []."""
+    """set_favorite(3, False) removes the ID from the list and returns an empty
+    list after a preceding set_favorite(3, True) call."""
     path = tmp_path / "favorites.json"
     services.set_favorite(3, True, favorites_path=path)
 
@@ -72,8 +75,8 @@ def test_set_favorite_false_on_an_absent_id_is_a_noop_and_does_not_raise(
 
 
 def test_set_favorite_accepts_any_id_without_a_catalog_lookup(tmp_path: Path) -> None:
-    """If the body is `pass`, this fails: returns None instead of the id, even
-    though no catalog exists at all for this id."""
+    """set_favorite accepts any numeric ID (here 999999) without consulting the
+    catalog, allowing users to favorite mods not yet synced."""
     path = tmp_path / "favorites.json"
 
     result = services.set_favorite(999999, True, favorites_path=path)

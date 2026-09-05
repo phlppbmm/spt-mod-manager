@@ -70,6 +70,7 @@ def _write_leftover_part(
 
 
 def _sidecar_of(work: Path) -> Path:
+    """Return the .json sidecar path for a given work file."""
     return work.with_name(f"{work.name}.json")
 
 
@@ -82,6 +83,7 @@ def _dir_size(path: Path) -> int:
 
 
 def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_bytes() returns DEFAULT_MAX_BYTES when environment variable is unset."""
     monkeypatch.delenv(MAX_GB_ENV_VAR, raising=False)
 
     assert cache.max_bytes() == DEFAULT_MAX_BYTES
@@ -95,6 +97,7 @@ def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> N
 def test_max_bytes_reads_a_valid_gb_value(
     monkeypatch: pytest.MonkeyPatch, raw: str, expected: int
 ) -> None:
+    """max_bytes() parses integer and fractional gigabyte values from environment variable."""
     monkeypatch.setenv(MAX_GB_ENV_VAR, raw)
 
     assert cache.max_bytes() == expected
@@ -128,6 +131,7 @@ def test_max_bytes_reads_a_valid_gb_value(
 def test_max_bytes_falls_back_to_default_for_garbage_or_non_positive(
     monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
+    """max_bytes() returns DEFAULT_MAX_BYTES for invalid, non-positive, or malformed values."""
     monkeypatch.setenv(MAX_GB_ENV_VAR, raw)
 
     assert cache.max_bytes() == DEFAULT_MAX_BYTES
@@ -137,10 +141,12 @@ def test_max_bytes_falls_back_to_default_for_garbage_or_non_positive(
 
 
 def test_find_returns_none_when_there_is_no_entry(cache_dir: Path) -> None:
+    """An empty cache returns None for any key lookup."""
     assert cache.find("missing-key", cache_dir=cache_dir) is None
 
 
 def test_find_returns_the_archive_path_when_present(cache_dir: Path) -> None:
+    """A cache hit with matching size returns the archive path and touches its mtime."""
     archive = _write_entry(cache_dir, "k1", "mod.zip", b"archive-bytes")
 
     assert cache.find("k1", len(b"archive-bytes"), cache_dir) == archive
@@ -149,6 +155,7 @@ def test_find_returns_the_archive_path_when_present(cache_dir: Path) -> None:
 def test_find_removes_a_size_mismatched_entry_and_reports_it_missing(
     cache_dir: Path,
 ) -> None:
+    """find() deletes the entry and returns None when actual size does not match expected_length."""
     _write_entry(cache_dir, "k2", "mod.zip", b"archive-bytes")
 
     result = cache.find("k2", expected_length=999, cache_dir=cache_dir)
@@ -160,6 +167,7 @@ def test_find_removes_a_size_mismatched_entry_and_reports_it_missing(
 def test_find_reuses_the_cached_file_as_is_when_expected_length_is_none(
     cache_dir: Path,
 ) -> None:
+    """When expected_length is None, find() reuses the cached file without size validation."""
     archive = _write_entry(cache_dir, "k3", "mod.zip", b"any-size-content")
 
     result = cache.find("k3", expected_length=None, cache_dir=cache_dir)
@@ -171,6 +179,7 @@ def test_find_reuses_the_cached_file_as_is_when_expected_length_is_none(
 def test_find_returns_none_for_invalid_json_meta_without_raising(
     cache_dir: Path,
 ) -> None:
+    """find() gracefully returns None when meta.json contains invalid JSON."""
     entry = cache_dir / "k4"
     entry.mkdir()
     (entry / "mod.zip").write_bytes(b"content")
@@ -182,6 +191,7 @@ def test_find_returns_none_for_invalid_json_meta_without_raising(
 def test_find_returns_none_when_meta_json_is_unreadable_without_raising(
     cache_dir: Path,
 ) -> None:
+    """find() gracefully returns None when meta.json cannot be read."""
     entry = cache_dir / "k5"
     entry.mkdir()
     (entry / "mod.zip").write_bytes(b"content")
@@ -194,6 +204,7 @@ def test_find_returns_none_when_meta_json_is_unreadable_without_raising(
 def test_find_returns_none_when_meta_name_escapes_its_entry_directory(
     cache_dir: Path,
 ) -> None:
+    """find() rejects meta.json name fields that escape the entry directory via traversal."""
     entry = cache_dir / "k6"
     entry.mkdir()
     (entry / "meta.json").write_text(
@@ -207,6 +218,7 @@ def test_find_returns_none_when_meta_name_escapes_its_entry_directory(
 def test_find_returns_none_when_meta_names_a_file_that_does_not_exist(
     cache_dir: Path,
 ) -> None:
+    """find() returns None when meta.json references a nonexistent archive file."""
     entry = cache_dir / "k7"
     entry.mkdir()
     (entry / "meta.json").write_text(
@@ -235,6 +247,7 @@ def test_find_returns_none_when_the_named_archive_is_a_directory_not_a_file(
 
 
 def test_find_refreshes_the_entrys_last_use_time_on_a_hit(cache_dir: Path) -> None:
+    """find() updates entry's last-modified timestamp on successful retrieval."""
     _write_entry(cache_dir, "k8", "mod.zip", b"content")
     entry = cache_dir / "k8"
     old_time = time.time() - 100_000
@@ -251,6 +264,7 @@ def test_find_refreshes_the_entrys_last_use_time_on_a_hit(cache_dir: Path) -> No
 def test_claim_with_no_leftover_starts_fresh_at_offset_zero(
     cache_dir: Path,
 ) -> None:
+    """Without a leftover part, claim returns offset=0, name=None, and no work file."""
     state = cache.claim("k9", 100, "http://new", cache_dir)
 
     assert state.offset == 0
@@ -265,6 +279,7 @@ def test_claim_with_no_leftover_starts_fresh_at_offset_zero(
 def test_claim_takes_over_a_leftover_part_matching_expected_length(
     cache_dir: Path,
 ) -> None:
+    """claim() resumes a partial download when leftover matches expected_length."""
     content = b"0123456789"
     _write_leftover_part(cache_dir, "k10", content, name="foo.zip", expected_length=500)
 
@@ -280,6 +295,7 @@ def test_claim_takes_over_a_leftover_part_matching_expected_length(
 
 
 def test_claim_discards_a_zero_byte_leftover_part(cache_dir: Path) -> None:
+    """claim() discards zero-byte leftover parts and starts fresh."""
     _write_leftover_part(cache_dir, "k11", b"", name="foo.zip", expected_length=None)
 
     state = cache.claim("k11", None, "http://new", cache_dir)
@@ -292,6 +308,7 @@ def test_claim_discards_a_zero_byte_leftover_part(cache_dir: Path) -> None:
 def test_claim_discards_a_leftover_part_recorded_for_a_different_size(
     cache_dir: Path,
 ) -> None:
+    """claim() discards leftover if expected_length has changed."""
     _write_leftover_part(
         cache_dir, "k12", b"abcdefghij", name="foo.zip", expected_length=500
     )
@@ -306,6 +323,7 @@ def test_claim_discards_a_leftover_part_recorded_for_a_different_size(
 def test_two_claims_on_one_leftover_part_only_one_gets_the_offset(
     cache_dir: Path,
 ) -> None:
+    """Only the first claim() of a leftover gets the offset; second claim starts fresh."""
     content = b"partial-bytes-1234567890"
     _write_leftover_part(
         cache_dir, "k13", content, name="foo.zip", expected_length=len(content) + 50
@@ -327,6 +345,7 @@ def test_two_claims_on_one_leftover_part_only_one_gets_the_offset(
 
 
 def test_keep_publishes_the_archive_and_writes_meta(cache_dir: Path) -> None:
+    """keep() moves work file under the key directory, writes meta.json, and returns archive path."""
     state = cache.claim("k14", None, "http://x", cache_dir)
     state.work.write_bytes(b"full-archive-content")
 
@@ -346,6 +365,7 @@ def test_keep_publishes_the_archive_and_writes_meta(cache_dir: Path) -> None:
 def test_keep_removes_a_sidecar_left_over_from_a_resumed_claim(
     cache_dir: Path,
 ) -> None:
+    """keep() removes the .part.json sidecar when publishing a resumed download."""
     _write_leftover_part(
         cache_dir, "k15", b"partial", name="mod.zip", expected_length=20
     )
@@ -362,6 +382,7 @@ def test_keep_removes_a_sidecar_left_over_from_a_resumed_claim(
 def test_two_keeps_for_the_same_key_leave_one_complete_file_and_no_stray_parts(
     cache_dir: Path,
 ) -> None:
+    """Concurrent keep() calls for the same key coalesce into one entry without stray .part files."""
     full_content = b"same-full-content-for-both-competing-downloads"
     state_a = cache.claim("k16", None, "http://x", cache_dir)
     state_b = cache.claim("k16", None, "http://x", cache_dir)
@@ -385,6 +406,7 @@ def test_two_keeps_for_the_same_key_leave_one_complete_file_and_no_stray_parts(
 def test_release_hands_an_interrupted_download_back_for_resume(
     cache_dir: Path,
 ) -> None:
+    """release() saves partial download as a .part file for later resume."""
     state = cache.claim("k17", 100, "http://x", cache_dir)
     state.work.write_bytes(b"partial-data-xyz")
 
@@ -408,6 +430,7 @@ def test_release_hands_an_interrupted_download_back_for_resume(
 def test_release_discards_the_released_copy_when_a_leftover_already_exists(
     cache_dir: Path,
 ) -> None:
+    """release() does not overwrite an existing .part file."""
     state_a = cache.claim("k18", None, "http://x", cache_dir)
     state_b = cache.claim("k18", None, "http://x", cache_dir)
     state_a.work.write_bytes(b"AAAA-content-from-a")
@@ -423,6 +446,7 @@ def test_release_discards_the_released_copy_when_a_leftover_already_exists(
 
 
 def test_release_discards_a_zero_byte_work_file(cache_dir: Path) -> None:
+    """release() does not save zero-byte work files."""
     state = cache.claim("k19", None, "http://x", cache_dir)
 
     cache.release(state, "k19", cache_dir)
@@ -454,6 +478,7 @@ def test_release_drops_the_unfinished_download_when_the_handback_rename_fails(
 def test_sweep_removes_part_files_older_than_the_max_age_and_keeps_fresh_ones(
     cache_dir: Path,
 ) -> None:
+    """sweep() removes .part files older than PART_MAX_AGE_SECONDS and reports bytes freed."""
     old_part = cache_dir / "old.part"
     old_part.write_bytes(b"x" * 50)
     old_sidecar = cache_dir / "old.part.json"
@@ -490,6 +515,7 @@ def test_sweep_ignores_a_part_file_whose_stat_fails_instead_of_raising(
 def test_sweep_leaves_a_stale_part_in_place_when_it_cannot_be_removed(
     cache_dir: Path,
 ) -> None:
+    """sweep() skips aged .part files it cannot delete and continues."""
     part = _write_leftover_part(cache_dir, "k99", b"stale-data")
     sidecar = _sidecar_of(part)
     old_time = time.time() - PART_MAX_AGE_SECONDS - 100
@@ -511,6 +537,7 @@ def test_sweep_leaves_a_stale_part_in_place_when_it_cannot_be_removed(
 def test_sweep_evicts_oldest_last_use_entries_first_until_under_the_cap(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """sweep() evicts oldest-first by mtime (not newest) to stay under max_bytes()."""
     _write_entry(cache_dir, "a", "a.zip", b"1" * 30)
     _write_entry(cache_dir, "b", "b.zip", b"2" * 40)
     _write_entry(cache_dir, "c", "c.zip", b"3" * 50)
@@ -535,6 +562,7 @@ def test_sweep_evicts_oldest_last_use_entries_first_until_under_the_cap(
 def test_sweep_never_evicts_the_keep_key_however_large_the_cache_is(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """sweep() protects the keep_key entry from eviction even if it exceeds the cap."""
     _write_entry(cache_dir, "a", "a.zip", b"1" * 80)
     _write_entry(cache_dir, "b", "b.zip", b"2" * 10)
     _write_entry(cache_dir, "c", "c.zip", b"3" * 10)
@@ -558,6 +586,7 @@ def test_sweep_never_evicts_the_keep_key_however_large_the_cache_is(
 def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """sweep() skips unevictable entries and continues evicting others."""
     _write_entry(cache_dir, "a", "a.zip", b"1" * 30)
     _write_entry(cache_dir, "b", "b.zip", b"2" * 20)
     b_size = _dir_size(cache_dir / "b")
@@ -581,6 +610,7 @@ def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
 def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """keep() raises ArchiveError naming the file when the publish rename fails."""
     state = cache.claim("k20", None, "http://x", cache_dir)
     state.work.write_bytes(b"full-archive-content")
 
@@ -606,6 +636,7 @@ def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails
 
 
 def test_clear_removes_everything_and_reports_bytes_freed(cache_dir: Path) -> None:
+    """clear() removes all directories and .part files, returning total freed bytes."""
     entry = cache_dir / "e1"
     entry.mkdir()
     (entry / "archive.zip").write_bytes(b"A" * 40)
@@ -620,12 +651,14 @@ def test_clear_removes_everything_and_reports_bytes_freed(cache_dir: Path) -> No
 
 
 def test_clear_on_an_empty_cache_frees_nothing(cache_dir: Path) -> None:
+    """Clearing an empty cache returns 0 bytes freed."""
     assert cache.clear(cache_dir) == 0
 
 
 def test_clear_reports_bytes_freed_only_for_entries_it_can_actually_remove(
     cache_dir: Path,
 ) -> None:
+    """clear() counts only successfully deleted entries in the bytes freed total."""
     _write_entry(cache_dir, "a", "a.zip", b"1" * 10)
     _write_entry(cache_dir, "b", "b.zip", b"2" * 20)
     b_size = _dir_size(cache_dir / "b")
@@ -652,6 +685,7 @@ def test_clear_reports_bytes_freed_only_for_entries_it_can_actually_remove(
 def test_an_unreadable_cache_dir_frees_nothing_instead_of_raising(
     tmp_path: Path, call: Callable[[Path], int]
 ) -> None:
+    """sweep() and clear() gracefully return 0 bytes freed when cache directory is unreadable."""
     unreadable = tmp_path / "cache"
     unreadable.mkdir()
     (unreadable / "leftover.part").write_bytes(b"data")

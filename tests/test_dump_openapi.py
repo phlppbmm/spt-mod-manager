@@ -76,6 +76,7 @@ def _find_nulls(value: Any, path: str, sink: list[str]) -> None:
 
 
 def test_build_openapi_matches_the_committed_openapi_json() -> None:
+    """Generated OpenAPI document matches the committed file."""
     # If build_openapi() body were `pass` (returns None), this fails because
     # the committed document, parsed from disk, is a non-trivial dict that
     # can never equal None; any schema drift also breaks the equality.
@@ -92,6 +93,7 @@ def test_build_openapi_matches_the_committed_openapi_json() -> None:
 def test_dump_openapi_run_as_a_module_writes_the_built_document(
     tmp_path: Path,
 ) -> None:
+    """Running as module writes the OpenAPI document to disk."""
     # If main()/dump() did nothing, the process would exit 0 with no file
     # written, or the file would be empty/invalid JSON, or its content would
     # not equal build_openapi(); each of those breaks one assertion below.
@@ -115,6 +117,7 @@ def test_dump_openapi_run_as_a_module_writes_the_built_document(
 def test_run_module_as_main_writes_the_built_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Module's __main__ guard writes the document."""
     # Runs the actual `if __name__ == "__main__":` guard in-process (unlike
     # the subprocess test above, which the coverage run driving this suite
     # cannot see into): if that guard's `sys.exit(main(sys.argv[1:]))` line
@@ -136,6 +139,7 @@ def test_run_module_as_main_writes_the_built_document(
 def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(
     tmp_path: Path,
 ) -> None:
+    """Too many arguments causes usage error."""
     result = subprocess.run(
         [sys.executable, "-m", "sptmod.server.dump_openapi", "a", "b"],
         capture_output=True,
@@ -153,6 +157,7 @@ def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(
 def test_main_with_no_arguments_writes_to_the_default_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """No arguments uses the default output path."""
     # DEFAULT_TARGET is a relative path resolved against the current working
     # directory; chdir into a scratch directory so this never touches the
     # repository's own openapi.json.
@@ -169,6 +174,7 @@ def test_main_with_no_arguments_writes_to_the_default_target(
 def test_main_with_too_many_arguments_does_not_write_a_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Too many arguments prevents file creation."""
     monkeypatch.chdir(tmp_path)
 
     exit_code = main(["a", "b"])
@@ -180,6 +186,7 @@ def test_main_with_too_many_arguments_does_not_write_a_file(
 
 
 def test_dump_creates_missing_parent_directories(tmp_path: Path) -> None:
+    """Dump creates parent directories when needed."""
     target = tmp_path / "nested" / "dir" / "openapi.json"
 
     dump(target)
@@ -195,16 +202,19 @@ def test_dump_creates_missing_parent_directories(tmp_path: Path) -> None:
 
 @pytest.fixture(scope="module")
 def document() -> dict[str, Any]:
+    """Build the OpenAPI document once for all structural tests in the module."""
     return build_openapi()
 
 
 def test_document_declares_openapi_3_1(document: dict[str, Any]) -> None:
+    """Document declares OpenAPI 3.1.0."""
     assert document["openapi"] == "3.1.0"
 
 
 def test_every_service_function_has_exactly_one_post_path(
     document: dict[str, Any],
 ) -> None:
+    """Each service function has exactly one POST path."""
     for name in SERVICE_FUNCTION_NAMES:
         path_item = document["paths"][f"/api/{name}"]
         assert set(path_item.keys()) == {"post"}
@@ -214,6 +224,7 @@ def test_every_service_function_has_exactly_one_post_path(
 def test_request_body_refs_the_camel_case_request_schema(
     document: dict[str, Any], name: str
 ) -> None:
+    """Request body references the correct PascalCase request schema."""
     operation = document["paths"][f"/api/{name}"]["post"]
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     expected_name = f"{_camel(name)}Request"
@@ -226,6 +237,7 @@ def test_request_body_refs_the_camel_case_request_schema(
 def test_200_response_resolves_to_an_existing_component_schema(
     document: dict[str, Any], name: str
 ) -> None:
+    """200 response schema reference exists in components."""
     operation = document["paths"][f"/api/{name}"]["post"]
     response_schema = operation["responses"]["200"]["content"]["application/json"][
         "schema"
@@ -240,6 +252,7 @@ def test_200_response_resolves_to_an_existing_component_schema(
 def test_error_response_and_progress_event_schemas_exist(
     document: dict[str, Any],
 ) -> None:
+    """ErrorResponse and ProgressEvent schemas exist."""
     schemas = document["components"]["schemas"]
 
     assert "ErrorResponse" in schemas
@@ -247,6 +260,7 @@ def test_error_response_and_progress_event_schemas_exist(
 
 
 def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> None:
+    """No null values exist anywhere in the OpenAPI document."""
     # openapi-typescript v7 turns "x?: T | null" into a required field, so a
     # reintroduced explicit `null` anywhere in the tree would break codegen.
     null_paths: list[str] = []
@@ -261,6 +275,7 @@ def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> 
 
 
 def test_cli_and_dump_openapi_do_not_pull_in_the_removed_web_framework() -> None:
+    """Removed web framework dependencies are not reintroduced."""
     # If the CLI or the OpenAPI dumper reintroduced a dependency on the old
     # ASGI web framework stack, this fails because one of the runtime-built
     # names below would show up either as an imported top-level package or

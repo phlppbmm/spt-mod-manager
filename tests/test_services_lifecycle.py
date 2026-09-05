@@ -30,10 +30,20 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub game-running checks to report no process, allowing operations.
+
+    All tests disable/enable/adopt/snapshot without mocking this, so the
+    stubs work in every test without repeating the setup.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a repository with an empty baseline commit.
+
+    Used by CLI tests that do not import a clean_repo fixture from conftest,
+    so they must create their own.
+    """
     repo = Repo.init(detect_layout(path))
     repo.commit(
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
@@ -47,6 +57,7 @@ def _clean_repo(path: Path) -> Repo:
 def test_disable_mod_removes_the_mods_files(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Disabling a mod reverts its install commit, deleting mod files."""
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "content"})
 
     services.disable_mod(clean_repo.path, "ModA")
@@ -57,6 +68,7 @@ def test_disable_mod_removes_the_mods_files(
 def test_disable_mod_revert_commit_carries_disabled_trailers(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """The revert commit carries Mod and Mod-State trailers marking it disabled."""
     install_commit(clean_repo, "ModA")
 
     result = services.disable_mod(clean_repo.path, "ModA")
@@ -69,6 +81,7 @@ def test_disable_mod_revert_commit_carries_disabled_trailers(
 def test_disable_mod_removes_mod_from_default_list_but_keeps_it_in_all(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Disabled mods are omitted from default list but present when include_all=True."""
     install_commit(clean_repo, "ModA")
 
     services.disable_mod(clean_repo.path, "ModA")
@@ -84,6 +97,7 @@ def test_disable_mod_removes_mod_from_default_list_but_keeps_it_in_all(
 def test_disabling_twice_is_a_no_op_with_a_notice_and_no_new_commit(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Disabling an already-disabled mod returns notice without creating a commit."""
     install_commit(clean_repo, "ModA")
     services.disable_mod(clean_repo.path, "ModA")
     commits_before = [c.hash for c in clean_repo.log()]
@@ -98,6 +112,7 @@ def test_disabling_twice_is_a_no_op_with_a_notice_and_no_new_commit(
 
 
 def test_disable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
+    """Disabling a non-existent mod raises ModNotFoundError."""
     with pytest.raises(ModNotFoundError):
         services.disable_mod(clean_repo.path, "Ghost")
 
@@ -134,6 +149,9 @@ def test_disable_mod_conflict_with_an_unowned_later_change_names_no_mod(
 def test_disable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Disabling a mod whose revert conflicts with a later mod's file raises
+    ConflictError naming the blocking mod and leaves the tree clean.
+    """
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/shared.dll": "base"}, minute=1
     )
@@ -160,6 +178,7 @@ def test_disable_mod_conflict_names_the_later_mod_and_leaves_tree_clean(
 def test_enable_mod_restores_the_files_with_original_content(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Enabling a mod cherry-picks its install commit, restoring original file content."""
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "original-bytes"}
     )
@@ -175,6 +194,7 @@ def test_enable_mod_restores_the_files_with_original_content(
 def test_enable_mod_commit_carries_enabled_trailers_and_mod_is_active_again(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Enabling a mod creates a commit with Mod and Mod-State trailers, listing it active."""
     install_commit(clean_repo, "ModA")
     services.disable_mod(clean_repo.path, "ModA")
 
@@ -188,6 +208,7 @@ def test_enable_mod_commit_carries_enabled_trailers_and_mod_is_active_again(
 
 
 def test_enable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
+    """Enabling a non-existent mod raises ModNotFoundError."""
     with pytest.raises(ModNotFoundError):
         services.enable_mod(clean_repo.path, "Ghost")
 
@@ -195,6 +216,7 @@ def test_enable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> N
 def test_enabling_an_active_mod_is_a_no_op_with_a_notice(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Enabling an already-enabled mod returns notice without creating a commit."""
     install_commit(clean_repo, "ModA")
     commits_before = [c.hash for c in clean_repo.log()]
 
@@ -270,6 +292,7 @@ def test_enable_mod_conflict_with_no_conflicting_paths_still_raises_plainly(
 
 
 def test_adopt_mod_folder_reads_metadata_from_package_json(clean_repo: Repo) -> None:
+    """Adopting a folder with package.json extracts mod name and version."""
     mod_dir = clean_repo.path / "SPT/user/mods/ServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -287,6 +310,7 @@ def test_adopt_mod_folder_reads_metadata_from_package_json(clean_repo: Repo) -> 
 def test_adopt_mod_folder_makes_the_mod_visible_in_list_and_files(
     clean_repo: Repo,
 ) -> None:
+    """After adoption, the mod appears in list_mods and its files in mod_files."""
     mod_dir = clean_repo.path / "SPT/user/mods/ServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -301,6 +325,7 @@ def test_adopt_mod_folder_makes_the_mod_visible_in_list_and_files(
 
 
 def test_adopt_bare_dll_needs_name_and_version_overrides(clean_repo: Repo) -> None:
+    """Adopting a bare DLL file requires name and version overrides."""
     (clean_repo.path / "BepInEx/plugins/LooseMod.dll").write_bytes(b"dll-bytes")
 
     result = services.adopt_mod(
@@ -319,6 +344,7 @@ def test_adopt_bare_dll_needs_name_and_version_overrides(clean_repo: Repo) -> No
 def test_adopt_bare_dll_without_version_override_raises_invalid_metadata(
     clean_repo: Repo,
 ) -> None:
+    """Adopting a bare DLL without version_override raises InvalidMetadataError."""
     (clean_repo.path / "BepInEx/plugins/LooseMod.dll").write_bytes(b"dll-bytes")
 
     with pytest.raises(InvalidMetadataError):
@@ -326,6 +352,7 @@ def test_adopt_bare_dll_without_version_override_raises_invalid_metadata(
 
 
 def test_adopt_mod_works_on_a_dirty_tree(clean_repo: Repo) -> None:
+    """Adoption stages only the target files, leaving other dirty changes untouched."""
     mod_dir = clean_repo.path / "SPT/user/mods/ServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -345,6 +372,7 @@ def test_adopt_mod_works_on_a_dirty_tree(clean_repo: Repo) -> None:
 def test_adopt_mod_raises_conflict_error_for_an_already_tracked_folder(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Adopting a folder that is already owned by an active mod raises ConflictError."""
     install_commit(
         clean_repo,
         "ModA",
@@ -363,6 +391,7 @@ def test_adopt_mod_raises_conflict_error_for_an_already_tracked_folder(
 def test_adopt_mod_raises_conflict_error_for_a_path_that_is_part_of_spt_itself(
     clean_repo: Repo,
 ) -> None:
+    """Adopting a path that belongs to SPT itself raises ConflictError."""
     with pytest.raises(ConflictError) as exc_info:
         services.adopt_mod(clean_repo.path, Path("BepInEx/plugins/spt"))
 
@@ -393,6 +422,7 @@ def test_adopt_mod_raises_conflict_error_when_the_target_holds_no_untracked_file
 def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_mod_paths(
     clean_repo: Repo,
 ) -> None:
+    """Adopting a path outside the configured mod directories raises NotAGameDirError."""
     (clean_repo.path / "BepInEx/config/loose.cfg").write_text("x", encoding="utf-8")
 
     with pytest.raises(NotAGameDirError):
@@ -400,6 +430,7 @@ def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_mod_paths(
 
 
 def test_adopt_mod_raises_mod_not_found_for_a_missing_target(clean_repo: Repo) -> None:
+    """Adopting a non-existent path raises ModNotFoundError."""
     with pytest.raises(ModNotFoundError):
         services.adopt_mod(clean_repo.path, Path("SPT/user/mods/DoesNotExist"))
 
@@ -407,6 +438,7 @@ def test_adopt_mod_raises_mod_not_found_for_a_missing_target(clean_repo: Repo) -
 def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_the_game_dir(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """Adopting a path outside the game directory raises NotAGameDirError."""
     outside = tmp_path / "elsewhere"
     outside.mkdir()
 
@@ -419,6 +451,7 @@ def test_adopt_mod_raises_not_a_game_dir_error_for_a_target_outside_the_game_dir
 def test_adopt_mod_of_a_partially_tracked_folder_raises_conflict(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Adopting a folder that is partially tracked raises ConflictError."""
     install_commit(
         clean_repo,
         "ModA",
@@ -441,6 +474,7 @@ def test_adopt_mod_of_a_partially_tracked_folder_raises_conflict(
 
 
 def test_init_adopt_true_commits_every_pre_existing_mod(fake_game_dir: Path) -> None:
+    """When init is given adopt=True, it automatically adopts all pre-existing mods."""
     mod_dir = fake_game_dir / "SPT/user/mods/OldMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -456,6 +490,7 @@ def test_init_adopt_true_commits_every_pre_existing_mod(fake_game_dir: Path) -> 
 def test_init_adopt_explicit_sequence_adopts_only_the_selected_mods(
     fake_game_dir: Path,
 ) -> None:
+    """When init is given a sequence of paths, it adopts only those mods."""
     for name in ("OldMod", "OtherMod"):
         mod_dir = fake_game_dir / "SPT/user/mods" / name
         mod_dir.mkdir(parents=True)
@@ -477,6 +512,7 @@ def test_init_adopt_explicit_sequence_adopts_only_the_selected_mods(
 def test_snapshot_commits_only_profile_and_config_changes(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Snapshot commits only profile and config changes, leaving mod files dirty."""
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "v1"})
     config_file = clean_repo.path / "BepInEx/config/mod.cfg"
     config_file.write_text("original config", encoding="utf-8")
@@ -500,6 +536,7 @@ def test_snapshot_commits_only_profile_and_config_changes(
 
 
 def test_snapshot_commit_subject_and_no_mod_trailer(clean_repo: Repo) -> None:
+    """Snapshot commit has snapshot subject and no Mod trailer."""
     (clean_repo.path / "SPT/user/profiles/abc.json").write_text(
         '{"changed": true}', encoding="utf-8"
     )
@@ -512,6 +549,7 @@ def test_snapshot_commit_subject_and_no_mod_trailer(clean_repo: Repo) -> None:
 
 
 def test_snapshot_raises_git_error_when_nothing_changed(clean_repo: Repo) -> None:
+    """Snapshot raises GitError when there are no profile or config changes."""
     with pytest.raises(GitError):
         services.snapshot(clean_repo.path)
 
@@ -522,6 +560,7 @@ def test_snapshot_raises_git_error_when_nothing_changed(clean_repo: Repo) -> Non
 def test_cli_disable_then_enable_roundtrip(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """CLI disable/enable roundtrip exercise the same code paths as service calls."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -537,6 +576,7 @@ def test_cli_disable_then_enable_roundtrip(
 def test_cli_disable_unknown_mod_exits_with_code_11(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """CLI disable of unknown mod exits with code 11 (MOD_NOT_FOUND)."""
     _clean_repo(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -549,6 +589,7 @@ def test_cli_disable_unknown_mod_exits_with_code_11(
 def test_cli_adopt_reports_the_adopted_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """CLI adopt reports the adopted mod in the output."""
     _clean_repo(fake_game_dir)
     mod_dir = fake_game_dir / "SPT/user/mods/ServerMod"
     mod_dir.mkdir(parents=True)

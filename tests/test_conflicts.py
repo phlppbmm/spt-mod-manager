@@ -29,6 +29,10 @@ from sptmod.core.repo import Repo
 
 
 def _mod_info(name: str, version: str, state: str = "installed") -> ModInfo:
+    """ModInfo with name/version; state defaults 'installed'.
+
+    Fixed fields: type='server', author='tester', commit='deadbeef', date=2024-01-01.
+    """
     return ModInfo(
         name=name,
         version=version,
@@ -53,6 +57,7 @@ def _mod_info(name: str, version: str, state: str = "installed") -> ModInfo:
 def test_check_file_conflicts_ignores_files_that_do_not_exist_yet(
     clean_repo: Repo,
 ) -> None:
+    """New files not yet on disk produce no conflict findings."""
     findings = check_file_conflicts(clean_repo, [Path("BepInEx/plugins/New.dll")])
 
     assert findings == []
@@ -61,6 +66,7 @@ def test_check_file_conflicts_ignores_files_that_do_not_exist_yet(
 def test_check_file_conflicts_reports_tracked_file_naming_owning_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Tracked files (already committed) produce conflict findings naming the owning mod."""
     install_commit(
         clean_repo,
         "ModA",
@@ -82,6 +88,7 @@ def test_check_file_conflicts_reports_tracked_file_naming_owning_mod(
 def test_check_file_conflicts_reports_empty_mod_when_last_commit_has_no_mod_trailer(
     clean_repo: Repo,
 ) -> None:
+    """Tracked files from commits with no mod trailer report empty mod name."""
     # clean_repo's baseline commit tracks .gitignore via a "Spt-Version"
     # trailer only, with no "Mod" trailer.
     findings = check_file_conflicts(clean_repo, [Path(".gitignore")])
@@ -96,6 +103,7 @@ def test_check_file_conflicts_reports_empty_mod_when_last_commit_has_no_mod_trai
 def test_check_file_conflicts_reports_untracked_file_with_adopt_hint(
     clean_repo: Repo,
 ) -> None:
+    """Untracked files on disk produce findings with an 'adopt' suggestion."""
     # Present on disk but never committed.
     stray = clean_repo.path / "BepInEx" / "config" / "Stray.cfg"
     stray.write_text("stray", encoding="utf-8")
@@ -113,6 +121,7 @@ def test_check_file_conflicts_reports_untracked_file_with_adopt_hint(
 def test_check_file_conflicts_keeps_the_order_of_target_files(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """File conflict findings preserve the order of input paths."""
     install_commit(
         clean_repo,
         "ModA",
@@ -154,6 +163,7 @@ def test_check_file_conflicts_propagates_git_error(
 def test_check_dll_duplicates_warns_on_same_name_in_different_mod_folder(
     fake_game_dir: Path,
 ) -> None:
+    """Same DLL name in different mod folders produces a duplicate warning."""
     existing = fake_game_dir / "BepInEx" / "plugins" / "ModA" / "Newtonsoft.Json.dll"
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"shared-lib")
@@ -171,6 +181,7 @@ def test_check_dll_duplicates_warns_on_same_name_in_different_mod_folder(
 
 
 def test_check_dll_duplicates_matches_case_insensitively(fake_game_dir: Path) -> None:
+    """DLL duplicate detection is case-insensitive (Windows behavior)."""
     existing = fake_game_dir / "BepInEx" / "plugins" / "ModA" / "Shared.DLL"
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"shared-lib")
@@ -186,6 +197,7 @@ def test_check_dll_duplicates_matches_case_insensitively(fake_game_dir: Path) ->
 def test_check_dll_duplicates_ignores_same_folder_same_name_overwrite(
     fake_game_dir: Path,
 ) -> None:
+    """Reinstalling the same mod's DLL to its own folder is not flagged."""
     existing = fake_game_dir / "BepInEx" / "plugins" / "ModA" / "Own.dll"
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"own")
@@ -198,6 +210,7 @@ def test_check_dll_duplicates_ignores_same_folder_same_name_overwrite(
 
 
 def test_check_dll_duplicates_ignores_non_dll_files(fake_game_dir: Path) -> None:
+    """Non-.dll files are not checked for duplication."""
     existing = fake_game_dir / "BepInEx" / "plugins" / "ModA" / "data.json"
     existing.parent.mkdir(parents=True)
     existing.write_text("{}", encoding="utf-8")
@@ -212,6 +225,7 @@ def test_check_dll_duplicates_ignores_non_dll_files(fake_game_dir: Path) -> None
 def test_check_dll_duplicates_ignores_dlls_outside_bepinex_plugins(
     fake_game_dir: Path,
 ) -> None:
+    """Only DLLs in BepInEx/plugins are checked; server-side DLLs are ignored."""
     existing = fake_game_dir / "BepInEx" / "plugins" / "ModA" / "Lib.dll"
     existing.parent.mkdir(parents=True)
     existing.write_bytes(b"lib")
@@ -224,6 +238,7 @@ def test_check_dll_duplicates_ignores_dlls_outside_bepinex_plugins(
 def test_check_dll_duplicates_loose_plugin_is_not_described_as_a_mod_folder(
     fake_game_dir: Path,
 ) -> None:
+    """Loose plugin DLLs (not in a mod folder) are reported without folder description."""
     # Existing DLL directly under BepInEx/plugins/, no mod subfolder.
     existing = fake_game_dir / "BepInEx" / "plugins" / "Shared.dll"
     existing.write_bytes(b"shared-lib")
@@ -246,6 +261,7 @@ def test_check_dll_duplicates_loose_plugin_is_not_described_as_a_mod_folder(
 def test_check_dll_duplicates_same_loose_path_is_not_a_duplicate(
     fake_game_dir: Path,
 ) -> None:
+    """Reinstalling a loose plugin to its own path is not a cross-folder duplicate."""
     # Same loose file targeted at its own existing path: an overwrite, left
     # to check_file_conflicts, not a cross-folder duplicate.
     existing = fake_game_dir / "BepInEx" / "plugins" / "Shared.dll"
@@ -262,6 +278,7 @@ def test_check_dll_duplicates_same_loose_path_is_not_a_duplicate(
 
 
 def test_check_dependencies_reports_missing_dependency() -> None:
+    """Missing required dependencies produce error findings."""
     findings = check_dependencies([], meta_deps({"RequiredMod": ">=1.0.0"}))
 
     assert len(findings) == 1
@@ -272,6 +289,7 @@ def test_check_dependencies_reports_missing_dependency() -> None:
 
 
 def test_check_dependencies_reports_out_of_range_version() -> None:
+    """Out-of-range dependency versions produce error findings."""
     installed = [_mod_info("RequiredMod", "0.5.0")]
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ">=1.0.0"}))
@@ -286,6 +304,7 @@ def test_check_dependencies_reports_out_of_range_version() -> None:
 
 
 def test_check_dependencies_matches_names_case_insensitively() -> None:
+    """Dependency names are matched case-insensitively (mod name normalization)."""
     installed = [_mod_info("requiredmod", "2.0.0")]
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ">=1.0.0"}))
@@ -294,6 +313,7 @@ def test_check_dependencies_matches_names_case_insensitively() -> None:
 
 
 def test_check_dependencies_satisfied_range_produces_no_finding() -> None:
+    """Installed versions within the required range produce no findings."""
     installed = [_mod_info("RequiredMod", "1.5.0")]
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ">=1.0.0"}))
@@ -302,6 +322,7 @@ def test_check_dependencies_satisfied_range_produces_no_finding() -> None:
 
 
 def test_check_dependencies_empty_range_matches_any_installed_version() -> None:
+    """Empty version range (unversioned dependency) matches any installed version."""
     installed = [_mod_info("RequiredMod", "0.0.1")]
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ""}))
@@ -310,6 +331,7 @@ def test_check_dependencies_empty_range_matches_any_installed_version() -> None:
 
 
 def test_check_dependencies_empty_range_still_requires_presence() -> None:
+    """Empty version range still requires the dependency to be installed."""
     findings = check_dependencies([], meta_deps({"RequiredMod": ""}))
 
     assert len(findings) == 1
@@ -317,6 +339,7 @@ def test_check_dependencies_empty_range_still_requires_presence() -> None:
 
 
 def test_check_dependencies_unsupported_range_is_a_warning_not_an_error() -> None:
+    """Unsupported version range syntax produces a warning, not an error."""
     installed = [_mod_info("RequiredMod", "1.0.0")]
 
     findings = check_dependencies(
@@ -330,6 +353,7 @@ def test_check_dependencies_unsupported_range_is_a_warning_not_an_error() -> Non
 
 
 def test_check_dependencies_lists_all_offenders_in_order() -> None:
+    """All dependency violations are reported, preserving order."""
     installed = [_mod_info("PresentButOld", "0.1.0")]
 
     findings = check_dependencies(
@@ -345,6 +369,7 @@ def test_check_dependencies_lists_all_offenders_in_order() -> None:
 
 
 def meta_deps(dependencies: dict[str, str]) -> ModMeta:
+    """Build a ModMeta with given dependencies."""
     return ModMeta(name="TestMod", version="1.0.0", dependencies=dependencies)
 
 
@@ -363,10 +388,12 @@ def meta_deps(dependencies: dict[str, str]) -> ModMeta:
     ],
 )
 def test_check_spt_compat_produces_no_finding(spt_version: str, spt_range: str) -> None:
+    """Compatible SPT versions and missing/unknown version/range produce no findings."""
     assert check_spt_compat(spt_version, spt_range) == []
 
 
 def test_check_spt_compat_mismatch_is_a_single_warning() -> None:
+    """SPT version mismatch produces a single warning finding."""
     findings = check_spt_compat("4.0.0", "~4.1.0")
 
     assert len(findings) == 1
@@ -376,6 +403,7 @@ def test_check_spt_compat_mismatch_is_a_single_warning() -> None:
 
 
 def test_check_spt_compat_unsupported_range_is_a_warning_naming_the_range() -> None:
+    """Unsupported SPT version range syntax produces a warning naming the range."""
     findings = check_spt_compat("4.1.0", "4.0.0 || 4.1.0")
 
     assert len(findings) == 1
@@ -391,6 +419,7 @@ def test_check_spt_compat_unsupported_range_is_a_warning_naming_the_range() -> N
 
 
 def test_apply_force_false_leaves_severities_unchanged() -> None:
+    """force=False leaves all conflict severities unchanged."""
     conflicts = [
         Conflict(kind="tracked-file", severity="error", message="a"),
         Conflict(kind="dll-duplicate", severity="warning", message="b"),
@@ -402,6 +431,7 @@ def test_apply_force_false_leaves_severities_unchanged() -> None:
 
 
 def test_apply_force_true_downgrades_errors_to_warnings() -> None:
+    """force=True downgrades all error severities to warnings."""
     conflicts = [
         Conflict(kind="tracked-file", severity="error", message="a"),
         Conflict(kind="dll-duplicate", severity="warning", message="b"),

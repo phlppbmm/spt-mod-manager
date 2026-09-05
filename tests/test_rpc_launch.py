@@ -24,12 +24,14 @@ runner = CliRunner()
 
 
 def _invoke(name: str, request: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
+    """Run ``rpc <name>`` and return ``(exit_code, parsed stdout lines)``."""
     result = runner.invoke(app, ["rpc", name], input=json.dumps(request))
     lines = [json.loads(line) for line in result.stdout.splitlines() if line]
     return result.exit_code, lines
 
 
 def _pong(router: respx.MockRouter) -> None:
+    """Mock the SPT server to respond successfully to ping requests."""
     router.get(PING_PATH).respond(200, json={"Response": "Pong!"})
 
 
@@ -47,16 +49,20 @@ def _free_then_ready(router: respx.MockRouter) -> None:
 
 
 def _login(router: respx.MockRouter, ok: bool = True) -> None:
+    """Mock the SPT server login endpoint to succeed or fail based on ``ok``."""
     router.put(LOGIN_PATH).respond(200, json={"Response": ok})
 
 
 def _not_running(monkeypatch: Any) -> None:
+    """Mock ``game_processes()`` to report no running processes."""
     monkeypatch.setattr(game_dir, "game_processes", lambda: [])
 
 
 def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile reports progress through server startup, client launch,
+    and login phases before returning launch result."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -88,6 +94,8 @@ def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
 def test_launch_profile_rpc_maps_game_running_to_its_existing_code(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile returns GAME_RUNNING error if the game process is
+    already running."""
     monkeypatch.setattr(
         game_dir,
         "game_processes",
@@ -111,6 +119,8 @@ def test_launch_profile_rpc_maps_game_running_to_its_existing_code(
 def test_launch_profile_rpc_maps_server_port_busy(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile returns SERVER_PORT_BUSY error when the server port is
+    already in use."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -127,6 +137,8 @@ def test_launch_profile_rpc_maps_server_port_busy(
 def test_launch_profile_rpc_maps_login_failed(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile returns LOGIN_FAILED error when server login is
+    rejected."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -144,6 +156,8 @@ def test_launch_profile_rpc_maps_login_failed(
 def test_launch_profile_rpc_maps_launcher_settings_missing(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile returns LAUNCHER_SETTINGS_MISSING error when client
+    launcher settings are not found."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
     d.launcher_settings_file.unlink()
@@ -162,6 +176,8 @@ def test_launch_profile_rpc_maps_launcher_settings_missing(
 def test_launch_profile_rpc_maps_launch_failed(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile returns LAUNCH_FAILED error when launching the client
+    process fails."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
 
@@ -176,6 +192,8 @@ def test_launch_profile_rpc_maps_launch_failed(
 def test_launch_profile_rpc_forwards_stop_server_on_exit_false(
     fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
 ) -> None:
+    """launch_profile with stop_server_on_exit=false persists the setting to
+    the launch state file."""
     _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -199,6 +217,8 @@ def test_launch_profile_rpc_forwards_stop_server_on_exit_false(
 def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
     tmp_path: Path,
 ) -> None:
+    """launch_status reports no running processes when none have been
+    launched."""
     exit_code, lines = _invoke("launch_status", {"path": str(tmp_path)})
 
     assert exit_code == 0
@@ -217,6 +237,7 @@ def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
 
 
 def test_stop_game_rpc_is_a_noop_without_a_prior_launch(tmp_path: Path) -> None:
+    """stop_game does nothing when no processes have been launched."""
     exit_code, lines = _invoke("stop_game", {"path": str(tmp_path)})
 
     assert exit_code == 0

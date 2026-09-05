@@ -165,6 +165,10 @@ def _mock_empty_dependencies_response(respx_router: respx.MockRouter) -> None:
 def test_plan_install_orders_dependency_before_the_requested_mod(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When target mod (id=1) depends on Dep Mod (id=2), plan_install returns
+    a plan with Dep Mod as the first entry (is_dependency=True) and the target
+    as the second entry (is_dependency=False), ensuring dependencies install first.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep")
     _mock_dependencies_response(respx_router, [dep])
@@ -200,6 +204,11 @@ def test_plan_install_orders_dependency_before_the_requested_mod(
 def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When Dep Mod (id=2, version 1.0.0) is a dependency but an installed mod
+    already has forge_id="2" and version 1.0.0, plan_install returns only the
+    target mod (skipping the dependency); this prevents re-installing already-
+    satisfied dependencies.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
     _mock_dependencies_response(respx_router, [dep])
@@ -214,6 +223,11 @@ def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
 def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_id(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When a dependency lacks a forge_id but an installed mod's name matches
+    (case-insensitive "dep mod" = "Dep Mod") at the required version, the
+    dependency is skipped from the plan; this handles the fallback matching
+    path for older or manually-installed mods.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid=None, version="1.0.0")
     _mock_dependencies_response(respx_router, [dep])
@@ -228,6 +242,10 @@ def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_i
 def test_plan_install_includes_outdated_installed_dependency(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When Dep Mod (id=2) depends on version 2.0.0 but only version 1.0.0 is
+    installed, plan_install includes the dependency in the plan (not satisfied);
+    this ensures upgrades are not skipped just because an older version exists.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="2.0.0")
     _mock_dependencies_response(respx_router, [dep])
@@ -245,6 +263,7 @@ def test_plan_install_includes_outdated_installed_dependency(
 def test_plan_install_orders_a_transitive_dependency_chain(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Install plan respects transitive dependencies in correct topological order."""
     _seed_target(client_factory, respx_router, catalog)
     dep_b = _dep_node(id=3, name="Dep B", version="1.0.0")
     dep_a = _dep_node(id=2, name="Dep A", version="1.0.0", dependencies=[dep_b])
@@ -285,6 +304,10 @@ def test_plan_install_diamond_dependency_appears_once_before_its_dependents(
 def test_plan_install_target_pair_omitted_from_response_raises_naming_the_target(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When /mods/dependencies returns an empty dict (target id:version pair
+    omitted), plan_install raises UnresolvableDependencyError naming "Target Mod";
+    this distinguishes "target not found" from "dependency not resolvable".
+    """
     _seed_target(client_factory, respx_router, catalog)
     _mock_empty_dependencies_response(respx_router)
     client = client_factory()
@@ -298,6 +321,11 @@ def test_plan_install_target_pair_omitted_from_response_raises_naming_the_target
 def test_plan_install_installed_dependency_with_unparseable_version_is_not_satisfied(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When Dep Mod (id=2) requires version 1.0.0 but an installed mod with
+    forge_id="2" has version="dev-build" (unparseable as semver), the dependency
+    is not considered satisfied and remains in the plan; this prevents silently
+    keeping a dev build when a real version is required.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
     _mock_dependencies_response(respx_router, [dep])
@@ -312,6 +340,10 @@ def test_plan_install_installed_dependency_with_unparseable_version_is_not_satis
 def test_plan_install_conflicting_dependency_raises_naming_it(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When a dependency node has conflict=True (Forge detected incompatible
+    version constraints), plan_install raises UnresolvableDependencyError naming
+    "Conflicted Dep"; this prevents installing a mod with known Forge conflicts.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Conflicted Dep", conflict=True)
     _mock_dependencies_response(respx_router, [dep])
@@ -326,6 +358,11 @@ def test_plan_install_conflicting_dependency_raises_naming_it(
 def test_plan_install_null_compatible_version_raises_naming_the_dependency(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """When a dependency node has latest_compatible_version=None (Forge has no
+    version matching the requested SPT version), plan_install raises
+    UnresolvableDependencyError naming "No Version Dep"; this prevents attempting
+    to install a dependency that has no compatible release.
+    """
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(
         id=2, name="No Version Dep", latest_compatible_version=None, conflict=False
@@ -342,6 +379,7 @@ def test_plan_install_null_compatible_version_raises_naming_the_dependency(
 def test_plan_install_dependency_cycle_raises_naming_the_dependency(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Install plan raises UnresolvableDependencyError for circular dependencies."""
     _seed_target(client_factory, respx_router, catalog)
     # "Dep A" (id=2) reappears on its own path -> a cycle.
     dep_a_again = _dep_node(id=2, name="Dep A", dependencies=[])
@@ -358,6 +396,7 @@ def test_plan_install_dependency_cycle_raises_naming_the_dependency(
 def test_plan_install_unknown_mod_raises_no_compatible_version_error(
     catalog: Catalog, client_factory: ClientFactory
 ) -> None:
+    """Install plan raises NoCompatibleVersionError for unknown mod IDs."""
     client = client_factory()
 
     with pytest.raises(NoCompatibleVersionError):
@@ -367,6 +406,7 @@ def test_plan_install_unknown_mod_raises_no_compatible_version_error(
 def test_plan_install_without_wanted_version_resolves_the_highest_compatible(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Install plan selects highest compatible version when no version is specified."""
     mod = mod_json_full(
         id=1,
         name="Target Mod",

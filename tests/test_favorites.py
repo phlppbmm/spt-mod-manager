@@ -28,6 +28,7 @@ def test_default_favorites_path_honors_xdg_config_home(
 
 
 def test_favorites_file_name_constant_is_favorites_json() -> None:
+    """The favorites file name constant is "favorites.json"."""
     assert FAVORITES_FILE_NAME == "favorites.json"
 
 

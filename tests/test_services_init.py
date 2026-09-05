@@ -23,6 +23,7 @@ from sptmod.core.repo import Repo
 
 
 def test_init_commits_whitelist_and_tracked_profile_only(fake_game_dir: Path) -> None:
+    """The initial commit contains only .gitignore and the tracked profile."""
     result = services.init_game_dir(fake_game_dir)
 
     committed = {f.path for f in Repo(fake_game_dir).show_files(result.commit)}
@@ -33,6 +34,7 @@ def test_init_commits_whitelist_and_tracked_profile_only(fake_game_dir: Path) ->
 
 
 def test_init_ignored_dummies_are_absent_from_the_commit(fake_game_dir: Path) -> None:
+    """Ignored files and directories are excluded from the initial commit."""
     result = services.init_game_dir(fake_game_dir)
 
     committed = {f.path for f in Repo(fake_game_dir).show_files(result.commit)}
@@ -46,6 +48,7 @@ def test_init_ignored_dummies_are_absent_from_the_commit(fake_game_dir: Path) ->
 
 
 def test_init_reports_the_spt_version_read_from_core_json(fake_game_dir: Path) -> None:
+    """The init result includes the SPT version read from core.json."""
     result = services.init_game_dir(fake_game_dir)
 
     assert result.spt_version == "4.1.0"
@@ -54,6 +57,7 @@ def test_init_reports_the_spt_version_read_from_core_json(fake_game_dir: Path) -
 def test_init_commit_subject_and_trailer_carry_the_spt_version(
     fake_game_dir: Path,
 ) -> None:
+    """The commit subject and Spt-Version trailer encode the detected SPT version."""
     services.init_game_dir(fake_game_dir)
 
     commit = Repo(fake_game_dir).log()[0]
@@ -64,6 +68,7 @@ def test_init_commit_subject_and_trailer_carry_the_spt_version(
 def test_init_raises_spt_version_unknown_and_leaves_no_git_when_core_json_is_missing(
     fake_game_dir: Path,
 ) -> None:
+    """Missing core.json raises SptVersionUnknownError and leaves no repository."""
     (fake_game_dir / "SPT" / "SPT_Data" / "configs" / "core.json").unlink()
 
     with pytest.raises(SptVersionUnknownError):
@@ -75,6 +80,7 @@ def test_init_raises_spt_version_unknown_and_leaves_no_git_when_core_json_is_mis
 def test_init_with_an_explicit_spt_version_succeeds_when_core_json_is_missing(
     fake_game_dir: Path,
 ) -> None:
+    """An explicit spt_version parameter bypasses the core.json check."""
     (fake_game_dir / "SPT" / "SPT_Data" / "configs" / "core.json").unlink()
 
     result = services.init_game_dir(fake_game_dir, spt_version="4.1.2")
@@ -86,18 +92,21 @@ def test_init_with_an_explicit_spt_version_succeeds_when_core_json_is_missing(
 
 
 def test_init_returns_the_given_game_dir(fake_game_dir: Path) -> None:
+    """The init result contains the game directory path."""
     result = services.init_game_dir(fake_game_dir)
 
     assert result.game_dir == fake_game_dir
 
 
 def test_init_on_clean_dir_reports_no_pre_existing_mods(fake_game_dir: Path) -> None:
+    """init reports an empty pre_existing_mods list for a clean directory."""
     result = services.init_game_dir(fake_game_dir)
 
     assert result.pre_existing_mods == []
 
 
 def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
+    """Running init a second time raises GitError."""
     services.init_game_dir(fake_game_dir)
 
     with pytest.raises(GitError):
@@ -107,6 +116,7 @@ def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:
 def test_init_reports_pre_existing_mod_folder_and_loose_plugin(
     fake_game_dir: Path,
 ) -> None:
+    """init detects and reports pre-existing mod folders and plugin DLLs."""
     mod_dir = fake_game_dir / "SPT" / "user" / "mods" / "OldServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text('{"name": "OldServerMod"}', encoding="utf-8")
@@ -124,6 +134,7 @@ def test_init_reports_pre_existing_mod_folder_and_loose_plugin(
 def test_init_with_pre_existing_mods_leaves_the_tree_dirty(
     fake_game_dir: Path,
 ) -> None:
+    """Pre-existing mods cause the repository to remain dirty."""
     mod_dir = fake_game_dir / "SPT" / "user" / "mods" / "OldServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text('{"name": "OldServerMod"}', encoding="utf-8")
@@ -136,6 +147,7 @@ def test_init_with_pre_existing_mods_leaves_the_tree_dirty(
 def test_init_with_pre_existing_mods_does_not_commit_them(
     fake_game_dir: Path,
 ) -> None:
+    """Pre-existing mods are not included in the initial commit."""
     mod_dir = fake_game_dir / "SPT" / "user" / "mods" / "OldServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text('{"name": "OldServerMod"}', encoding="utf-8")

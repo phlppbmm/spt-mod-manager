@@ -43,6 +43,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_mod_versions_parses_null_content_length_and_embedded_dependency(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """mod_versions() parses null content_length and embedded dependencies."""
     respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(
             200, json=page_envelope([version_json(content_length=None)])
@@ -84,6 +85,7 @@ def test_mod_versions_parses_null_content_length_and_embedded_dependency(
 def test_mod_versions_parses_incompatible_fika_compatibility(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """mod_versions() parses and preserves the 'incompatible' fika_compatibility value."""
     respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(
             200, json=page_envelope([version_json(fika_compatibility="incompatible")])
@@ -99,6 +101,11 @@ def test_mod_versions_parses_incompatible_fika_compatibility(
 def test_updates_parses_all_four_lists_with_blocked_update_quirks(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """updates() parses all four result lists, handling blocked_update quirks.
+
+    Handles: current_version has no slug in blocked_updates, blocking_mods omitted as [],
+    and all nested version/dependency relationships.
+    """
     data = {
         "spt_version": "3.11.5",
         "updates": [
@@ -218,6 +225,7 @@ def test_updates_parses_all_four_lists_with_blocked_update_quirks(
 def test_updates_parses_populated_blocking_mods(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """updates() parses the blocking_mods list when present in blocked_updates."""
     data = {
         "spt_version": "3.11.5",
         "updates": [],
@@ -270,6 +278,7 @@ def test_updates_parses_populated_blocking_mods(
 def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """dependencies() parses the recursive dependency tree, conflict flag, and nullable versions."""
     nested_dep = {
         "id": 100,
         "guid": "com.example.nested",
@@ -329,6 +338,7 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
 def test_dependencies_omits_unresolvable_pairs_and_keeps_empty_list_for_no_deps(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """dependencies() omits unresolvable pairs from the result and keeps empty lists."""
     # Two pairs queried; only one resolves ("9:9.9.9" is unresolvable and
     # omitted by the server). The resolved pair has no dependencies -> [].
     data: JsonDict = {"5:1.2.0": []}

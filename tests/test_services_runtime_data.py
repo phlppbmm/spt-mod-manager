@@ -26,10 +26,12 @@ from sptmod.core.repo import Repo
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock the game process detector to prevent false failures during runtime data tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a repository with a clean initial commit, simulating post-init state."""
     repo = Repo.init(detect_layout(path))
     repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
@@ -41,6 +43,7 @@ def _clean_repo(path: Path) -> Repo:
 def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Untracked files in mod directories don't appear in status report."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -61,6 +64,7 @@ def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
 def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
     game_dir_fixture: str, request: pytest.FixtureRequest, install_commit: InstallCommit
 ) -> None:
+    """Status ignores runtime data in server mod directories across both game layouts."""
     game_dir_path: Path = request.getfixturevalue(game_dir_fixture)
     repo = _clean_repo(game_dir_path)
     mods_dir = detect_layout(game_dir_path).mods_dir.as_posix()
@@ -85,6 +89,7 @@ def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
 def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Status ignores runtime data in patcher directories."""
     install_commit(
         clean_repo,
         "PatchMod",
@@ -105,6 +110,7 @@ def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
 def test_install_of_another_mod_is_not_blocked_by_runtime_data(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Installing another mod succeeds even with runtime data present."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -127,6 +133,7 @@ def test_install_of_another_mod_is_not_blocked_by_runtime_data(
 def test_install_still_blocks_on_a_foreign_directory_and_omits_owned_runtime_paths(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Install still blocks on unmanaged mods, omitting owned runtime data from the error."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -183,6 +190,7 @@ def test_install_with_profile_changes_and_runtime_data_snapshots_exactly_once(
 def test_install_still_blocks_on_a_modified_tracked_file_inside_an_owned_dir(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Modified tracked files still block install even in owned mod directories."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -212,6 +220,7 @@ def test_removing_or_disabling_deletes_runtime_data_and_the_now_empty_directory(
     clean_repo: Repo,
     install_commit: InstallCommit,
 ) -> None:
+    """remove_mod and disable_mod delete runtime data and empty mod directories."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -244,6 +253,7 @@ def test_removing_or_disabling_clears_a_patcher_dir_but_keeps_the_patchers_root(
     clean_repo: Repo,
     install_commit: InstallCommit,
 ) -> None:
+    """remove_mod and disable_mod clear patcher mod dirs but preserve BepInEx/patchers."""
     install_commit(
         clean_repo,
         "PatchMod",
@@ -264,6 +274,7 @@ def test_removing_or_disabling_clears_a_patcher_dir_but_keeps_the_patchers_root(
 def test_enable_mod_after_disable_restores_only_the_recorded_files(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """enable_mod restores only tracked files, not runtime data that was deleted."""
     install_commit(
         clean_repo,
         "ClientMod",
@@ -284,6 +295,7 @@ def test_enable_mod_after_disable_restores_only_the_recorded_files(
 def test_remove_mod_keeps_a_second_active_mods_files_in_a_shared_directory(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """remove_mod only removes files belonging to the mod, preserving other mods' files."""
     install_commit(
         clean_repo,
         "ModA",
@@ -314,6 +326,7 @@ def test_remove_mod_keeps_a_second_active_mods_files_in_a_shared_directory(
 def test_a_directory_owned_only_by_a_disabled_mod_resurfaces_as_manual(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """A directory owned only by a disabled mod is reported as a manual mod."""
     install_commit(
         clean_repo,
         "ClientMod",

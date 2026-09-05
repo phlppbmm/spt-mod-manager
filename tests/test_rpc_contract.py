@@ -49,19 +49,24 @@ SERVICE_FUNCTION_NAMES = _service_function_names()
 
 
 def _camel(name: str) -> str:
+    """Convert ``snake_case`` to ``PascalCase``, matching the schema naming."""
     return "".join(part.title() for part in name.split("_"))
 
 
 def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
+    """Every public service function is exposed as an RPC endpoint and no
+    other endpoints exist."""
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
 def test_rpc_functions_has_exactly_thirtyfour_entries() -> None:
+    """The RPC registry contains exactly 34 endpoints."""
     assert len(RPC_FUNCTIONS) == 34
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
 def test_spec_function_is_the_same_named_service_function(name: str) -> None:
+    """Each RPC spec references the actual service function object."""
     assert RPC_FUNCTIONS[name].function is getattr(services, name)
 
 
@@ -69,6 +74,7 @@ def test_spec_function_is_the_same_named_service_function(name: str) -> None:
 def test_spec_request_resolves_the_same_named_camel_case_request_model(
     name: str,
 ) -> None:
+    """Each RPC spec references the corresponding PascalCase request model."""
     expected = getattr(schemas, f"{_camel(name)}Request")
     assert RPC_FUNCTIONS[name].request is expected
 
@@ -88,6 +94,8 @@ _INTERNAL_ONLY_PARAMS: dict[str, set[str]] = {
 def test_request_fields_match_service_parameters_minus_progress_and_client(
     name: str,
 ) -> None:
+    """RPC request fields exactly match service function parameters, excluding
+    progress/client callbacks and internal-only fields."""
     spec = RPC_FUNCTIONS[name]
     params = set(inspect.signature(spec.function).parameters) - {
         "progress",
@@ -141,6 +149,8 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
 def test_schema_declares_every_field_of_its_core_dataclass(
     dataclass_type: type, schema_type: type[BaseModel]
 ) -> None:
+    """Every field in a core dataclass exists in its corresponding Pydantic
+    schema."""
     dataclass_fields = {field.name for field in dataclasses.fields(dataclass_type)}
     schema_fields = set(schema_type.model_fields.keys())
 
@@ -153,6 +163,7 @@ def test_schema_declares_every_field_of_its_core_dataclass(
 
 
 def _concrete_core_error_classes() -> list[type[Exception]]:
+    """Every concrete exception class defined in ``sptmod.core.errors``."""
     return [
         obj
         for _, obj in vars(core_errors).items()
@@ -166,6 +177,7 @@ CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
 def test_there_are_twentyfive_concrete_core_error_classes() -> None:
+    """Exactly 25 concrete exception classes are defined in sptmod.core.errors."""
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
     assert len(CONCRETE_CORE_ERROR_CLASSES) == 25
@@ -179,6 +191,8 @@ def test_there_are_twentyfive_concrete_core_error_classes() -> None:
 def test_every_concrete_core_error_maps_to_a_non_fallback_code(
     error_type: type[Exception],
 ) -> None:
+    """Every core exception class maps to a specific RPC error code (not
+    fallback)."""
     code = error_code(error_type)
 
     assert code != FALLBACK_ERROR_CODE
@@ -186,6 +200,7 @@ def test_every_concrete_core_error_maps_to_a_non_fallback_code(
 
 
 def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
+    """OperationInProgressError maps to OPERATION_IN_PROGRESS code."""
     assert error_code(core_errors.OperationInProgressError) == "OPERATION_IN_PROGRESS"
 
 
@@ -195,6 +210,7 @@ def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
 
 
 def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -> None:
+    """Only responses with an operation_id field are marked in the RPC spec."""
     declares_operation_id = {
         name
         for name, spec in RPC_FUNCTIONS.items()
@@ -215,6 +231,7 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
 
 
 def test_exactly_the_wrapped_specs_wrap_a_result_under_a_named_field() -> None:
+    """Only specified endpoints wrap plain results under named fields."""
     # Most wrapped results are plain strings; list_favorites/set_favorite wrap
     # a plain list[int] the same way, under "mod_ids".
     wrapped = {name: spec.wrap for name, spec in RPC_FUNCTIONS.items() if spec.wrap}

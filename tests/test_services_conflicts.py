@@ -35,12 +35,14 @@ _BLOCKING_ERRORS: tuple[type[ConflictError | DependencyError], ...] = (
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock the game process detector to prevent false failures during install tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def test_tracked_file_conflict_aborts_install_and_names_owning_mod(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """A tracked-file conflict aborts the install and names the owning mod."""
     install_commit(
         clean_repo,
         "ModA",
@@ -64,6 +66,7 @@ def test_tracked_file_conflict_aborts_install_and_names_owning_mod(
 def test_tracked_file_conflict_with_force_proceeds_and_reports_warning(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """force=True downgrades tracked-file conflicts to warnings and allows the install."""
     install_commit(
         clean_repo,
         "ModA",
@@ -86,6 +89,7 @@ def test_tracked_file_conflict_with_force_proceeds_and_reports_warning(
 def test_dll_duplicate_across_mod_folders_is_a_warning_and_install_proceeds(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """DLL duplicates across different mod folders are warnings and do not block the install."""
     install_commit(
         clean_repo,
         "ModA",
@@ -109,6 +113,7 @@ def test_dll_duplicate_across_mod_folders_is_a_warning_and_install_proceeds(
 def test_missing_and_out_of_range_dependency_abort_listing_all_offenders(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Missing and out-of-range dependencies abort the install and list all offenders."""
     install_commit(
         clean_repo,
         "OldDep",
@@ -149,6 +154,7 @@ def test_missing_and_out_of_range_dependency_abort_listing_all_offenders(
 def test_missing_and_out_of_range_dependency_with_force_proceeds(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """force=True downgrades missing and out-of-range dependencies to warnings."""
     install_commit(
         clean_repo,
         "OldDep",
@@ -188,6 +194,7 @@ def test_missing_and_out_of_range_dependency_with_force_proceeds(
 def test_tracked_file_and_missing_dependency_both_block_and_are_both_reported(
     clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
 ) -> None:
+    """Both tracked-file and dependency errors block the install and are reported together."""
     install_commit(
         clean_repo,
         "ModA",
@@ -222,6 +229,7 @@ def test_tracked_file_and_missing_dependency_both_block_and_are_both_reported(
 def test_spt_version_mismatch_is_a_warning_and_install_proceeds(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """sptVersion mismatch is a warning only and does not block the install."""
     # fake_game_dir's SPT/SPT_Data/configs/core.json reports sptVersion 4.1.0.
     archive = make_archive(
         {

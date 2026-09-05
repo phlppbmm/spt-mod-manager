@@ -13,11 +13,13 @@ from sptmod.core.repo import Repo
 
 
 def _write(path: Path, content: str = "content") -> None:
+    """Create a file with the given content, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
 def test_ignored_dummies_are_not_visible_as_untracked(initialized_repo: Repo) -> None:
+    """Files in ignored directories (logs, cache, backups) never appear in status."""
     status = initialized_repo.status()
 
     ignored = {
@@ -31,12 +33,14 @@ def test_ignored_dummies_are_not_visible_as_untracked(initialized_repo: Repo) ->
 
 
 def test_untracked_under_hides_ignored_prefixes(initialized_repo: Repo) -> None:
+    """Repo.untracked_under() returns empty when querying ignored directories."""
     assert initialized_repo.untracked_under(Path("SPT/user/logs")) == []
     assert initialized_repo.untracked_under(Path("EscapeFromTarkov_Data")) == []
     assert initialized_repo.untracked_under(Path("SPT/user/profiles/backups")) == []
 
 
 def test_untracked_under_shows_new_trackable_mod_file(initialized_repo: Repo) -> None:
+    """New mod files are visible via untracked_under on the mods directory."""
     mod_file = initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll"
     _write(mod_file, "binary-ish")
 
@@ -48,6 +52,7 @@ def test_untracked_under_shows_new_trackable_mod_file(initialized_repo: Repo) ->
 def test_untracked_under_shows_new_trackable_plugin_and_config(
     initialized_repo: Repo,
 ) -> None:
+    """BepInEx plugins and config files are visible as untracked."""
     _write(initialized_repo.path / "BepInEx" / "plugins" / "TestPlugin.dll", "plugin")
     _write(initialized_repo.path / "BepInEx" / "config" / "TestPlugin.cfg", "cfg")
 
@@ -75,6 +80,7 @@ def test_untracked_under_shows_new_trackable_patcher(
 def test_commit_with_paths_none_stages_bepinex_patchers(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.commit(paths=None) stages files from BepInEx/patchers/ when they exist."""
     _write(initialized_repo.path / "BepInEx" / "patchers" / "Fixer.dll", "patcher")
 
     commit_hash = initialized_repo.commit("mod: whitelist patchers", paths=None)
@@ -86,6 +92,7 @@ def test_commit_with_paths_none_stages_bepinex_patchers(
 def test_status_untracked_lists_profile_json_before_first_commit(
     initialized_repo: Repo,
 ) -> None:
+    """The default profile fixture JSON appears untracked before the first commit."""
     status = initialized_repo.status()
 
     assert Path("SPT/user/profiles/abc.json") in status.untracked
@@ -94,6 +101,7 @@ def test_status_untracked_lists_profile_json_before_first_commit(
 def test_commit_with_paths_none_stages_only_whitelisted_files(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.commit(paths=None) stages all whitelisted files (mods, plugins, config, etc)."""
     _write(
         initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll", "dll"
     )
@@ -116,6 +124,7 @@ def test_commit_with_paths_none_stages_only_whitelisted_files(
 def test_commit_with_paths_none_never_includes_ignored_dummies(
     initialized_repo: Repo,
 ) -> None:
+    """Repo.commit(paths=None) excludes ignored files (logs, cache, backups, etc)."""
     _write(
         initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll", "dll"
     )
@@ -135,6 +144,7 @@ def test_commit_with_paths_none_never_includes_ignored_dummies(
 def test_is_clean_after_full_whitelist_commit_ignores_leftover_dummies(
     initialized_repo: Repo,
 ) -> None:
+    """After committing all whitelisted files, is_clean() ignores the ignored dummy files."""
     _write(
         initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll", "dll"
     )

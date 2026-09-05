@@ -19,16 +19,19 @@ from sptmod.core.repo import Repo
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock the game process detector to prevent false failures during list/history tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def test_list_mods_on_a_fresh_repo_returns_no_mods(clean_repo: Repo) -> None:
+    """A fresh repository with no installed mods returns an empty list."""
     assert services.list_mods(clean_repo.path) == []
 
 
 def test_install_revert_reinstall_sequence_is_reflected_by_list_and_history(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
+    """install, remove, and reinstall sequences are tracked in list_mods and history."""
     first_archive = make_archive(
         {
             "SPT/user/mods/CoolMod/package.json": json.dumps(
@@ -66,6 +69,7 @@ def test_install_revert_reinstall_sequence_is_reflected_by_list_and_history(
 def test_list_mods_default_returns_only_active_mods(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """list_mods() by default excludes disabled and removed mods."""
     install_commit(clean_repo, "ModA", minute=1)
     disable_target = install_commit(clean_repo, "ModB", minute=2)
     install_commit(clean_repo, "ModC", minute=3)
@@ -84,6 +88,7 @@ def test_list_mods_default_returns_only_active_mods(
 def test_list_mods_include_all_also_returns_disabled_and_removed(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """include_all=True returns mods in all states including disabled and removed."""
     install_commit(clean_repo, "ModA", minute=1)
     disable_target = install_commit(clean_repo, "ModB", minute=2)
     remove_target = install_commit(clean_repo, "ModD", minute=3)
@@ -130,6 +135,7 @@ def test_list_mods_excludes_a_mod_trailer_with_no_descriptive_commit(
 def test_list_mods_reflects_the_youngest_commit_of_each_mod(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """list_mods reflects a mod's most recent commit state, including version and status."""
     install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(
         clean_repo, "ModA", version="1.1.0", state="updated", minute=2
@@ -145,6 +151,7 @@ def test_list_mods_reflects_the_youngest_commit_of_each_mod(
 def test_mod_files_returns_the_files_of_the_active_mods_install_commit(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """mod_files returns the files from the mod's most recent install commit."""
     install_commit(
         clean_repo,
         "ModA",
@@ -166,6 +173,7 @@ def test_mod_files_returns_the_files_of_the_active_mods_install_commit(
 def test_mod_files_matches_case_insensitively(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """mod_files performs case-insensitive name matching."""
     install_commit(
         clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "a-content"}
     )
@@ -178,6 +186,7 @@ def test_mod_files_matches_case_insensitively(
 
 
 def test_mod_files_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
+    """mod_files raises ModNotFoundError when the mod name does not exist."""
     with pytest.raises(ModNotFoundError):
         services.mod_files(clean_repo.path, "Ghost")
 
@@ -185,6 +194,7 @@ def test_mod_files_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> No
 def test_mod_files_raises_ambiguous_mod_error_for_case_variant_names(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """mod_files raises AmbiguousModError when multiple case variants exist."""
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
@@ -197,6 +207,7 @@ def test_mod_files_raises_ambiguous_mod_error_for_case_variant_names(
 def test_history_without_name_returns_all_commits_newest_first(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history() without a name returns all commits in reverse chronological order."""
     baseline_hash = clean_repo.log()[0].hash
     first_hash = install_commit(clean_repo, "ModA", minute=1)
     second_hash = install_commit(clean_repo, "ModB", minute=2)
@@ -213,6 +224,7 @@ def test_history_without_name_returns_all_commits_newest_first(
 def test_history_filtered_by_name_returns_only_that_mods_commits(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history(name) filters to commits involving only that mod, newest first."""
     first_hash = install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(clean_repo, "ModB", minute=2)
     second_hash = install_commit(
@@ -227,6 +239,7 @@ def test_history_filtered_by_name_returns_only_that_mods_commits(
 def test_history_name_filter_matches_case_insensitively(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history name filtering performs case-insensitive matching."""
     commit_hash = install_commit(clean_repo, "ModA", minute=1)
 
     result = services.history(clean_repo.path, "moda")
@@ -235,6 +248,7 @@ def test_history_name_filter_matches_case_insensitively(
 
 
 def test_history_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
+    """history raises ModNotFoundError when the mod name does not exist."""
     with pytest.raises(ModNotFoundError):
         services.history(clean_repo.path, "Ghost")
 
@@ -242,6 +256,7 @@ def test_history_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None
 def test_history_raises_ambiguous_mod_error_for_case_variant_names(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """history raises AmbiguousModError when multiple case variants exist."""
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 

@@ -44,6 +44,7 @@ def _open_handles_on(path: Path) -> int:
 
 
 def test_init_on_a_non_sqlite_file_raises_database_error(tmp_path: Path) -> None:
+    """Catalog.__init__ rejects invalid database files with sqlite3.DatabaseError."""
     garbage = tmp_path / "garbage.db"
     garbage.write_bytes(b"not a sqlite database, just plain junk padding" * 5)
 
@@ -57,6 +58,7 @@ def test_init_on_a_non_sqlite_file_raises_database_error(tmp_path: Path) -> None
 def test_init_failure_leaves_no_open_handle_on_the_database_file(
     tmp_path: Path,
 ) -> None:
+    """When Catalog.__init__ fails, the database file is not left open."""
     garbage = tmp_path / "garbage.db"
     garbage.write_bytes(b"not a sqlite database, just plain junk padding" * 5)
 
@@ -201,6 +203,10 @@ CREATE TABLE versions (
 def test_init_upgrades_a_versions_table_without_fika_compatibility_reads_none(
     tmp_path: Path,
 ) -> None:
+    """A database created before the fika_compatibility column was added to
+    the versions table migrates silently on open, and existing version rows
+    read back with fika_compatibility=None rather than raising a schema error.
+    """
     old_db = tmp_path / "old-forge-catalog.db"
     with sqlite3.connect(old_db) as connection:
         connection.executescript(_PRE_FIKA_VERSIONS_SCHEMA)

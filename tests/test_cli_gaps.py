@@ -66,6 +66,7 @@ SPT_CONSTRAINT = "^4.0.0"
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure no game processes are detected during CLI tests."""
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
@@ -83,6 +84,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a game directory repository and commit the baseline configuration."""
     repo = Repo.init(detect_layout(path))
     repo.commit(
         f"chore: clean SPT {SPT_VERSION}",
@@ -93,6 +95,7 @@ def _clean_repo(path: Path) -> Repo:
 
 
 def _mod_json(mod_id: int, name: str, version: str) -> dict[str, object]:
+    """Build a Forge mod JSON envelope for a given ID, name and version."""
     return mod_json_full(
         id=mod_id,
         name=name,
@@ -171,6 +174,7 @@ def _seed_forge_mod(
 def _current_version(
     *, mod_id: int, name: str, version: str, version_id: int
 ) -> dict[str, object]:
+    """Build a current version object for a Forge update response."""
     return {
         "id": version_id,
         "mod_id": mod_id,
@@ -748,6 +752,7 @@ def test_check_reports_a_warning_for_an_unparseable_db_file(
 
 
 def _write_pre_existing_mod(fake_game_dir: Path, name: str = "CoolMod") -> Path:
+    """Create a pre-existing mod folder with a package.json file."""
     mod_dir = fake_game_dir / "SPT" / "user" / "mods" / name
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(

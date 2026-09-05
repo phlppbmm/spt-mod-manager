@@ -37,6 +37,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 def test_mods_unwraps_success_envelope(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Unwraps {"success": true, "data": items, "meta": {...}} and populates PageMeta."""
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200, json=page_envelope([mod_json_minimal(id=7, name="Unwrapped Mod")])
@@ -55,6 +56,7 @@ def test_mods_unwraps_success_envelope(
 def test_mod_unwraps_success_envelope(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """Parses nested objects from {"success": true, "data": {full mod + license/category/versions}}."""
     respx_router.get("/mod/42").mock(
         return_value=httpx.Response(
             200, json={"success": True, "data": mod_json_full(id=42)}
@@ -112,6 +114,7 @@ def test_mod_unwraps_success_envelope(
 def test_mods_400_validation_failed_raises_forge_api_error(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """A 400 error envelope raises ForgeApiError with code, message, and status."""
     route = respx_router.get("/mods").mock(
         return_value=httpx.Response(
             400, json=error_envelope("VALIDATION_FAILED", "per_page must be <= 50")
@@ -131,6 +134,7 @@ def test_mods_400_validation_failed_raises_forge_api_error(
 def test_mod_404_not_found_raises_forge_api_error(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """A 404 error envelope raises ForgeApiError with code, message, and status."""
     route = respx_router.get("/mod/999").mock(
         return_value=httpx.Response(
             404, json=error_envelope("NOT_FOUND", "Mod not found")
@@ -150,6 +154,7 @@ def test_mod_404_not_found_raises_forge_api_error(
 def test_mods_with_a_non_json_body_raises_forge_unavailable(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """A non-JSON response body raises ForgeUnavailableError."""
     respx_router.get("/mods").mock(
         return_value=httpx.Response(200, content=b"not json at all")
     )
@@ -162,6 +167,7 @@ def test_mods_with_a_non_json_body_raises_forge_unavailable(
 def test_ping_true_when_api_answers(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """ping() returns True on 200 with {"success": true}; returns False otherwise."""
     respx_router.get("/ping").mock(
         return_value=httpx.Response(200, json={"success": True})
     )
@@ -173,6 +179,7 @@ def test_ping_true_when_api_answers(
 def test_ping_false_on_connection_error(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """ping() catches httpx.ConnectError and returns False instead of raising."""
     respx_router.get("/ping").mock(side_effect=httpx.ConnectError("boom"))
     client = client_factory()
 
@@ -182,6 +189,7 @@ def test_ping_false_on_connection_error(
 def test_ping_false_on_server_error(
     client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
+    """ping() returns False when the API responds with a 5xx error."""
     respx_router.get("/ping").mock(return_value=httpx.Response(500))
     client = client_factory()
 

@@ -44,10 +44,20 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub game-running checks to report no process, allowing operations.
+
+    All tests status/export/import without mocking this, so the stubs work in
+    every test without repeating the setup.
+    """
     monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Initialize a repository with an empty baseline commit.
+
+    Used by CLI tests that do not import a clean_repo fixture from conftest,
+    so they must create their own.
+    """
     repo = Repo.init(detect_layout(path))
     repo.commit(
         "chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None
@@ -76,6 +86,7 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 
 def test_status_groups_modified_profile(clean_repo: Repo) -> None:
+    """Status reports modified profile files separately."""
     (clean_repo.path / "SPT/user/profiles/abc.json").write_text(
         '{"changed": true}', encoding="utf-8"
     )
@@ -88,6 +99,7 @@ def test_status_groups_modified_profile(clean_repo: Repo) -> None:
 
 
 def test_status_groups_modified_config(clean_repo: Repo) -> None:
+    """Status reports modified BepInEx config files separately."""
     config_file = clean_repo.path / "BepInEx/config/mod.cfg"
     config_file.write_text("original", encoding="utf-8")
     clean_repo.commit("chore: seed config", paths=[Path("BepInEx/config/mod.cfg")])
@@ -102,6 +114,7 @@ def test_status_groups_modified_config(clean_repo: Repo) -> None:
 def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Status reports modified mod files under other_modified, not profiles/configs."""
     install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "v1"})
     (clean_repo.path / "BepInEx/plugins/ModA.dll").write_text("v2", encoding="utf-8")
 
@@ -113,6 +126,7 @@ def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
 
 
 def test_status_groups_untracked_mod_folder_as_a_manual_mod(clean_repo: Repo) -> None:
+    """Status groups untracked files below mod folders as manual mods."""
     mod_dir = clean_repo.path / "SPT/user/mods/NewMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text(
@@ -134,6 +148,7 @@ def test_status_groups_untracked_mod_folder_as_a_manual_mod(clean_repo: Repo) ->
 def test_status_groups_a_loose_untracked_dll_as_a_manual_mod_by_itself(
     clean_repo: Repo,
 ) -> None:
+    """Status reports a loose untracked DLL as its own manual mod entry."""
     (clean_repo.path / "BepInEx/plugins/Loose.dll").write_bytes(b"dll-bytes")
 
     report = services.status(clean_repo.path)
@@ -150,6 +165,7 @@ def test_status_groups_a_loose_untracked_dll_as_a_manual_mod_by_itself(
 def test_export_text_lists_name_version_ordered_by_name(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Export text format lists installed mods by name and version, alphabetically."""
     install_commit(clean_repo, "Zeta", version="1.0.0", mod_type="client", minute=1)
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="client", minute=2)
 
@@ -164,6 +180,7 @@ def test_export_text_lists_name_version_ordered_by_name(
 def test_export_json_structure(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Export JSON format wraps mods in object with mods array."""
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="server")
 
     output = services.export_mods(
@@ -179,6 +196,7 @@ def test_export_json_structure(
 def test_export_client_only_keeps_client_and_hybrid_mods(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Export with client_only=True filters out server-only mods."""
     install_commit(clean_repo, "ServerOnly", mod_type="server", minute=1)
     install_commit(clean_repo, "ClientOnly", mod_type="client", minute=2)
     install_commit(clean_repo, "HybridMod", mod_type="hybrid", minute=3)
@@ -203,6 +221,10 @@ def _seed_catalog_mod(
     mod_id: int,
     detail_url: str,
 ) -> None:
+    """Seed the catalog cache with a single mocked Forge mod entry.
+
+    Used by export link tests to ensure a catalog lookup finds matching mods.
+    """
     mod = mod_json_full(
         id=mod_id,
         name=name,
@@ -224,6 +246,7 @@ def test_export_includes_the_catalog_link_when_the_db_has_a_match(
     respx_router: respx.MockRouter,
     tmp_path: Path,
 ) -> None:
+    """Export looks up catalog links by mod name and includes them in text output."""
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="client")
     db_path = tmp_path / "catalog.db"
     _seed_catalog_mod(
@@ -317,6 +340,9 @@ def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
 def test_import_diff_reports_missing_different_and_extra(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Import compares a list against installed mods, categorizing them as
+    missing (in list only), different (mismatched versions), or extra (installed only).
+    """
     install_commit(clean_repo, "ModA", version="1.0.0", minute=1)
     install_commit(clean_repo, "ModB", version="2.0.0", minute=2)
     install_commit(clean_repo, "ModD", version="4.0.0", minute=3)
@@ -342,6 +368,7 @@ def test_import_diff_reports_missing_different_and_extra(
 def test_import_matches_names_case_insensitively(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Import matches mod names case-insensitively."""
     install_commit(clean_repo, "ModA", version="1.0.0")
     list_file = tmp_path / "wanted.txt"
     list_file.write_text("moda 1.0.0\n", encoding="utf-8")
@@ -354,6 +381,7 @@ def test_import_matches_names_case_insensitively(
 def test_import_json_format_is_recognised_by_content_not_extension(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Import detects JSON format by content, not file extension."""
     install_commit(clean_repo, "ModA", version="1.0.0")
     list_file = tmp_path / "wanted.txt"  # ".txt" extension, JSON content
     payload = {
@@ -369,6 +397,7 @@ def test_import_json_format_is_recognised_by_content_not_extension(
 def test_import_raises_invalid_metadata_for_a_missing_list_file(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """Import raises InvalidMetadataError when list file does not exist."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(clean_repo.path, tmp_path / "does-not-exist.txt")
 
@@ -376,6 +405,7 @@ def test_import_raises_invalid_metadata_for_a_missing_list_file(
 def test_import_raises_invalid_metadata_when_neither_source_is_given(
     clean_repo: Repo,
 ) -> None:
+    """Import raises InvalidMetadataError when neither file nor content is given."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(clean_repo.path)
 
@@ -383,6 +413,7 @@ def test_import_raises_invalid_metadata_when_neither_source_is_given(
 def test_import_raises_invalid_metadata_when_both_sources_are_given(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """Import raises InvalidMetadataError when both file and content are given."""
     list_file = tmp_path / "wanted.txt"
     list_file.write_text("ModA 1.0.0\n", encoding="utf-8")
 
@@ -393,6 +424,7 @@ def test_import_raises_invalid_metadata_when_both_sources_are_given(
 def test_import_raises_invalid_metadata_for_malformed_json_content(
     clean_repo: Repo,
 ) -> None:
+    """Import raises InvalidMetadataError for malformed JSON content."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(clean_repo.path, content="{not valid json")
 
@@ -400,6 +432,7 @@ def test_import_raises_invalid_metadata_for_malformed_json_content(
 def test_import_raises_invalid_metadata_when_json_has_no_mods_list(
     clean_repo: Repo,
 ) -> None:
+    """Import raises InvalidMetadataError when JSON mods field is not an array."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(clean_repo.path, content=json.dumps({"mods": "nope"}))
 
@@ -407,6 +440,7 @@ def test_import_raises_invalid_metadata_when_json_has_no_mods_list(
 def test_import_raises_invalid_metadata_for_a_non_object_mod_entry(
     clean_repo: Repo,
 ) -> None:
+    """Import raises InvalidMetadataError when a mod entry is not an object."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(
             clean_repo.path, content=json.dumps({"mods": ["just-a-string"]})
@@ -416,6 +450,7 @@ def test_import_raises_invalid_metadata_for_a_non_object_mod_entry(
 def test_import_raises_invalid_metadata_for_a_mod_entry_missing_name_or_version(
     clean_repo: Repo,
 ) -> None:
+    """Import raises InvalidMetadataError when mod entry lacks name or version."""
     with pytest.raises(InvalidMetadataError):
         services.import_list(
             clean_repo.path, content=json.dumps({"mods": [{"name": "ModA"}]})
@@ -425,6 +460,7 @@ def test_import_raises_invalid_metadata_for_a_mod_entry_missing_name_or_version(
 def test_import_text_format_skips_blank_lines(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
+    """Import text format ignores blank lines in the content."""
     install_commit(clean_repo, "ModA", version="1.0.0")
 
     diff = services.import_list(
@@ -437,6 +473,7 @@ def test_import_text_format_skips_blank_lines(
 def test_import_raises_invalid_metadata_for_a_text_line_with_no_version(
     clean_repo: Repo,
 ) -> None:
+    """Import text format raises InvalidMetadataError when line has no version."""
     with pytest.raises(InvalidMetadataError) as exc_info:
         services.import_list(clean_repo.path, content="JustAName\n")
 
@@ -446,6 +483,7 @@ def test_import_raises_invalid_metadata_for_a_text_line_with_no_version(
 def test_export_import_text_roundtrip(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Exporting to text and re-importing produces no diff, verifying format integrity."""
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.txt"
     list_file.write_text(
@@ -463,6 +501,7 @@ def test_export_import_text_roundtrip(
 def test_export_import_json_roundtrip(
     clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
 ) -> None:
+    """Exporting to JSON and re-importing produces no diff, verifying format integrity."""
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.json"
     list_file.write_text(
@@ -483,6 +522,7 @@ def test_export_import_json_roundtrip(
 def test_cli_status_shows_adopt_hint_for_a_manual_mod(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """CLI status shows untracked mods with an adopt hint."""
     _clean_repo(fake_game_dir)
     mod_dir = fake_game_dir / "SPT/user/mods/NewMod"
     mod_dir.mkdir(parents=True)
@@ -501,6 +541,7 @@ def test_cli_status_shows_adopt_hint_for_a_manual_mod(
 def test_cli_export_json_happy_path(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
+    """CLI export with --format json outputs installed mods as JSON."""
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
@@ -520,6 +561,7 @@ def test_cli_import_apply_installs_the_missing_mod_via_the_mocked_forge_path(
     make_archive: MakeArchive,
     tmp_path: Path,
 ) -> None:
+    """CLI import --apply installs missing mods from list via the Forge."""
     _clean_repo(fake_game_dir)
     archive = make_archive(
         {

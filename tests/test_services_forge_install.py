@@ -244,6 +244,8 @@ def _dep_node(
     link: str,
     content_length: int,
 ) -> dict[str, Any]:
+    """Build a Forge dependency node: latest_compatible_version with link/content_length,
+    conflict=False (safe to install), empty dependencies list."""
     return {
         "id": id,
         "guid": None,
@@ -264,6 +266,7 @@ def _dep_node(
 def _package_archive(
     make_archive: MakeArchive, folder: str, name: str, version: str
 ) -> Path:
+    """Build a zip archive: SPT/user/mods/{folder}/package.json with name, version, author."""
     return make_archive(
         {
             f"SPT/user/mods/{folder}/package.json": json.dumps(
@@ -275,6 +278,7 @@ def _package_archive(
 
 
 def _mock_download(respx_router: respx.MockRouter, link: str, archive: Path) -> int:
+    """Mock a download link to serve an archive and return its size."""
     body = archive.read_bytes()
     respx_router.get(link).mock(
         return_value=httpx.Response(
@@ -417,6 +421,7 @@ def test_install_mod_succeeds_when_the_catalog_was_only_synced(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
+    """Verify install_mod succeeds when download links must be fetched from the Forge."""
     archive = _package_archive(make_archive, "LinkMod", "Link Mod", "1.0.0")
     link = "https://dl.example/link-mod-1.0.0.zip"
     content_length = len(archive.read_bytes())
@@ -677,6 +682,7 @@ def test_check_updates_after_a_metadata_less_install_queries_the_plan_version(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
+    """Verify check_updates uses the Forge version for bare-DLL mods (not empty)."""
     archive = make_archive({"BepInEx/plugins/VersionlessMod.dll": b"dll-bytes"}, "zip")
     body = archive.read_bytes()
     link = "https://dl.example/versionless-mod-3.2.1.zip"
@@ -924,6 +930,7 @@ def _seed_simple_catalog(
     db_path: Path,
     mods: list[JsonDict],
 ) -> None:
+    """Mock /mods endpoint and sync mods into the catalog via full sync (single page, all mods)."""
     page = page_envelope(
         mods, current_page=1, last_page=1, total=len(mods), next_url=None
     )
@@ -940,6 +947,8 @@ def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
+    """With forge_match=True, sets forge_id and forge_version_id when mod name and version
+    match exactly one cached mod (unambiguous)."""
     _seed_simple_catalog(
         client_factory,
         respx_router,
@@ -1023,6 +1032,8 @@ def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
     db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
+    """With forge_match=True, leaves forge_id and forge_version_id empty when mod name
+    matches multiple cached mods (ambiguous lookup)."""
     _seed_simple_catalog(
         client_factory,
         respx_router,
@@ -1073,6 +1084,9 @@ def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
 def test_install_from_archive_forge_match_leaves_ids_empty_when_no_match(
     clean_repo: Repo, db_path: Path, make_archive: MakeArchive
 ) -> None:
+    """When db_path points to a non-existent catalog file, forge_match still
+    returns empty Forge IDs without raising an exception (no-op lookup).
+    """
     # db_path points at a file that has never been created: the catalog cache
     # does not exist yet, which install_from_archive's docstring says makes
     # the lookup a no-op.
@@ -1141,6 +1155,7 @@ def test_import_list_apply_installs_exactly_the_missing_mods(
 def test_import_list_content_parameter_yields_the_same_diff_as_a_file(
     clean_repo: Repo, tmp_path: Path
 ) -> None:
+    """import_list returns identical ImportDiff whether given content= string or list_file= path."""
     text = "SomeMod 1.0.0\n"
     list_file = tmp_path / "mods.txt"
     list_file.write_text(text, encoding="utf-8")
@@ -1174,6 +1189,7 @@ def test_clear_catalog_cache_removes_the_db_file_and_reports_removed(
 
 
 def test_clear_catalog_cache_second_call_reports_not_removed(tmp_path: Path) -> None:
+    """Verify clear_catalog_cache reports removed=False when called on non-existent cache."""
     db = tmp_path / "forge-cache.db"
     with Catalog(db):
         pass
@@ -1350,6 +1366,7 @@ def _mock_updates_single(
     link: str,
     content_length: int,
 ) -> None:
+    """Mock a Forge update check response with a single update available."""
     respx_router.get("/mods/updates").mock(
         return_value=httpx.Response(
             200,

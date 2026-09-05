@@ -49,6 +49,11 @@ _FORGE_UNAVAILABLE_EXIT_CODE = 14
 
 
 def _clean_repo(path: Path) -> Repo:
+    """Create and initialize a clean repository at the given game directory.
+
+    Initializes the repository and commits an empty state with SPT version 4.1.0
+    set in the trailer.
+    """
     repo = Repo.init(detect_layout(path))
     repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
     return repo
@@ -57,6 +62,11 @@ def _clean_repo(path: Path) -> Repo:
 def _mod_json(
     mod_id: int, name: str, author: str, version: str, spt_constraint: str
 ) -> dict[str, object]:
+    """Build a Forge API mod envelope for a single version.
+
+    Creates a complete mod JSON structure as returned by the Forge API,
+    suitable for mocking API responses in tests.
+    """
     return mod_json_full(
         id=mod_id,
         name=name,
@@ -76,6 +86,7 @@ def _mod_json(
 
 
 def _one_page(mods: list[dict[str, object]]) -> httpx.Response:
+    """Return HTTP 200 with mods wrapped in a pagination envelope: page 1 of 1, no next URL."""
     return httpx.Response(
         200,
         json=page_envelope(
@@ -557,6 +568,12 @@ def _blocked_db_path(tmp_path: Path) -> Path:
 def test_catalog_reads_raise_catalog_unavailable_not_os_error(
     call: Callable[[Path, Path], object], fake_game_dir: Path, tmp_path: Path
 ) -> None:
+    """Verify catalog operations raise CatalogUnavailableError when db_path cannot be accessed.
+
+    Checks that sync_catalog, search_catalog, and browse_catalog all convert
+    filesystem errors (when the catalog directory is blocked) to the typed
+    CatalogUnavailableError rather than raising raw OSError.
+    """
     _clean_repo(fake_game_dir)
 
     with pytest.raises(CatalogUnavailableError):

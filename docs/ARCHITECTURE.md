@@ -68,7 +68,15 @@ src-tauri/              Tauri v2 desktop app
   tests/
     rpc_driver_tests.rs   with mocked subprocess
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
+tests/                  Python test suite (1522 tests)
+  conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
+  fixture_types.py      fixture Protocols for typing
+  forge_json.py         Forge API mock payload builders
+  pe_builder.py         PE file assembly helpers
+  test_*.py             individual test modules
 Cargo.toml              workspace (members: src-tauri)
+typings/                local stubs for untyped packages
+  rarfile.pyi           stub for rarfile (rar support)
 frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/index.ts           re-exports of public API
   src/lib/updateall.ts       bulk update orchestration
@@ -546,16 +554,27 @@ default true, passed as a parameter to each launch call).
 **The pytest suite is the Rust-port specification** — tests are black-box,
 behavior-focused; do not weaken them to make an implementation fit.
 
+### Quality gates
+
+```bash
+uv run pytest                        # Python suite (1522 collected: 1521 passed, 1 skipped)
+uv run pytest --cov                  # with coverage gates (line & branch 100%)
+uv run pyright                       # strict type checking on src + tests
+uv run pylint src tests              # strict linting (design limits to observed maxima)
+uv run mypy --strict src tests       # strict typing on both src and tests
+cd frontend && pnpm vitest run --coverage  # frontend (269 tests; 100% coverage)
+cargo build && cargo test            # Rust (13 driver + 2 ignored e2e)
+cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
+```
+
 ### Suite sizes and coverage
 
 - **Python:** 1521 passed, 1 skipped; `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 269 vitest tests in 9 files; `cd frontend && pnpm vitest run
-  --coverage` enforces 100% statements/branches/functions/lines on `src/lib/**/*.ts`
-  (minus `*.test.ts` and generated `api/types.ts`; v8 provider). Coverage directory
-  ignored in git.
+- **Frontend:** 269 vitest tests in 9 files; strict 100% statements/branches/functions/lines on
+  `src/lib/**/*.ts` (minus `*.test.ts` and generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
   reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume
   points llvm-cov cannot attribute + error path in `child.wait()`). rpc.rs's
@@ -568,12 +587,20 @@ behavior-focused; do not weaken them to make an implementation fit.
 
 ### Test details and fixtures
 
-- Fixtures in tests/conftest.py: `fake_game_dir` (4.0 `SPT/` layout — the
+- Fixtures in `tests/conftest.py`: `fake_game_dir` (4.0 `SPT/` layout — the
   bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
   `fake_launchable_dir` (4.1 layout + server/client stub scripts + launcher
   settings + profile with login credentials), `clean_repo`, `install_commit`,
   `make_archive` (zip/7z; rar cannot be created — real samples in `tests/data/`,
-  plus an encrypted zip).
+  plus an encrypted zip). Shared builders: `tests/forge_json.py` (Forge API mock
+  payloads), `tests/pe_builder.py` (PE file assembly). Fixture types: `tests/fixture_types.py`
+  (Protocols for typed fixtures).
+- Every test module, class, and function has a docstring stating setup, assertion,
+  and reason. Tests are fully typed via fixture Protocols; NO suppression pragmas
+  in src or tests (`type: ignore`, `noqa`, `pylint: disable`, `pragma: no cover`).
+  Lint findings are resolved by refactoring; the only configured knobs are pylint
+  design limits set to the exact observed maxima and `min-similarity-lines = 24`
+  for the CatalogMod dataclass/schema mirror.
 - All Forge tests run against respx mocks shaped by docs/FORGE_API.md; the
   suite NEVER hits the network. Live verification happens manually against
   sp-mod.com (full pipeline verified 2026-09-02: sync 1862 mods, SAIN install
@@ -600,6 +627,7 @@ behavior-focused; do not weaken them to make an implementation fit.
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
 | `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
+| `SPTMOD_SMOKE_GAME_DIR` | Rust e2e test only; override game directory path for `src-tauri/tests/rpc_e2e_ignored.rs` |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
 | `XDG_CACHE_HOME` | relocates the staging dir and download cache (platformdirs) |
 

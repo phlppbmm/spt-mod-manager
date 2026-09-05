@@ -76,10 +76,12 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (1194 collected)
+uv run pytest                        # full suite (1522 collected: 1521 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
-uv run mypy --strict src
+uv run pyright                       # strict type checking on src + tests
+uv run pylint src tests              # strict linting (design limits to observed maxima)
+uv run mypy --strict src tests       # strict typing on both src and tests
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
 cd frontend && pnpm vitest run --coverage  # frontend coverage (v8, 100%)
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
@@ -88,6 +90,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.54% lines)
 # after changing service functions or request/response schemas:
 uv run python -m sptmod.server.dump_openapi openapi.json
 cd frontend && pnpm gen:api          # regenerates src/lib/api/types.ts
+uv run pytest tests/test_dump_openapi.py  # verify contract drift detection
 
 # run the app (Tauri desktop):
 uv tool install --editable .         # install sptmod CLI
@@ -119,7 +122,7 @@ cargo tauri dev                      # hot reload during development
   package.json) ≠ the Forge display name; link rows by Forge id.
 - Catalog cache is disposable; schema evolves via the ALTER list in
   `catalog._MOD_COLUMN_MIGRATIONS`.
-- Line length 88 (ruff E501) — including docstrings.
+- Line length 119 (ruff E501) — including docstrings.
 - Real-mod corpus for manual verification lives untracked in `_data/mods/`.
 - Tests exercise only public entry points and observable effects; never patch
   or call private names (service functions, public methods, CliRunner, `sptmod rpc`, TS exports).
@@ -128,5 +131,13 @@ cargo tauri dev                      # hot reload during development
   testability: `locate_directory(roots=)`, `game_lock(timeout=, poll_interval=)`.
 - Sibling cases parametrized with descriptive ids; coverage exclusions only via
   the two `exclude_also` patterns in pyproject (sys.platform, TYPE_CHECKING).
-  No `# pragma: no cover`; unreachable defensive code is deleted.
+  NO suppression pragmas of any kind in src or tests (`type: ignore`, `noqa`,
+  `pylint: disable`, `pragma: no cover`) — lint findings are resolved by
+  refactoring; the only configured knobs are pylint design limits set to the
+  exact observed maxima and `min-similarity-lines = 24` for the CatalogMod
+  dataclass/schema mirror.
+- Every test module, class, and function has a docstring stating setup,
+  assertion, and reason. Tests are fully typed via fixture Protocols in
+  `tests/fixture_types.py`; shared builders in `tests/conftest.py`,
+  `tests/forge_json.py`, `tests/pe_builder.py`.
 - A strict `xfail` may pin a known production bug only with a bead reference.

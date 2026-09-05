@@ -24,7 +24,7 @@ import psutil
 import pytest
 
 from fixture_types import InstallCommit, MakeArchive
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import OperationInProgressError
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import (
@@ -35,11 +35,7 @@ from sptmod.core.workspace import (
     staging_dir,
 )
 
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disable game process detection for lock tests to test lock behavior in isolation."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
+pytestmark = pytest.mark.usefixtures("not_running")
 
 
 def _dead_pid() -> int:
@@ -519,7 +515,7 @@ def test_no_progress_is_emitted_when_the_lock_is_free(clean_repo: Repo) -> None:
     ):
         pass
 
-    assert calls == []
+    assert not calls
 
 
 # --- service-layer contention: waits, never sees a dirty-tree error --------
@@ -572,8 +568,9 @@ def test_two_installs_of_different_mods_at_once_both_succeed(clean_repo: Repo, m
     def run(key: str, archive: Path) -> None:
         try:
             results[key] = services.install_from_archive(clean_repo.path, archive)
-        except BaseException as error:  # noqa: BLE001 -- surfaced below
+        except BaseException as error:
             errors[key] = error
+            raise
 
     thread_a = threading.Thread(target=run, args=("a", archive_a))
     thread_b = threading.Thread(target=run, args=("b", archive_b))
@@ -582,7 +579,7 @@ def test_two_installs_of_different_mods_at_once_both_succeed(clean_repo: Repo, m
     thread_a.join(timeout=5)
     thread_b.join(timeout=5)
 
-    assert errors == {}
+    assert not errors
     assert set(results) == {"a", "b"}
     assert results["a"].mod.name == "ModA"
     assert results["b"].mod.name == "ModB"
@@ -614,7 +611,7 @@ def test_read_only_calls_ignore_a_held_lock_and_return_quickly(
     assert [mod.name for mod in mods] == ["ModA"]
     assert files
     assert commits
-    assert status_report.manual_mods == []
+    assert not status_report.manual_mods
 
 
 # --- the lock file itself never counts as an unmanaged change -------------
@@ -632,7 +629,7 @@ def test_lock_file_never_appears_in_status_and_tree_stays_clean(
 
     report = services.status(clean_repo.path)
 
-    assert report.manual_mods == []
-    assert report.other_untracked == []
-    assert report.other_modified == []
+    assert not report.manual_mods
+    assert not report.other_untracked
+    assert not report.other_modified
     assert clean_repo.is_clean() is True

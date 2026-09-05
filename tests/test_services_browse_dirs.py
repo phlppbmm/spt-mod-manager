@@ -185,7 +185,7 @@ def test_locate_directory_returns_an_empty_list_when_nothing_matches(
     """
     matches = services.locate_directory("NoSuchDirectoryName", [], roots=[locate_root])
 
-    assert matches == []
+    assert not matches
 
 
 def test_locate_directory_raises_invalid_path_error_for_a_name_with_a_separator() -> None:
@@ -271,7 +271,7 @@ def test_locate_directory_skips_directories_in_the_skip_list(tmp_path: Path) -> 
 
     matches = services.locate_directory("SPT", [], roots=[root])
 
-    assert matches == []
+    assert not matches
 
 
 def test_locate_directory_does_not_descend_past_the_max_depth(tmp_path: Path) -> None:

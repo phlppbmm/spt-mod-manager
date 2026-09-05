@@ -114,6 +114,7 @@ def build_openapi() -> dict[str, Any]:
 def _post_operation(
     name: str, request_schema: dict[str, Any], response_schema: dict[str, Any]
 ) -> dict[str, Any]:
+    """Build an OpenAPI POST operation object for a service function."""
     operation_id = f"{name}_api_{name}_post"
     if "$ref" not in response_schema:
         response_schema = response_schema | {
@@ -136,6 +137,7 @@ def _post_operation(
 
 
 def _json_response(description: str, schema: dict[str, Any]) -> dict[str, Any]:
+    """Build an OpenAPI response object for a JSON content type."""
     return {
         "description": description,
         "content": {"application/json": {"schema": schema}},
@@ -143,12 +145,14 @@ def _json_response(description: str, schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _error_response() -> dict[str, Any]:
+    """Build an OpenAPI error response object."""
     return _json_response(
         "Default Response", {"$ref": REF_TEMPLATE.format(model="ErrorResponse")}
     )
 
 
 def _title(name: str) -> str:
+    """Convert snake_case to Title Case."""
     return " ".join(word.capitalize() for word in name.split("_"))
 
 
@@ -160,6 +164,7 @@ def _without_none(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stripped(value: Any) -> Any:
+    """Recursively remove None values from dicts and lists."""
     if isinstance(value, dict):
         return _without_none(value)
     if isinstance(value, list):

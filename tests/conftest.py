@@ -1,18 +1,40 @@
 """Shared fixtures for the sptmod test suite."""
 
+import inspect
+import itertools
 import json
 import os
+import shutil
+import subprocess
 import sys
-from collections.abc import Iterator, Mapping
+import zipfile
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import psutil
+import py7zr
 import pytest
+import respx
+from typer.testing import CliRunner
 
-from fixture_types import InstallCommit, JsonDict, MakeArchive, MakeProfile
+from fixture_types import (
+    ClientFactory,
+    InstallCommit,
+    JsonDict,
+    MakeArchive,
+    MakeProfile,
+    SpawnProcess,
+    SpawnSleeper,
+)
+from sptmod.cli import app
+from sptmod.core import game_dir, services
+from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
+from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 from sptmod.core.game_dir import detect_layout
+from sptmod.core.launch import LAUNCH_STATE_FILE_NAME
 from sptmod.core.repo import Repo
 
 
@@ -489,22 +511,16 @@ def make_archive(tmp_path: Path) -> MakeArchive:
     available in this environment. Tests exercising rar handling must skip
     via ``rar_backend_available()`` instead of faking a rar as a zip.
     """
-    import itertools
-
     counter = itertools.count()
 
     def _make(files: Mapping[str, str | bytes], fmt: str) -> Path:
         archive_path = tmp_path / f"archive-{next(counter)}.{fmt}"
         if fmt == "zip":
-            import zipfile
-
             with zipfile.ZipFile(archive_path, "w") as zf:
                 for relpath, content in files.items():
                     data = content.encode("utf-8") if isinstance(content, str) else content
                     zf.writestr(relpath, data)
         elif fmt == "7z":
-            import py7zr
-
             staging = tmp_path / f"stage-{next(counter)}"
             staging.mkdir()
             with py7zr.SevenZipFile(archive_path, "w") as zf:
@@ -833,3 +849,285 @@ def fake_launchable_dir(fake_game_dir_runtime: Path) -> Iterator[LaunchableGameD
         )
     finally:
         kill_launchable_processes(root)
+
+
+class FakeClock:
+    """A monotonic-clock stand-in that only advances when told to.
+
+    Matches the ``Callable[[], float]`` signature ``ForgeClient`` expects
+    for its ``clock`` constructor argument.
+    """
+
+    def __init__(self, start: float = 1_000.0) -> None:
+        self.value = start
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        """Moves the fake clock forward by ``seconds``."""
+        self.value += seconds
+
+
+class RecordingSleep:
+    """A sleep stand-in that records requested durations without blocking.
+
+    Matches the ``Callable[[float], None]`` signature ``ForgeClient``
+    expects for its ``sleep`` constructor argument. Never calls the real
+    ``time.sleep``.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
+@pytest.fixture
+def fake_clock() -> FakeClock:
+    """Fixture providing a FakeClock instance initialized to 1000.0.
+
+    The clock returns a constant monotonic value (1000.0) until advance(seconds)
+    is called; this allows tests to control time precisely for throttle and retry
+    logic without blocking.
+    """
+    return FakeClock()
+
+
+@pytest.fixture
+def recording_sleep() -> RecordingSleep:
+    """A mock sleep function that records requested sleep durations without blocking."""
+    return RecordingSleep()
+
+
+@pytest.fixture
+def client_factory(fake_clock: FakeClock, recording_sleep: RecordingSleep) -> Iterator[ClientFactory]:
+    """Build ``ForgeClient`` instances wired to the fake clock/recording sleep.
+
+    Every client built through the factory is closed on teardown.
+    """
+    made: list[ForgeClient] = []
+
+    def _make(**kwargs: Any) -> ForgeClient:
+        """Build a ForgeClient with injected clock and sleep test doubles.
+
+        The client is wired to use fake_clock (controlled time) and recording_sleep
+        (non-blocking duration recording); all instances are automatically closed
+        during fixture teardown.
+        """
+        client = ForgeClient(clock=fake_clock, sleep=recording_sleep, **kwargs)
+        made.append(client)
+        return client
+
+    yield _make
+    for client in made:
+        client.close()
+
+
+@pytest.fixture
+def respx_router() -> Iterator[respx.MockRouter]:
+    """A respx HTTP mocking router set to the Forge's default base URL."""
+    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
+        yield router
+
+
+@pytest.fixture
+def db_path(tmp_path: Path) -> Path:
+    """Path of the catalog SQLite file for one test, inside ``tmp_path``.
+
+    Never the real platformdirs config dir: catalog tests must not touch the
+    developer's actual config directory.
+    """
+    return tmp_path / "forge-catalog.db"
+
+
+@pytest.fixture
+def catalog(db_path: Path) -> Iterator[Catalog]:
+    """A ``Catalog`` opened at the test's isolated ``db_path``."""
+    with Catalog(db_path) as cat:
+        yield cat
+
+
+def _open_process(argv: Sequence[str]) -> subprocess.Popen[bytes]:
+    """Start ``argv``; the ``spawn_process`` fixture owns and kills the handle."""
+    return subprocess.Popen(list(argv))
+
+
+@pytest.fixture
+def spawn_process() -> Iterator[SpawnProcess]:
+    """Factory starting throwaway real processes, all killed on teardown."""
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def _spawn(argv: Sequence[str]) -> subprocess.Popen[bytes]:
+        spawned.append(_open_process(argv))
+        return spawned[-1]
+
+    yield _spawn
+    for process in spawned:
+        with suppress(OSError):
+            process.kill()
+            process.wait(timeout=2)
+
+
+@pytest.fixture
+def spawn_sleeper(spawn_process: SpawnProcess) -> SpawnSleeper:
+    """Factory spawning a throwaway real process that just sleeps."""
+    sleep_bin = shutil.which("sleep")
+    assert sleep_bin is not None
+
+    def _spawn() -> subprocess.Popen[bytes]:
+        return spawn_process([sleep_bin, "30"])
+
+    return _spawn
+
+
+def clean_repo_at(path: Path) -> Repo:
+    """Initialise the game directory at ``path`` and commit its clean baseline.
+
+    The path-taking counterpart of the :func:`clean_repo` fixture, for tests
+    that pick the game directory themselves (CLI and RPC tests mostly).
+    """
+    repo = Repo.init(detect_layout(path))
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
+    return repo
+
+
+def forge_trailers(mod_id: str, version_id: str | None = None) -> JsonDict:
+    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
+
+    The trailer names contain hyphens, so they can only be passed as keyword
+    overrides through ``**``. The return type is ``dict[str, Any]`` on
+    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
+    rejected by both type checkers because of its non-``str`` ``files`` and
+    ``minute`` parameters.
+    """
+    trailers: JsonDict = {"Mod-Forge-Id": mod_id}
+    if version_id is not None:
+        trailers["Mod-Forge-Version-Id"] = version_id
+    return trailers
+
+
+def service_function_names() -> list[str]:
+    """Every public, module-defined function of ``sptmod.core.services``."""
+    return sorted(
+        name
+        for name, obj in vars(services).items()
+        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
+    )
+
+
+def invoke_rpc(name: str, request: JsonDict) -> tuple[int, list[JsonDict]]:
+    """Run ``rpc <name>`` and return ``(exit_code, parsed stdout lines)``."""
+    result = CliRunner().invoke(app, ["rpc", name], input=json.dumps(request))
+    lines = [json.loads(line) for line in result.stdout.splitlines() if line]
+    return result.exit_code, lines
+
+
+@pytest.fixture
+def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report no running SPT process, whatever runs on the test host.
+
+    Requested through a module-level ``pytest.mark.usefixtures`` by every
+    suite whose service calls would otherwise raise ``GameRunningError``
+    when the developer happens to play while the tests run.
+    """
+    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
+
+
+@pytest.fixture
+def cache_dir(tmp_path: Path) -> Path:
+    """Empty temporary directory used as the download cache root."""
+    directory = tmp_path / "cache"
+    directory.mkdir()
+    return directory
+
+
+@pytest.fixture
+def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point ``default_db_path()`` at an isolated location for CLI tests.
+
+    The CLI never passes ``db_path`` explicitly, so it resolves through
+    ``forge.catalog.default_db_path()``, which must not touch the developer's
+    real config directory.
+    """
+    config_dir = tmp_path / "config"
+    monkeypatch.setattr(
+        "sptmod.core.forge.catalog.platformdirs.user_config_path",
+        lambda *args, **kwargs: config_dir,
+    )
+    return config_dir / DB_FILE_NAME
+
+
+def write_launch_state(
+    root: Path,
+    *,
+    profile_id: str = "",
+    stop_server_on_exit: bool = True,
+    server: dict[str, Any] | None = None,
+    client: dict[str, Any] | None = None,
+    watcher: dict[str, Any] | None = None,
+) -> None:
+    """Write LAUNCH_STATE_FILE_NAME to the game directory with given process state.
+
+    Creates the JSON state file recording the profile, process PIDs and start times
+    (server, client, watcher), and the stop_server_on_exit flag. Keyword args
+    allow each process reference and the flag to be individually set; defaults are
+    empty profile and true for stop_server_on_exit.
+    """
+    payload = {
+        "profile_id": profile_id,
+        "stop_server_on_exit": stop_server_on_exit,
+        "server": server,
+        "client": client,
+        "watcher": watcher,
+    }
+    (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def process_ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
+    """Build a process reference dict for the launch state file.
+
+    Returns a dict with pid and started_at (float timestamp); if started_by_sptmod
+    is not None, it is also included. This object is assigned to server, client, or
+    watcher fields in the state file.
+    """
+    payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
+    if started_by_sptmod is not None:
+        payload["started_by_sptmod"] = started_by_sptmod
+    return payload
+
+
+def empty_pmc_profile() -> JsonDict:
+    """Return a minimal valid PMC profile with empty containers."""
+    return {
+        "characters": {
+            "pmc": {
+                "Inventory": {"items": []},
+                "TradersInfo": {},
+                "Quests": [],
+            }
+        }
+    }
+
+
+def profile_with_item(item_id: str) -> JsonDict:
+    """Build a profile document containing an inventory item with the given ID."""
+    return {
+        "characters": {
+            "pmc": {
+                "Inventory": {
+                    "items": [
+                        {
+                            "_id": "i1",
+                            "_tpl": item_id,
+                            "parentId": "5c0d1b8b86f7744bb2683c99",
+                            "slotId": "hideout",
+                        }
+                    ]
+                },
+                "TradersInfo": {},
+                "Quests": [],
+            }
+        }
+    }

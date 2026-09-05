@@ -8,13 +8,11 @@ port, and every ping/login answer is simulated through respx.
 
 import json
 import os
-import shutil
 import stat
-import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
-from contextlib import suppress
+import zlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +21,8 @@ import psutil
 import pytest
 import respx
 
-from conftest import LaunchableGameDir, kill_launchable_processes, stub_dump
+from conftest import LaunchableGameDir, kill_launchable_processes, process_ref, stub_dump, write_launch_state
+from fixture_types import SpawnProcess, SpawnSleeper
 from sptmod.core import game_dir
 from sptmod.core.errors import (
     GameRunningError,
@@ -90,7 +89,7 @@ def _free_then_ready_route(router: respx.MockRouter) -> respx.Route:
     """The initial check answers "free" once; every later poll answers "spt"."""
     calls = {"n": 0}
 
-    def _side_effect(request: httpx.Request) -> httpx.Response:
+    def _side_effect(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
             raise httpx.ConnectError("refused")
@@ -130,64 +129,6 @@ def _state_payload(root: Path) -> dict[str, Any]:
     """
     payload: dict[str, Any] = json.loads((root / LAUNCH_STATE_FILE_NAME).read_text(encoding="utf-8"))
     return payload
-
-
-def _write_state_file(
-    root: Path,
-    *,
-    profile_id: str = "",
-    stop_server_on_exit: bool = True,
-    server: dict[str, Any] | None = None,
-    client: dict[str, Any] | None = None,
-    watcher: dict[str, Any] | None = None,
-) -> None:
-    """Write LAUNCH_STATE_FILE_NAME to the game directory with given process state.
-
-    Creates the JSON state file recording the profile, process PIDs and start times
-    (server, client, watcher), and the stop_server_on_exit flag. Keyword args
-    allow each process reference and the flag to be individually set; defaults are
-    empty profile and true for stop_server_on_exit.
-    """
-    payload = {
-        "profile_id": profile_id,
-        "stop_server_on_exit": stop_server_on_exit,
-        "server": server,
-        "client": client,
-        "watcher": watcher,
-    }
-    (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
-
-
-def _ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
-    """Build a process reference dict for the launch state file.
-
-    Returns a dict with pid and started_at (float timestamp); if started_by_sptmod
-    is not None, it is also included. This object is assigned to server, client, or
-    watcher fields in the state file.
-    """
-    payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
-    if started_by_sptmod is not None:
-        payload["started_by_sptmod"] = started_by_sptmod
-    return payload
-
-
-@pytest.fixture
-def spawn_sleeper() -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
-    """Factory spawning a throwaway real process that just sleeps."""
-    sleep_bin = shutil.which("sleep")
-    assert sleep_bin is not None
-    spawned: list[subprocess.Popen[bytes]] = []
-
-    def _spawn() -> subprocess.Popen[bytes]:
-        process = subprocess.Popen([sleep_bin, "30"])
-        spawned.append(process)
-        return process
-
-    yield _spawn
-    for process in spawned:
-        with suppress(OSError):
-            process.kill()
-            process.wait(timeout=2)
 
 
 # --------------------------------------------------------------------------
@@ -569,7 +510,7 @@ def test_launch_profile_polls_until_ready_with_two_free_answers_first(
     d = fake_launchable_dir
     calls = {"n": 0}
 
-    def _ping(request: httpx.Request) -> httpx.Response:
+    def _ping(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] <= 3:  # 1 initial check + 2 poll iterations, all "free"
             raise httpx.ConnectError("refused")
@@ -602,7 +543,7 @@ def test_launch_profile_keeps_polling_through_a_mid_poll_timeout_then_succeeds(
     d = fake_launchable_dir
     calls = {"n": 0}
 
-    def _ping(request: httpx.Request) -> httpx.Response:
+    def _ping(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
             raise httpx.ConnectError("refused")  # initial check: "free"
@@ -656,7 +597,7 @@ def test_launch_profile_raises_server_port_busy_when_a_foreign_answer_appears_mi
     d = fake_launchable_dir
     calls = {"n": 0}
 
-    def _ping(request: httpx.Request) -> httpx.Response:
+    def _ping(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
             raise httpx.ConnectError("refused")
@@ -684,7 +625,7 @@ def test_launch_profile_raises_launch_error_when_the_spawned_server_dies(
     d.server_binary.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(1)\n", encoding="utf-8")
     os.chmod(d.server_binary, 0o755)
 
-    def _ping(request: httpx.Request) -> httpx.Response:
+    def _ping(_request: httpx.Request) -> httpx.Response:
         # A tiny real delay guarantees the trivial script above has already
         # exited by the time the first poll iteration checks process_alive.
         time.sleep(0.1)
@@ -741,8 +682,6 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
     assert events[-1] == ("done", 100, "The game is starting")
 
     # -- login request: zlib PUT body, raw-response header -------------
-    import zlib
-
     login_request = login_route.calls.last.request
     assert login_request.method == "PUT"
     assert login_request.headers["responsecompressed"] == "0"
@@ -1037,11 +976,11 @@ def test_launch_status_reports_alive_processes_from_the_state_file(
     launch_status returns LaunchStatus reporting both running with the profile_id.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
-    _write_state_file(
+    write_launch_state(
         tmp_path,
         profile_id="profile-a",
-        server=_ref(111, 1.0, started_by_sptmod=True),
-        client=_ref(222, 2.0),
+        server=process_ref(111, 1.0, started_by_sptmod=True),
+        client=process_ref(222, 2.0),
     )
 
     assert launch_status(tmp_path) == LaunchStatus(True, True, 111, 222, "profile-a")
@@ -1086,7 +1025,7 @@ def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
         "game_processes",
         lambda: [GameProcess(pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0)],
     )
-    _write_state_file(tmp_path, profile_id="profile-a", client=_ref(222, 2.0))
+    write_launch_state(tmp_path, profile_id="profile-a", client=process_ref(222, 2.0))
 
     status = launch_status(tmp_path)
 
@@ -1104,11 +1043,11 @@ def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
     with pids 0, but profile_id="stale-profile" is retained.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
-    _write_state_file(
+    write_launch_state(
         tmp_path,
         profile_id="stale-profile",
-        server=_ref(1, 1.0, started_by_sptmod=True),
-        client=_ref(2, 2.0),
+        server=process_ref(1, 1.0, started_by_sptmod=True),
+        client=process_ref(2, 2.0),
     )
 
     assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "stale-profile")
@@ -1128,7 +1067,7 @@ def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
         "game_processes",
         lambda: [GameProcess(pid=999, name="SPT.Server.Linux", kind="server", started_at=1.0)],
     )
-    _write_state_file(tmp_path, server=_ref(111, 1.0, started_by_sptmod=True))
+    write_launch_state(tmp_path, server=process_ref(111, 1.0, started_by_sptmod=True))
 
     assert launch_status(tmp_path).server_pid == 111
 
@@ -1148,7 +1087,7 @@ def test_stop_game_is_a_noop_without_a_state_file(tmp_path: Path) -> None:
 
 def test_stop_game_falls_back_to_the_scanned_process_table(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """stop_game terminates scanned processes when no state file exists.
@@ -1190,7 +1129,7 @@ def test_stop_game_falls_back_to_the_scanned_process_table(
 
 def test_stop_game_stops_every_scanned_game_process(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """stop_game terminates all instances of the game when multiple exist.
@@ -1224,7 +1163,7 @@ def test_stop_game_stops_every_scanned_game_process(
 
 
 def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """stop_game terminates server/client/watcher and deletes state file.
 
@@ -1235,12 +1174,12 @@ def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
     server = spawn_sleeper()
     client = spawn_sleeper()
     watcher = spawn_sleeper()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
         profile_id="p",
-        server=_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=True),
-        client=_ref(client.pid, psutil.Process(client.pid).create_time()),
-        watcher=_ref(watcher.pid, psutil.Process(watcher.pid).create_time()),
+        server=process_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=True),
+        client=process_ref(client.pid, psutil.Process(client.pid).create_time()),
+        watcher=process_ref(watcher.pid, psutil.Process(watcher.pid).create_time()),
     )
 
     result = stop_game(tmp_path)
@@ -1251,7 +1190,7 @@ def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
     assert not (tmp_path / LAUNCH_STATE_FILE_NAME).exists()
 
 
-def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> None:
+def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path, spawn_process: SpawnProcess) -> None:
     """stop_game terminates client and all child processes recursively.
 
     Client spawns a child process (sleep 30); state records the parent pid. stop_game
@@ -1265,29 +1204,22 @@ def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> 
         f"open({str(child_pid_file)!r}, 'w').write(str(c.pid))\n"
         "time.sleep(30)\n"
     )
-    parent = subprocess.Popen([sys.executable, "-c", script])
-    try:
-        _wait_until(child_pid_file.exists)
-        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
-        _write_state_file(
-            tmp_path,
-            client=_ref(parent.pid, psutil.Process(parent.pid).create_time()),
-        )
+    parent = spawn_process([sys.executable, "-c", script])
+    _wait_until(child_pid_file.exists)
+    child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    write_launch_state(
+        tmp_path,
+        client=process_ref(parent.pid, psutil.Process(parent.pid).create_time()),
+    )
 
-        result = stop_game(tmp_path)
+    result = stop_game(tmp_path)
 
-        assert result.client_stopped is True
-        _wait_until(lambda: not psutil.pid_exists(child_pid))
-        parent.wait(timeout=4)
-    finally:
-        with suppress(OSError):
-            parent.kill()
-            parent.wait(timeout=2)
+    assert result.client_stopped is True
+    _wait_until(lambda: not psutil.pid_exists(child_pid))
+    parent.wait(timeout=4)
 
 
-def test_stop_game_tolerates_an_already_gone_process(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
-) -> None:
+def test_stop_game_tolerates_an_already_gone_process(tmp_path: Path, spawn_sleeper: SpawnSleeper) -> None:
     """stop_game handles gracefully when state records a pid that no longer exists.
 
     Process was killed before stop_game() called; state file records its (now-dead)
@@ -1298,7 +1230,7 @@ def test_stop_game_tolerates_an_already_gone_process(
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait(timeout=4)
-    _write_state_file(tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True))
+    write_launch_state(tmp_path, server=process_ref(process.pid, started_at, started_by_sptmod=True))
 
     result = stop_game(tmp_path)
 
@@ -1307,16 +1239,16 @@ def test_stop_game_tolerates_an_already_gone_process(
 
 
 def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """stop_game skips pid with mismatched start time (PID reuse guard).
 
-    State records server=_ref(process.pid, 1.0, started_by_sptmod=True). Current
+    State records server=process_ref(process.pid, 1.0, started_by_sptmod=True). Current
     process at that pid has a much later real create_time. start time mismatch
     proves the pid was reused; stop_game leaves it running. Result server_stopped=False.
     """
     process = spawn_sleeper()
-    _write_state_file(tmp_path, server=_ref(process.pid, 1.0, started_by_sptmod=True))
+    write_launch_state(tmp_path, server=process_ref(process.pid, 1.0, started_by_sptmod=True))
 
     result = stop_game(tmp_path)
 
@@ -1324,9 +1256,7 @@ def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
     assert process.poll() is None  # still running -- it was correctly left alone
 
 
-def test_stop_game_tolerates_an_already_gone_watcher(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
-) -> None:
+def test_stop_game_tolerates_an_already_gone_watcher(tmp_path: Path, spawn_sleeper: SpawnSleeper) -> None:
     """stop_game handles dead watcher pid in state without raising.
 
     Unlike server/client (which fall back to scan), watcher pid is handed directly
@@ -1340,7 +1270,7 @@ def test_stop_game_tolerates_an_already_gone_watcher(
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait(timeout=4)
-    _write_state_file(tmp_path, watcher=_ref(process.pid, started_at))
+    write_launch_state(tmp_path, watcher=process_ref(process.pid, started_at))
 
     result = stop_game(tmp_path)  # must not raise
 
@@ -1348,7 +1278,7 @@ def test_stop_game_tolerates_an_already_gone_watcher(
 
 
 def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """stop_game skips watcher with mismatched start time (pid reuse guard).
 
@@ -1357,7 +1287,7 @@ def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
     mismatch and leaves the process running.
     """
     process = spawn_sleeper()
-    _write_state_file(tmp_path, watcher=_ref(process.pid, 1.0))
+    write_launch_state(tmp_path, watcher=process_ref(process.pid, 1.0))
 
     stop_game(tmp_path)
 
@@ -1366,7 +1296,7 @@ def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
 
 def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """stop_game escalates to SIGKILL when a process ignores SIGTERM.
@@ -1386,12 +1316,15 @@ def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
     # what the SUT did (killed the process), not what this monkeypatch wrote.
     process = spawn_sleeper()
     started_at = psutil.Process(process.pid).create_time()
-    _write_state_file(tmp_path, server=_ref(process.pid, started_at, started_by_sptmod=True))
+    write_launch_state(tmp_path, server=process_ref(process.pid, started_at, started_by_sptmod=True))
     real_wait_procs = psutil.wait_procs
 
     def _report_still_alive(
         procs: list[psutil.Process], timeout: float | None = None
     ) -> tuple[list[psutil.Process], list[psutil.Process]]:
+        # The stand-in answers at once; the name stays because the call site
+        # passes the timeout by keyword.
+        del timeout
         gone, _ = real_wait_procs(procs, timeout=0)
         return gone, procs
 
@@ -1455,7 +1388,7 @@ def test_launch_status_ignores_a_state_entry_with_an_unusable_pid(
     returning server_running=False.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
-    _write_state_file(tmp_path, server={"pid": bad_pid, "started_at": 1.0})
+    write_launch_state(tmp_path, server={"pid": bad_pid, "started_at": 1.0})
 
     assert launch_status(tmp_path).server_running is False
 
@@ -1471,6 +1404,6 @@ def test_launch_status_ignores_a_state_entry_with_an_unusable_started_at(
     server_running=False.
     """
     monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
-    _write_state_file(tmp_path, server={"pid": 111, "started_at": bad_started_at})
+    write_launch_state(tmp_path, server={"pid": 111, "started_at": bad_started_at})
 
     assert launch_status(tmp_path).server_running is False

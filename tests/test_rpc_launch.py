@@ -14,20 +14,12 @@ import httpx
 import respx
 from typer.testing import CliRunner
 
-from conftest import LaunchableGameDir
-from sptmod.cli import app
+from conftest import LaunchableGameDir, invoke_rpc
 from sptmod.core import game_dir
 from sptmod.core.game_dir import GameProcess
 from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
 
 runner = CliRunner()
-
-
-def _invoke(name: str, request: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
-    """Run ``rpc <name>`` and return ``(exit_code, parsed stdout lines)``."""
-    result = runner.invoke(app, ["rpc", name], input=json.dumps(request))
-    lines = [json.loads(line) for line in result.stdout.splitlines() if line]
-    return result.exit_code, lines
 
 
 def _pong(router: respx.MockRouter) -> None:
@@ -42,7 +34,7 @@ def _free_then_ready(router: respx.MockRouter) -> None:
     """The initial check answers "free" once; every later poll answers "spt"."""
     calls = {"n": 0}
 
-    def _side_effect(request: httpx.Request) -> httpx.Response:
+    def _side_effect(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
             raise httpx.ConnectError("refused")
@@ -78,7 +70,7 @@ def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
         _free_then_ready(router)
         _login(router)
 
-        exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
+        exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 0
     events = [doc["event"] for doc in lines]
@@ -112,7 +104,7 @@ def test_launch_profile_rpc_maps_game_running_to_its_existing_code(
     )
     d = fake_launchable_dir
 
-    exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
+    exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 1
     assert lines[-1]["event"] == "error"
@@ -130,7 +122,7 @@ def test_launch_profile_rpc_maps_server_port_busy(fake_launchable_dir: Launchabl
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         router.get(PING_PATH).respond(200, json={"Response": "not-pong"})
 
-        exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
+        exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 1
     assert lines[-1]["data"]["code"] == "SERVER_PORT_BUSY"
@@ -147,7 +139,7 @@ def test_launch_profile_rpc_maps_login_failed(fake_launchable_dir: LaunchableGam
         _pong(router)
         _login(router, ok=False)
 
-        exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
+        exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 1
     assert lines[-1]["data"]["code"] == "LOGIN_FAILED"
@@ -168,7 +160,7 @@ def test_launch_profile_rpc_maps_launcher_settings_missing(
         _pong(router)
         _login(router)
 
-        exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
+        exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 1
     assert lines[-1]["data"]["code"] == "LAUNCHER_SETTINGS_MISSING"
@@ -183,7 +175,7 @@ def test_launch_profile_rpc_maps_launch_failed(fake_launchable_dir: LaunchableGa
     _not_running(monkeypatch)
     d = fake_launchable_dir
 
-    exit_code, lines = _invoke("launch_profile", {"path": str(d.root), "profile_id": "no-such-profile"})
+    exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": "no-such-profile"})
 
     assert exit_code == 1
     assert lines[-1]["data"]["code"] == "LAUNCH_FAILED"
@@ -203,7 +195,7 @@ def test_launch_profile_rpc_forwards_stop_server_on_exit_false(
         _pong(router)
         _login(router)
 
-        exit_code, _lines = _invoke(
+        exit_code, _lines = invoke_rpc(
             "launch_profile",
             {
                 "path": str(d.root),
@@ -224,7 +216,7 @@ def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
 
     No .sptmod-launch.json file exists and no game processes are running.
     """
-    exit_code, lines = _invoke("launch_status", {"path": str(tmp_path)})
+    exit_code, lines = invoke_rpc("launch_status", {"path": str(tmp_path)})
 
     assert exit_code == 0
     assert lines == [
@@ -247,7 +239,7 @@ def test_stop_game_rpc_is_a_noop_without_a_prior_launch(tmp_path: Path) -> None:
     No state file exists and no game processes are running, so the operation
     completes without error but reports nothing was stopped.
     """
-    exit_code, lines = _invoke("stop_game", {"path": str(tmp_path)})
+    exit_code, lines = invoke_rpc("stop_game", {"path": str(tmp_path)})
 
     assert exit_code == 0
     assert lines == [

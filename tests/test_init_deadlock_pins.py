@@ -18,23 +18,16 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from pe_builder import build_synthetic_exe, write_server_exe
 from sptmod.cli import app as cli_app
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import GitError, SptVersionUnknownError
 from sptmod.core.game_dir import read_pe_file_version
 from sptmod.core.repo import Repo
-from test_game_layout import build_synthetic_exe, write_server_exe
+
+pytestmark = pytest.mark.usefixtures("not_running")
 
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patches ``game_dir.running_game_processes`` to return an empty list.
-
-    Every init test runs as if no SPT process were running.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 # --- (1) unresolvable version: no .git residue, checked before git init ----
@@ -233,4 +226,4 @@ def test_init_yes_adopts_only_the_real_mod_and_status_has_no_manual_entries(
     assert [mod.name for mod in result.adopted] == ["RealMod"]
 
     report = services.status(fake_game_dir_runtime)
-    assert report.manual_mods == []
+    assert not report.manual_mods

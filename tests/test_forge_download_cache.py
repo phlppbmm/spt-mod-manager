@@ -13,18 +13,11 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import ClientFactory
 from sptmod.core.errors import ArchiveError, ForgeUnavailableError
 from sptmod.core.forge import cache
 from sptmod.core.forge.client import DEFAULT_CHUNK_SIZE
 from sptmod.core.forge.download import CACHE_HIT_MESSAGE, DOWNLOAD_STEP, download_cached
-from test_forge_client_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    recording_sleep,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep"]
 
 DOWNLOAD_URL = "https://cdn.example.com/releases/download/v1/mod-archive.zip"
 FORBIDDEN_WORDS = ("git", "commit", "repository", "revert", "cherry")
@@ -44,14 +37,6 @@ class RecordingProgress:
         values (step name, percentage int, status message string).
         """
         self.calls.append((step, percent, message))
-
-
-@pytest.fixture
-def cache_dir(tmp_path: Path) -> Path:
-    """Empty temporary directory used as the download cache root."""
-    directory = tmp_path / "cache"
-    directory.mkdir()
-    return directory
 
 
 class _RaisingAfterFirstChunk(httpx.SyncByteStream):

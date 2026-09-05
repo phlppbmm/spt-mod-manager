@@ -7,56 +7,26 @@ commands built on top of them.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from conftest import clean_repo_at, forge_trailers
 from fixture_types import InstallCommit
+from forge_json import mod_json_full, owner_json, page_envelope
 from sptmod.cli import EXIT_CODES, app
 from sptmod.core import services
 from sptmod.core.errors import CatalogUnavailableError, ForgeUnavailableError
-from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, SyncResult
+from sptmod.core.forge.catalog import Catalog, SyncResult
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
-from sptmod.core.game_dir import detect_layout
-from sptmod.core.repo import Repo
-from test_forge_catalog_fixtures import (
-    client_factory,
-    db_path,
-    fake_clock,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-)
-
-__all__ = [
-    "client_factory",
-    "db_path",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
 
 runner = CliRunner()
 
 # RED contract: ForgeUnavailableError is not yet in cli.EXIT_CODES. Pinned
 # here so the CLI test fails clearly against the stub until it is wired.
 _FORGE_UNAVAILABLE_EXIT_CODE = 14
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Create and initialize a clean repository at the given game directory.
-
-    Initializes the repository and commits an empty state with SPT version 4.1.0
-    set in the trailer.
-    """
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
 
 
 def _mod_json(mod_id: int, name: str, author: str, version: str, spt_constraint: str) -> dict[str, object]:
@@ -107,38 +77,6 @@ def _seed(
         cat.sync(client, full=True)
 
 
-def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
-    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
-
-    The trailer names contain hyphens, so they can only be passed as keyword
-    overrides through ``**``. The return type is ``dict[str, Any]`` on
-    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
-    rejected by both type checkers because of its non-``str`` ``files`` and
-    ``minute`` parameters.
-    """
-    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
-    if version_id is not None:
-        trailers["Mod-Forge-Version-Id"] = version_id
-    return trailers
-
-
-@pytest.fixture
-def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``default_db_path()`` at an isolated location for CLI tests.
-
-    The CLI commands never pass ``db_path`` explicitly, so they resolve
-    through ``forge.catalog.default_db_path()``, which asks platformdirs for
-    the user's config directory. Patching that call keeps CLI catalog tests
-    off the developer's real config directory.
-    """
-    config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
-    return config_dir / DB_FILE_NAME
-
-
 # --- sync_catalog ---------------------------------------------------------
 
 
@@ -150,7 +88,7 @@ def test_sync_catalog_syncs_via_the_injected_client_into_the_injected_db(
 ) -> None:
     """If sync_catalog's body is `pass`, this fails: result is None, not a
     SyncResult, and the reopened db_path has no cached mod."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(return_value=_one_page([_mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0")]))
     client = client_factory()
 
@@ -173,7 +111,7 @@ def test_sync_catalog_raises_forge_unavailable_on_a_network_error(
     respx_router: respx.MockRouter,
 ) -> None:
     """If sync_catalog's body is `pass`, this fails: no exception is raised."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(side_effect=httpx.ConnectError("boom"))
     client = client_factory()
 
@@ -193,7 +131,7 @@ def test_search_catalog_classifies_installed_and_available_mods(
 ) -> None:
     """If search_catalog's body is `pass`, this fails: returns None instead of
     an entry list with the joined installed state."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -204,7 +142,7 @@ def test_search_catalog_classifies_installed_and_available_mods(
             _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
         ],
     )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
 
     results = services.search_catalog(fake_game_dir, "", db_path=db_path)
 
@@ -223,7 +161,7 @@ def test_search_catalog_matches_query_against_name_and_author(
 ) -> None:
     """If search_catalog's body is `pass`, this fails: returns None instead of
     the single name-matching entry."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -248,7 +186,7 @@ def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
 ) -> None:
     """If search_catalog's body is `pass`, this fails: Beta Mod (^3.8.0, not
     compatible with core.json's sptVersion 4.1.0) would not be dropped."""
-    _clean_repo(fake_game_dir)  # fake_game_dir's core.json sptVersion is "4.1.0"
+    clean_repo_at(fake_game_dir)  # fake_game_dir's core.json sptVersion is "4.1.0"
     client = client_factory()
     _seed(
         db_path,
@@ -277,7 +215,7 @@ def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: returns None instead of
     both cached mods ordered by name."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -288,7 +226,7 @@ def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
             _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
         ],
     )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
 
     results = services.browse_catalog(fake_game_dir, "all", db_path=db_path)
 
@@ -304,7 +242,7 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: Beta Mod (never
     installed) would not be excluded from the "installed" filter."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -317,14 +255,14 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
             _mod_json(3, "Gamma Mod", "Carol", "2.0.0", "^4.0.0"),
         ],
     )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
     install_commit(
         repo,
         "Gamma Mod",
         "1.0.0",
         mod_type="server",
         minute=2,
-        **_forge_trailers("3"),
+        **forge_trailers("3"),
     )
 
     results = services.browse_catalog(fake_game_dir, "installed", db_path=db_path)
@@ -342,7 +280,7 @@ def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: the installed Alpha Mod
     would not be excluded from the "available" filter."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -353,7 +291,7 @@ def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
             _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
         ],
     )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
 
     results = services.browse_catalog(fake_game_dir, "available", db_path=db_path)
 
@@ -368,7 +306,7 @@ def test_browse_catalog_compatible_only_drops_incompatible_mods(
 ) -> None:
     """If browse_catalog's body is `pass`, this fails: Beta Mod (^3.8.0) would
     not be dropped for the game dir's sptVersion 4.1.0."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -394,7 +332,7 @@ def test_browse_catalog_hides_versions_that_are_not_installable(
     """Without compatible_only, Beta Mod stays in the list, but its only
     version (^3.8.0) is no version the installer could resolve for the game
     dir's SPT 4.1.0, so no version is offered for it."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -425,7 +363,7 @@ def test_cli_sync_exits_zero_and_reports_counts(
 ) -> None:
     """If the sync command's handler is `pass`, this fails: exit code stays
     the click default of 0 with no matching report on stdout."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(return_value=_one_page([_mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0")]))
     monkeypatch.chdir(fake_game_dir)
 
@@ -444,12 +382,12 @@ def test_cli_search_and_browse_render_after_a_sync(
 ) -> None:
     """If the search/browse handlers are `pass`, this fails: neither table
     would contain the synced and installed mod's name."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(return_value=_one_page([_mod_json(1, "Cool Mod", "Someone", "1.0.0", "^4.0.0")]))
     monkeypatch.chdir(fake_game_dir)
     sync_result = runner.invoke(app, ["sync"])
     assert sync_result.exit_code == 0
-    install_commit(repo, "Cool Mod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(repo, "Cool Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
 
     search_result = runner.invoke(app, ["search", "cool"])
     browse_result = runner.invoke(app, ["browse", "--installed"])
@@ -463,7 +401,7 @@ def test_cli_search_and_browse_render_after_a_sync(
 def test_cli_browse_rejects_more_than_one_filter_flag(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If _browse_filter's body is `pass` (returns None, no raise), Click
     still exits 0 since no BadParameter is raised, so this fails."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["browse", "--installed", "--available"])
@@ -487,7 +425,7 @@ def test_cli_sync_maps_forge_unavailable_to_its_own_exit_code(
     """
     monkeypatch.setattr("sptmod.core.forge.client.BACKOFF_BASE_SECONDS", 0.0)
     monkeypatch.setattr("sptmod.core.forge.client.BACKOFF_MAX_SECONDS", 0.0)
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(side_effect=httpx.ConnectError("boom"))
     monkeypatch.chdir(fake_game_dir)
 
@@ -550,7 +488,7 @@ def test_catalog_reads_raise_catalog_unavailable_not_os_error(
     filesystem errors (when the catalog directory is blocked) to the typed
     CatalogUnavailableError rather than raising raw OSError.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
 
     with pytest.raises(CatalogUnavailableError):
         call(fake_game_dir, _blocked_db_path(tmp_path))

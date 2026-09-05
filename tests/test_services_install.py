@@ -26,6 +26,8 @@ from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
+pytestmark = pytest.mark.usefixtures("not_running")
+
 
 def _tree_listing(root: Path) -> set[Path]:
     """A snapshot of every file below ``root`` (git internals excluded)."""
@@ -45,17 +47,6 @@ def _named_zip(tmp_path: Path, name: str, files: dict[str, str | bytes]) -> Path
             data = content.encode("utf-8") if isinstance(content, str) else content
             zf.writestr(relpath, data)
     return archive_path
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub OS process check to prevent running game from failing tests.
-
-    Prevents GameRunningError during tests if SPT is actually running on the
-    test host. This fixture is auto-used to ensure deterministic test runs
-    regardless of the developer's current session state.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def test_server_only_install_places_the_file_at_the_canonical_path(
@@ -325,7 +316,7 @@ def test_install_cleans_up_the_temp_dir_after_success(
 
     services.install_from_archive(clean_repo.path, archive)
 
-    assert list(workspace.staging_dir().iterdir()) == []
+    assert not list(workspace.staging_dir().iterdir())
 
 
 def test_install_rolls_back_copied_files_when_the_commit_is_rejected(
@@ -424,7 +415,7 @@ def test_install_cleans_up_the_temp_dir_after_failure(
     with pytest.raises(ArchiveError):
         services.install_from_archive(clean_repo.path, archive)
 
-    assert list(workspace.staging_dir().iterdir()) == []
+    assert not list(workspace.staging_dir().iterdir())
     assert _tree_listing(clean_repo.path) == before
     assert clean_repo.is_clean() is True
 
@@ -448,7 +439,7 @@ def test_install_leaves_the_game_dir_untouched_when_extraction_fails_partway(
 
     assert _tree_listing(clean_repo.path) == before
     assert clean_repo.is_clean() is True
-    assert list(workspace.staging_dir().iterdir()) == []
+    assert not list(workspace.staging_dir().iterdir())
 
 
 # --- real-corpus regressions: SPT_Runtime prefix, hybrid-half, patchers, ----

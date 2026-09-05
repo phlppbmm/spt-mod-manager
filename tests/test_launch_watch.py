@@ -12,14 +12,15 @@ import runpy
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
-from contextlib import suppress
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import psutil
 import pytest
 
+from conftest import process_ref, write_launch_state
+from fixture_types import SpawnProcess, SpawnSleeper
 from sptmod.core.game_dir import CLIENT_EXE_NAME
 from sptmod.core.launch import (
     CLIENT_NEVER_STARTED,
@@ -32,96 +33,33 @@ from sptmod.watch import USAGE, main
 pytestmark = pytest.mark.timeout(5)
 
 
-def _write_state_file(
-    root: Path,
-    *,
-    stop_server_on_exit: bool = True,
-    server: dict[str, Any] | None = None,
-    client: dict[str, Any] | None = None,
-) -> None:
-    """Write LAUNCH_STATE_FILE_NAME with given server/client process refs and flag.
-
-    Creates a launch state file recording the profile "p", stop_server_on_exit flag,
-    and process references. watcher is always None. Used to set up state before
-    watch_game is called.
-    """
-    payload = {
-        "profile_id": "p",
-        "stop_server_on_exit": stop_server_on_exit,
-        "server": server,
-        "client": client,
-        "watcher": None,
-    }
-    (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
-
-
-def _ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
-    """Build a process reference dict with pid, started_at, and optional sptmod flag.
-
-    Returns dict with pid, started_at (float timestamp). If started_by_sptmod is
-    not None, includes that boolean key. Used to create server/client/watcher
-    entries in state file.
-    """
-    payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
-    if started_by_sptmod is not None:
-        payload["started_by_sptmod"] = started_by_sptmod
-    return payload
-
-
 def _live_ref(process: subprocess.Popen[bytes], *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
     """Build a process reference from a running Popen, capturing its real start time.
 
     Queries psutil for the process's create_time and calls _ref with the pid and
     timestamp. Optional started_by_sptmod flag is passed through.
     """
-    return _ref(
+    return process_ref(
         process.pid,
         psutil.Process(process.pid).create_time(),
         started_by_sptmod=started_by_sptmod,
     )
 
 
-def _dead_ref(spawn: Callable[[], subprocess.Popen[bytes]]) -> dict[str, Any]:
+def _dead_ref(spawn: SpawnSleeper) -> dict[str, Any]:
     """Spawn a process, note it and end it: a launch process that is gone."""
     process = spawn()
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait(timeout=4)
-    return _ref(process.pid, started_at)
-
-
-def _spawner(executable: Path) -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
-    """Yield a spawner that tracks and cleans up all spawned processes on exit."""
-    spawned: list[subprocess.Popen[bytes]] = []
-
-    def _spawn() -> subprocess.Popen[bytes]:
-        process = subprocess.Popen([str(executable), "30"])
-        spawned.append(process)
-        return process
-
-    yield _spawn
-    for process in spawned:
-        with suppress(OSError):
-            process.kill()
-            process.wait(timeout=2)
-
-
-@pytest.fixture
-def spawn_sleeper() -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
-    """Fixture yielding a factory that spawns real sleep processes and cleans them up.
-
-    Each spawn call launches sleep 30; the fixture tracks all spawned processes and
-    kills/waits them on teardown.
-    """
-    sleep_bin = shutil.which("sleep")
-    assert sleep_bin is not None
-    yield from _spawner(Path(sleep_bin))
+    return process_ref(process.pid, started_at)
 
 
 @pytest.fixture
 def spawn_client(
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
+    spawn_process: SpawnProcess,
+) -> SpawnSleeper:
     """Spawn processes the real name scan reports as the running game.
 
     A copy of ``sleep`` under the game's file name, so ``psutil`` reports that
@@ -132,7 +70,11 @@ def spawn_client(
     assert sleep_bin is not None
     executable = tmp_path_factory.mktemp("game") / CLIENT_EXE_NAME
     shutil.copy(sleep_bin, executable)
-    yield from _spawner(executable)
+
+    def _spawn() -> subprocess.Popen[bytes]:
+        return spawn_process([str(executable), "30"])
+
+    return _spawn
 
 
 def _ticking(
@@ -213,7 +155,7 @@ def test_watch_game_returns_immediately_with_no_client_recorded(tmp_path: Path) 
     State file has server ref but client=None; no client process to wait for.
     watch_game skips polling (sleep not called) and leaves state file untouched.
     """
-    _write_state_file(tmp_path, server=_ref(1, 1.0, started_by_sptmod=True))
+    write_launch_state(tmp_path, profile_id="p", server=process_ref(1, 1.0, started_by_sptmod=True))
 
     watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
 
@@ -238,7 +180,7 @@ def _watch_until_client_exits(tmp_path: Path, client: subprocess.Popen[bytes]) -
 
 
 def test_watch_game_stops_the_server_when_it_started_it_and_was_asked_to(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """watch_game terminates server after client exits when stop_server_on_exit=true.
 
@@ -248,8 +190,9 @@ def test_watch_game_stops_the_server_when_it_started_it_and_was_asked_to(
     """
     server = spawn_sleeper()
     client = spawn_sleeper()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=True),
         client=_live_ref(client),
@@ -263,8 +206,8 @@ def test_watch_game_stops_the_server_when_it_started_it_and_was_asked_to(
 
 def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
-    spawn_client: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
 ) -> None:
     """watch_game scans for game by name when recorded client pid is dead.
 
@@ -276,8 +219,9 @@ def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
     # wrapper and is already gone, while the game itself runs under Wine.
     server = spawn_sleeper()
     client = spawn_client()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=True),
         client=_dead_ref(spawn_sleeper),
@@ -291,8 +235,8 @@ def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
 
 def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
-    spawn_client: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
 ) -> None:
     """watch_game waits within grace_seconds for game to appear by name before monitoring.
 
@@ -301,8 +245,9 @@ def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
     the server, clears state.
     """
     server = spawn_sleeper()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=True),
         client=_dead_ref(spawn_sleeper),
@@ -324,7 +269,7 @@ def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
 
 
 def test_watch_game_keeps_waiting_while_the_recorded_process_is_still_alive(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """watch_game waits for recorded process even after grace period expires if it's still alive.
 
@@ -337,8 +282,9 @@ def test_watch_game_keeps_waiting_while_the_recorded_process_is_still_alive(
     # the game (or the wrapper hosting it) and gets waited for.
     server = spawn_sleeper()
     client = spawn_sleeper()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=True),
         client=_live_ref(client),
@@ -358,8 +304,8 @@ def test_watch_game_keeps_waiting_while_the_recorded_process_is_still_alive(
 
 def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
-    spawn_client: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
 ) -> None:
     """watch_game leaves server running when stop_server_on_exit=false.
 
@@ -368,8 +314,9 @@ def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
     """
     server = spawn_sleeper()
     client = spawn_client()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=False,
         server=_live_ref(server, started_by_sptmod=True),
         client=_dead_ref(spawn_sleeper),
@@ -383,8 +330,8 @@ def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
 
 def test_watch_game_leaves_a_server_it_did_not_start(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
-    spawn_client: Callable[[], subprocess.Popen[bytes]],
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
 ) -> None:
     """watch_game leaves server alone when started_by_sptmod is false.
 
@@ -393,8 +340,9 @@ def test_watch_game_leaves_a_server_it_did_not_start(
     """
     server = spawn_sleeper()
     client = spawn_client()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=False),
         client=_dead_ref(spawn_sleeper),
@@ -406,16 +354,14 @@ def test_watch_game_leaves_a_server_it_did_not_start(
     assert not _state_file(tmp_path).exists()
 
 
-def test_watch_game_clears_state_with_no_server_recorded_at_all(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
-) -> None:
+def test_watch_game_clears_state_with_no_server_recorded_at_all(tmp_path: Path, spawn_sleeper: SpawnSleeper) -> None:
     """watch_game clears state when client exits and no server was ever recorded.
 
     State has only client (no server entry). After client exits, watch_game clears
     state file (since nothing needs it anymore).
     """
     client = spawn_sleeper()
-    _write_state_file(tmp_path, stop_server_on_exit=True, client=_live_ref(client))
+    write_launch_state(tmp_path, profile_id="p", stop_server_on_exit=True, client=_live_ref(client))
 
     _watch_until_client_exits(tmp_path, client)
 
@@ -428,7 +374,7 @@ def test_watch_game_clears_state_with_no_server_recorded_at_all(
 
 
 def test_watch_game_stops_the_server_and_notes_why_when_no_game_appears(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """watch_game stops server and records failure when game doesn't appear within grace period.
 
@@ -436,8 +382,9 @@ def test_watch_game_stops_the_server_and_notes_why_when_no_game_appears(
     grace expires, watch_game stops the server and writes failure note to state.
     """
     server = spawn_sleeper()
-    _write_state_file(
+    write_launch_state(
         tmp_path,
+        profile_id="p",
         stop_server_on_exit=True,
         server=_live_ref(server, started_by_sptmod=True),
         client=_dead_ref(spawn_sleeper),
@@ -452,7 +399,7 @@ def test_watch_game_stops_the_server_and_notes_why_when_no_game_appears(
 
 
 def test_watch_game_notes_the_failure_when_the_recorded_pid_was_reused(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """watch_game records CLIENT_NEVER_STARTED when recorded pid was reused.
 
@@ -463,7 +410,7 @@ def test_watch_game_notes_the_failure_when_the_recorded_pid_was_reused(
     # A real, running process, but a started_at that does not match it --
     # exactly what a pid reused by an unrelated process would look like.
     stranger = spawn_sleeper()
-    _write_state_file(tmp_path, client=_ref(stranger.pid, 1.0))
+    write_launch_state(tmp_path, profile_id="p", client=process_ref(stranger.pid, 1.0))
 
     sleep, clock = _ticking(_nothing)
     watch_game(tmp_path, poll_seconds=3.0, grace_seconds=3.0, sleep=sleep, clock=clock)
@@ -473,15 +420,13 @@ def test_watch_game_notes_the_failure_when_the_recorded_pid_was_reused(
     assert payload["failure"] == CLIENT_NEVER_STARTED
 
 
-def test_the_noted_failure_survives_reading_the_state_file_back(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
-) -> None:
+def test_the_noted_failure_survives_reading_the_state_file_back(tmp_path: Path, spawn_sleeper: SpawnSleeper) -> None:
     """Failure note persists in state file; launch_status still reads other fields like profile_id.
 
     watch_game writes failure note; state file is not deleted. launch_status can
     still read the profile_id field from the state despite the failure.
     """
-    _write_state_file(tmp_path, client=_dead_ref(spawn_sleeper))
+    write_launch_state(tmp_path, profile_id="p", client=_dead_ref(spawn_sleeper))
 
     sleep, clock = _ticking(_nothing)
     watch_game(tmp_path, poll_seconds=1.0, grace_seconds=1.0, sleep=sleep, clock=clock)
@@ -540,7 +485,7 @@ def test_run_module_as_main_watches_and_exits_0(tmp_path: Path, monkeypatch: pyt
     """
     # Mirrors tests/test_dump_openapi.py's coverage of the __main__ guard: a
     # state file naming no client at all makes watch_game return immediately.
-    _write_state_file(tmp_path, server=_ref(1, 1.0, started_by_sptmod=True))
+    write_launch_state(tmp_path, profile_id="p", server=process_ref(1, 1.0, started_by_sptmod=True))
     monkeypatch.setattr(sys, "argv", ["watch", str(tmp_path)])
 
     with pytest.raises(SystemExit) as exit_info:

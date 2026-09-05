@@ -17,24 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import DirtyTreeError
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the game process detector to prevent false failures during runtime data tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a repository with a clean initial commit, simulating post-init state."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
+pytestmark = pytest.mark.usefixtures("not_running")
 
 
 # --- status: runtime data is left out of the report entirely ----------------
@@ -70,7 +60,7 @@ def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
 ) -> None:
     """Status ignores runtime data in server mod directories across both game layouts."""
     game_dir_path: Path = request.getfixturevalue(game_dir_fixture)
-    repo = _clean_repo(game_dir_path)
+    repo = clean_repo_at(game_dir_path)
     mods_dir = detect_layout(game_dir_path).mods_dir.as_posix()
     install_commit(
         repo,
@@ -86,8 +76,8 @@ def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
 
     report = services.status(game_dir_path)
 
-    assert report.manual_mods == []
-    assert report.other_untracked == []
+    assert not report.manual_mods
+    assert not report.other_untracked
 
 
 def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
@@ -108,8 +98,8 @@ def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
 
     report = services.status(clean_repo.path)
 
-    assert report.manual_mods == []
-    assert report.other_untracked == []
+    assert not report.manual_mods
+    assert not report.other_untracked
 
 
 # --- install: runtime data never blocks, is never snapshotted ---------------

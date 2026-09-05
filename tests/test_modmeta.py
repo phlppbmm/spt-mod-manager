@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sptmod.core.models import CommitInfo, ModInfo
+from sptmod.core.models import MOD_TRAILER_KEYS, CommitInfo, ModInfo
 from sptmod.core.modmeta import (
     InvalidMetadataError,
     ModMeta,
@@ -71,7 +71,7 @@ def test_read_package_json_minimal_metadata_uses_defaults(tmp_path: Path) -> Non
     assert meta.spt_range == ""
     assert meta.author == ""
     assert meta.guid == ""
-    assert meta.dependencies == {}
+    assert not meta.dependencies
 
 
 def test_read_package_json_parses_dependencies_dict(tmp_path: Path) -> None:
@@ -246,8 +246,6 @@ def test_build_trailers_contains_all_keys_in_order() -> None:
     mod_info = _sample_mod_info()
 
     trailers = build_trailers(mod_info)
-
-    from sptmod.core.models import MOD_TRAILER_KEYS
 
     assert list(trailers.keys()) == list(MOD_TRAILER_KEYS)
 

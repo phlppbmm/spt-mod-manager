@@ -12,6 +12,7 @@ import contextlib
 import os
 from pathlib import Path
 
+import py7zr
 import pytest
 import rarfile
 
@@ -123,8 +124,6 @@ def test_extract_encrypted_7z_raises_archive_error_not_password_required(
     Creates an encrypted .7z file (password "secret123") using py7zr. Calling
     extract() must catch py7zr.PasswordRequired and raise ArchiveError instead.
     """
-    import py7zr
-
     stage = tmp_path / "stage"
     stage.mkdir()
     plain = stage / "secret.txt"

@@ -246,25 +246,54 @@ def main(name: str) -> int:
     return _dispatch(spec, request)
 
 
+class _ServiceFailed(Exception):
+    """Raised at the RPC error boundary for any failure of a service function.
+
+    Carries the original exception, whose type decides the error code and the
+    structured details of the response.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
 def _dispatch(spec: RpcSpec, request: schemas.CoreModel) -> int:
+    """Execute the service function from ``spec`` with validated ``request`` fields.
+
+    Returns EXIT_ERROR if an exception occurs; otherwise serializes the result
+    and returns EXIT_OK. One result or error line is always written to stdout.
+    """
     operation_id = _operation_id(request)
-    kwargs = request.model_dump(exclude={"operation_id"})
-    if "progress" in inspect.signature(spec.function).parameters:
-        kwargs["progress"] = _progress(operation_id)
     try:
-        result = spec.function(**kwargs)
-        data = _serialise(spec, result, operation_id)
-    except Exception as error:
-        traceback.print_exc()
+        data = _call(spec, request, operation_id)
+    except _ServiceFailed as failure:
         body = schemas.ErrorResponse(
-            error=str(error) or type(error).__name__,
-            code=error_code(type(error)),
-            details=error_details(error),
+            error=str(failure.error) or type(failure.error).__name__,
+            code=error_code(type(failure.error)),
+            details=error_details(failure.error),
         )
         _write({"event": "error", "data": body.model_dump(mode="json")})
         return EXIT_ERROR
     _write({"event": "result", "data": data})
     return EXIT_OK
+
+
+def _call(spec: RpcSpec, request: schemas.CoreModel, operation_id: str) -> JsonValue:
+    """Call the service function of ``spec`` and render its result.
+
+    Any failure of the service function is the caller's error response, so the
+    traceback goes to stderr here and the exception is re-raised wrapped.
+    """
+    kwargs = request.model_dump(exclude={"operation_id"})
+    if "progress" in inspect.signature(spec.function).parameters:
+        kwargs["progress"] = _progress(operation_id)
+    try:
+        result = spec.function(**kwargs)
+        return _serialise(spec, result, operation_id)
+    except Exception as error:
+        traceback.print_exc()
+        raise _ServiceFailed(error) from error
 
 
 def _serialise(spec: RpcSpec, result: object, operation_id: str) -> JsonValue:
@@ -304,12 +333,20 @@ def _progress(operation_id: str) -> Progress:
 
 
 def _write_error(message: str, code: str) -> int:
+    """Write an error envelope to stdout and return EXIT_REQUEST (code 2).
+
+    Used for validation/request errors (malformed JSON, unknown function).
+    """
     body = schemas.ErrorResponse(error=message, code=code)
     _write({"event": "error", "data": body.model_dump(mode="json")})
     return EXIT_REQUEST
 
 
 def _write(document: dict[str, JsonValue]) -> None:
+    """Write one JSON line (``document`` + newline) to stdout, UTF-8 encoded, flushed.
+
+    Used for all output: progress events, result, and error envelopes.
+    """
     line = json.dumps(document, ensure_ascii=False) + "\n"
     sys.stdout.buffer.write(line.encode())
     sys.stdout.buffer.flush()

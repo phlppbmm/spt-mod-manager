@@ -211,6 +211,7 @@ def mod_info_from_commit(commit: CommitInfo) -> ModInfo | None:
 
 
 def _numeric_parts(text: str) -> list[int]:
+    """Extract up to 3 semantic version numbers from text, stripping leading 'v'."""
     body = text[1:] if text[:1] in {"v", "V"} else text
     if not body:
         raise UnsupportedRangeError(f"unsupported version syntax: {text!r}")
@@ -225,11 +226,13 @@ def _numeric_parts(text: str) -> list[int]:
 
 
 def _padded(parts: list[int]) -> tuple[int, int, int]:
+    """Pad version parts to a 3-tuple with zeros."""
     filled = [*parts, 0, 0, 0]
     return filled[0], filled[1], filled[2]
 
 
 def _token_matches(version: tuple[int, int, int], token: str) -> bool:
+    """Return whether the padded version satisfies one range token."""
     for operator in _COMPARATORS:
         if token.startswith(operator):
             bound = _padded(_numeric_parts(token[len(operator) :]))

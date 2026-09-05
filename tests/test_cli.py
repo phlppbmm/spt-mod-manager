@@ -6,29 +6,16 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app
 from sptmod.core import game_dir
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
+pytestmark = pytest.mark.usefixtures("not_running")
+
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patches ``game_dir.running_game_processes`` to return an empty list.
-
-    Every CLI test runs as if no SPT process were running.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a game directory repository and commit the baseline configuration."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
 
 
 def test_init_happy_path_exits_zero_and_reports_the_spt_version(
@@ -71,7 +58,7 @@ def test_install_file_without_a_resolvable_version_prints_a_hint(
     read (``meta_from_dll`` leaves it empty); the CLI must call this out and
     point at ``--version`` rather than silently committing an empty version.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
 
@@ -91,7 +78,7 @@ def test_install_file_with_a_version_override_prints_no_versionless_hint(
     print the ``--version`` hint that would normally guide a user to resolve
     the missing version for a bare DLL.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
 
@@ -109,7 +96,7 @@ def test_list_happy_path_exits_zero(
     Creates a repo with a single installed mod and runs ``sptmod list``;
     must exit with code 0.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -126,7 +113,7 @@ def test_files_happy_path_exits_zero(
     Creates a repo with one installed mod named "CoolMod" and runs
     ``sptmod files CoolMod``; must exit with code 0.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -143,7 +130,7 @@ def test_history_happy_path_exits_zero(
     Creates a repo with a mod install commit and runs ``sptmod history``;
     must exit with code 0.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -160,7 +147,7 @@ def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
     Removes an installed mod with ``--yes``; must exit with code 0 and print
     the mod name "CoolMod" to stdout.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -189,7 +176,7 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
     confirmation; the mod's DLL must still exist and exit code must be
     non-zero.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
     dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
@@ -208,7 +195,7 @@ def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
     Runs ``sptmod remove <name>`` without ``--yes`` and answers "y"; must exit
     with code 0, print the mod name, and the DLL must no longer exist.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
     dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
@@ -228,7 +215,7 @@ def test_remove_with_yes_flag_skips_the_confirmation_prompt(
     Runs ``sptmod remove <name> --yes``; must exit with code 0, print the mod
     name, and the DLL must no longer exist (no interactive prompt).
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
     dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
@@ -249,7 +236,7 @@ def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
     with code 11 (mapped ModNotFoundError) and write a message to stderr
     starting with "error:".
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["remove", "Ghost"])
@@ -267,7 +254,7 @@ def test_install_with_invalid_metadata_exits_with_code_13(
     field; must exit with code 13 (mapped InvalidMetadataError) and write
     "error:" to stderr.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     # "version" is mandatory in package.json; missing it makes read_package_json
     # raise InvalidMetadataError, which the CLI must map to its own exit code.
     archive = make_archive(
@@ -310,12 +297,12 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
         archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
         argv = ["install", "--file", str(archive)]
     elif scenario == "game_running":
-        _clean_repo(fake_game_dir)
+        clean_repo_at(fake_game_dir)
         monkeypatch.setattr(game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"])
         archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
         argv = ["install", "--file", str(archive)]
     else:
-        repo = _clean_repo(fake_game_dir)
+        repo = clean_repo_at(fake_game_dir)
         install_commit(repo, "CoolMod", minute=1)
         install_commit(repo, "coolmod", minute=2)
         argv = ["remove", "COOLMOD"]

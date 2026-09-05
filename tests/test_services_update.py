@@ -10,16 +10,17 @@ and its no-op behaviour for blocked, incompatible or absent updates.
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from conftest import forge_trailers
 from fixture_types import InstallCommit, JsonDict, MakeArchive
+from forge_json import current_version_json, success_envelope
 from sptmod.cli import app as cli_app
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import (
     AmbiguousModError,
     ConflictError,
@@ -27,80 +28,19 @@ from sptmod.core.errors import (
     DirtyTreeError,
     ModNotFoundError,
 )
-from sptmod.core.forge.catalog import DB_FILE_NAME
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.repo import Repo
-from test_forge_catalog_fixtures import (
-    client_factory,
-    db_path,
-    fake_clock,
-    recording_sleep,
-    respx_router,
-)
-from test_forge_client_fixtures import success_envelope
 
-__all__ = ["client_factory", "db_path", "fake_clock", "recording_sleep", "respx_router"]
+pytestmark = pytest.mark.usefixtures("not_running")
 
 SPT_VERSION = "4.1.0"
 
 cli_runner = CliRunner()
 
 
-def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
-    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
-
-    The trailer names contain hyphens, so they can only be passed as keyword
-    overrides through ``**``. The return type is ``dict[str, Any]`` on
-    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
-    rejected by both type checkers because of its non-``str`` ``files`` and
-    ``minute`` parameters.
-    """
-    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
-    if version_id is not None:
-        trailers["Mod-Forge-Version-Id"] = version_id
-    return trailers
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the OS-process check so a real SPT session on the test host
-    cannot make these tests fail with GameRunningError; mirrors the same
-    stub already used in test_services_install.py, test_services_lifecycle.py
-    and test_services_runtime_data.py."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-@pytest.fixture
-def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``default_db_path()`` at an isolated location for CLI tests.
-
-    The CLI never passes ``db_path`` explicitly, so it resolves through
-    ``forge.catalog.default_db_path()``, which must not touch the developer's
-    real config directory.
-    """
-    config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
-    return config_dir / DB_FILE_NAME
-
-
 def _mock_updates(respx_router: respx.MockRouter, data: JsonDict) -> None:
     """Mock the Forge /mods/updates endpoint to return a given payload."""
     respx_router.get("/mods/updates").mock(return_value=httpx.Response(200, json=success_envelope(data)))
-
-
-def _current_version(*, id: int, mod_id: int, name: str, version: str, slug: str | None = None) -> JsonDict:
-    """Build a Forge current-version entry for use in mock /mods/updates payload."""
-    return {
-        "id": id,
-        "mod_id": mod_id,
-        "guid": None,
-        "name": name,
-        "version": version,
-        "slug": slug,
-    }
 
 
 # --- check_updates -----------------------------------------------------
@@ -120,7 +60,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "Available Mod",
         "1.0.0",
         mod_type="server",
-        **_forge_trailers("10"),
+        **forge_trailers("10"),
     )
     install_commit(
         clean_repo,
@@ -128,7 +68,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "1.5.0",
         mod_type="server",
         minute=2,
-        **_forge_trailers("20"),
+        **forge_trailers("20"),
     )
     install_commit(
         clean_repo,
@@ -136,7 +76,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "2.0.0",
         mod_type="server",
         minute=3,
-        **_forge_trailers("40"),
+        **forge_trailers("40"),
     )
     install_commit(
         clean_repo,
@@ -144,7 +84,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "0.9.0",
         mod_type="server",
         minute=4,
-        **_forge_trailers("30"),
+        **forge_trailers("30"),
     )
     install_commit(
         clean_repo,
@@ -152,7 +92,7 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
         "1.0.0",
         mod_type="server",
         minute=5,
-        **_forge_trailers(""),
+        **forge_trailers(""),
     )
     _mock_updates(
         respx_router,
@@ -160,8 +100,8 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
             "spt_version": SPT_VERSION,
             "updates": [
                 {
-                    "current_version": _current_version(
-                        id=100,
+                    "current_version": current_version_json(
+                        version_id=100,
                         mod_id=10,
                         name="Available Mod",
                         version="1.0.0",
@@ -180,8 +120,8 @@ def test_check_updates_reports_all_four_lists_and_skips_unmatched_active_mods(
             ],
             "blocked_updates": [
                 {
-                    "current_version": _current_version(
-                        id=101,
+                    "current_version": current_version_json(
+                        version_id=101,
                         mod_id=20,
                         name="Blocked Mod",
                         version="1.5.0",
@@ -297,14 +237,14 @@ def test_check_updates_ambiguous_name_raises_ambiguous_mod(
     CoolMod and coolmod), a query by name must fail to disambiguate rather
     than silently picking one.
     """
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("1"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("1"))
     install_commit(
         clean_repo,
         "coolmod",
         "2.0.0",
         mod_type="server",
         minute=2,
-        **_forge_trailers("2"),
+        **forge_trailers("2"),
     )
     client = client_factory()
 
@@ -337,7 +277,7 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
             "SPT/user/mods/CoolMod/old_only.txt": "old text",
             "BepInEx/config/CoolMod.cfg": "user settings",
         },
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -356,8 +296,8 @@ def test_update_mod_replaces_files_in_one_commit_and_keeps_config_untouched(
             "spt_version": SPT_VERSION,
             "updates": [
                 {
-                    "current_version": _current_version(
-                        id=100,
+                    "current_version": current_version_json(
+                        version_id=100,
                         mod_id=10,
                         name="CoolMod",
                         version="1.0.0",
@@ -434,7 +374,7 @@ def test_update_mod_with_a_foreign_untracked_mod_folder_raises_dirty_tree_error(
         files={
             "SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "1.0.0", "author": "Acme"})
         },
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     foreign = clean_repo.path / "SPT/user/mods/Foreign/x.txt"
     foreign.parent.mkdir(parents=True)
@@ -470,7 +410,7 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
             ),
             "SPT/user/mods/CoolMod/old_only.txt": "old text",
         },
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     runtime_file = clean_repo.path / "SPT/user/mods/CoolMod/new_file.txt"
     runtime_file.write_text("written while playing", encoding="utf-8")
@@ -491,8 +431,8 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
             "spt_version": SPT_VERSION,
             "updates": [
                 {
-                    "current_version": _current_version(
-                        id=100,
+                    "current_version": current_version_json(
+                        version_id=100,
                         mod_id=10,
                         name="CoolMod",
                         version="1.0.0",
@@ -557,8 +497,8 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
                 "updates": [],
                 "blocked_updates": [
                     {
-                        "current_version": _current_version(
-                            id=100,
+                        "current_version": current_version_json(
+                            version_id=100,
                             mod_id=10,
                             name="CoolMod",
                             version="1.0.0",
@@ -616,7 +556,7 @@ def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(
     (no commit, no version change) but provide a descriptive notice explaining
     why the update did not proceed.
     """
-    install_commit(clean_repo, "CoolMod", mod_version, mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", mod_version, mod_type="server", **forge_trailers("10"))
     _mock_updates(respx_router, payload)
     client = client_factory()
     commits_before = len(clean_repo.log())
@@ -655,7 +595,7 @@ def test_update_mod_absent_from_every_report_list_is_a_noop_with_generic_notice(
     but possible server response); update_mod must still no-op instead of
     crashing, with the generic fallback notice. If _no_update_notice's final
     `return` were changed to return "", this fails."""
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     _mock_updates(
         respx_router,
         {
@@ -681,7 +621,7 @@ def _mock_update_recommendation(respx_router: respx.MockRouter, link: str, conte
             "spt_version": SPT_VERSION,
             "updates": [
                 {
-                    "current_version": _current_version(id=100, mod_id=10, name="ModA", version="1.0.0"),
+                    "current_version": current_version_json(version_id=100, mod_id=10, name="ModA", version="1.0.0"),
                     "recommended_version": {
                         "id": 200,
                         "version": "2.0.0",
@@ -719,7 +659,7 @@ def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
         mod_type="server",
         files={"SPT/user/mods/Shared/data.txt": "modb-content"},
         minute=1,
-        **_forge_trailers("20"),
+        **forge_trailers("20"),
     )
     install_commit(
         clean_repo,
@@ -728,7 +668,7 @@ def test_update_mod_tracked_file_conflict_aborts_and_names_owning_mod(
         mod_type="server",
         files={"SPT/user/mods/ModA/package.json": json.dumps({"name": "ModA", "version": "1.0.0"})},
         minute=2,
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -772,7 +712,7 @@ def test_update_mod_missing_dependency_aborts_without_committing(
         "1.0.0",
         mod_type="server",
         files={"SPT/user/mods/ModA/package.json": json.dumps({"name": "ModA", "version": "1.0.0"})},
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -813,8 +753,8 @@ def _available_update_data(link: str, content_length: int) -> JsonDict:
         "spt_version": SPT_VERSION,
         "updates": [
             {
-                "current_version": _current_version(
-                    id=100,
+                "current_version": current_version_json(
+                    version_id=100,
                     mod_id=10,
                     name="CoolMod",
                     version="1.0.0",
@@ -849,7 +789,7 @@ def test_cli_update_check_never_prompts(
     With empty stdin, `sptmod update --check` exits 0 with the report (e.g., CoolMod)
     printed to stdout; if it prompted, CliRunner would hit EOF and exit with error.
     """
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     _mock_updates(respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1))
     monkeypatch.chdir(clean_repo.path)
 
@@ -873,7 +813,7 @@ def test_cli_update_without_yes_prompts_and_cancels_on_no(
     With input='n\\n', `sptmod update` exits 0 and the repo's commit count remains
     unchanged; the update is not applied.
     """
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     _mock_updates(respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1))
     commits_before = len(clean_repo.log())
     monkeypatch.chdir(clean_repo.path)
@@ -897,7 +837,7 @@ def test_cli_update_without_yes_prompts_and_applies_on_yes(
     With input='y\\n', `sptmod update` exits 0 and a new commit is added (mod updated
     from 1.0.0 to 2.0.0).
     """
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     new_archive = make_archive(
         {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "2.0.0", "author": "Acme"})},
         "zip",
@@ -928,7 +868,7 @@ def test_cli_update_yes_flag_applies_without_prompting(
     """If --yes does not exist yet or does not skip the prompt, this fails:
     either Typer rejects the unknown option, or empty stdin makes the prompt
     hit EOF and abort instead of applying."""
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **_forge_trailers("10"))
+    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     new_archive = make_archive(
         {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "2.0.0", "author": "Acme"})},
         "zip",

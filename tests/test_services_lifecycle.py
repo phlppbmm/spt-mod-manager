@@ -12,41 +12,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from conftest import clean_repo_at
 from fixture_types import InstallCommit
 from sptmod.cli import app
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import (
     ConflictError,
     GitError,
     ModNotFoundError,
     NotAGameDirError,
 )
-from sptmod.core.game_dir import detect_layout
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
+pytestmark = pytest.mark.usefixtures("not_running")
+
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub game-running checks to report no process, allowing operations.
-
-    All tests disable/enable/adopt/snapshot without mocking this, so the
-    stubs work in every test without repeating the setup.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a repository with an empty baseline commit.
-
-    Used by CLI tests that do not import a clean_repo fixture from conftest,
-    so they must create their own.
-    """
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
 
 
 # --- disable_mod -----------------------------------------------------------
@@ -108,7 +89,7 @@ def test_disabling_twice_is_a_no_op_with_a_notice_and_no_new_commit(
 
     assert result.notice != ""
     assert result.commit == ""
-    assert result.files == []
+    assert not result.files
     assert result.state == "disabled"
     assert [c.hash for c in clean_repo.log()] == commits_before
 
@@ -221,7 +202,7 @@ def test_enabling_an_active_mod_is_a_no_op_with_a_notice(clean_repo: Repo, insta
 
     assert result.notice != ""
     assert result.commit == ""
-    assert result.files == []
+    assert not result.files
     assert result.state == "installed"
     assert [c.hash for c in clean_repo.log()] == commits_before
 
@@ -583,7 +564,7 @@ def test_cli_disable_then_enable_roundtrip(
     from the game dir, both commands return exit_code == 0 and enable output contains 'CoolMod'.
     This verifies that the CLI wiring for disable/enable matches the service behavior.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -597,7 +578,7 @@ def test_cli_disable_then_enable_roundtrip(
 
 def test_cli_disable_unknown_mod_exits_with_code_11(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI disable of unknown mod exits with code 11 (MOD_NOT_FOUND)."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["disable", "Ghost"])
@@ -613,7 +594,7 @@ def test_cli_adopt_reports_the_adopted_mod(fake_game_dir: Path, monkeypatch: pyt
     from the game dir, result.exit_code == 0 and 'ServerMod' appears in result.stdout. This confirms
     successful adoption and provides user feedback.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     mod_dir = fake_game_dir / "SPT/user/mods/ServerMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text('{"name": "ServerMod", "version": "1.0.0"}', encoding="utf-8")

@@ -24,16 +24,8 @@ from sptmod.core.forge.cache import (
 )
 
 
-@pytest.fixture
-def cache_dir(tmp_path: Path) -> Path:
-    """Empty temporary directory used as the download cache root."""
-    directory = tmp_path / "cache"
-    directory.mkdir()
-    return directory
-
-
 def _write_entry(
-    cache_dir: Path,
+    root: Path,
     key: str,
     name: str,
     content: bytes,
@@ -41,7 +33,7 @@ def _write_entry(
     url: str = "http://example.invalid/x.zip",
 ) -> Path:
     """Build a complete cache entry directly on disk, bypassing ``keep``."""
-    entry = cache_dir / key
+    entry = root / key
     entry.mkdir(parents=True)
     (entry / name).write_bytes(content)
     (entry / "meta.json").write_text(
@@ -52,7 +44,7 @@ def _write_entry(
 
 
 def _write_leftover_part(
-    cache_dir: Path,
+    root: Path,
     key: str,
     content: bytes,
     *,
@@ -61,9 +53,9 @@ def _write_leftover_part(
     url: str = "http://example.invalid/x.zip",
 ) -> Path:
     """Leave an unclaimed partial download behind, as a killed process would."""
-    part = cache_dir / f"{key}.part"
+    part = root / f"{key}.part"
     part.write_bytes(content)
-    (cache_dir / f"{key}.part.json").write_text(
+    (root / f"{key}.part.json").write_text(
         json.dumps({"name": name, "expected_length": expected_length, "url": url}),
         encoding="utf-8",
     )
@@ -761,7 +753,7 @@ def test_clear_removes_everything_and_reports_bytes_freed(cache_dir: Path) -> No
     freed = cache.clear(cache_dir)
 
     assert freed == 40 + len(b"{}") + 15
-    assert list(cache_dir.iterdir()) == []
+    assert not list(cache_dir.iterdir())
 
 
 def test_clear_on_an_empty_cache_frees_nothing(cache_dir: Path) -> None:

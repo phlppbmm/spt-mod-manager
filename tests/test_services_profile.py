@@ -11,49 +11,16 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from conftest import clean_repo_at, profile_with_item
 from fixture_types import InstallCommit, JsonDict
 from sptmod.cli import app
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import ProfileResidueError
-from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
+pytestmark = pytest.mark.usefixtures("not_running")
+
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the game process detector to prevent false failures during profile tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a repository with a clean initial commit, simulating post-init state."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
-
-
-def _profile_with_item(item_id: str) -> JsonDict:
-    """Build a profile document containing an inventory item with the given ID."""
-    return {
-        "characters": {
-            "pmc": {
-                "Inventory": {
-                    "items": [
-                        {
-                            "_id": "i1",
-                            "_tpl": item_id,
-                            "parentId": "5c0d1b8b86f7744bb2683c99",
-                            "slotId": "hideout",
-                        }
-                    ]
-                },
-                "TradersInfo": {},
-                "Quests": [],
-            }
-        }
-    }
 
 
 def _commit_profile_with_item(repo: Repo, item_id: str) -> Path:
@@ -63,7 +30,7 @@ def _commit_profile_with_item(repo: Repo, item_id: str) -> Path:
     the tree clean for the subsequent ``remove_mod``/CLI call.
     """
     profile_path = repo.path / "SPT/user/profiles/abc.json"
-    profile_path.write_text(json.dumps(_profile_with_item(item_id)), encoding="utf-8")
+    profile_path.write_text(json.dumps(profile_with_item(item_id)), encoding="utf-8")
     repo.commit("chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")])
     return profile_path
 
@@ -406,7 +373,7 @@ def test_cli_check_exits_zero_when_no_profile_has_residue(
     Running 'sptmod check' on a clean repository with no mods installed
     results in exit code 0.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["check"])
@@ -423,7 +390,7 @@ def test_cli_check_exits_zero_and_reports_residues_when_found(
     'sptmod check' exits with code 0 (not an error, just a report) and
     includes 'ServerMod' and profile ID 'abc' in the output.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf4"
     _install_server_mod_with_item(repo, install_commit, item_id)
     _commit_profile_with_item(repo, item_id)
@@ -450,7 +417,7 @@ def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
     After installing ServerMod and committing a profile with its item,
     'sptmod remove ServerMod' exits with code 8 and prints 'error:' to stderr.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf5"
     _install_server_mod_with_item(repo, install_commit, item_id)
     _commit_profile_with_item(repo, item_id)
@@ -471,7 +438,7 @@ def test_cli_remove_with_force_succeeds_despite_profile_residue(
     'sptmod remove ServerMod --force' exits with code 0, includes 'ServerMod'
     in stdout, and removes the mod despite the residue.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf6"
     _install_server_mod_with_item(repo, install_commit, item_id)
     _commit_profile_with_item(repo, item_id)
@@ -492,7 +459,7 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
     containing that item, 'sptmod remove ServerMod --clean-profiles' exits 0
     and leaves the profile with an empty items array.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf7"
     _install_server_mod_with_item(repo, install_commit, item_id)
     profile_path = _commit_profile_with_item(repo, item_id)
@@ -513,7 +480,7 @@ def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
     After cleaning a profile with residues, 'sptmod remove ServerMod
     --clean-profiles' stdout includes the profile ID 'abc'.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf9"
     _install_server_mod_with_item(repo, install_commit, item_id)
     _commit_profile_with_item(repo, item_id)
@@ -538,7 +505,7 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
     # structured container: sptmod can only find it via the string
     # fallback, so nothing is removed but something stays untouched.
     item_id = "5c0d1b8b86f7744bb2683cfb"
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     _install_server_mod_with_item(repo, install_commit, item_id)
     profile = {
         "characters": {
@@ -572,7 +539,7 @@ def test_cli_remove_prints_a_warning_line_for_broken_db_json(
     valid json') causes 'sptmod remove ServerMod' to print 'items.json' in
     stdout or stderr.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     trader_id = "5ac3b934136fb568fa78b1e2"
     install_commit(
         repo,

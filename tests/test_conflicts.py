@@ -67,7 +67,7 @@ def test_check_file_conflicts_ignores_files_that_do_not_exist_yet(
     """
     findings = check_file_conflicts(clean_repo, [Path("BepInEx/plugins/New.dll")])
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_file_conflicts_reports_tracked_file_naming_owning_mod(
@@ -235,7 +235,7 @@ def test_check_dll_duplicates_ignores_same_folder_same_name_overwrite(
 
     findings = check_dll_duplicates(fake_game_dir, [Path("BepInEx/plugins/ModA/Own.dll")])
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dll_duplicates_ignores_non_dll_files(fake_game_dir: Path) -> None:
@@ -251,7 +251,7 @@ def test_check_dll_duplicates_ignores_non_dll_files(fake_game_dir: Path) -> None
 
     findings = check_dll_duplicates(fake_game_dir, [Path("BepInEx/plugins/ModC/data.json")])
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dll_duplicates_ignores_dlls_outside_bepinex_plugins(
@@ -264,7 +264,7 @@ def test_check_dll_duplicates_ignores_dlls_outside_bepinex_plugins(
 
     findings = check_dll_duplicates(fake_game_dir, [Path("SPT/user/mods/ModC/Lib.dll")])
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dll_duplicates_loose_plugin_is_not_described_as_a_mod_folder(
@@ -309,7 +309,7 @@ def test_check_dll_duplicates_same_loose_path_is_not_a_duplicate(
 
     findings = check_dll_duplicates(fake_game_dir, [Path("BepInEx/plugins/Shared.dll")])
 
-    assert findings == []
+    assert not findings
 
 
 # --------------------------------------------------------------------------
@@ -365,7 +365,7 @@ def test_check_dependencies_matches_names_case_insensitively() -> None:
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ">=1.0.0"}))
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dependencies_satisfied_range_produces_no_finding() -> None:
@@ -379,7 +379,7 @@ def test_check_dependencies_satisfied_range_produces_no_finding() -> None:
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ">=1.0.0"}))
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dependencies_empty_range_matches_any_installed_version() -> None:
@@ -388,7 +388,7 @@ def test_check_dependencies_empty_range_matches_any_installed_version() -> None:
 
     findings = check_dependencies(installed, meta_deps({"RequiredMod": ""}))
 
-    assert findings == []
+    assert not findings
 
 
 def test_check_dependencies_empty_range_still_requires_presence() -> None:
@@ -467,7 +467,7 @@ def meta_deps(dependencies: dict[str, str]) -> ModMeta:
 )
 def test_check_spt_compat_produces_no_finding(spt_version: str, spt_range: str) -> None:
     """Compatible SPT versions and missing/unknown version/range produce no findings."""
-    assert check_spt_compat(spt_version, spt_range) == []
+    assert not check_spt_compat(spt_version, spt_range)
 
 
 def test_check_spt_compat_mismatch_is_a_single_warning() -> None:

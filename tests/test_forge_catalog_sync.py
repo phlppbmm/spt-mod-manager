@@ -9,38 +9,17 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import ClientFactory
+from forge_json import make_mod_info, mod_json_full, owner_json, page_envelope, version_json
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
-from test_forge_catalog_fixtures import (
-    ClientFactory,
-    catalog,
-    client_factory,
-    db_path,
-    fake_clock,
-    make_mod_info,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-    version_json,
-)
-
-__all__ = [
-    "catalog",
-    "client_factory",
-    "db_path",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
 
 
 def _mods_route_queue(respx_router: respx.MockRouter, responses: list[httpx.Response]) -> respx.Route:
     """Mock GET /mods to hand out ``responses`` in order, one per request."""
 
-    def _next(request: httpx.Request) -> httpx.Response:
+    def _next(_request: httpx.Request) -> httpx.Response:
         return responses.pop(0)
 
     return respx_router.get("/mods").mock(side_effect=_next)
@@ -614,7 +593,7 @@ def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
     )
     call_count = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         call_count["n"] += 1
         if call_count["n"] == 1:
             return httpx.Response(200, json=page1)

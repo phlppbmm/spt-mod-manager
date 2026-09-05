@@ -6,20 +6,11 @@ import httpx
 import pytest
 import respx
 
+from conftest import FakeClock, RecordingSleep
+from fixture_types import ClientFactory
+from forge_json import page_envelope
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.client import BACKOFF_BASE_SECONDS
-from test_forge_client_fixtures import (
-    ClientFactory,
-    FakeClock,
-    RecordingSleep,
-    client_factory,
-    fake_clock,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_third_request_within_window_sleeps_a_sane_duration(
@@ -77,7 +68,7 @@ def test_429_then_retries_with_growing_backoff_then_succeeds(
     """429 responses trigger retry with exponentially increasing backoff until success."""
     attempts = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         attempts["n"] += 1
         if attempts["n"] < 3:
             return httpx.Response(429)
@@ -102,7 +93,7 @@ def test_429_honors_retry_after_header(
     """A numeric Retry-After header on 429 is respected for the sleep duration."""
     attempts = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         attempts["n"] += 1
         if attempts["n"] == 1:
             return httpx.Response(429, headers={"Retry-After": "5"})
@@ -125,7 +116,7 @@ def test_429_with_a_malformed_retry_after_falls_back_to_exponential_backoff(
     the first retry sleeps the base exponential-backoff duration instead."""
     attempts = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         attempts["n"] += 1
         if attempts["n"] == 1:
             return httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"})

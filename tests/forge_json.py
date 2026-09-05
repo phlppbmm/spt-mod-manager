@@ -1,105 +1,14 @@
-"""Shared fixtures and JSON builders for the Forge HTTP client test suite.
+"""JSON builders for Forge API responses and catalog rows.
 
-Not a standalone test module (no ``test_*`` functions): it is imported by the
-other ``test_forge_client_*.py`` files so fixtures/builders live in one place
-without touching ``tests/conftest.py``.
+Not a test module: the ``test_forge_*`` and ``test_services_*`` suites import
+these builders so the shape of a mocked Forge payload lives in one place.
 """
 
-from collections.abc import Callable, Iterator
+from datetime import datetime
 from typing import Any
 
-import pytest
-import respx
-
-from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
-
-# The factory forwards arbitrary keyword arguments to ``ForgeClient``, so the
-# parameter list stays open; tests annotate their fixture argument with this.
-type ClientFactory = Callable[..., ForgeClient]
-
-
-class FakeClock:
-    """A monotonic-clock stand-in that only advances when told to.
-
-    Matches the ``Callable[[], float]`` signature ``ForgeClient`` expects
-    for its ``clock`` constructor argument.
-    """
-
-    def __init__(self, start: float = 1_000.0) -> None:
-        self.value = start
-
-    def __call__(self) -> float:
-        return self.value
-
-    def advance(self, seconds: float) -> None:
-        """Moves the fake clock forward by ``seconds``."""
-        self.value += seconds
-
-
-class RecordingSleep:
-    """A sleep stand-in that records requested durations without blocking.
-
-    Matches the ``Callable[[float], None]`` signature ``ForgeClient``
-    expects for its ``sleep`` constructor argument. Never calls the real
-    ``time.sleep``.
-    """
-
-    def __init__(self) -> None:
-        self.calls: list[float] = []
-
-    def __call__(self, seconds: float) -> None:
-        self.calls.append(seconds)
-
-
-@pytest.fixture
-def fake_clock() -> FakeClock:
-    """Fixture providing a FakeClock instance initialized to 1000.0.
-
-    The clock returns a constant monotonic value (1000.0) until advance(seconds)
-    is called; this allows tests to control time precisely for throttle and retry
-    logic without blocking.
-    """
-    return FakeClock()
-
-
-@pytest.fixture
-def recording_sleep() -> RecordingSleep:
-    """A mock sleep function that records requested sleep durations without blocking."""
-    return RecordingSleep()
-
-
-@pytest.fixture
-def client_factory(fake_clock: FakeClock, recording_sleep: RecordingSleep) -> Iterator[ClientFactory]:
-    """Build ``ForgeClient`` instances wired to the fake clock/recording sleep.
-
-    Every client built through the factory is closed on teardown.
-    """
-    made: list[ForgeClient] = []
-
-    def _make(**kwargs: Any) -> ForgeClient:
-        """Build a ForgeClient with injected clock and sleep test doubles.
-
-        The client is wired to use fake_clock (controlled time) and recording_sleep
-        (non-blocking duration recording); all instances are automatically closed
-        during fixture teardown.
-        """
-        client = ForgeClient(clock=fake_clock, sleep=recording_sleep, **kwargs)
-        made.append(client)
-        return client
-
-    yield _make
-    for client in made:
-        client.close()
-
-
-@pytest.fixture
-def respx_router() -> Iterator[respx.MockRouter]:
-    """A respx HTTP mocking router set to the Forge's default base URL."""
-    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
-        yield router
-
-
-# --- JSON builders -----------------------------------------------------
+from sptmod.core.forge.client import DEFAULT_BASE_URL
+from sptmod.core.models import ModInfo
 
 
 def success_envelope(data: Any) -> dict[str, Any]:
@@ -244,3 +153,85 @@ def version_json(**overrides: Any) -> dict[str, Any]:
     }
     data.update(overrides)
     return data
+
+
+def make_mod_info(
+    *,
+    forge_id: str = "",
+    name: str = "Some Mod",
+    version: str = "1.0.0",
+    **overrides: Any,
+) -> ModInfo:
+    """Build a ``ModInfo`` fixture with sensible defaults for classify() tests.
+
+    ``forge_id`` and ``name`` are the two fields classify() matches on;
+    everything else defaults to plausible but otherwise irrelevant values.
+    """
+    fields: dict[str, Any] = {
+        "name": name,
+        "version": version,
+        "mod_type": "server",
+        "author": "Someone",
+        "spt_range": "",
+        "state": "installed",
+        "commit": "abc123",
+        "date": datetime(2025, 1, 1),
+        "forge_id": forge_id,
+        "forge_version_id": "",
+        "guid": "",
+        "source": "forge",
+    }
+    fields.update(overrides)
+    return ModInfo(**fields)
+
+
+def current_version_json(
+    *, version_id: int, mod_id: int, name: str, version: str, slug: str | None = None
+) -> dict[str, Any]:
+    """The ``current_version`` object of a ``/mods/updates`` entry."""
+    return {
+        "id": version_id,
+        "mod_id": mod_id,
+        "guid": None,
+        "name": name,
+        "version": version,
+        "slug": slug,
+    }
+
+
+def recommended_version_json(
+    *,
+    version_id: int,
+    version: str,
+    link: str,
+    content_length: int,
+    spt_version: str,
+    fika_compatibility: str = "unknown",
+) -> dict[str, Any]:
+    """The ``recommended_version`` object of a ``/mods/updates`` entry."""
+    return {
+        "id": version_id,
+        "version": version,
+        "link": link,
+        "content_length": content_length,
+        "fika_compatibility": fika_compatibility,
+        "spt_versions": [spt_version],
+    }
+
+
+def updates_payload(
+    spt_version: str,
+    *,
+    updates: list[dict[str, Any]] | None = None,
+    blocked_updates: list[dict[str, Any]] | None = None,
+    up_to_date: list[dict[str, Any]] | None = None,
+    incompatible_with_spt: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a ``/mods/updates`` payload with its four report lists."""
+    return {
+        "spt_version": spt_version,
+        "updates": list(updates or []),
+        "blocked_updates": list(blocked_updates or []),
+        "up_to_date": list(up_to_date or []),
+        "incompatible_with_spt": list(incompatible_with_spt or []),
+    }

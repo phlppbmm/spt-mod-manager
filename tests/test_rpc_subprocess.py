@@ -16,8 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from sptmod.core.game_dir import detect_layout
-from sptmod.core.repo import Repo
+from conftest import clean_repo_at
 
 SPTMOD_BINARY = shutil.which("sptmod")
 
@@ -25,13 +24,6 @@ pytestmark = pytest.mark.skipif(
     SPTMOD_BINARY is None,
     reason="sptmod console script not on PATH; run under 'uv run pytest'",
 )
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a game directory repository and commit the baseline configuration."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
 
 
 def _run_rpc(name: str, request: dict[str, object]) -> subprocess.CompletedProcess[str]:
@@ -77,7 +69,7 @@ def test_install_from_archive_streams_progress_then_a_result_all_valid_json(
     Events precede the result (event=result with mod.name=\"CoolMod\"); all lines
     are valid JSON parsed without errors.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = tmp_path / "mod.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr(

@@ -242,10 +242,12 @@ def apply_force(conflicts: Sequence[Conflict], force: bool) -> list[Conflict]:
 
 
 def _mod_folder(plugin_file: Path) -> Path:
+    """Return the mod folder of a plugin file below BepInEx/plugins."""
     return PLUGINS_DIR / plugin_file.relative_to(PLUGINS_DIR).parts[0]
 
 
 def _is_version(text: str) -> bool:
+    """Return whether ``text`` is a valid semantic version string."""
     try:
         version_matches(text, "")
     except UnsupportedRangeError:

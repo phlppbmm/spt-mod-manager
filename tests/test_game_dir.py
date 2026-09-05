@@ -10,12 +10,12 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 """
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import psutil
 import pytest
 
+from fixture_types import SpawnProcess
 from sptmod.core.errors import GameRunningError, NotAGameDirError
 from sptmod.core.game_dir import (
     GameProcess,
@@ -233,6 +233,7 @@ def test_ensure_game_not_running_message_names_the_processes(
 
 def test_running_game_processes_reports_a_real_process_named_like_the_server(
     tmp_path: Path,
+    spawn_process: SpawnProcess,
 ) -> None:
     """A process whose executable is named like the SPT server is detected
     through the real process table and blocks operations."""
@@ -240,14 +241,11 @@ def test_running_game_processes_reports_a_real_process_named_like_the_server(
     assert sleep is not None
     fake_server = tmp_path / "SPT.Server.Linux"
     shutil.copy(sleep, fake_server)
-    process = subprocess.Popen([str(fake_server), "30"])
-    try:
-        assert "SPT.Server.Linux" in running_game_processes()
-        with pytest.raises(GameRunningError):
-            ensure_game_not_running()
-    finally:
-        process.kill()
-        process.wait()
+    spawn_process([str(fake_server), "30"])
+
+    assert "SPT.Server.Linux" in running_game_processes()
+    with pytest.raises(GameRunningError):
+        ensure_game_not_running()
 
 
 # --- game_process_kind -------------------------------------------------------
@@ -343,7 +341,7 @@ def test_game_processes_skips_a_process_that_vanishes_mid_scan(
         lambda: iter([_VanishedProcess()]),
     )
 
-    assert game_processes() == []
+    assert not game_processes()
 
 
 def test_running_game_processes_is_the_name_projection_of_game_processes(
@@ -365,25 +363,22 @@ def test_running_game_processes_is_the_name_projection_of_game_processes(
 
 
 def test_process_alive_true_for_a_running_process_with_the_matching_start_time(
-    tmp_path: Path,
+    spawn_process: SpawnProcess,
 ) -> None:
     """process_alive() returns True when the process exists and creation time matches."""
     sleep = shutil.which("sleep")
     assert sleep is not None
-    process = subprocess.Popen([sleep, "30"])
-    try:
-        started_at = psutil.Process(process.pid).create_time()
-        assert process_alive(process.pid, started_at) is True
-    finally:
-        process.kill()
-        process.wait()
+    process = spawn_process([sleep, "30"])
+
+    started_at = psutil.Process(process.pid).create_time()
+    assert process_alive(process.pid, started_at) is True
 
 
-def test_process_alive_false_after_the_process_exits() -> None:
+def test_process_alive_false_after_the_process_exits(spawn_process: SpawnProcess) -> None:
     """process_alive() returns False after the process has exited."""
     sleep = shutil.which("sleep")
     assert sleep is not None
-    process = subprocess.Popen([sleep, "30"])
+    process = spawn_process([sleep, "30"])
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait()
@@ -392,17 +387,14 @@ def test_process_alive_false_after_the_process_exits() -> None:
 
 
 def test_process_alive_false_when_the_start_time_no_longer_matches(
-    tmp_path: Path,
+    spawn_process: SpawnProcess,
 ) -> None:
     """process_alive() returns False when the process exists but creation time differs."""
     sleep = shutil.which("sleep")
     assert sleep is not None
-    process = subprocess.Popen([sleep, "30"])
-    try:
-        assert process_alive(process.pid, 1.0) is False
-    finally:
-        process.kill()
-        process.wait()
+    process = spawn_process([sleep, "30"])
+
+    assert process_alive(process.pid, 1.0) is False
 
 
 class _ZombieProcess:

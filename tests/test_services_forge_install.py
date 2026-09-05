@@ -18,83 +18,34 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
+from conftest import forge_trailers
 from fixture_types import InstallCommit, JsonDict, MakeArchive
+from forge_json import (
+    current_version_json,
+    mod_json_full,
+    owner_json,
+    page_envelope,
+    recommended_version_json,
+    success_envelope,
+    updates_payload,
+    version_json,
+)
 from sptmod.cli import app as cli_app
-from sptmod.core import game_dir, services
-from sptmod.core.errors import ArchiveError, ConflictError, NotAGameDirError
-from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog, NoCompatibleVersionError
+from sptmod.core import services
+from sptmod.core.errors import ArchiveError, ConflictError, NotAGameDirError, PartialInstallError
+from sptmod.core.forge.catalog import Catalog, NoCompatibleVersionError
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 from sptmod.core.forge.download import CACHE_HIT_MESSAGE
 from sptmod.core.models import PlanEntry
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import download_cache_dir, staging_dir
-from test_forge_catalog_fixtures import (
-    client_factory,
-    db_path,
-    fake_clock,
-    recording_sleep,
-    respx_router,
-)
-from test_forge_client_fixtures import (
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    success_envelope,
-    version_json,
-)
 
-__all__ = [
-    "client_factory",
-    "db_path",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
+pytestmark = pytest.mark.usefixtures("not_running")
 
 SPT_VERSION = "4.1.0"
 SPT_CONSTRAINT = "^4.0.0"
 
 cli_runner = CliRunner()
-
-
-def _forge_trailers(mod_id: str, version_id: str | None = None) -> dict[str, Any]:
-    """Forge id trailers for ``install_commit``, for ``**``-unpacking.
-
-    The trailer names contain hyphens, so they can only be passed as keyword
-    overrides through ``**``. The return type is ``dict[str, Any]`` on
-    purpose: unpacking a ``dict[str, str]`` into ``install_commit`` is
-    rejected by both type checkers because of its non-``str`` ``files`` and
-    ``minute`` parameters.
-    """
-    trailers: dict[str, Any] = {"Mod-Forge-Id": mod_id}
-    if version_id is not None:
-        trailers["Mod-Forge-Version-Id"] = version_id
-    return trailers
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the OS-process check so a real SPT session on the test host
-    cannot make these tests fail with GameRunningError; mirrors the same
-    stub already used in test_services_install.py, test_services_lifecycle.py
-    and test_services_runtime_data.py."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-@pytest.fixture
-def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``default_db_path()`` at an isolated location for CLI tests.
-
-    The CLI never passes ``db_path`` explicitly, so it resolves through
-    ``forge.catalog.default_db_path()``, which must not touch the developer's
-    real config directory.
-    """
-    config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
-    return config_dir / DB_FILE_NAME
 
 
 def _seed_target(
@@ -231,7 +182,7 @@ def _echo_dependencies(respx_router: respx.MockRouter, nodes: list[dict[str, Any
 
 def _dep_node(
     *,
-    id: int,
+    mod_id: int,
     name: str,
     version: str,
     version_id: int,
@@ -244,7 +195,7 @@ def _dep_node(
     conflict=False, and empty dependencies list.
     """
     return {
-        "id": id,
+        "id": mod_id,
         "guid": None,
         "name": name,
         "slug": name.lower().replace(" ", "-"),
@@ -334,7 +285,7 @@ def test_plan_mod_install_orders_dependency_before_the_requested_mod(
         respx_router,
         [
             _dep_node(
-                id=102,
+                mod_id=102,
                 name="Dep Mod",
                 version="1.0.0",
                 version_id=1020,
@@ -565,7 +516,7 @@ def test_install_mod_installs_missing_dependency_as_its_own_commit_before_the_ta
         respx_router,
         [
             _dep_node(
-                id=202,
+                mod_id=202,
                 name="Dep Mod",
                 version="1.0.0",
                 version_id=2020,
@@ -796,7 +747,7 @@ def _partial_failure_scenario(
         respx_router,
         [
             _dep_node(
-                id=dep_id,
+                mod_id=dep_id,
                 name="Dep Mod",
                 version="1.0.0",
                 version_id=dep_id * 10,
@@ -820,8 +771,6 @@ def test_install_mod_partial_failure_raises_partial_install_error_keeping_dep_co
     """If install_mod's partial-failure path is unimplemented, this fails:
     either no PartialInstallError is raised, or it lacks .installed/.cause,
     or the dependency's commit is missing from the repo."""
-    from sptmod.core.errors import PartialInstallError
-
     client, _dep_link, _target_link = _partial_failure_scenario(
         client_factory, respx_router, db_path, make_archive, mod_id=221, dep_id=222
     )
@@ -1079,8 +1028,8 @@ def test_import_list_apply_installs_exactly_the_missing_mods(
     diff = services.import_list(clean_repo.path, list_file=list_file, apply=True, db_path=db_path, client=client)
 
     assert diff.missing == [services.ImportEntry(name="Import Target", wanted_version="3.0.0")]
-    assert diff.different == []
-    assert diff.extra == []
+    assert not diff.different
+    assert not diff.extra
     assert len(diff.installed) == 1
     assert [entry.name for entry in diff.installed[0].plan.entries] == ["Import Target"]
     assert diff.installed[0].installed[0].mod.name == "Import Target"
@@ -1299,40 +1248,29 @@ def _mock_updates_single(
     content_length: int,
 ) -> None:
     """Mock a Forge update check response with a single update available."""
-    respx_router.get("/mods/updates").mock(
-        return_value=httpx.Response(
-            200,
-            json=success_envelope(
-                {
-                    "spt_version": SPT_VERSION,
-                    "updates": [
-                        {
-                            "current_version": {
-                                "id": current_id,
-                                "mod_id": mod_id,
-                                "guid": None,
-                                "name": name,
-                                "version": current_version,
-                                "slug": slug,
-                            },
-                            "recommended_version": {
-                                "id": new_version_id,
-                                "version": new_version,
-                                "link": link,
-                                "content_length": content_length,
-                                "fika_compatibility": "unknown",
-                                "spt_versions": [SPT_VERSION],
-                            },
-                            "update_reason": "newer version available",
-                        }
-                    ],
-                    "blocked_updates": [],
-                    "up_to_date": [],
-                    "incompatible_with_spt": [],
-                }
-            ),
-        )
+    payload = updates_payload(
+        SPT_VERSION,
+        updates=[
+            {
+                "current_version": current_version_json(
+                    version_id=current_id,
+                    mod_id=mod_id,
+                    name=name,
+                    version=current_version,
+                    slug=slug,
+                ),
+                "recommended_version": recommended_version_json(
+                    version_id=new_version_id,
+                    version=new_version,
+                    link=link,
+                    content_length=content_length,
+                    spt_version=SPT_VERSION,
+                ),
+                "update_reason": "newer version available",
+            }
+        ],
     )
+    respx_router.get("/mods/updates").mock(return_value=httpx.Response(200, json=success_envelope(payload)))
 
 
 def test_update_mod_to_a_cached_version_skips_the_download(
@@ -1360,7 +1298,7 @@ def test_update_mod_to_a_cached_version_skips_the_download(
                 {"name": "UpdateCacheMod", "version": "1.0.0", "author": "Acme"}
             )
         },
-        **_forge_trailers("10", "100"),
+        **forge_trailers("10", "100"),
     )
     new_archive = make_archive(
         {
@@ -1420,7 +1358,7 @@ def test_update_mod_to_an_uncached_version_downloads_once_and_caches_it(
                 {"name": "FreshCacheMod", "version": "1.0.0", "author": "Acme"}
             )
         },
-        **_forge_trailers("11", "110"),
+        **forge_trailers("11", "110"),
     )
     new_archive = make_archive(
         {
@@ -1491,7 +1429,7 @@ def test_install_mod_leaves_no_leftover_staging_directories(
 
     services.install_mod(clean_repo.path, "Staging Mod", "1.0.0", db_path=db_path, client=client)
 
-    assert list(staging_dir().glob("sptmod-*")) == []
+    assert not list(staging_dir().glob("sptmod-*"))
 
 
 def test_no_download_progress_message_during_a_cache_hit_mentions_git_vocabulary(
@@ -1533,6 +1471,8 @@ def test_no_download_progress_message_during_a_cache_hit_mentions_git_vocabulary
     download_messages: list[str] = []
 
     def _progress(step: str, percent: int, message: str) -> None:
+        # The parameter names are part of the Progress protocol.
+        del percent
         if step == "download":
             download_messages.append(message)
 

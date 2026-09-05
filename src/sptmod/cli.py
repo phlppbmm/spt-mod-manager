@@ -41,6 +41,7 @@ from sptmod.core.models import (
     ProfileResidue,
 )
 from sptmod.core.modmeta import InvalidMetadataError
+from sptmod.server.rpc import main as run_rpc
 
 app = typer.Typer(help="sptmod: mod manager for SPT (Single Player Tarkov).")
 
@@ -105,11 +106,11 @@ def _mod_table(mods: Sequence[ModInfo]) -> Table:
     return table
 
 
-def _file_table(files: Sequence[ModFile]) -> Table:
+def _file_table(mod_files: Sequence[ModFile]) -> Table:
     table = Table()
     table.add_column("File")
     table.add_column("Change")
-    for mod_file in files:
+    for mod_file in mod_files:
         table.add_row(mod_file.path.as_posix(), mod_file.change)
     return table
 
@@ -430,7 +431,7 @@ def install(
     name: Annotated[
         str | None, typer.Option("--name", help="Override the mod name (--file only).")
     ] = None,
-    version: Annotated[
+    mod_version: Annotated[
         str | None,
         typer.Option("--version", help="Version to install, or override for --file."),
     ] = None,
@@ -457,7 +458,7 @@ def install(
                     Path.cwd(),
                     archive,
                     name_override=name,
-                    version_override=version,
+                    version_override=mod_version,
                     force=force,
                     progress=_report_progress,
                     forge_match=True,
@@ -473,14 +474,14 @@ def install(
     if mod is None:
         raise typer.BadParameter("pass a mod ID or name, or --file ARCHIVE")
     with _handled():
-        plan = services.plan_mod_install(Path.cwd(), mod, version)
+        plan = services.plan_mod_install(Path.cwd(), mod, mod_version)
         console.print(_plan_table(plan))
         if not yes and not typer.confirm("install this plan?", default=True):
             console.print("cancelled", markup=False)
             return
         try:
             result = services.install_mod(
-                Path.cwd(), mod, version, force=force, progress=_report_progress
+                Path.cwd(), mod, mod_version, force=force, progress=_report_progress
             )
         except PartialInstallError as error:
             for installed in error.installed:
@@ -496,7 +497,7 @@ def update(
         list[str] | None,
         typer.Argument(metavar="[NAME]...", help="Mods to update; default: all."),
     ] = None,
-    check: Annotated[
+    check_only: Annotated[
         bool, typer.Option("--check", help="Only report the available updates.")
     ] = False,
     force: Annotated[
@@ -516,7 +517,7 @@ def update(
         console.print(_updates_table(report))
         for skipped in report.skipped:
             console.print(f"not identified on Forge: {skipped}", markup=False)
-        if check:
+        if check_only:
             return
         if not report.available:
             console.print("nothing to update", markup=False)
@@ -633,14 +634,14 @@ def adopt(
     name: Annotated[
         str | None, typer.Option("--name", help="Override the mod name.")
     ] = None,
-    version: Annotated[
+    mod_version: Annotated[
         str | None, typer.Option("--version", help="Override the mod version.")
     ] = None,
 ) -> None:
     """Take a manually installed mod into the repository."""
     with _handled():
         result = services.adopt_mod(
-            Path.cwd(), target, name_override=name, version_override=version
+            Path.cwd(), target, name_override=name, version_override=mod_version
         )
         console.print(
             f"adopted {result.mod.name} {result.mod.version}".rstrip()
@@ -676,7 +677,7 @@ def snapshot(
 
 @app.command()
 def export(
-    format: Annotated[
+    output_format: Annotated[
         str, typer.Option("--format", help="Output format: text or json.")
     ] = "text",
     client_only: Annotated[
@@ -687,7 +688,7 @@ def export(
     with _handled():
         typer.echo(
             services.export_mods(
-                Path.cwd(), _export_format(format), client_only=client_only
+                Path.cwd(), _export_format(output_format), client_only=client_only
             ),
             nl=False,
         )
@@ -808,8 +809,6 @@ def rpc(
     Writes NDJSON to stdout: one line per progress report, then one result or
     error line. Meant for a driver process, not for interactive use.
     """
-    from sptmod.server.rpc import main as run_rpc
-
     raise typer.Exit(run_rpc(name))
 
 

@@ -10,7 +10,8 @@ import httpx
 import pytest
 import respx
 
-from fixture_types import JsonDict
+from fixture_types import ClientFactory, JsonDict
+from forge_json import page_envelope, success_envelope, version_json
 from sptmod.core.forge.client import (
     BlockedUpdate,
     BlockingMod,
@@ -26,18 +27,6 @@ from sptmod.core.forge.client import (
     UpdatesResult,
     UpToDateMod,
 )
-from test_forge_client_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-    success_envelope,
-    version_json,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_mod_versions_parses_null_content_length_and_embedded_dependency(

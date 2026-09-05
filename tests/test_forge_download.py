@@ -6,16 +6,9 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import ClientFactory
 from sptmod.core.errors import ArchiveError, ForgeUnavailableError
 from sptmod.core.forge.download import FALLBACK_FILE_NAME, download
-from test_forge_client_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    recording_sleep,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep"]
 
 DOWNLOAD_URL = "https://cdn.example.com/releases/download/v1/mod-archive.zip"
 
@@ -203,7 +196,7 @@ def test_download_size_mismatch_raises_archive_error_and_removes_temp_file(
         with pytest.raises(ArchiveError):
             download(client, DOWNLOAD_URL, dest_dir, expected_length=len(body) + 1)
 
-    assert list(dest_dir.iterdir()) == []
+    assert not list(dest_dir.iterdir())
 
 
 def test_download_expected_length_none_skips_the_size_check(client_factory: ClientFactory, dest_dir: Path) -> None:
@@ -255,4 +248,4 @@ def test_download_propagates_forge_unavailable_error_and_leaves_no_temp_file(
         with pytest.raises(ForgeUnavailableError):
             download(client, DOWNLOAD_URL, dest_dir)
 
-    assert list(dest_dir.iterdir()) == []
+    assert not list(dest_dir.iterdir())

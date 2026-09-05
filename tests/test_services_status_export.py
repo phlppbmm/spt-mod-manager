@@ -18,66 +18,19 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive
+from forge_json import mod_json_full, owner_json, page_envelope, version_json
 from sptmod.cli import app
-from sptmod.core import game_dir, services
-from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
+from sptmod.core import services
+from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import ForgeClient
-from sptmod.core.game_dir import detect_layout
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
-from test_forge_client_fixtures import (
-    client_factory,
-    fake_clock,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-    version_json,
-)
 
-__all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
+pytestmark = pytest.mark.usefixtures("not_running")
 
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub game-running checks to report no process, allowing operations.
-
-    All tests status/export/import without mocking this, so the stubs work in
-    every test without repeating the setup.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a repository with an empty baseline commit.
-
-    Used by CLI tests that do not import a clean_repo fixture from conftest,
-    so they must create their own.
-    """
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
-
-
-@pytest.fixture
-def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``default_db_path()`` at an isolated location for CLI tests.
-
-    Mirrors the fixture of the same name in ``test_services_catalog.py``: the
-    CLI never passes ``db_path`` explicitly, so it resolves through
-    ``forge.catalog.default_db_path()``, which must not touch the developer's
-    real config directory.
-    """
-    config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
-    return config_dir / DB_FILE_NAME
 
 
 # --- status ------------------------------------------------------------------
@@ -96,8 +49,8 @@ def test_status_groups_modified_profile(clean_repo: Repo) -> None:
     report = services.status(clean_repo.path)
 
     assert report.modified_profiles == [Path("SPT/user/profiles/abc.json")]
-    assert report.modified_configs == []
-    assert report.manual_mods == []
+    assert not report.modified_configs
+    assert not report.manual_mods
 
 
 def test_status_groups_modified_config(clean_repo: Repo) -> None:
@@ -116,7 +69,7 @@ def test_status_groups_modified_config(clean_repo: Repo) -> None:
     report = services.status(clean_repo.path)
 
     assert report.modified_configs == [Path("BepInEx/config/mod.cfg")]
-    assert report.modified_profiles == []
+    assert not report.modified_profiles
 
 
 def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
@@ -134,8 +87,8 @@ def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
     report = services.status(clean_repo.path)
 
     assert report.other_modified == [Path("BepInEx/plugins/ModA.dll")]
-    assert report.modified_profiles == []
-    assert report.modified_configs == []
+    assert not report.modified_profiles
+    assert not report.modified_configs
 
 
 def test_status_groups_untracked_mod_folder_as_a_manual_mod(clean_repo: Repo) -> None:
@@ -197,7 +150,7 @@ def test_export_text_lists_name_version_ordered_by_name(
     install_commit(clean_repo, "Zeta", version="1.0.0", mod_type="client", minute=1)
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="client", minute=2)
 
-    output = services.export_mods(clean_repo.path, format="text", db_path=tmp_path / "catalog.db")
+    output = services.export_mods(clean_repo.path, export_format="text", db_path=tmp_path / "catalog.db")
 
     lines = output.strip("\n").split("\n")
     assert lines == ["Alpha 2.0.0", "Zeta 1.0.0"]
@@ -207,7 +160,7 @@ def test_export_json_structure(clean_repo: Repo, install_commit: InstallCommit, 
     """Export JSON format wraps mods in object with mods array."""
     install_commit(clean_repo, "Alpha", version="2.0.0", mod_type="server")
 
-    output = services.export_mods(clean_repo.path, format="json", db_path=tmp_path / "catalog.db")
+    output = services.export_mods(clean_repo.path, export_format="json", db_path=tmp_path / "catalog.db")
 
     data = json.loads(output)
     assert data == {"mods": [{"name": "Alpha", "version": "2.0.0", "type": "server", "link": ""}]}
@@ -228,7 +181,7 @@ def test_export_client_only_keeps_client_and_hybrid_mods(
 
     output = services.export_mods(
         clean_repo.path,
-        format="text",
+        export_format="text",
         client_only=True,
         db_path=tmp_path / "catalog.db",
     )
@@ -288,7 +241,7 @@ def test_export_includes_the_catalog_link_when_the_db_has_a_match(
         detail_url="https://forge.sp-tarkov.com/mods/alpha",
     )
 
-    output = services.export_mods(clean_repo.path, format="text", db_path=db_path)
+    output = services.export_mods(clean_repo.path, export_format="text", db_path=db_path)
 
     assert output.strip("\n") == "Alpha 2.0.0 https://forge.sp-tarkov.com/mods/alpha"
 
@@ -337,7 +290,7 @@ def test_export_skips_a_cached_catalog_mod_that_is_not_installed(
     with Catalog(db_path) as catalog:
         catalog.sync(client, full=True)
 
-    output = services.export_mods(clean_repo.path, format="text", db_path=db_path)
+    output = services.export_mods(clean_repo.path, export_format="text", db_path=db_path)
 
     assert output.strip("\n") == "Alpha 2.0.0 https://forge.sp-tarkov.com/mods/alpha"
 
@@ -359,7 +312,7 @@ def test_export_degrades_to_a_linkless_list_when_the_catalog_is_unavailable(
     blocked.write_text("not a directory", encoding="utf-8")
     db_path = blocked / "catalog.db"
 
-    output = services.export_mods(clean_repo.path, format="text", db_path=db_path)
+    output = services.export_mods(clean_repo.path, export_format="text", db_path=db_path)
 
     assert output.strip("\n") == "Alpha 1.0.0"
 
@@ -547,7 +500,7 @@ def test_export_import_text_roundtrip(clean_repo: Repo, install_commit: InstallC
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.txt"
     list_file.write_text(
-        services.export_mods(clean_repo.path, format="text", db_path=tmp_path / "catalog.db"),
+        services.export_mods(clean_repo.path, export_format="text", db_path=tmp_path / "catalog.db"),
         encoding="utf-8",
     )
 
@@ -567,7 +520,7 @@ def test_export_import_json_roundtrip(clean_repo: Repo, install_commit: InstallC
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
     list_file = tmp_path / "wanted.json"
     list_file.write_text(
-        services.export_mods(clean_repo.path, format="json", db_path=tmp_path / "catalog.db"),
+        services.export_mods(clean_repo.path, export_format="json", db_path=tmp_path / "catalog.db"),
         encoding="utf-8",
     )
 
@@ -586,7 +539,7 @@ def test_cli_status_shows_adopt_hint_for_a_manual_mod(fake_game_dir: Path, monke
     the game dir, output.exit_code == 0 and output.stdout contains 'adopt' and
     'SPT/user/mods/NewMod'. This guides users toward adoption of untracked mods.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     mod_dir = fake_game_dir / "SPT/user/mods/NewMod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "package.json").write_text('{"name": "NewMod", "version": "1.0.0"}', encoding="utf-8")
@@ -608,7 +561,7 @@ def test_cli_export_json_happy_path(
     result.exit_code == 0 and 'CoolMod' appears in result.stdout. This enables JSON export
     for scripting.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -634,7 +587,7 @@ def test_cli_import_apply_installs_the_missing_mod_via_the_mocked_forge_path(
     yields result.exit_code == 0 and stdout containing 'installed Import Target 3.0.0'. This
     enables one-command list restoration.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive(
         {
             "SPT/user/mods/Import Target/package.json": json.dumps(

@@ -24,11 +24,7 @@ from sptmod.core.errors import (
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import game_lock
 
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the game process detector to prevent false failures during remove tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
+pytestmark = pytest.mark.usefixtures("not_running")
 
 
 def test_remove_mod_deletes_the_files_added_by_its_install_commit(

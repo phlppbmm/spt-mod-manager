@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import empty_pmc_profile
 from fixture_types import InstallCommit, JsonDict, MakeProfile
 from sptmod.core.errors import GitError
 from sptmod.core.game_dir import GameLayout, detect_layout
@@ -47,19 +48,6 @@ def _make_profile(tmp_path: Path, name: str, content: JsonDict) -> Path:
     path = tmp_path / f"{name}.json"
     path.write_text(json.dumps(content), encoding="utf-8")
     return path
-
-
-def _empty_pmc_profile() -> JsonDict:
-    """Return a minimal valid PMC profile with empty containers."""
-    return {
-        "characters": {
-            "pmc": {
-                "Inventory": {"items": []},
-                "TradersInfo": {},
-                "Quests": [],
-            }
-        }
-    }
 
 
 # --------------------------------------------------------------------------
@@ -96,7 +84,7 @@ def test_collect_mod_ids_reads_item_trader_and_quest_ids_from_the_commit(
     assert result.items == {ITEM_A, ITEM_B}
     assert result.traders == {TRADER_ID}
     assert result.quests == {"quest-one", "quest-two"}
-    assert result.warnings == []
+    assert not result.warnings
 
 
 def test_collect_mod_ids_trader_id_includes_both_folder_name_and_base_json_id(
@@ -222,7 +210,7 @@ def test_collect_mod_ids_malformed_quest_entries_are_skipped_without_crashing(
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.quests == {"quest-one", "quest-two"}
-    assert result.warnings == []
+    assert not result.warnings
 
 
 # --------------------------------------------------------------------------
@@ -233,7 +221,7 @@ def test_collect_mod_ids_malformed_quest_entries_are_skipped_without_crashing(
 def test_find_residues_reports_item_hits_from_inventory_items(tmp_path: Path) -> None:
     """find_residues detects inventory items whose template ID matches a mod item."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -274,7 +262,7 @@ def test_find_residues_legacy_tpl_key_is_not_matched_structurally(
     'string' fallback, since the structural match looks at ``_tpl``.
     """
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -295,7 +283,7 @@ def test_find_residues_reports_trader_hits_from_traders_info_keys(
 ) -> None:
     """Trader IDs in TradersInfo dict keys are reported as residue."""
     ids = ModIds(traders={TRADER_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["TradersInfo"] = {TRADER_ID: {"salesSum": 0}}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -316,7 +304,7 @@ def test_find_residues_reports_trader_hits_from_traders_info_keys(
 def test_find_residues_reports_quest_hits_from_quests_qid(tmp_path: Path) -> None:
     """Quest IDs in Quests array qid fields are reported as residue."""
     ids = ModIds(quests={"quest-one"})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Quests"] = [
         {"qid": "quest-one", "status": 1},
         {"qid": "quest-one", "status": 4},
@@ -342,7 +330,7 @@ def test_find_residues_string_fallback_finds_id_embedded_elsewhere(
 ) -> None:
     """String category catches IDs found in raw text but not structurally."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["someOtherSection"] = {"lastEquippedTpl": ITEM_A}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -356,7 +344,7 @@ def test_find_residues_string_fallback_excludes_ids_already_matched_structurally
 ) -> None:
     """String category excludes IDs already matched by structural rules."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -380,7 +368,7 @@ def test_find_residues_orders_categories_item_trader_quest_string(
     """Residues are ordered by category: item, trader, quest, then string."""
     string_only_id = "loose-mod-marker-id"
     ids = ModIds(items={ITEM_A}, traders={TRADER_ID}, quests={"quest-one", string_only_id})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -407,7 +395,7 @@ def test_find_residues_orders_categories_item_trader_quest_string(
 def test_find_residues_ids_are_distinct_and_sorted(tmp_path: Path) -> None:
     """Residue IDs list is sorted and deduplicated; count includes all matches."""
     ids = ModIds(items={ITEM_B, ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -447,7 +435,7 @@ def test_find_residues_ids_are_distinct_and_sorted(tmp_path: Path) -> None:
 def test_find_residues_returns_empty_list_for_a_clean_profile(tmp_path: Path) -> None:
     """find_residues returns empty list when profile contains no mod IDs."""
     ids = ModIds(items={ITEM_A}, traders={TRADER_ID}, quests={"quest-one"})
-    profile = _make_profile(tmp_path, "player1", _empty_pmc_profile())
+    profile = _make_profile(tmp_path, "player1", empty_pmc_profile())
 
     assert find_residues(profile, ids) == []
 
@@ -486,7 +474,7 @@ def test_find_residues_malformed_inventory_items_is_ignored_without_crashing(
 ) -> None:
     """find_residues tolerates Inventory.items that is not a list."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = "not-a-list"
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -498,7 +486,7 @@ def test_find_residues_skips_non_dict_entries_in_inventory_items(
 ) -> None:
     """Non-dict entries in inventory items array are skipped without crashing."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         "not-a-dict",
         {
@@ -529,7 +517,7 @@ def test_find_residues_skips_non_dict_entries_in_quests_but_counts_the_rest(
 ) -> None:
     """Non-dict entries in Quests array are skipped; valid matches are counted."""
     ids = ModIds(quests={"quest-one"})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Quests"] = [
         "not-a-dict",
         {"qid": "some-other-quest", "status": 1},
@@ -890,6 +878,9 @@ def test_find_residues_missing_or_wrong_type_container_yields_no_residue(
     ids: ModIds,
 ) -> None:
     """Missing or malformed residue containers degrade to no residue."""
+    # ``category`` only labels the case here; the shared case list feeds it to
+    # the tests that do check it.
+    del category
     doc = make_profile()
     corrupt(doc, path)
     profile = _make_profile(tmp_path, "player1", doc)
@@ -958,7 +949,7 @@ def test_find_residues_item_closure_counts_children_and_grandchildren_and_is_cyc
 ) -> None:
     """Item category closure includes nested items via parentId and handles cycles."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         # A parentId cycle between "container" and "child": neither can be
         # revisited once it enters the closure, so the walk still terminates.
@@ -987,7 +978,7 @@ def test_find_residues_item_closure_skips_items_without_a_usable_id(
 ) -> None:
     """Item closure skips entries with missing or non-string _id fields."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {"_id": "container", "_tpl": ITEM_A, "slotId": "main"},
         {"_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
@@ -1016,7 +1007,7 @@ def test_find_residues_string_fallback_excludes_matched_ids_but_keeps_unmatched(
     tmp_path: Path,
 ) -> None:
     """String fallback excludes IDs matched structurally but keeps others."""
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "x1",
@@ -1046,7 +1037,7 @@ def test_find_residues_string_fallback_excludes_matched_ids_but_keeps_unmatched(
 
 def _pmc_with_repeatable(active: list[JsonDict]) -> JsonDict:
     """Build a PMC profile with a repeatable-quests structure."""
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["RepeatableQuests"] = [
         {
             "id": "daily",
@@ -1116,7 +1107,7 @@ def test_find_residues_repeatable_quest_skips_non_dict_groups_and_entries(
 ) -> None:
     """Non-dict entries in RepeatableQuests groups and quest lists are skipped."""
     ids = ModIds(quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["RepeatableQuests"] = [
         "not-a-dict",
         {
@@ -1161,7 +1152,7 @@ def test_find_residues_repeatable_quest_no_hit_leaves_no_residue(
 def test_find_residues_task_counter_matches_by_key(tmp_path: Path) -> None:
     """Task-counter category matches when the dict key is a mod quest ID."""
     ids = ModIds(quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["TaskConditionCounters"] = {
         QUEST_ID: {"id": QUEST_ID, "type": "Counter", "value": 1, "sourceId": "other"}
     }
@@ -1184,7 +1175,7 @@ def test_find_residues_task_counter_matches_by_key(tmp_path: Path) -> None:
 def test_find_residues_task_counter_matches_by_source_id(tmp_path: Path) -> None:
     """Task-counter also matches when entry's sourceId field references a mod quest."""
     ids = ModIds(quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["TaskConditionCounters"] = {
         "cond1": {"id": "cond1", "type": "Counter", "value": 1, "sourceId": QUEST_ID}
     }
@@ -1209,7 +1200,7 @@ def test_find_residues_task_counter_tolerates_a_non_dict_value_and_no_hit(
 ) -> None:
     """Non-dict values in TaskConditionCounters dict are tolerated."""
     ids = ModIds(quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["TaskConditionCounters"] = {"cond1": "not-a-dict"}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1219,7 +1210,7 @@ def test_find_residues_task_counter_tolerates_a_non_dict_value_and_no_hit(
 def test_find_residues_hideout_production_matches_by_key(tmp_path: Path) -> None:
     """Hideout-production category matches when the Production dict key is a recipe ID."""
     ids = ModIds(recipes={RECIPE_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Hideout"] = {"Production": {RECIPE_ID: {"Progress": 0}}}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1242,7 +1233,7 @@ def test_find_residues_hideout_production_matches_by_recipe_id(
 ) -> None:
     """Hideout-production also matches when entry's recipeId field is a mod recipe."""
     ids = ModIds(recipes={RECIPE_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Hideout"] = {"Production": {"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1265,7 +1256,7 @@ def test_find_residues_hideout_production_tolerates_a_non_dict_value_and_no_hit(
 ) -> None:
     """Non-dict values in Production dict are tolerated."""
     ids = ModIds(recipes={RECIPE_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Hideout"] = {"Production": {"prod1": "not-a-dict"}}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1280,7 +1271,7 @@ def test_find_residues_hideout_production_tolerates_a_non_dict_value_and_no_hit(
 def test_find_residues_insured_item_matches_by_trader_id(tmp_path: Path) -> None:
     """Insured-item category matches when entry's tid field is a mod trader."""
     ids = ModIds(traders={TRADER_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["InsuredItems"] = [{"tid": TRADER_ID, "itemId": "x"}]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1301,7 +1292,7 @@ def test_find_residues_insured_item_matches_by_trader_id(tmp_path: Path) -> None
 def test_find_residues_insured_item_matches_by_item_closure(tmp_path: Path) -> None:
     """Insured-item also matches via inventory item closure referenced by itemId."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Inventory"]["items"] = [
         {"_id": "container", "_tpl": ITEM_A, "slotId": "main"},
         {"_id": "child", "_tpl": ITEM_B, "parentId": "container", "slotId": "main"},
@@ -1321,7 +1312,7 @@ def test_find_residues_insured_item_skips_non_dict_entries_and_no_hit(
 ) -> None:
     """Non-dict entries in InsuredItems array are skipped."""
     ids = ModIds(traders={TRADER_ID}, items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["InsuredItems"] = [
         "not-a-dict",
         {"tid": "other-trader", "itemId": "unrelated-item"},
@@ -1339,7 +1330,7 @@ def test_find_residues_insured_item_skips_non_dict_entries_and_no_hit(
 def test_find_residues_insurance_matches_by_trader_id(tmp_path: Path) -> None:
     """Insurance category matches when entry's traderId field is a mod trader."""
     ids = ModIds(traders={TRADER_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["insurance"] = [{"traderId": TRADER_ID, "items": []}]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1362,7 +1353,7 @@ def test_find_residues_insurance_matches_by_item_and_its_closure(
 ) -> None:
     """Insurance also matches entries holding mod items with their nested children."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["insurance"] = [
         {
             "traderId": "unrelated-trader",
@@ -1393,7 +1384,7 @@ def test_find_residues_insurance_skips_non_dict_entries_and_no_hit(
 ) -> None:
     """Non-dict entries in insurance array are skipped."""
     ids = ModIds(traders={TRADER_ID}, items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["insurance"] = ["not-a-dict", {"traderId": "other", "items": []}]
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1408,7 +1399,7 @@ def test_find_residues_insurance_skips_non_dict_entries_and_no_hit(
 def test_find_residues_dialogue_matches_by_trader_key(tmp_path: Path) -> None:
     """Dialogue category matches when the dialogues dict key is a mod trader."""
     ids = ModIds(traders={TRADER_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {TRADER_ID: {"_id": TRADER_ID, "messages": []}}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1431,7 +1422,7 @@ def test_find_residues_dialogue_matches_message_by_template_id_prefix(
 ) -> None:
     """Dialogue messages match when templateId starts with a mod quest ID."""
     ids = ModIds(quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
@@ -1457,7 +1448,7 @@ def test_find_residues_dialogue_matches_message_by_template_id_prefix(
 def test_find_residues_dialogue_matches_message_by_item_tpl(tmp_path: Path) -> None:
     """Dialogue messages match when their items hold mod item templates."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
@@ -1489,7 +1480,7 @@ def test_find_residues_dialogue_matches_message_by_item_tpl(tmp_path: Path) -> N
 def test_find_residues_dialogue_skips_non_dict_messages(tmp_path: Path) -> None:
     """Non-dict entries in dialogue messages array are skipped."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
@@ -1509,7 +1500,7 @@ def test_find_residues_dialogue_matches_message_by_item_when_template_id_is_miss
 ) -> None:
     """Dialogue message items are still checked even when templateId is absent."""
     ids = ModIds(items={ITEM_A}, quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
@@ -1540,7 +1531,7 @@ def test_find_residues_dialogue_matches_message_by_item_when_template_id_is_miss
 def test_find_residues_dialogue_no_hit_leaves_no_residue(tmp_path: Path) -> None:
     """No dialogue residue when trader keys and message IDs/items don't match."""
     ids = ModIds(traders={TRADER_ID}, items={ITEM_A}, quests={QUEST_ID})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["dialogues"] = {
         "unrelated-trader": {
             "_id": "unrelated-trader",
@@ -1563,7 +1554,7 @@ def test_find_residues_dialogue_no_hit_leaves_no_residue(tmp_path: Path) -> None
 def test_find_residues_userbuild_matches_all_three_build_lists(tmp_path: Path, build_key: str) -> None:
     """Userbuild category matches items in weaponBuilds, equipmentBuilds, magazineBuilds."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["userbuilds"] = {
         "weaponBuilds": [],
         "equipmentBuilds": [],
@@ -1589,7 +1580,7 @@ def test_find_residues_userbuild_matches_all_three_build_lists(tmp_path: Path, b
 def test_find_residues_userbuild_no_hit_leaves_no_residue(tmp_path: Path) -> None:
     """No userbuild residue when build items don't reference mod items."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["userbuilds"] = {
         "weaponBuilds": [{"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_B}]}],
         "equipmentBuilds": [],
@@ -1610,7 +1601,7 @@ def test_find_residues_hideout_area_matches_a_nested_tpl_below_slots(
 ) -> None:
     """Hideout-area category matches items nested anywhere below Areas[].slots[]."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Hideout"] = {
         "Areas": [
             {
@@ -1646,7 +1637,7 @@ def test_find_residues_hideout_area_no_hit_leaves_no_residue(
 ) -> None:
     """No hideout-area residue when slots don't hold mod items."""
     ids = ModIds(items={ITEM_A})
-    content = _empty_pmc_profile()
+    content = empty_pmc_profile()
     content["characters"]["pmc"]["Hideout"] = {"Areas": [{"type": 0, "slots": [{"locationIndex": 0}]}]}
     profile = _make_profile(tmp_path, "player1", content)
 
@@ -1784,7 +1775,7 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
     )
 
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
-    profile_with_x = _empty_pmc_profile()
+    profile_with_x = empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "i1",
@@ -1794,7 +1785,7 @@ def test_check_all_keys_residues_by_mod_name_across_mods_and_profiles(
         }
     ]
     (profiles_dir / "abc.json").write_text(json.dumps(profile_with_x), encoding="utf-8")
-    (profiles_dir / "def.json").write_text(json.dumps(_empty_pmc_profile()), encoding="utf-8")
+    (profiles_dir / "def.json").write_text(json.dumps(empty_pmc_profile()), encoding="utf-8")
 
     result = check_all(clean_repo, detect_layout(clean_repo.path))
 
@@ -1823,7 +1814,7 @@ def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit: InstallC
     clean_repo.revert(commit_hash, extra_trailers={"Mod": "ModZ", "Mod-State": "removed"})
 
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
-    profile_with_x = _empty_pmc_profile()
+    profile_with_x = empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "i1",
@@ -1836,7 +1827,7 @@ def test_check_all_skips_removed_mods(clean_repo: Repo, install_commit: InstallC
 
     result = check_all(clean_repo, detect_layout(clean_repo.path))
 
-    assert result.residues == {}
+    assert not result.residues
 
 
 def test_check_all_prefixes_collection_warnings_with_the_mod_name(
@@ -1866,7 +1857,7 @@ def test_check_all_does_not_modify_the_repository_or_profiles(clean_repo: Repo, 
         files={"SPT/user/mods/ModX/db/templates/items.json": json.dumps({item_x: {"_id": item_x, "_name": "item_x"}})},
     )
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
-    profile_with_x = _empty_pmc_profile()
+    profile_with_x = empty_pmc_profile()
     profile_with_x["characters"]["pmc"]["Inventory"]["items"] = [
         {
             "_id": "i1",
@@ -1897,4 +1888,4 @@ def test_collect_mod_ids_accepts_db_files_saved_with_a_utf8_bom(
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.items == {ITEM_A}
-    assert result.warnings == []
+    assert not result.warnings

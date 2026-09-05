@@ -14,30 +14,11 @@ import httpx
 import pytest
 import respx
 
+from forge_json import mod_json_full, owner_json, page_envelope, success_envelope, version_json
 from sptmod.core import services
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import ForgeClient
-from test_forge_catalog_fixtures import (
-    client_factory,
-    db_path,
-    fake_clock,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-    success_envelope,
-    version_json,
-)
-
-__all__ = [
-    "client_factory",
-    "db_path",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
 
 # An HTML fragment exercising every branch of _HtmlTextExtractor: a <p> tag
 # (newline break), inline markup that is dropped but keeps its text, a

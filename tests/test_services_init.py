@@ -127,7 +127,7 @@ def test_init_on_clean_dir_reports_no_pre_existing_mods(fake_game_dir: Path) -> 
     """
     result = services.init_game_dir(fake_game_dir)
 
-    assert result.pre_existing_mods == []
+    assert not result.pre_existing_mods
 
 
 def test_init_twice_raises_git_error(fake_game_dir: Path) -> None:

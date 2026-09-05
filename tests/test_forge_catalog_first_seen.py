@@ -7,30 +7,10 @@ from datetime import UTC, datetime
 import httpx
 import respx
 
-from fixture_types import JsonDict
+from fixture_types import ClientFactory, JsonDict
+from forge_json import mod_json_full, owner_json, page_envelope
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import ForgeClient
-from test_forge_catalog_fixtures import (
-    ClientFactory,
-    catalog,
-    client_factory,
-    db_path,
-    fake_clock,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-)
-
-__all__ = [
-    "catalog",
-    "client_factory",
-    "db_path",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
 
 _ISO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 

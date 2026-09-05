@@ -8,24 +8,9 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import ClientFactory
+from forge_json import mod_json_full, owner_json, page_envelope
 from sptmod.core.forge.catalog import Catalog
-from test_forge_catalog_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    mod_json_full,
-    owner_json,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-)
-
-__all__ = [
-    "client_factory",
-    "fake_clock",
-    "recording_sleep",
-    "respx_router",
-]
 
 _FD_DIR = Path("/proc/self/fd")
 
@@ -110,7 +95,7 @@ def test_init_upgrades_a_database_created_without_the_newer_columns(
         mod = catalog.get_mod(7)
         assert mod is not None
         assert mod.name == "Old Mod"
-        assert mod.source_links == ()
+        assert not mod.source_links
         assert catalog.get_description(7) is None
 
         catalog.store_description(7, "Plain text.", mod.updated_at)

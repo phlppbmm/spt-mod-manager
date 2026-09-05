@@ -11,16 +11,12 @@ from pathlib import Path
 import pytest
 
 from fixture_types import InstallCommit, MakeArchive
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import AmbiguousModError, ModNotFoundError
 from sptmod.core.models import ACTIVE_STATES
 from sptmod.core.repo import Repo
 
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the game process detector to prevent false failures during list/history tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
+pytestmark = pytest.mark.usefixtures("not_running")
 
 
 def test_list_mods_on_a_fresh_repo_returns_no_mods(clean_repo: Repo) -> None:

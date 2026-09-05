@@ -545,8 +545,12 @@ class SearchCatalogRequest(CoreModel):
 class BrowseCatalogRequest(CoreModel):
     """Parameters of ``browse_catalog``."""
 
+    # ``catalog_filter`` keeps the wire name ``filter`` through its alias, so neither the
+    # model field nor the service parameter shadows the builtin.
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     path: Path
-    filter: BrowseFilter = "all"
+    catalog_filter: BrowseFilter = Field("all", alias="filter")
     compatible_only: bool = False
     db_path: Path | None = None
 
@@ -590,8 +594,12 @@ class SnapshotRequest(CoreModel):
 class ExportModsRequest(CoreModel):
     """Parameters of ``export_mods``."""
 
+    # ``export_format`` keeps the wire name ``format`` through its alias, so neither the
+    # model field nor the service parameter shadows the builtin.
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     path: Path
-    format: ExportFormat = "text"
+    export_format: ExportFormat = Field("text", alias="format")
     client_only: bool = False
     db_path: Path | None = None
 

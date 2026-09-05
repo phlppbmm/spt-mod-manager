@@ -14,16 +14,18 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
-from fixture_types import InstallCommit, MakeArchive
+from conftest import clean_repo_at, invoke_rpc
+from fixture_types import InstallCommit, MakeArchive, TrailerInstallCommit
+from forge_json import mod_json_full, mod_json_minimal, owner_json, page_envelope, version_json
 from sptmod.cli import app
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import (
     AmbiguousModError,
     ArchiveError,
@@ -38,39 +40,14 @@ from sptmod.core.errors import (
 )
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
-from sptmod.core.game_dir import detect_layout
 from sptmod.core.models import Conflict, ModInfo, ProfileResidue
 from sptmod.core.repo import Repo
+from sptmod.core.workspace import download_cache_dir
 from sptmod.server import rpc
-from test_forge_client_fixtures import (
-    mod_json_full,
-    mod_json_minimal,
-    owner_json,
-    page_envelope,
-    version_json,
-)
+
+pytestmark = pytest.mark.usefixtures("not_running")
 
 SPT_CONSTRAINT = "^4.0.0"
-
-
-class TrailerInstallCommit(Protocol):
-    """``install_commit`` seen by the call sites that pass trailer overrides.
-
-    ``fixture_types.InstallCommit`` also declares the keyword-only ``files``
-    and ``minute`` parameters, so a ``**{"Mod-Forge-Id": ...}`` unpack is
-    rejected (a ``str`` value could land on ``minute: int``). The call sites
-    below pass trailer overrides only.
-    """
-
-    def __call__(
-        self,
-        repo: Repo,
-        name: str,
-        version: str = ...,
-        *,
-        mod_type: str = ...,
-        **trailer_overrides: str,
-    ) -> str: ...
 
 
 def _mod_info(name: str) -> ModInfo:
@@ -92,26 +69,6 @@ def _mod_info(name: str) -> ModInfo:
 
 
 runner = CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub game process checking to always report no running processes."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a repo and commit a baseline configuration."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
-    return repo
-
-
-def _invoke(name: str, request: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
-    """Run ``rpc <name>`` and return ``(exit_code, parsed stdout lines)``."""
-    result = runner.invoke(app, ["rpc", name], input=json.dumps(request))
-    lines = [json.loads(line) for line in result.stdout.splitlines() if line]
-    return result.exit_code, lines
 
 
 @pytest.fixture
@@ -146,7 +103,7 @@ def test_success_envelope_carries_event_result_and_the_service_return_value(
     service function's result."""
     (tmp_path / "Sub").mkdir()
 
-    exit_code, lines = _invoke("list_directories", {"path": str(tmp_path)})
+    exit_code, lines = invoke_rpc("list_directories", {"path": str(tmp_path)})
 
     assert exit_code == 0
     assert lines == [
@@ -174,7 +131,7 @@ def _install_request(fake_game_dir: Path, make_archive: MakeArchive, **overrides
     minimal mod metadata and returns request={path, archive} plus any caller
     overrides (used in operation_id tests to pass a specific caller ID).
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive(
         {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "1.2.3", "author": "Acme"})},
         "zip",
@@ -215,7 +172,7 @@ def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
     """
     request = _install_request(fake_game_dir, make_archive, operation_id="caller-op")
 
-    exit_code, lines = _invoke("install_from_archive", request)
+    exit_code, lines = invoke_rpc("install_from_archive", request)
 
     assert exit_code == 0
     assert all(doc["operation_id"] == "caller-op" for doc in lines[:-1])
@@ -232,7 +189,7 @@ def test_operation_id_is_generated_as_32_hex_chars_when_absent_and_identical_eve
     """
     request = _install_request(fake_game_dir, make_archive)
 
-    exit_code, lines = _invoke("install_from_archive", request)
+    exit_code, lines = invoke_rpc("install_from_archive", request)
 
     assert exit_code == 0
     generated = lines[0]["operation_id"]
@@ -255,9 +212,9 @@ def test_set_spt_version_wraps_its_plain_string_result_under_spt_version(
     The RpcSpec for set_spt_version declares wrap=\"spt_version\", so the
     core service's string result is put under that field in the JSON response.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
 
-    exit_code, lines = _invoke("set_spt_version", {"path": str(repo.path), "version": "4.2.0"})
+    exit_code, lines = invoke_rpc("set_spt_version", {"path": str(repo.path), "version": "4.2.0"})
 
     assert exit_code == 0
     assert lines == [{"event": "result", "data": {"spt_version": "4.2.0"}}]
@@ -269,10 +226,10 @@ def test_export_mods_wraps_its_plain_string_result_under_content(fake_game_dir: 
     The RpcSpec for export_mods declares wrap=\"content\", so the service's
     string result becomes data.content=\"\" in the JSON response.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     db_path = tmp_path / "unused-catalog.db"
 
-    exit_code, lines = _invoke("export_mods", {"path": str(repo.path), "db_path": str(db_path)})
+    exit_code, lines = invoke_rpc("export_mods", {"path": str(repo.path), "db_path": str(db_path)})
 
     assert exit_code == 0
     assert lines == [{"event": "result", "data": {"content": ""}}]
@@ -282,7 +239,7 @@ def test_list_favorites_wraps_its_list_result_under_mod_ids(tmp_path: Path) -> N
     """A list result is wrapped under the 'mod_ids' field."""
     favorites_path = tmp_path / "favorites.json"
 
-    exit_code, lines = _invoke("list_favorites", {"favorites_path": str(favorites_path)})
+    exit_code, lines = invoke_rpc("list_favorites", {"favorites_path": str(favorites_path)})
 
     assert exit_code == 0
     assert lines == [{"event": "result", "data": {"mod_ids": []}}]
@@ -295,14 +252,14 @@ def test_set_favorite_and_list_favorites_round_trip_through_the_rpc_layer(
     still see [] instead of [42], since nothing was actually written."""
     favorites_path = tmp_path / "favorites.json"
 
-    exit_code, lines = _invoke(
+    exit_code, lines = invoke_rpc(
         "set_favorite",
         {"mod_id": 42, "favorite": True, "favorites_path": str(favorites_path)},
     )
     assert exit_code == 0
     assert lines == [{"event": "result", "data": {"mod_ids": [42]}}]
 
-    exit_code, lines = _invoke("list_favorites", {"favorites_path": str(favorites_path)})
+    exit_code, lines = invoke_rpc("list_favorites", {"favorites_path": str(favorites_path)})
     assert exit_code == 0
     assert lines == [{"event": "result", "data": {"mod_ids": [42]}}]
 
@@ -325,7 +282,7 @@ def test_conflict_error_details_carry_only_the_conflicts_list(
     )
     inject_error("status", ConflictError("boom", conflicts=[conflict]))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -350,7 +307,7 @@ def test_dependency_error_details_carry_only_the_conflicts_list(
     conflict = Conflict(kind="missing-dependency", severity="error", message="needs Y")
     inject_error("status", DependencyError("boom", conflicts=[conflict]))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -372,7 +329,7 @@ def test_unresolvable_dependency_error_details_carry_dependency_and_reason(
         UnresolvableDependencyError("DepMod", "no compatible version published"),
     )
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -396,7 +353,7 @@ def test_partial_install_error_details_carry_the_installed_mod_names(
     ]
     inject_error("status", PartialInstallError("boom", installed, RuntimeError("cause")))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -415,7 +372,7 @@ def test_profile_residue_error_details_carry_the_residues_list(
     residue = ProfileResidue(profile="abc", category="item", ids=["1", "2"], count=2)
     inject_error("status", ProfileResidueError("boom", residues=[residue]))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -442,7 +399,7 @@ def test_git_error_details_carry_the_conflicting_paths(
     """
     inject_error("status", GitError("boom", conflicting_paths=[Path("a/b.txt"), Path("c.txt")]))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -460,7 +417,7 @@ def test_ambiguous_mod_error_details_carry_name_and_candidates_unsorted(
     """
     inject_error("status", AmbiguousModError("Foo", ["FooB", "FooA"]))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -481,7 +438,7 @@ def test_forge_api_error_details_carry_the_upstream_code_and_status(
     """
     inject_error("status", ForgeApiError("NOT_FOUND", "mod is gone", 404))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -502,7 +459,7 @@ def test_error_without_structured_payload_gets_empty_details(
     """
     inject_error("status", ArchiveError("archive is corrupt"))
 
-    exit_code, lines = _invoke("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
 
     assert exit_code == 1
     data = lines[0]["data"]
@@ -591,7 +548,7 @@ def test_sync_catalog_reaches_forge_through_respx_and_reports_the_page_count(
         empty_page = page_envelope([], current_page=1, last_page=1, total=0)
         router.get("/mods").respond(200, json=empty_page)
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "sync_catalog",
             {"path": "/unused", "full": True, "db_path": str(db_path)},
         )
@@ -623,11 +580,11 @@ def test_rpc_output_does_not_depend_on_the_current_working_directory(
     The test changes to a different directory and invokes status via RPC; the
     result is independent of cwd since paths are resolved from the request.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     monkeypatch.chdir(elsewhere)
 
-    exit_code, lines = _invoke("status", {"path": str(repo.path)})
+    exit_code, lines = invoke_rpc("status", {"path": str(repo.path)})
 
     assert exit_code == 0
     assert lines == [
@@ -667,7 +624,7 @@ def test_locate_directory_serialises_every_matched_directory(tmp_path: Path, mon
         dataclasses.replace(original, function=lambda **_kwargs: matches),
     )
 
-    exit_code, lines = _invoke("locate_directory", {"name": "SPT", "fingerprint": ["BepInEx", "cache"]})
+    exit_code, lines = invoke_rpc("locate_directory", {"name": "SPT", "fingerprint": ["BepInEx", "cache"]})
 
     assert exit_code == 0
     assert lines == [
@@ -689,7 +646,7 @@ def test_init_game_dir_reports_spt_version_and_no_pre_existing_mods(
     The test directory has no mods installed, so init_game_dir reports empty
     lists and a non-empty commit hash for the initial commit.
     """
-    exit_code, lines = _invoke("init_game_dir", {"path": str(fake_game_dir)})
+    exit_code, lines = invoke_rpc("init_game_dir", {"path": str(fake_game_dir)})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -710,7 +667,7 @@ def test_list_mods_returns_the_installed_mod(clean_repo: Repo, install_commit: I
     """list_mods returns all installed mods with their version and state."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("list_mods", {"path": str(clean_repo.path)})
+    exit_code, lines = invoke_rpc("list_mods", {"path": str(clean_repo.path)})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -724,7 +681,7 @@ def test_mod_files_returns_the_files_of_the_install_commit(clean_repo: Repo, ins
     annotations."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("mod_files", {"path": str(clean_repo.path), "name": "CoolMod"})
+    exit_code, lines = invoke_rpc("mod_files", {"path": str(clean_repo.path), "name": "CoolMod"})
 
     assert exit_code == 0
     assert lines[0]["data"] == [{"path": "BepInEx/plugins/CoolMod.dll", "change": "added"}]
@@ -738,7 +695,7 @@ def test_history_without_name_returns_commits_newest_first(clean_repo: Repo, ins
     """
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("history", {"path": str(clean_repo.path)})
+    exit_code, lines = invoke_rpc("history", {"path": str(clean_repo.path)})
 
     assert exit_code == 0
     subjects = [commit["subject"] for commit in lines[0]["data"]]
@@ -753,7 +710,7 @@ def test_history_with_name_matches_case_insensitively(clean_repo: Repo, install_
     """
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("history", {"path": str(clean_repo.path), "name": "coolmod"})
+    exit_code, lines = invoke_rpc("history", {"path": str(clean_repo.path), "name": "coolmod"})
 
     assert exit_code == 0
     subjects = [commit["subject"] for commit in lines[0]["data"]]
@@ -770,7 +727,7 @@ def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
     """
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
+    exit_code, lines = invoke_rpc("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -779,7 +736,7 @@ def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
     assert data["commit"] != ""
     assert data["files"] == ["BepInEx/plugins/CoolMod.dll"]
 
-    _, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
+    _, listed_lines = invoke_rpc("list_mods", {"path": str(clean_repo.path)})
     assert listed_lines[0]["data"] == []
 
 
@@ -787,9 +744,9 @@ def test_enable_mod_restores_a_disabled_mod(clean_repo: Repo, install_commit: In
     """enable_mod restores a previously disabled mod and it reappears in
     list_mods."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
-    _invoke("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
+    invoke_rpc("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
-    exit_code, lines = _invoke("enable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
+    exit_code, lines = invoke_rpc("enable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -797,7 +754,7 @@ def test_enable_mod_restores_a_disabled_mod(clean_repo: Repo, install_commit: In
     assert data["state"] == "enabled"
     assert data["commit"] != ""
 
-    _, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
+    _, listed_lines = invoke_rpc("list_mods", {"path": str(clean_repo.path)})
     assert [mod["name"] for mod in listed_lines[0]["data"]] == ["CoolMod"]
 
 
@@ -809,7 +766,7 @@ def test_remove_mod_deletes_the_files_and_reports_them(clean_repo: Repo, install
     """
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("remove_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
+    exit_code, lines = invoke_rpc("remove_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -824,7 +781,7 @@ def test_check_profiles_reports_no_residue_for_a_db_free_mod(clean_repo: Repo, i
     templates."""
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
-    exit_code, lines = _invoke("check_profiles", {"path": str(clean_repo.path)})
+    exit_code, lines = invoke_rpc("check_profiles", {"path": str(clean_repo.path)})
 
     assert exit_code == 0
     assert lines[0]["data"] == {"residues": {}, "warnings": []}
@@ -855,7 +812,7 @@ def test_plan_profile_cleanup_reports_removals_through_rpc(clean_repo: Repo, ins
     (clean_repo.path / profile_relpath).write_text(json.dumps(profile), encoding="utf-8")
     clean_repo.commit("chore: profile snapshot", paths=[profile_relpath])
 
-    exit_code, lines = _invoke(
+    exit_code, lines = invoke_rpc(
         "plan_profile_cleanup",
         {"path": str(clean_repo.path), "mod_name": "ServerMod"},
     )
@@ -895,7 +852,7 @@ def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
     profile_path.write_text(json.dumps(profile), encoding="utf-8")
     clean_repo.commit("chore: profile snapshot", paths=[profile_relpath])
 
-    exit_code, lines = _invoke("clean_profile", {"path": str(clean_repo.path), "mod_name": "ServerMod"})
+    exit_code, lines = invoke_rpc("clean_profile", {"path": str(clean_repo.path), "mod_name": "ServerMod"})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -915,7 +872,7 @@ def test_clean_profile_maps_invalid_path_error_to_the_invalid_path_code(
     """
     inject_error("clean_profile", InvalidPathError("no such profile"))
 
-    exit_code, lines = _invoke("clean_profile", {"path": "/whatever", "mod_name": "ServerMod"})
+    exit_code, lines = invoke_rpc("clean_profile", {"path": "/whatever", "mod_name": "ServerMod"})
 
     assert exit_code == 1
     assert lines[0]["data"]["code"] == "INVALID_PATH"
@@ -934,7 +891,7 @@ def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:
         encoding="utf-8",
     )
 
-    exit_code, lines = _invoke(
+    exit_code, lines = invoke_rpc(
         "adopt_mod",
         {"path": str(clean_repo.path), "target": "SPT/user/mods/ManualMod"},
     )
@@ -955,7 +912,7 @@ def test_snapshot_commits_a_modified_profile(clean_repo: Repo) -> None:
         encoding="utf-8",
     )
 
-    exit_code, lines = _invoke("snapshot", {"path": str(clean_repo.path), "message": "test snapshot"})
+    exit_code, lines = invoke_rpc("snapshot", {"path": str(clean_repo.path), "message": "test snapshot"})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -976,12 +933,12 @@ def test_search_catalog_finds_a_synced_mod_by_name(clean_repo: Repo, tmp_path: P
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         router.get("/mods").respond(200, json=envelope)
-        _invoke(
+        invoke_rpc(
             "sync_catalog",
             {"path": str(clean_repo.path), "db_path": str(db_path)},
         )
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "search_catalog",
             {
                 "path": str(clean_repo.path),
@@ -1004,12 +961,12 @@ def test_browse_catalog_available_filter_keeps_the_uninstalled_synced_mod(clean_
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         router.get("/mods").respond(200, json=envelope)
-        _invoke(
+        invoke_rpc(
             "sync_catalog",
             {"path": str(clean_repo.path), "db_path": str(db_path)},
         )
 
-        available_exit, available_lines = _invoke(
+        available_exit, available_lines = invoke_rpc(
             "browse_catalog",
             {
                 "path": str(clean_repo.path),
@@ -1017,7 +974,7 @@ def test_browse_catalog_available_filter_keeps_the_uninstalled_synced_mod(clean_
                 "db_path": str(db_path),
             },
         )
-        installed_exit, installed_lines = _invoke(
+        installed_exit, installed_lines = invoke_rpc(
             "browse_catalog",
             {
                 "path": str(clean_repo.path),
@@ -1042,12 +999,12 @@ def test_browse_catalog_exposes_the_first_seen_at_stamp_of_a_synced_mod(clean_re
     envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         router.get("/mods").respond(200, json=envelope)
-        _invoke(
+        invoke_rpc(
             "sync_catalog",
             {"path": str(clean_repo.path), "db_path": str(db_path)},
         )
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "browse_catalog",
             {
                 "path": str(clean_repo.path),
@@ -1074,7 +1031,7 @@ def test_clear_catalog_cache_deletes_the_db_file_and_reports_removed_false_on_re
         pass
     assert db.exists()
 
-    exit_code, lines = _invoke("clear_catalog_cache", {"db_path": str(db)})
+    exit_code, lines = invoke_rpc("clear_catalog_cache", {"db_path": str(db)})
 
     assert exit_code == 0
     assert lines[0]["data"] == {
@@ -1085,7 +1042,7 @@ def test_clear_catalog_cache_deletes_the_db_file_and_reports_removed_false_on_re
     }
     assert not db.exists()
 
-    second_exit, second_lines = _invoke("clear_catalog_cache", {"db_path": str(db)})
+    second_exit, second_lines = invoke_rpc("clear_catalog_cache", {"db_path": str(db)})
 
     assert second_exit == 0
     assert second_lines[0]["data"]["removed"] is False
@@ -1098,8 +1055,6 @@ def test_clear_catalog_cache_with_downloads_also_clears_the_archive_cache(
     return value must carry the archive directory and the bytes it freed --
     not just clear the catalog db as the ``downloads=False`` default does.
     """
-    from sptmod.core.workspace import download_cache_dir
-
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     db = tmp_path / "forge-cache.db"
     with Catalog(db):
@@ -1113,7 +1068,7 @@ def test_clear_catalog_cache_with_downloads_also_clears_the_archive_cache(
     (entry / "meta.json").write_text(meta, encoding="utf-8")
     expected_freed = len(payload) + len(meta.encode("utf-8"))
 
-    exit_code, lines = _invoke("clear_catalog_cache", {"db_path": str(db), "downloads": True})
+    exit_code, lines = invoke_rpc("clear_catalog_cache", {"db_path": str(db), "downloads": True})
 
     assert exit_code == 0
     assert lines[0]["data"] == {
@@ -1163,7 +1118,7 @@ def _seed_forge_mod(
     )
     page = page_envelope([mod], current_page=1, last_page=1, total=1)
     router.get("/mods").respond(200, json=page)
-    sync_exit, _sync_lines = _invoke("sync_catalog", {"path": "/unused", "full": True, "db_path": str(db_path)})
+    sync_exit, _sync_lines = invoke_rpc("sync_catalog", {"path": "/unused", "full": True, "db_path": str(db_path)})
     assert sync_exit == 0
 
     versions_page = page_envelope(
@@ -1227,11 +1182,11 @@ def test_get_mod_details_combines_cached_data_with_the_live_description(
     )
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         router.get("/mods").respond(200, json=page)
-        _invoke("sync_catalog", {"path": "/unused", "db_path": str(db_path)})
+        invoke_rpc("sync_catalog", {"path": "/unused", "db_path": str(db_path)})
         router.get("/mod/42/versions").respond(200, json=versions_page)
         router.get("/mod/42").respond(200, json={"success": True, "data": mod})
 
-        exit_code, lines = _invoke("get_mod_details", {"mod_id": 42, "db_path": str(db_path)})
+        exit_code, lines = invoke_rpc("get_mod_details", {"mod_id": 42, "db_path": str(db_path)})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -1259,7 +1214,7 @@ def test_plan_mod_install_resolves_the_target_and_its_download_link(fake_game_di
     The response includes the download link from the version record and the
     version_id (9010) for later use by install_mod.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         _seed_forge_mod(
@@ -1273,7 +1228,7 @@ def test_plan_mod_install_resolves_the_target_and_its_download_link(fake_game_di
             content_length=1000,
         )
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "plan_mod_install",
             {
                 "path": str(fake_game_dir),
@@ -1305,7 +1260,7 @@ def test_install_mod_downloads_and_installs_the_target(
 ) -> None:
     """install_mod downloads a mod archive from the resolved link and
     installs it with Forge metadata."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     archive = make_archive(
         {
@@ -1330,7 +1285,7 @@ def test_install_mod_downloads_and_installs_the_target(
         )
         router.get(link).respond(200, content=body, headers={"Content-Length": str(len(body))})
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "install_mod",
             {
                 "path": str(fake_game_dir),
@@ -1365,7 +1320,7 @@ def test_check_updates_reports_an_available_update(
     CoolMod 1.0.0 (Forge ID 10) has an update to 2.0.0; available includes the
     link and new version details with version_id=200.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"})
     db_path = tmp_path / "catalog.db"
     data = {
@@ -1398,7 +1353,7 @@ def test_check_updates_reports_an_available_update(
     with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
         router.get("/mods/updates").respond(200, json={"success": True, "data": data})
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "check_updates",
             {"path": str(fake_game_dir), "db_path": str(db_path)},
         )
@@ -1429,7 +1384,7 @@ def test_update_mod_applies_the_recommended_version(
     Installed CoolMod 1.0.0 is replaced with 2.0.0; the result includes
     operation_id in data, previous_version=\"1.0.0\", and new commit hash.
     """
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"})
     db_path = tmp_path / "catalog.db"
     new_archive = make_archive(
@@ -1469,7 +1424,7 @@ def test_update_mod_applies_the_recommended_version(
         router.get("/mods/updates").respond(200, json={"success": True, "data": data})
         router.get(link).respond(200, content=body, headers={"Content-Length": str(len(body))})
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "update_mod",
             {
                 "path": str(fake_game_dir),
@@ -1498,11 +1453,11 @@ def test_import_list_reports_a_mod_only_the_list_has_as_missing(fake_game_dir: P
     With no prior installation, missing contains the mod name and version;
     installed, different, and extra are all empty.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     list_file = tmp_path / "mods.txt"
     list_file.write_text("GhostMod 2.0.0\n", encoding="utf-8")
 
-    exit_code, lines = _invoke("import_list", {"path": str(fake_game_dir), "list_file": str(list_file)})
+    exit_code, lines = invoke_rpc("import_list", {"path": str(fake_game_dir), "list_file": str(list_file)})
 
     assert exit_code == 0
     data = lines[0]["data"]
@@ -1527,7 +1482,7 @@ def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
     All lines are events with the result event containing installed mod details
     including the downloaded version; progress events precede result.
     """
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     db_path = tmp_path / "catalog.db"
     archive = make_archive(
         {
@@ -1555,7 +1510,7 @@ def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
         )
         router.get(link).respond(200, content=body, headers={"Content-Length": str(len(body))})
 
-        exit_code, lines = _invoke(
+        exit_code, lines = invoke_rpc(
             "import_list",
             {
                 "path": str(fake_game_dir),

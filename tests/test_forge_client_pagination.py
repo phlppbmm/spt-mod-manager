@@ -4,18 +4,9 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import ClientFactory
+from forge_json import mod_json_minimal, page_envelope
 from sptmod.core.forge.client import DEFAULT_BASE_URL
-from test_forge_client_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    mod_json_minimal,
-    page_envelope,
-    recording_sleep,
-    respx_router,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_iter_mods_walks_every_page_exactly_once_in_order(
@@ -109,7 +100,7 @@ def test_iter_mods_stops_when_next_url_repeats_an_already_fetched_url(
     responses = [httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
     call_count = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         call_count["n"] += 1
         if call_count["n"] > 3:
             # Bail out fast instead of relying only on the pytest-timeout
@@ -185,7 +176,7 @@ def test_iter_mods_stops_when_last_page_reached_despite_non_null_next(
     )
     call_count = {"n": 0}
 
-    def side_effect(request: httpx.Request) -> httpx.Response:
+    def side_effect(_request: httpx.Request) -> httpx.Response:
         call_count["n"] += 1
         if call_count["n"] > 3:
             raise AssertionError("iter_mods kept fetching past meta.last_page")

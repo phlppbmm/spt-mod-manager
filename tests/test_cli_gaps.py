@@ -14,87 +14,32 @@ interactive per-mod adopt loop.
 import json
 import sys
 from pathlib import Path
-from typing import Protocol
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
-from fixture_types import InstallCommit, MakeArchive
-from sptmod.cli import app, main
-from sptmod.core import game_dir
-from sptmod.core.game_dir import detect_layout
-from sptmod.core.repo import Repo
-from test_forge_client_fixtures import (
+from conftest import clean_repo_at
+from fixture_types import InstallCommit, MakeArchive, TrailerInstallCommit
+from forge_json import (
+    current_version_json,
     mod_json_full,
     owner_json,
     page_envelope,
-    respx_router,
     success_envelope,
     version_json,
 )
+from sptmod.cli import app, main
+from sptmod.core.repo import Repo
 
+pytestmark = pytest.mark.usefixtures("not_running")
 
-class TrailerInstallCommit(Protocol):
-    """``install_commit`` seen by the call sites that pass trailer overrides.
-
-    ``fixture_types.InstallCommit`` also declares the keyword-only ``files``
-    and ``minute`` parameters, so a ``**{"Mod-Forge-Id": ...}`` unpack is
-    rejected (a ``str`` value could land on ``minute: int``). The call sites
-    below pass trailer overrides only.
-    """
-
-    def __call__(
-        self,
-        repo: Repo,
-        name: str,
-        version: str = ...,
-        *,
-        mod_type: str = ...,
-        **trailer_overrides: str,
-    ) -> str: ...
-
-
-__all__ = ["respx_router"]
 
 runner = CliRunner()
 
 SPT_VERSION = "4.1.0"
 SPT_CONSTRAINT = "^4.0.0"
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patches ``game_dir.running_game_processes`` to return an empty list.
-
-    Every CLI test runs as if no SPT process were running.
-    """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
-
-
-@pytest.fixture
-def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``default_db_path()`` at an isolated location for CLI tests.
-
-    The CLI never passes ``db_path`` explicitly, so it resolves through
-    ``forge.catalog.default_db_path()``, which must not touch the developer's
-    real config directory.
-    """
-    config_dir = tmp_path / "config"
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
-    return config_dir / "sptmod" / "forge-catalog.db"
-
-
-def _clean_repo(path: Path) -> Repo:
-    """Initialize a game directory repository and commit the baseline configuration."""
-    repo = Repo.init(detect_layout(path))
-    repo.commit(
-        f"chore: clean SPT {SPT_VERSION}",
-        trailers={"Spt-Version": SPT_VERSION},
-        paths=None,
-    )
-    return repo
 
 
 def _mod_json(mod_id: int, name: str, version: str) -> dict[str, object]:
@@ -172,18 +117,6 @@ def _seed_forge_mod(
     respx_router.get("/mods/dependencies").mock(side_effect=_empty_dependencies)
 
 
-def _current_version(*, mod_id: int, name: str, version: str, version_id: int) -> dict[str, object]:
-    """Build a current version object for a Forge update response."""
-    return {
-        "id": version_id,
-        "mod_id": mod_id,
-        "guid": None,
-        "name": name,
-        "version": version,
-        "slug": name.lower().replace(" ", "-"),
-    }
-
-
 def _updates_payload(kind: str, *, mod_id: int, name: str, version: str) -> dict[str, object]:
     """A ``/mods/updates`` envelope with exactly one entry, in the list ``kind``."""
     payload: dict[str, object] = {
@@ -196,7 +129,7 @@ def _updates_payload(kind: str, *, mod_id: int, name: str, version: str) -> dict
     if kind == "blocked":
         payload["blocked_updates"] = [
             {
-                "current_version": _current_version(mod_id=mod_id, name=name, version=version, version_id=1),
+                "current_version": current_version_json(mod_id=mod_id, name=name, version=version, version_id=1),
                 "latest_version": {
                     "id": 2,
                     "version": "2.0.0",
@@ -278,7 +211,7 @@ def test_snapshot_commits_the_modified_profile_and_reports_it(
 ) -> None:
     """If ``snapshot``'s print line is removed, this fails: no ``snapshot:``
     line appears even though the commit itself still happens."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     commits_before = len(repo.log())
     monkeypatch.chdir(fake_game_dir)
     profile = fake_game_dir / "SPT" / "user" / "profiles" / "abc.json"
@@ -302,7 +235,7 @@ def test_install_rejects_both_a_mod_argument_and_file(
 ) -> None:
     """If the ``MOD``/``--file`` exclusivity check is removed, this fails:
     exit code stays 0 instead of the BadParameter usage error."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
 
@@ -315,7 +248,7 @@ def test_install_rejects_both_a_mod_argument_and_file(
 def test_install_rejects_neither_a_mod_argument_nor_file(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the missing-target check is removed, this fails: exit code stays 0
     instead of the BadParameter usage error."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["install"])
@@ -336,7 +269,7 @@ def test_install_forge_path_declining_the_plan_cancels_without_a_commit(
     """If the plan-confirmation prompt is removed, this fails: the mod gets
     installed (one extra commit) even though the simulated user answered
     'n'."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     commits_before = len(repo.log())
     _seed_forge_mod(
         respx_router,
@@ -367,7 +300,7 @@ def test_install_forge_path_success_prints_each_installed_mod(
     """If the ``for installed in result.installed: _print_install(...)`` loop
     is removed, this fails: the CLI's own install output never names the
     mod even though the commit (checked via the RPC-covered path) succeeds."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     archive = make_archive(
         {
             "SPT/user/mods/Target Mod/package.json": json.dumps(
@@ -408,7 +341,7 @@ def test_install_plan_with_no_reported_size_renders_without_crashing(
     """Pins ``_size(None)``: if the ``None`` guard is removed, dividing
     ``None`` by ``_BYTES_PER_MB`` raises a ``TypeError`` before the plan table
     (and the cancel prompt after it) is ever reached, so this fails."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     _seed_forge_mod(
         respx_router,
         mod_id=503,
@@ -441,7 +374,7 @@ def test_update_reports_a_mod_forge_cannot_identify_as_skipped_and_stops(
     'nothing to update' print, is removed, this fails: neither line appears
     even though the mod carries no Forge ID and Forge lists nothing to
     apply."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "Ghost Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": ""})
     monkeypatch.chdir(fake_game_dir)
 
@@ -474,7 +407,7 @@ def test_update_check_renders_the_blocked_incompatible_and_uptodate_rows(
 ) -> None:
     """If ``_updates_table``'s loop for this list is removed, this fails: the
     row's state text never appears even though Forge reported an entry."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "Some Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "77"})
     respx_router.get("/mods/updates").mock(
         return_value=httpx.Response(
@@ -500,13 +433,13 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
     the plan and confirm, then ``update_mod`` re-queries before downloading.
     If ``_print_update``'s notice branch is removed, this fails: the second
     (up-to-date) answer's ``notice`` is silently dropped instead of printed."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"})
     available = {
         "spt_version": SPT_VERSION,
         "updates": [
             {
-                "current_version": _current_version(mod_id=10, name="CoolMod", version="1.0.0", version_id=100),
+                "current_version": current_version_json(mod_id=10, name="CoolMod", version="1.0.0", version_id=100),
                 "recommended_version": {
                     "id": 200,
                     "version": "2.0.0",
@@ -525,7 +458,7 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
     up_to_date = _updates_payload("up_to_date", mod_id=10, name="CoolMod", version="1.0.0")
     calls = {"n": 0}
 
-    def _side_effect(request: httpx.Request) -> httpx.Response:
+    def _side_effect(_request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         data = available if calls["n"] == 1 else up_to_date
         return httpx.Response(200, json=success_envelope(data))
@@ -550,7 +483,7 @@ def test_disabling_an_already_disabled_mod_prints_a_notice(
     """If ``_print_toggle``'s notice branch is removed, this fails: the
     second disable prints the normal 'disabled ...' line (with an empty
     commit hash) instead of the notice."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
     first = runner.invoke(app, ["disable", "CoolMod"])
@@ -568,7 +501,7 @@ def test_enabling_an_already_active_mod_prints_a_notice(
     """If ``_print_toggle``'s notice branch is removed, this fails: enabling
     a never-disabled mod prints the normal 'enabled ...' line instead of the
     notice."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
@@ -584,7 +517,7 @@ def test_enabling_an_already_active_mod_prints_a_notice(
 def test_export_rejects_an_unknown_format(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If ``_export_format``'s raise is removed, this fails: exit code stays
     0 instead of the BadParameter usage error."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, ["export", "--format", "yaml"])
@@ -606,7 +539,7 @@ def test_browse_available_filter_excludes_the_installed_mod(
     """If ``_browse_filter``'s ``available`` branch is removed, ``available``
     falls through to the default ``all`` filter, so this fails: the installed
     mod (which ``available`` must exclude) still appears."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
@@ -639,7 +572,7 @@ def test_browse_with_no_filter_flag_lists_every_cached_mod(
     """If ``_browse_filter``'s default-``all`` fallthrough is removed (e.g.
     it returns ``None``), this fails: ``browse`` with no flags crashes or
     lists nothing instead of showing the cached mod."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([_mod_json(1, "Cached Mod", "1.0.0")], total=1))
     )
@@ -674,7 +607,7 @@ def test_status_reports_dirty_profiles_or_nothing_changed(
     If the ``not any(...)`` guard in ``_print_status`` is removed, the
     clean-tree case fails: no summary line appears instead of 'nothing
     changed'."""
-    _clean_repo(fake_game_dir)
+    clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
     if write_profile:
         profile = fake_game_dir / "SPT" / "user" / "profiles" / "abc.json"
@@ -697,7 +630,7 @@ def test_check_reports_a_warning_for_an_unparseable_db_file(
 ) -> None:
     """If the ``for warning in result.warnings`` loop is removed, this fails:
     no warning line appears even though the mod's db file is not valid JSON."""
-    repo = _clean_repo(fake_game_dir)
+    repo = clean_repo_at(fake_game_dir)
     install_commit(
         repo,
         "CoolMod",

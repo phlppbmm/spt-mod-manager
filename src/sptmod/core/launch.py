@@ -597,38 +597,45 @@ def _spawn_watcher(path: Path) -> _ProcessRef:
     )
 
 
-def _spawn_detached(
+def _open_detached(
     argv: Sequence[str], cwd: Path, environment: dict[str, str]
-) -> _ProcessRef:
-    """Start ``argv`` so it keeps running after this process is gone.
+) -> subprocess.Popen[bytes]:
+    """Start ``argv`` detached from this process and return the raw handle.
 
     The child gets its own session (or, on Windows, its own process group and
     no console), so it neither receives the signals of the caller nor leaves a
-    window behind, and all three of its streams are closed.
+    window behind, and all three of its streams are closed. The handle is
+    deliberately not closed: the process must outlive this one.
     """
+    if sys.platform == "win32":
+        return subprocess.Popen(
+            list(argv),
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW,
+        )
+    return subprocess.Popen(
+        list(argv),
+        cwd=cwd,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def _spawn_detached(
+    argv: Sequence[str], cwd: Path, environment: dict[str, str]
+) -> _ProcessRef:
+    """Start ``argv`` so it keeps running after this process is gone."""
     try:
-        if sys.platform == "win32":
-            process = subprocess.Popen(
-                list(argv),
-                cwd=cwd,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.DETACHED_PROCESS
-                | subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            process = subprocess.Popen(
-                list(argv),
-                cwd=cwd,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        process = _open_detached(argv, cwd, environment)
     except OSError as error:
         raise LaunchError(f"{argv[0]} could not be started: {error}") from error
     return _ProcessRef(pid=process.pid, started_at=_started_at(process.pid))

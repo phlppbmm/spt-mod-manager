@@ -4,10 +4,8 @@ import httpx
 import pytest
 import respx
 
+from forge_json import page_envelope
 from sptmod.core.forge.client import ForgeClient
-from test_forge_client_fixtures import page_envelope, respx_router
-
-__all__ = ["respx_router"]
 
 FORGE_URL_ENV_VAR = "SPTMOD_FORGE_URL"
 

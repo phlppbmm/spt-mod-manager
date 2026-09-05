@@ -1222,6 +1222,9 @@ def sync_catalog(
             previous contents.
         ForgeApiError: The API answered with an error envelope.
     """
+    # The cache is machine-wide, so the game directory only identifies the
+    # caller here; every service function takes it for a uniform RPC contract.
+    del path
     if client is not None:
         with _open_catalog(db_path) as catalog:
             return catalog.sync(client, full=full, progress=progress)
@@ -1268,20 +1271,20 @@ def search_catalog(
 
 def browse_catalog(
     path: Path,
-    filter: BrowseFilter = "all",
+    catalog_filter: BrowseFilter = "all",
     compatible_only: bool = False,
     *,
     db_path: Path | None = None,
 ) -> list[CatalogEntry]:
     """Return the cached catalog joined with the installed mods of ``path``.
 
-    ``filter`` selects one of the three frontend lists: ``installed`` keeps the
+    ``catalog_filter`` selects one of the three frontend lists: ``installed`` keeps the
     entries matching an active mod, including the ones with an update
     available, ``available`` keeps the rest, and ``all`` keeps everything.
 
     Args:
         path: The tracked game directory.
-        filter: Which of the three lists to return.
+        catalog_filter: Which of the three lists to return.
         compatible_only: Keep only mods with a version compatible with the SPT
             version of the game directory.
         db_path: Catalog database path; defaults to :func:`default_db_path`.
@@ -1296,9 +1299,9 @@ def browse_catalog(
     installed = list_mods(path)
     with _open_catalog(db_path) as catalog:
         entries = _classified(catalog, installed, path, compatible_only)
-    if filter == "all":
+    if catalog_filter == "all":
         return entries
-    wanted = filter == "installed"
+    wanted = catalog_filter == "installed"
     return [entry for entry in entries if (entry.state != "available") == wanted]
 
 
@@ -1587,7 +1590,7 @@ def _snapshot(path: Path, message: str | None) -> SnapshotResult:
 
 def export_mods(
     path: Path,
-    format: ExportFormat = "text",
+    export_format: ExportFormat = "text",
     client_only: bool = False,
     *,
     db_path: Path | None = None,
@@ -1603,7 +1606,7 @@ def export_mods(
 
     Args:
         path: The tracked game directory.
-        format: The output format.
+        export_format: The output format.
         client_only: Keep only mods with a client part.
         db_path: Catalog database path; defaults to :func:`default_db_path`.
             An unusable catalog cache is not fatal here: the list is then
@@ -1634,7 +1637,7 @@ def export_mods(
         ),
         key=lambda entry: entry.name.casefold(),
     )
-    if format == "json":
+    if export_format == "json":
         payload = {
             "mods": [
                 {

@@ -3,14 +3,7 @@
 import httpx
 import respx
 
-from test_forge_client_fixtures import (
-    ClientFactory,
-    client_factory,
-    fake_clock,
-    recording_sleep,
-)
-
-__all__ = ["client_factory", "fake_clock", "recording_sleep"]
+from fixture_types import ClientFactory
 
 DOWNLOAD_URL = "https://cdn.example.com/releases/mod-1.0.0.zip"
 
@@ -61,4 +54,4 @@ def test_stream_of_empty_body_yields_no_chunks(client_factory: ClientFactory) ->
         with client.stream(DOWNLOAD_URL) as download:
             chunks = list(download.chunks)
 
-        assert chunks == []
+        assert not chunks

@@ -85,60 +85,37 @@ reportUnknownLambdaType = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pylint.main]
+load-plugins = ["pylint_pytest"]
+source-roots = ["src", "tests"]
 # workspace.py imports msvcrt under a sys.platform == "win32" guard (Windows-only).
 ignored-modules = ["msvcrt"]
 
-[tool.pylint."messages control"]
-disable = [
-    # Test names are the documentation and ruff's pydocstyle rules are not
-    # enabled, so this only produces noise.
-    "missing-function-docstring",
-    # Every pytest fixture argument shadows the fixture function.
-    "redefined-outer-name",
-    # Parallel arrange blocks are intentional; the suite is the Rust-port spec
-    # and must stay readable per test.
-    "duplicate-code",
-    # `== []` / `== {}` are exact-value assertions in tests; rewriting them to
-    # `not x` would weaken them.
-    "use-implicit-booleaness-not-comparison",
-    # Service functions keep a uniform (path, ...) signature for the RPC
-    # contract (services.sync_catalog ignores `path`), and fixtures are
-    # requested for their effects.
-    "unused-argument",
-    # ruff's isort (lint select "I") owns import order; pylint mis-sorts the
-    # sys.path-based test-helper imports.
-    "wrong-import-order",
-    # Deliberate lazy imports (cli.py -> sptmod.server.rpc) and per-test imports.
-    "import-outside-toplevel",
-    # Detached Popen processes (launch.py) and test stub processes outlive the
-    # enclosing block.
-    "consider-using-with",
-    # `format` and `filter` are part of the service-function/CLI contract names.
-    "redefined-builtin",
-    # ruff E501 owns line length (88); pylint's 100 disagrees and does not
-    # honour ruff's pragma-comment exemption.
-    "line-too-long",
-    # rpc.py's `except Exception` is the RPC error boundary by design.
-    "broad-exception-caught",
-]
-
+# Raised over the pylint defaults, never disabled: each limit is the smallest
+# value the current code needs, with the function or class that drives it.
 [tool.pylint.design]
-# Raised, not disabled: keeps a ceiling. Max observed in parentheses.
-max-args = 12                 # (11)
-max-positional-arguments = 12 # (9)
-max-locals = 30               # (27)
-max-attributes = 30           # (27)
-max-returns = 10              # (9)
-min-public-methods = 0        # frozen dataclasses have none
+max-args = 11                # services.install_from_archive: its keyword list is
+                             # the InstallFromArchiveRequest schema
+max-positional-arguments = 9 # test_profile: nine fixtures in one test signature
+max-locals = 27              # services._apply_update
+max-attributes = 27          # forge.client.ForgeMod: one attribute per API field
+max-returns = 9              # modmeta._token_matches
+min-public-methods = 0       # frozen dataclasses and Protocols have none
+
+[tool.pylint.similarities]
+# The pydantic request/response models mirror the core dataclasses field for
+# field -- that duplication is the API contract (forge.catalog.CatalogMod and
+# schemas.CatalogMod share 23 lines) and a schema-parity test enforces it.
+min-similarity-lines = 24
 
 [tool.pylint.format]
 max-line-length = 119
-max-module-lines = 4000       # (services.py 3480)
+max-module-lines = 4000      # core/services.py (3480 lines) until it is split
 
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
     "pylint>=4.0.8",
+    "pylint-pytest>=1.1.8",
     "pyright[nodejs]>=1.1.411",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",

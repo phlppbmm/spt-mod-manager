@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import empty_pmc_profile
 from fixture_types import InstallCommit, JsonDict
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
@@ -28,6 +29,8 @@ from sptmod.core.errors import (
 )
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
+
+pytestmark = pytest.mark.usefixtures("not_running")
 
 # --------------------------------------------------------------------------
 # Fixed content IDs shared by every test in this module. Item and trader IDs
@@ -50,12 +53,6 @@ OTHER_ACHIEVEMENT_ID = "achievement-other"
 STRING_ONLY_ITEM_ID = "5c0d1b8b86f7744bb2683cbb"
 
 MOD_NAME = "TestMod"
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the game process check to prevent GameRunningError during profile cleanup tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def _install_mod(repo: Repo, install_commit: InstallCommit, name: str = MOD_NAME, minute: int = 1) -> str:
@@ -291,7 +288,7 @@ def test_plan_profile_cleanup_does_not_modify_the_profile_repo_or_history(
 
     plan = services.plan_profile_cleanup(clean_repo.path, MOD_NAME)
 
-    assert plan.removals != []
+    assert plan.removals
     assert profile_path.read_bytes() == before_bytes
     assert clean_repo.log()[0].hash == before_head
     assert clean_repo.is_clean() is True
@@ -331,7 +328,7 @@ def test_plan_profile_cleanup_works_for_an_already_removed_mod(
 
     plan = services.plan_profile_cleanup(clean_repo.path, MOD_NAME)
 
-    assert plan.removals != []
+    assert plan.removals
     assert plan.mod == MOD_NAME
 
 
@@ -427,7 +424,7 @@ def test_clean_profile_removes_every_category_hit_and_keeps_unrelated_ids(
     result = services.clean_profile(clean_repo.path, MOD_NAME)
 
     assert result.profiles == ["abc"]
-    assert result.untouched == []
+    assert not result.untouched
     cleaned = json.loads(profile_path.read_text(encoding="utf-8"))
 
     for name in ("pmc", "scav"):
@@ -531,15 +528,7 @@ def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup
     or snapshot commit is created.
     """
     _install_mod(clean_repo, install_commit)
-    untouched_profile = {
-        "characters": {
-            "pmc": {
-                "Inventory": {"items": []},
-                "TradersInfo": {},
-                "Quests": [],
-            }
-        }
-    }
+    untouched_profile = empty_pmc_profile()
     profile_path = _write_profile(clean_repo, "abc", untouched_profile)
     before_bytes = profile_path.read_bytes()
     before_commits = len(clean_repo.log())
@@ -549,8 +538,8 @@ def test_clean_profile_with_no_hits_leaves_the_file_byte_identical_and_no_backup
 
     result = services.clean_profile(clean_repo.path, MOD_NAME)
 
-    assert result.profiles == []
-    assert result.backups == []
+    assert not result.profiles
+    assert not result.backups
     assert result.snapshot == ""
     assert profile_path.read_bytes() == before_bytes
     assert len(clean_repo.log()) == before_commits

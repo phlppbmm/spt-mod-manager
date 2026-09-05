@@ -7,7 +7,6 @@ function, request/response ``$ref`` wiring, required standalone schemas,
 absence of JSON ``null`` anywhere).
 """
 
-import inspect
 import json
 import runpy
 import subprocess
@@ -17,23 +16,14 @@ from typing import Any
 
 import pytest
 
-from sptmod.core import services
+from conftest import service_function_names
 from sptmod.server.dump_openapi import DEFAULT_TARGET, build_openapi, dump, main
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMMITTED_OPENAPI_JSON = REPO_ROOT / "openapi.json"
 
 
-def _service_function_names() -> list[str]:
-    """Every public, module-defined function of ``sptmod.core.services``."""
-    return sorted(
-        name
-        for name, obj in vars(services).items()
-        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
-    )
-
-
-SERVICE_FUNCTION_NAMES = _service_function_names()
+SERVICE_FUNCTION_NAMES = service_function_names()
 
 
 def _camel(name: str) -> str:
@@ -301,7 +291,7 @@ def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> 
     null_paths: list[str] = []
     _find_nulls(document, "", null_paths)
 
-    assert null_paths == []
+    assert not null_paths
 
 
 # --------------------------------------------------------------------------

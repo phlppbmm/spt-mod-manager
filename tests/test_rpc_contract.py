@@ -12,6 +12,7 @@ import inspect
 import pytest
 from pydantic import BaseModel
 
+from conftest import service_function_names
 from sptmod.core import errors as core_errors
 from sptmod.core import services
 from sptmod.core.forge.catalog import (
@@ -33,17 +34,7 @@ from sptmod.server import schemas
 from sptmod.server.errors import ERROR_MAPPING, FALLBACK_ERROR_CODE, error_code
 from sptmod.server.rpc import RPC_FUNCTIONS
 
-
-def _service_function_names() -> list[str]:
-    """Every public, module-defined function of ``sptmod.core.services``."""
-    return sorted(
-        name
-        for name, obj in vars(services).items()
-        if inspect.isfunction(obj) and obj.__module__ == services.__name__ and not name.startswith("_")
-    )
-
-
-SERVICE_FUNCTION_NAMES = _service_function_names()
+SERVICE_FUNCTION_NAMES = service_function_names()
 
 
 def _camel(name: str) -> str:

@@ -23,20 +23,16 @@ import json
 import pytest
 
 from fixture_types import InstallCommit, MakeArchive
-from sptmod.core import game_dir, services
+from sptmod.core import services
 from sptmod.core.errors import ConflictError, DependencyError
 from sptmod.core.repo import Repo
+
+pytestmark = pytest.mark.usefixtures("not_running")
 
 _BLOCKING_ERRORS: tuple[type[ConflictError | DependencyError], ...] = (
     ConflictError,
     DependencyError,
 )
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock the game process detector to prevent false failures during install tests."""
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
 
 
 def test_tracked_file_conflict_aborts_install_and_names_owning_mod(

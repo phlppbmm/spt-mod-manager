@@ -20,6 +20,7 @@ from sptmod.core.forge.catalog import (
     CatalogVersion,
     SyncResult,
 )
+from sptmod.core.launch import LaunchResult, LaunchStatus, StopResult
 from sptmod.core.models import (
     CommitInfo,
     Conflict,
@@ -126,9 +127,9 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (services.CleanupPlan, schemas.CleanupPlan),
     (services.CleanupResult, schemas.CleanupResult),
     (services.UntouchedResidue, schemas.UntouchedResidue),
-    (services.LaunchResult, schemas.LaunchResult),
-    (services.LaunchStatus, schemas.LaunchStatus),
-    (services.StopResult, schemas.StopResult),
+    (LaunchResult, schemas.LaunchResult),
+    (LaunchStatus, schemas.LaunchStatus),
+    (StopResult, schemas.StopResult),
 ]
 
 

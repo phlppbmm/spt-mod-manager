@@ -43,6 +43,7 @@ def _run_rpc(name: str, request: dict[str, object]) -> subprocess.CompletedProce
         capture_output=True,
         text=True,
         timeout=5,
+        check=False,
     )
 
 
@@ -128,6 +129,7 @@ def test_malformed_stdin_exits_two() -> None:
         capture_output=True,
         text=True,
         timeout=5,
+        check=False,
     )
 
     assert process.returncode == 2

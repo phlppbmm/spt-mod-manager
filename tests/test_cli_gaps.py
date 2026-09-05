@@ -14,12 +14,14 @@ interactive per-mod adopt loop.
 import json
 import sys
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app, main
 from sptmod.core import game_dir
 from sptmod.core.game_dir import detect_layout
@@ -32,6 +34,27 @@ from test_forge_client_fixtures import (
     success_envelope,
     version_json,
 )
+
+
+class TrailerInstallCommit(Protocol):
+    """``install_commit`` seen by the call sites that pass trailer overrides.
+
+    ``fixture_types.InstallCommit`` also declares the keyword-only ``files``
+    and ``minute`` parameters, so a ``**{"Mod-Forge-Id": ...}`` unpack is
+    rejected (a ``str`` value could land on ``minute: int``). The call sites
+    below pass trailer overrides only.
+    """
+
+    def __call__(
+        self,
+        repo: Repo,
+        name: str,
+        version: str = ...,
+        *,
+        mod_type: str = ...,
+        **trailer_overrides: str,
+    ) -> str: ...
+
 
 __all__ = ["respx_router"]
 
@@ -276,7 +299,7 @@ def test_snapshot_commits_the_modified_profile_and_reports_it(
 
 
 def test_install_rejects_both_a_mod_argument_and_file(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
     """If the ``MOD``/``--file`` exclusivity check is removed, this fails:
     exit code stays 0 instead of the BadParameter usage error."""
@@ -342,7 +365,7 @@ def test_install_forge_path_success_prints_each_installed_mod(
     monkeypatch: pytest.MonkeyPatch,
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
-    make_archive,
+    make_archive: MakeArchive,
 ) -> None:
     """If the ``for installed in result.installed: _print_install(...)`` loop
     is removed, this fails: the CLI's own install output never names the
@@ -415,7 +438,9 @@ def test_install_plan_with_no_reported_size_renders_without_crashing(
 
 
 def test_update_reports_a_mod_forge_cannot_identify_as_skipped_and_stops(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    install_commit: TrailerInstallCommit,
 ) -> None:
     """If the ``for skipped in report.skipped`` loop, or the empty-report
     'nothing to update' print, is removed, this fails: neither line appears
@@ -452,7 +477,7 @@ def test_update_check_renders_the_blocked_incompatible_and_uptodate_rows(
     fake_game_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: TrailerInstallCommit,
 ) -> None:
     """If ``_updates_table``'s loop for this list is removed, this fails: the
     row's state text never appears even though Forge reported an entry."""
@@ -480,7 +505,7 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
     fake_game_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
     respx_router: respx.MockRouter,
-    install_commit,
+    install_commit: TrailerInstallCommit,
 ) -> None:
     """Pins the TOCTOU no-op path: ``update`` queries Forge once to display
     the plan and confirm, then ``update_mod`` re-queries before downloading.
@@ -537,7 +562,7 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
 
 
 def test_disabling_an_already_disabled_mod_prints_a_notice(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     """If ``_print_toggle``'s notice branch is removed, this fails: the
     second disable prints the normal 'disabled ...' line (with an empty
@@ -555,7 +580,7 @@ def test_disabling_an_already_disabled_mod_prints_a_notice(
 
 
 def test_enabling_an_already_active_mod_prints_a_notice(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     """If ``_print_toggle``'s notice branch is removed, this fails: enabling
     a never-disabled mod prints the normal 'enabled ...' line instead of the
@@ -598,7 +623,7 @@ def test_browse_available_filter_excludes_the_installed_mod(
     monkeypatch: pytest.MonkeyPatch,
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
-    install_commit,
+    install_commit: TrailerInstallCommit,
 ) -> None:
     """If ``_browse_filter``'s ``available`` branch is removed, ``available``
     falls through to the default ``all`` filter, so this fails: the installed
@@ -694,7 +719,7 @@ def test_status_reports_dirty_profiles_or_nothing_changed(
 
 
 def test_check_reports_a_warning_for_an_unparseable_db_file(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     """If the ``for warning in result.warnings`` loop is removed, this fails:
     no warning line appears even though the mod's db file is not valid JSON."""

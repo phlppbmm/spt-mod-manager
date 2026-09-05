@@ -12,15 +12,16 @@ import dataclasses
 import json
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
@@ -38,7 +39,7 @@ from sptmod.core.errors import (
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
 from sptmod.core.game_dir import detect_layout
-from sptmod.core.models import Conflict, ProfileResidue
+from sptmod.core.models import Conflict, ModInfo, ProfileResidue
 from sptmod.core.repo import Repo
 from sptmod.server import rpc
 from test_forge_client_fixtures import (
@@ -50,6 +51,44 @@ from test_forge_client_fixtures import (
 )
 
 SPT_CONSTRAINT = "^4.0.0"
+
+
+class TrailerInstallCommit(Protocol):
+    """``install_commit`` seen by the call sites that pass trailer overrides.
+
+    ``fixture_types.InstallCommit`` also declares the keyword-only ``files``
+    and ``minute`` parameters, so a ``**{"Mod-Forge-Id": ...}`` unpack is
+    rejected (a ``str`` value could land on ``minute: int``). The call sites
+    below pass trailer overrides only.
+    """
+
+    def __call__(
+        self,
+        repo: Repo,
+        name: str,
+        version: str = ...,
+        *,
+        mod_type: str = ...,
+        **trailer_overrides: str,
+    ) -> str: ...
+
+
+def _mod_info(name: str) -> ModInfo:
+    """A fully populated ``ModInfo`` for the named mod."""
+    return ModInfo(
+        name=name,
+        version="1.0.0",
+        mod_type="client",
+        author="tester",
+        spt_range="~4.1.0",
+        state="installed",
+        commit="",
+        date=datetime(2024, 1, 1, tzinfo=UTC),
+        forge_id="",
+        forge_version_id="",
+        guid="",
+        source="",
+    )
 
 runner = CliRunner()
 
@@ -126,7 +165,7 @@ def test_success_envelope_carries_event_result_and_the_service_return_value(
 
 
 def _install_request(
-    fake_game_dir: Path, make_archive: Any, **overrides: Any
+    fake_game_dir: Path, make_archive: MakeArchive, **overrides: Any
 ) -> dict[str, Any]:
     _clean_repo(fake_game_dir)
     archive = make_archive(
@@ -143,7 +182,7 @@ def _install_request(
 
 
 def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
-    fake_game_dir: Path, make_archive: Any
+    fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
     request = _install_request(fake_game_dir, make_archive)
 
@@ -161,7 +200,7 @@ def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
 
 
 def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
-    fake_game_dir: Path, make_archive: Any
+    fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
     request = _install_request(fake_game_dir, make_archive, operation_id="caller-op")
 
@@ -173,7 +212,7 @@ def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
 
 
 def test_operation_id_is_generated_as_32_hex_chars_when_absent_and_identical_everywhere(
-    fake_game_dir: Path, make_archive: Any
+    fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
     request = _install_request(fake_game_dir, make_archive)
 
@@ -322,8 +361,8 @@ def test_partial_install_error_details_carry_the_installed_mod_names(
     inject_error: Callable[[str, Exception], None],
 ) -> None:
     installed = [
-        SimpleNamespace(mod=SimpleNamespace(name="First")),
-        SimpleNamespace(mod=SimpleNamespace(name="Second")),
+        services.InstallResult(mod=_mod_info("First")),
+        services.InstallResult(mod=_mod_info("Second")),
     ]
     inject_error(
         "status", PartialInstallError("boom", installed, RuntimeError("cause"))
@@ -518,7 +557,9 @@ def test_sync_catalog_reaches_forge_through_respx_and_reports_the_page_count(
 
 
 def test_rpc_output_does_not_depend_on_the_current_working_directory(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: Any
+    fake_game_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     elsewhere = tmp_path_factory.mktemp("elsewhere")
@@ -602,7 +643,9 @@ def test_init_game_dir_reports_spt_version_and_no_pre_existing_mods(
 # --------------------------------------------------------------------------
 
 
-def test_list_mods_returns_the_installed_mod(clean_repo: Repo, install_commit) -> None:
+def test_list_mods_returns_the_installed_mod(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
     exit_code, lines = _invoke("list_mods", {"path": str(clean_repo.path)})
@@ -615,7 +658,7 @@ def test_list_mods_returns_the_installed_mod(clean_repo: Repo, install_commit) -
 
 
 def test_mod_files_returns_the_files_of_the_install_commit(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -630,7 +673,7 @@ def test_mod_files_returns_the_files_of_the_install_commit(
 
 
 def test_history_without_name_returns_commits_newest_first(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -642,7 +685,7 @@ def test_history_without_name_returns_commits_newest_first(
 
 
 def test_history_with_name_matches_case_insensitively(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -656,7 +699,7 @@ def test_history_with_name_matches_case_insensitively(
 
 
 def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -671,11 +714,13 @@ def test_disable_mod_reverts_the_install_commit_and_removes_it_from_list_mods(
     assert data["commit"] != ""
     assert data["files"] == ["BepInEx/plugins/CoolMod.dll"]
 
-    listed_exit, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
+    _, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
     assert listed_lines[0]["data"] == []
 
 
-def test_enable_mod_restores_a_disabled_mod(clean_repo: Repo, install_commit) -> None:
+def test_enable_mod_restores_a_disabled_mod(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
     _invoke("disable_mod", {"path": str(clean_repo.path), "name": "CoolMod"})
 
@@ -689,12 +734,12 @@ def test_enable_mod_restores_a_disabled_mod(clean_repo: Repo, install_commit) ->
     assert data["state"] == "enabled"
     assert data["commit"] != ""
 
-    listed_exit, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
+    _, listed_lines = _invoke("list_mods", {"path": str(clean_repo.path)})
     assert [mod["name"] for mod in listed_lines[0]["data"]] == ["CoolMod"]
 
 
 def test_remove_mod_deletes_the_files_and_reports_them(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -711,7 +756,7 @@ def test_remove_mod_deletes_the_files_and_reports_them(
 
 
 def test_check_profiles_reports_no_residue_for_a_db_free_mod(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     install_commit(clean_repo, "CoolMod", "1.2.3")
 
@@ -722,7 +767,7 @@ def test_check_profiles_reports_no_residue_for_a_db_free_mod(
 
 
 def test_plan_profile_cleanup_reports_removals_through_rpc(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf7"
     install_commit(
@@ -765,7 +810,7 @@ def test_plan_profile_cleanup_reports_removals_through_rpc(
 
 
 def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
-    clean_repo: Repo, install_commit
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
     item_id = "5c0d1b8b86f7744bb2683cf8"
     install_commit(
@@ -1190,7 +1235,7 @@ def test_plan_mod_install_resolves_the_target_and_its_download_link(
 
 
 def test_install_mod_downloads_and_installs_the_target(
-    fake_game_dir: Path, tmp_path: Path, make_archive: Any
+    fake_game_dir: Path, tmp_path: Path, make_archive: MakeArchive
 ) -> None:
     _clean_repo(fake_game_dir)
     db_path = tmp_path / "catalog.db"
@@ -1247,7 +1292,7 @@ def test_install_mod_downloads_and_installs_the_target(
 
 
 def test_check_updates_reports_an_available_update(
-    fake_game_dir: Path, tmp_path: Path, install_commit
+    fake_game_dir: Path, tmp_path: Path, install_commit: TrailerInstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(
@@ -1305,7 +1350,10 @@ def test_check_updates_reports_an_available_update(
 
 
 def test_update_mod_applies_the_recommended_version(
-    fake_game_dir: Path, tmp_path: Path, install_commit, make_archive: Any
+    fake_game_dir: Path,
+    tmp_path: Path,
+    install_commit: TrailerInstallCommit,
+    make_archive: MakeArchive,
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(
@@ -1405,7 +1453,7 @@ def test_import_list_reports_a_mod_only_the_list_has_as_missing(
 
 
 def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
-    fake_game_dir: Path, tmp_path: Path, make_archive: Any
+    fake_game_dir: Path, tmp_path: Path, make_archive: MakeArchive
 ) -> None:
     _clean_repo(fake_game_dir)
     db_path = tmp_path / "catalog.db"

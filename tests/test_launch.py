@@ -45,6 +45,7 @@ from sptmod.core.launch import (
     stop_game,
     tokenize_launch_settings,
 )
+from sptmod.core.models import Progress
 from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
 
 pytestmark = pytest.mark.timeout(5)
@@ -60,7 +61,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(game_dir, "game_processes", lambda: [])
 
 
-def _progress() -> tuple[list[tuple[str, int, str]], Callable[[str, int, str], None]]:
+def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
     events: list[tuple[str, int, str]] = []
 
     def _capture(step: str, percent: int, message: str) -> None:
@@ -104,7 +105,10 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 4.0) -> None:
 
 
 def _state_payload(root: Path) -> dict[str, Any]:
-    return json.loads((root / LAUNCH_STATE_FILE_NAME).read_text(encoding="utf-8"))
+    payload: dict[str, Any] = json.loads(
+        (root / LAUNCH_STATE_FILE_NAME).read_text(encoding="utf-8")
+    )
+    return payload
 
 
 def _write_state_file(
@@ -126,7 +130,9 @@ def _write_state_file(
     (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict:
+def _ref(
+    pid: int, started_at: float, *, started_by_sptmod: bool | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
     if started_by_sptmod is not None:
         payload["started_by_sptmod"] = started_by_sptmod
@@ -134,13 +140,13 @@ def _ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) 
 
 
 @pytest.fixture
-def spawn_sleeper() -> Iterator[Callable[[], subprocess.Popen]]:
+def spawn_sleeper() -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
     """Factory spawning a throwaway real process that just sleeps."""
     sleep_bin = shutil.which("sleep")
     assert sleep_bin is not None
-    spawned: list[subprocess.Popen] = []
+    spawned: list[subprocess.Popen[bytes]] = []
 
-    def _spawn() -> subprocess.Popen:
+    def _spawn() -> subprocess.Popen[bytes]:
         process = subprocess.Popen([sleep_bin, "30"])
         spawned.append(process)
         return process
@@ -704,7 +710,7 @@ def test_launch_profile_prefixes_gamemoderun_when_game_mode_is_set(
 
         launch_profile(d.root, d.profile_id)
 
-    _wait_until(lambda: marker.exists())
+    _wait_until(marker.exists)
     assert marker.read_text(encoding="utf-8").strip() == "invoked"
     _wait_until(lambda: Path(f"{d.umu_path}.dump.json").exists())
     client_dump = stub_dump(d.umu_path)
@@ -921,7 +927,7 @@ def test_stop_game_is_a_noop_without_a_state_file(tmp_path: Path) -> None:
 
 def test_stop_game_falls_back_to_the_scanned_process_table(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen],
+    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # No state file at all -- exactly like launch_status, stop_game finds a
@@ -957,7 +963,7 @@ def test_stop_game_falls_back_to_the_scanned_process_table(
 
 def test_stop_game_stops_every_scanned_game_process(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen],
+    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A game hosted by Wine shows up more than once; leaving any of them
@@ -986,7 +992,7 @@ def test_stop_game_stops_every_scanned_game_process(
 
 
 def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen]
+    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
     server = spawn_sleeper()
     client = spawn_sleeper()
@@ -1019,7 +1025,7 @@ def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> 
     )
     parent = subprocess.Popen([sys.executable, "-c", script])
     try:
-        _wait_until(lambda: child_pid_file.exists())
+        _wait_until(child_pid_file.exists)
         child_pid = int(child_pid_file.read_text(encoding="utf-8"))
         _write_state_file(
             tmp_path,
@@ -1038,7 +1044,7 @@ def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path) -> 
 
 
 def test_stop_game_tolerates_an_already_gone_process(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen]
+    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
     process = spawn_sleeper()
     started_at = psutil.Process(process.pid).create_time()
@@ -1055,7 +1061,7 @@ def test_stop_game_tolerates_an_already_gone_process(
 
 
 def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen]
+    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
     process = spawn_sleeper()
     _write_state_file(tmp_path, server=_ref(process.pid, 1.0, started_by_sptmod=True))
@@ -1067,7 +1073,7 @@ def test_stop_game_ignores_a_process_whose_start_time_no_longer_matches(
 
 
 def test_stop_game_tolerates_an_already_gone_watcher(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen]
+    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
     # Unlike server/client, the watcher entry is handed to _terminate directly
     # (no _live_ref/scan fallback), so a dead watcher pid exercises
@@ -1084,7 +1090,7 @@ def test_stop_game_tolerates_an_already_gone_watcher(
 
 
 def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
-    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen]
+    tmp_path: Path, spawn_sleeper: Callable[[], subprocess.Popen[bytes]]
 ) -> None:
     process = spawn_sleeper()
     _write_state_file(tmp_path, watcher=_ref(process.pid, 1.0))
@@ -1096,7 +1102,7 @@ def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
 
 def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
     tmp_path: Path,
-    spawn_sleeper: Callable[[], subprocess.Popen],
+    spawn_sleeper: Callable[[], subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # TERMINATE_TIMEOUT (10s) is a module constant, not an injected parameter
@@ -1114,7 +1120,9 @@ def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
     )
     real_wait_procs = psutil.wait_procs
 
-    def _report_still_alive(procs: list, timeout: float | None = None) -> tuple:
+    def _report_still_alive(
+        procs: list[psutil.Process], timeout: float | None = None
+    ) -> tuple[list[psutil.Process], list[psutil.Process]]:
         gone, _ = real_wait_procs(procs, timeout=0)
         return gone, procs
 

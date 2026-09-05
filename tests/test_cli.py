@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from fixture_types import InstallCommit, MakeArchive
 from sptmod.cli import app
 from sptmod.core import game_dir
 from sptmod.core.game_dir import detect_layout
@@ -47,7 +48,7 @@ def test_init_on_a_non_game_dir_exits_with_code_3_and_reports_on_stderr(
 
 
 def test_install_file_without_a_resolvable_version_prints_a_hint(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
     """A bare-DLL client install with no version override has no version to
     read (``meta_from_dll`` leaves it empty); the CLI must call this out and
@@ -65,7 +66,7 @@ def test_install_file_without_a_resolvable_version_prints_a_hint(
 
 
 def test_install_file_with_a_version_override_prints_no_versionless_hint(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
     _clean_repo(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
@@ -80,7 +81,7 @@ def test_install_file_with_a_version_override_prints_no_versionless_hint(
 
 
 def test_list_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -92,7 +93,7 @@ def test_list_happy_path_exits_zero(
 
 
 def test_files_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -104,7 +105,7 @@ def test_files_happy_path_exits_zero(
 
 
 def test_history_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -116,7 +117,7 @@ def test_history_happy_path_exits_zero(
 
 
 def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -139,7 +140,7 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
     extra_args: list[str],
     fake_game_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    install_commit,
+    install_commit: InstallCommit,
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -153,7 +154,7 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
 
 
 def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -168,7 +169,7 @@ def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
 
 
 def test_remove_with_yes_flag_skips_the_confirmation_prompt(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
     repo = _clean_repo(fake_game_dir)
     install_commit(repo, "CoolMod")
@@ -195,7 +196,7 @@ def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
 
 
 def test_install_with_invalid_metadata_exits_with_code_13(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
     _clean_repo(fake_game_dir)
     # "version" is mandatory in package.json; missing it makes read_package_json
@@ -225,8 +226,8 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
     expected_exit_code: int,
     fake_game_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    make_archive,
-    install_commit,
+    make_archive: MakeArchive,
+    install_commit: InstallCommit,
 ) -> None:
     if scenario == "dirty_tree":
         # No baseline commit: the tracked profile is still untracked.

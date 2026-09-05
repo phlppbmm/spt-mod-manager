@@ -23,7 +23,7 @@ from sptmod.core import game_dir, services
 from sptmod.core.errors import GitError, SptVersionUnknownError
 from sptmod.core.game_dir import read_pe_file_version
 from sptmod.core.repo import Repo
-from test_game_layout import _build_synthetic_exe, _write_server_exe
+from test_game_layout import build_synthetic_exe, write_server_exe
 
 runner = CliRunner()
 
@@ -108,7 +108,7 @@ def test_explicit_spt_version_overrides_a_detectable_core_json_version(
 def test_explicit_spt_version_overrides_a_detectable_pe_version(
     fake_game_dir_runtime: Path,
 ) -> None:
-    _write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "1.0.0")
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "1.0.0")
 
     result = services.init_game_dir(fake_game_dir_runtime, spt_version="9.9.9")
 
@@ -121,7 +121,7 @@ def test_explicit_spt_version_overrides_a_detectable_pe_version(
 def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(
     tmp_path: Path,
 ) -> None:
-    real = bytearray(_build_synthetic_exe("4.1.2"))
+    real = bytearray(build_synthetic_exe("4.1.2"))
     # Section header layout (see _SECTION_HEADER_SIZE / _read_sections):
     # name(8) + virtual_size(4) + virtual_address(4) + raw_size(4) + ...
     # The section header sits right after DOS+COFF+OptionalHeader (0x400).

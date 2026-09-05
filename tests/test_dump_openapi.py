@@ -50,9 +50,11 @@ def _resolved_ref_name(schema: dict[str, Any]) -> str | None:
     array wrapping a ``$ref`` in ``items`` (``list[Model]`` responses).
     """
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[-1]
+        ref: str = schema["$ref"]
+        return ref.rsplit("/", 1)[-1]
     if schema.get("type") == "array" and "$ref" in schema.get("items", {}):
-        return schema["items"]["$ref"].rsplit("/", 1)[-1]
+        items_ref: str = schema["items"]["$ref"]
+        return items_ref.rsplit("/", 1)[-1]
     return None
 
 
@@ -101,6 +103,7 @@ def test_dump_openapi_run_as_a_module_writes_the_built_document(
         text=True,
         timeout=30,
         cwd=REPO_ROOT,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr
@@ -139,6 +142,7 @@ def test_dump_openapi_run_with_too_many_arguments_exits_2_and_prints_usage(
         text=True,
         timeout=30,
         cwd=tmp_path,
+        check=False,
     )
 
     assert result.returncode == 2
@@ -298,6 +302,7 @@ print("ok")
         text=True,
         timeout=30,
         cwd=REPO_ROOT,
+        check=False,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

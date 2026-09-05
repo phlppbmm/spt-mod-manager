@@ -1695,6 +1695,17 @@
             },
             "title": "Source Links",
             "type": "array"
+          },
+          "first_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen At"
           }
         },
         "required": [
@@ -1808,6 +1819,16 @@
               }
             ],
             "title": "Updated At"
+          },
+          "fika_compatibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FikaCompatibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2463,6 +2484,14 @@
         },
         "title": "FavoritesResponse",
         "type": "object"
+      },
+      "FikaCompatibility": {
+        "enum": [
+          "compatible",
+          "incompatible",
+          "unknown"
+        ],
+        "type": "string"
       },
       "FileChange": {
         "enum": [

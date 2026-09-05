@@ -10,6 +10,7 @@ precondition.
 
 import dataclasses
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -927,6 +928,32 @@ def test_browse_catalog_available_filter_keeps_the_uninstalled_synced_mod(
     assert installed_lines[0]["data"] == []
 
 
+def test_browse_catalog_exposes_the_first_seen_at_stamp_of_a_synced_mod(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "catalog.db"
+    envelope = page_envelope([mod_json_minimal(id=1, name="Example Mod")])
+    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
+        router.get("/mods").respond(200, json=envelope)
+        _invoke(
+            "sync_catalog",
+            {"path": str(clean_repo.path), "db_path": str(db_path)},
+        )
+
+        exit_code, lines = _invoke(
+            "browse_catalog",
+            {
+                "path": str(clean_repo.path),
+                "filter": "all",
+                "db_path": str(db_path),
+            },
+        )
+
+    assert exit_code == 0
+    stamp = lines[0]["data"][0]["mod"]["first_seen_at"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp)
+
+
 def test_clear_catalog_cache_deletes_the_db_file_and_reports_removed_false_on_retry(
     tmp_path: Path,
 ) -> None:
@@ -1112,6 +1139,7 @@ def test_get_mod_details_combines_cached_data_with_the_live_description(
             "downloads": 10,
             "published_at": "2025-01-02T00:00:00Z",
             "updated_at": "2025-01-02T00:00:00Z",
+            "fika_compatibility": "compatible",
         }
     ]
     assert data["description"] == "Adds cool stuff."

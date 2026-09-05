@@ -14,6 +14,7 @@ import platformdirs
 from sptmod.core.errors import SptmodError
 from sptmod.core.forge.client import (
     MAX_PER_PAGE,
+    FikaCompatibility,
     ForgeClient,
     ForgeMod,
     ForgeVersion,
@@ -58,7 +59,8 @@ CREATE TABLE IF NOT EXISTS mods (
     license_link TEXT,
     source_links TEXT NOT NULL DEFAULT '[]',
     description TEXT,
-    description_updated_at TEXT
+    description_updated_at TEXT,
+    first_seen_at TEXT
 );
 CREATE INDEX IF NOT EXISTS mods_name_idx ON mods (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS mods_author_idx ON mods (author COLLATE NOCASE);
@@ -82,6 +84,7 @@ _MOD_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = (
     "source_links TEXT NOT NULL DEFAULT '[]'",
     "description TEXT",
     "description_updated_at TEXT",
+    "first_seen_at TEXT",
 )
 
 _VERSIONS_SCHEMA: Final = """
@@ -95,7 +98,8 @@ CREATE TABLE IF NOT EXISTS versions (
     spt_version_constraint TEXT NOT NULL DEFAULT '',
     downloads INTEGER NOT NULL DEFAULT 0,
     published_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    fika_compatibility TEXT
 );
 CREATE INDEX IF NOT EXISTS versions_mod_id_idx ON versions (mod_id);
 
@@ -105,15 +109,18 @@ CREATE TABLE IF NOT EXISTS sync_state (
 );
 """
 
+_VERSION_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = ("fika_compatibility TEXT",)
+
 _MOD_COLUMNS: Final = (
     "id, hub_id, guid, name, slug, teaser, thumbnail, author, downloads,"
     " detail_url, published_at, created_at, updated_at, favourites_count,"
     " endorsements_count, fika_compatibility, featured, contains_ads,"
-    " contains_ai_content, category, license_name, license_link, source_links"
+    " contains_ai_content, category, license_name, license_link, source_links,"
+    " first_seen_at"
 )
 _VERSION_COLUMNS: Final = (
     "id, mod_id, version, link, content_length, spt_version_constraint,"
-    " downloads, published_at, updated_at"
+    " downloads, published_at, updated_at, fika_compatibility"
 )
 _DESCRIPTION_COLUMNS: Final = "description, description_updated_at"
 
@@ -164,6 +171,7 @@ class CatalogMod:
     license_name: str | None = None
     license_link: str | None = None
     source_links: tuple["CatalogSourceLink", ...] = ()
+    first_seen_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,9 +186,10 @@ class CatalogSourceLink:
 class CatalogVersion:
     """A mod version as cached in the local catalog.
 
-    ``link`` and ``content_length`` are None for versions that only ever
-    arrived through the ``include=versions`` summary of /mods; they are filled
-    once :meth:`Catalog.fetch_versions` loads the full version list.
+    ``link``, ``content_length`` and ``fika_compatibility`` are None for
+    versions that only ever arrived through the ``include=versions`` summary of
+    /mods; they are filled once :meth:`Catalog.fetch_versions` loads the full
+    version list.
     """
 
     id: int
@@ -192,6 +201,7 @@ class CatalogVersion:
     downloads: int
     published_at: str | None
     updated_at: str | None
+    fika_compatibility: FikaCompatibility | None = None
 
 
 @dataclass(frozen=True)
@@ -294,6 +304,7 @@ def _mod_from_row(row: sqlite3.Row) -> CatalogMod:
         license_name=row["license_name"],
         license_link=row["license_link"],
         source_links=_links_from_json(row["source_links"]),
+        first_seen_at=row["first_seen_at"],
     )
 
 
@@ -329,6 +340,7 @@ def _version_from_row(row: sqlite3.Row) -> CatalogVersion:
         downloads=row["downloads"],
         published_at=row["published_at"],
         updated_at=row["updated_at"],
+        fika_compatibility=row["fika_compatibility"],
     )
 
 
@@ -388,6 +400,7 @@ def _version_from_forge(mod_id: int, version: ForgeVersion) -> CatalogVersion:
         downloads=version.downloads,
         published_at=version.published_at,
         updated_at=version.updated_at,
+        fika_compatibility=version.fika_compatibility,
     )
 
 
@@ -397,8 +410,8 @@ def _merge_version(
     """Keep cached download details that the incoming payload does not carry.
 
     The ``include=versions`` summaries of /mods know neither ``link`` nor
-    ``content_length`` nor ``updated_at``, so a sync must not wipe what a
-    previous :meth:`Catalog.fetch_versions` already stored.
+    ``content_length`` nor ``updated_at`` nor ``fika_compatibility``, so a sync
+    must not wipe what a previous :meth:`Catalog.fetch_versions` already stored.
     """
     if existing is None:
         return incoming
@@ -413,7 +426,19 @@ def _merge_version(
         updated_at=(
             existing.updated_at if incoming.updated_at is None else incoming.updated_at
         ),
+        fika_compatibility=(
+            existing.fika_compatibility
+            if incoming.fika_compatibility is None
+            else incoming.fika_compatibility
+        ),
     )
+
+
+def _first_seen_at(existing: CatalogMod | None) -> str | None:
+    """Return the first-seen stamp for an upsert: stored value, or now for new mods."""
+    if existing is not None:
+        return existing.first_seen_at
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _is_comparable(version: str) -> bool:
@@ -480,9 +505,13 @@ class Catalog:
             # Lightweight migration for caches created before the thumbnail
             # column existed; the cache is disposable, so this is the only
             # schema evolution mechanism.
-            for column in _MOD_COLUMN_MIGRATIONS:
-                with contextlib.suppress(sqlite3.OperationalError):
-                    self._db.execute(f"ALTER TABLE mods ADD COLUMN {column}")
+            for table, columns in (
+                ("mods", _MOD_COLUMN_MIGRATIONS),
+                ("versions", _VERSION_COLUMN_MIGRATIONS),
+            ):
+                for column in columns:
+                    with contextlib.suppress(sqlite3.OperationalError):
+                        self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
             self._db.commit()
         except BaseException:
             self._db.close()
@@ -849,13 +878,14 @@ class Catalog:
 
     def _upsert_mod(self, mod: CatalogMod) -> _UpsertOutcome:
         existing = self.get_mod(mod.id)
-        if existing == mod:
+        merged = replace(mod, first_seen_at=_first_seen_at(existing))
+        if existing == merged:
             return "unchanged"
         stored = self.get_description(mod.id)
         self._db.execute(
             f"INSERT OR REPLACE INTO mods ({_MOD_COLUMNS}, {_DESCRIPTION_COLUMNS})"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 mod.id,
                 mod.hub_id,
@@ -884,6 +914,7 @@ class Catalog:
                 mod.license_name,
                 mod.license_link,
                 _links_to_json(mod.source_links),
+                merged.first_seen_at,
                 None if stored is None else stored.text,
                 None if stored is None else stored.updated_at,
             ),
@@ -900,7 +931,7 @@ class Catalog:
             return "unchanged"
         self._db.execute(
             f"INSERT OR REPLACE INTO versions ({_VERSION_COLUMNS})"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 merged.id,
                 merged.mod_id,
@@ -911,6 +942,7 @@ class Catalog:
                 merged.downloads,
                 merged.published_at,
                 merged.updated_at,
+                merged.fika_compatibility,
             ),
         )
         return "new" if existing is None else "updated"

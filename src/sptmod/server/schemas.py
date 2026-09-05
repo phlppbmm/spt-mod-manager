@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from sptmod.core.forge.catalog import CatalogState
+from sptmod.core.forge.client import FikaCompatibility
 from sptmod.core.models import (
     ConflictKind,
     ConflictSeverity,
@@ -157,6 +158,7 @@ class CatalogMod(CoreModel):
     license_name: str | None = None
     license_link: str | None = None
     source_links: list["CatalogSourceLink"] = []
+    first_seen_at: str | None = None
 
 
 class CatalogSourceLink(CoreModel):
@@ -178,6 +180,7 @@ class CatalogVersion(CoreModel):
     downloads: int
     published_at: str | None
     updated_at: str | None
+    fika_compatibility: FikaCompatibility | None = None
 
 
 class CatalogEntry(CoreModel):

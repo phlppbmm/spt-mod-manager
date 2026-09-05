@@ -742,6 +742,8 @@ export interface components {
              * @default []
              */
             source_links: components["schemas"]["CatalogSourceLink"][];
+            /** First Seen At */
+            first_seen_at?: string | null;
         };
         /**
          * CatalogSourceLink
@@ -778,6 +780,7 @@ export interface components {
             published_at: string | null;
             /** Updated At */
             updated_at: string | null;
+            fika_compatibility?: components["schemas"]["FikaCompatibility"] | null;
         };
         /**
          * CheckProfilesRequest
@@ -1150,6 +1153,8 @@ export interface components {
              */
             mod_ids: number[];
         };
+        /** @enum {string} */
+        FikaCompatibility: "compatible" | "incompatible" | "unknown";
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
         /**

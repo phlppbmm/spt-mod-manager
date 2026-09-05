@@ -346,6 +346,79 @@ def test_fetch_versions_fills_link_and_content_length(
     assert persisted[0].content_length == 123456
 
 
+@pytest.mark.parametrize(
+    "fika_compatibility", ["compatible", "incompatible", "unknown"]
+)
+def test_fetch_versions_stores_and_exposes_fika_compatibility(
+    catalog: Catalog,
+    client_factory,
+    respx_router: respx.MockRouter,
+    fika_compatibility: str,
+) -> None:
+    _mods_route_queue(respx_router, _full_sync_pages())
+    client = client_factory()
+    catalog.sync(client, full=True)
+
+    full_versions_page = page_envelope(
+        [
+            version_json(
+                id=901,
+                version="1.0.0",
+                spt_version_constraint="^3.8.0",
+                published_at="2025-01-02T00:00:00Z",
+                fika_compatibility=fika_compatibility,
+            )
+        ],
+        current_page=1,
+        last_page=1,
+        total=1,
+        next_url=None,
+    )
+    respx_router.get("/mod/1/versions").mock(
+        return_value=httpx.Response(200, json=full_versions_page)
+    )
+
+    fetched = catalog.fetch_versions(client, 1)
+
+    assert fetched[0].fika_compatibility == fika_compatibility
+    assert catalog.get_versions(1)[0].fika_compatibility == fika_compatibility
+
+
+def test_sync_after_fetch_versions_does_not_wipe_stored_fika_compatibility(
+    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+) -> None:
+    _mods_route_queue(respx_router, _full_sync_pages())
+    client = client_factory()
+    catalog.sync(client, full=True)
+
+    full_versions_page = page_envelope(
+        [
+            version_json(
+                id=901,
+                version="1.0.0",
+                spt_version_constraint="^3.8.0",
+                published_at="2025-01-02T00:00:00Z",
+                fika_compatibility="incompatible",
+            )
+        ],
+        current_page=1,
+        last_page=1,
+        total=1,
+        next_url=None,
+    )
+    respx_router.get("/mod/1/versions").mock(
+        return_value=httpx.Response(200, json=full_versions_page)
+    )
+    catalog.fetch_versions(client, 1)
+
+    # A later sync only ever re-sends the /mods `include=versions` summary,
+    # which carries no fika_compatibility field at all.
+    _mods_route_queue(respx_router, _full_sync_pages())
+    catalog.sync(client, full=True)
+
+    assert catalog.get_versions(1)[0].fika_compatibility == "incompatible"
+
+
 def test_forge_unavailable_during_sync_raises_but_keeps_prior_cache(
     catalog: Catalog,
     db_path: Path,

@@ -3477,6 +3477,7 @@
         "type": "object"
       },
       "ModState": {
+        "description": "The lifecycle state a mod's youngest commit puts it in.",
         "enum": [
           "installed",
           "updated",
@@ -3484,14 +3485,17 @@
           "enabled",
           "removed"
         ],
+        "title": "ModState",
         "type": "string"
       },
       "ModType": {
+        "description": "How a mod hooks into the game: server-side, client-side or both.",
         "enum": [
           "server",
           "client",
           "hybrid"
         ],
+        "title": "ModType",
         "type": "string"
       },
       "PlanEntry": {

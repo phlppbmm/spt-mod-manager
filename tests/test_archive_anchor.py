@@ -313,7 +313,7 @@ def test_find_anchor_ignores_unrelated_bare_user_mods_dir(tmp_path: Path) -> Non
         layout,
         extracted_root,
         {Path("SPT/user/mods/CoolMod/package.json"): "server-package"},
-        "server",
+        ModType.SERVER,
     )
 
 
@@ -343,7 +343,7 @@ def test_find_anchor_recognizes_spt_runtime_prefixed_server_dir_without_package_
             Path("SPT/user/mods/betterkeys/betterkeys.dll"): "server-dll",
             Path("SPT/user/mods/betterkeys/config/config.jsonc"): "{}",
         },
-        "server",
+        ModType.SERVER,
     )
 
 
@@ -375,7 +375,7 @@ def test_find_anchor_recognizes_spt_runtime_prefixed_hybrid_without_package_json
             Path("SPT/user/mods/ServerPart/ServerPart.dll"): "server-dll",
             Path("BepInEx/plugins/ClientPart/ClientPart.dll"): "client-dll",
         },
-        "hybrid",
+        ModType.HYBRID,
     )
 
 
@@ -469,5 +469,5 @@ def test_find_anchor_nested_capitalized_plugins_dir_stays_part_of_server_mod(
             Path("SPT/user/mods/CoolMod/package.json"): "server-package",
             Path("SPT/user/mods/CoolMod/Plugins/foo.dll"): "inner-dll",
         },
-        "server",
+        ModType.SERVER,
     )

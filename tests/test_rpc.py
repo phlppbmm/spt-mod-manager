@@ -40,7 +40,13 @@ from sptmod.core.errors import (
 )
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
-from sptmod.core.models import Conflict, ModInfo, ProfileResidue
+from sptmod.core.models import (
+    Conflict,
+    ModInfo,
+    ModState,
+    ModType,
+    ProfileResidue,
+)
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import download_cache_dir
 from sptmod.server import rpc
@@ -55,10 +61,10 @@ def _mod_info(name: str) -> ModInfo:
     return ModInfo(
         name=name,
         version="1.0.0",
-        mod_type="client",
+        mod_type=ModType.CLIENT,
         author="tester",
         spt_range="~4.1.0",
-        state="installed",
+        state=ModState.INSTALLED,
         commit="",
         date=datetime(2024, 1, 1, tzinfo=UTC),
         forge_id="",

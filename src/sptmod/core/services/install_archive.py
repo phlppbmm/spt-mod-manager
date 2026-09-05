@@ -38,6 +38,8 @@ from sptmod.core.models import (
     ACTIVE_STATES,
     Conflict,
     ModInfo,
+    ModState,
+    ModType,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -195,7 +197,7 @@ def install_from_archive(
                 mod_type=layout.mod_type,
                 author=meta.author,
                 spt_range=meta.spt_range,
-                state="installed",
+                state=ModState.INSTALLED,
                 commit="",
                 date=UNSET_DATE,
                 forge_id=forge_id or matched_id,
@@ -278,7 +280,7 @@ def read_meta(
         InvalidMetadataError: no metadata source exists, or a value would
             break the git trailers it is written to.
     """
-    if layout.mod_type == "client":
+    if layout.mod_type == ModType.CLIENT:
         meta = _dll_meta(layout, name_override, version_override, archive.stem)
     else:
         mod_dir = _server_mod_dir(layout, mods_dir)

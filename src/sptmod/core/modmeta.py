@@ -24,6 +24,8 @@ from sptmod.core.models import (
     CommitInfo,
     Json,
     ModInfo,
+    ModState,
+    ModType,
 )
 
 PACKAGE_JSON_NAME: Final = "package.json"
@@ -198,10 +200,10 @@ def mod_info_from_commit(commit: CommitInfo) -> ModInfo | None:
     return ModInfo(
         name=name,
         version=trailers.get(TRAILER_MOD_VERSION, ""),
-        mod_type=mod_type,
+        mod_type=ModType(mod_type),
         author=trailers.get(TRAILER_MOD_AUTHOR, ""),
         spt_range=trailers.get(TRAILER_MOD_SPT, ""),
-        state=state,
+        state=ModState(state),
         commit=commit.hash,
         date=commit.date,
         forge_id=trailers.get(TRAILER_MOD_FORGE_ID, ""),

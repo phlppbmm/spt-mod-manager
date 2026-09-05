@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Final, Literal, Protocol
 
@@ -9,19 +10,34 @@ from typing import Final, Literal, Protocol
 # Json keeps isinstance narrowing typed instead of falling back to Any.
 type Json = str | int | float | bool | None | list[Json] | dict[str, Json]
 
-type ModType = Literal["server", "client", "hybrid"]
-type ModState = Literal["installed", "updated", "disabled", "enabled", "removed"]
 type FileChange = Literal["added", "modified", "deleted"]
 
-MOD_TYPES: Final[tuple[ModType, ...]] = ("server", "client", "hybrid")
-MOD_STATES: Final[tuple[ModState, ...]] = (
-    "installed",
-    "updated",
-    "disabled",
-    "enabled",
-    "removed",
+
+class ModType(StrEnum):
+    """How a mod hooks into the game: server-side, client-side or both."""
+
+    SERVER = "server"
+    CLIENT = "client"
+    HYBRID = "hybrid"
+
+
+class ModState(StrEnum):
+    """The lifecycle state a mod's youngest commit puts it in."""
+
+    INSTALLED = "installed"
+    UPDATED = "updated"
+    DISABLED = "disabled"
+    ENABLED = "enabled"
+    REMOVED = "removed"
+
+
+MOD_TYPES: Final[tuple[ModType, ...]] = tuple(ModType)
+MOD_STATES: Final[tuple[ModState, ...]] = tuple(ModState)
+ACTIVE_STATES: Final[tuple[ModState, ...]] = (
+    ModState.INSTALLED,
+    ModState.UPDATED,
+    ModState.ENABLED,
 )
-ACTIVE_STATES: Final[tuple[ModState, ...]] = ("installed", "updated", "enabled")
 
 TRAILER_MOD: Final = "Mod"
 TRAILER_MOD_VERSION: Final = "Mod-Version"

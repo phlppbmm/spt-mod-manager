@@ -42,6 +42,7 @@ from sptmod.core.models import (
     Conflict,
     ModFile,
     ModInfo,
+    ModState,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -434,7 +435,7 @@ def _apply_update(
                 mod_type=layout.mod_type,
                 author=meta.author,
                 spt_range=meta.spt_range,
-                state="updated",
+                state=ModState.UPDATED,
                 forge_version_id=str(candidate.version_id),
                 guid=meta.guid,
                 source=candidate.link,

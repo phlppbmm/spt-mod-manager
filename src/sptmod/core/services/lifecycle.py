@@ -27,6 +27,7 @@ from sptmod.core.models import (
     TRAILER_MOD_STATE,
     ModInfo,
     ModState,
+    ModType,
 )
 from sptmod.core.modmeta import (
     PACKAGE_JSON_NAME,
@@ -162,7 +163,10 @@ def remove_mod(
         try:
             commit_hash = repo.revert(
                 mod.commit,
-                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "removed"},
+                extra_trailers={
+                    TRAILER_MOD: mod.name,
+                    TRAILER_MOD_STATE: ModState.REMOVED,
+                },
             )
         except GitError as error:
             raise _sequencer_conflict(repo, mod, error, "remove") from error
@@ -211,7 +215,10 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
         try:
             commit_hash = repo.revert(
                 mod.commit,
-                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "disabled"},
+                extra_trailers={
+                    TRAILER_MOD: mod.name,
+                    TRAILER_MOD_STATE: ModState.DISABLED,
+                },
             )
         except GitError as error:
             raise _sequencer_conflict(repo, mod, error, "disable") from error
@@ -219,7 +226,7 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
 
     return ToggleResult(
         name=mod.name,
-        state="disabled",
+        state=ModState.DISABLED,
         commit=commit_hash,
         files=[mod_file.path for mod_file in repo.show_files(commit_hash)],
     )
@@ -250,7 +257,7 @@ def enable_mod(path: Path, name: str) -> ToggleResult:
     repo = Repo(path)
     with game_lock(path, f"enabling {name}"):
         mod = resolve_mod(current_mods(repo), name)
-        if mod.state != "disabled":
+        if mod.state != ModState.DISABLED:
             return ToggleResult(
                 name=mod.name,
                 state=mod.state,
@@ -261,14 +268,17 @@ def enable_mod(path: Path, name: str) -> ToggleResult:
         try:
             commit_hash = repo.cherry_pick(
                 install_commit(repo, mod.name),
-                extra_trailers={TRAILER_MOD: mod.name, TRAILER_MOD_STATE: "enabled"},
+                extra_trailers={
+                    TRAILER_MOD: mod.name,
+                    TRAILER_MOD_STATE: ModState.ENABLED,
+                },
             )
         except GitError as error:
             raise _sequencer_conflict(repo, mod, error, "enable") from error
 
     return ToggleResult(
         name=mod.name,
-        state="enabled",
+        state=ModState.ENABLED,
         commit=commit_hash,
         files=[mod_file.path for mod_file in repo.show_files(commit_hash)],
     )
@@ -351,10 +361,14 @@ def adopt_mod_at(
     draft = ModInfo(
         name=meta.name,
         version=meta.version,
-        mod_type="server" if relative.is_relative_to(layout.mods_dir) else "client",
+        mod_type=(
+            ModType.SERVER
+            if relative.is_relative_to(layout.mods_dir)
+            else ModType.CLIENT
+        ),
         author=meta.author,
         spt_range=meta.spt_range,
-        state="installed",
+        state=ModState.INSTALLED,
         commit="",
         date=UNSET_DATE,
         forge_id="",

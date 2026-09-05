@@ -1683,9 +1683,17 @@ export interface components {
             /** Source */
             source: string;
         };
-        /** @enum {string} */
+        /**
+         * ModState
+         * @description The lifecycle state a mod's youngest commit puts it in.
+         * @enum {string}
+         */
         ModState: "installed" | "updated" | "disabled" | "enabled" | "removed";
-        /** @enum {string} */
+        /**
+         * ModType
+         * @description How a mod hooks into the game: server-side, client-side or both.
+         * @enum {string}
+         */
         ModType: "server" | "client" | "hybrid";
         /**
          * PlanEntry

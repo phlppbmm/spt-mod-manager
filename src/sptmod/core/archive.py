@@ -223,11 +223,11 @@ def find_anchor(extracted_root: Path) -> ArchiveLayout:
 
     mod_type: ModType
     if server_mappings and client_mappings:
-        mod_type = "hybrid"
+        mod_type = ModType.HYBRID
     elif server_mappings:
-        mod_type = "server"
+        mod_type = ModType.SERVER
     else:
-        mod_type = "client"
+        mod_type = ModType.CLIENT
 
     mappings = [*server_mappings, *client_mappings]
     files: list[Path] = []

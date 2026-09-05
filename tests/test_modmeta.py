@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from sptmod.core.models import MOD_TRAILER_KEYS, CommitInfo, ModInfo
+from sptmod.core.models import (
+    MOD_TRAILER_KEYS,
+    CommitInfo,
+    ModInfo,
+    ModState,
+    ModType,
+)
 from sptmod.core.modmeta import (
     InvalidMetadataError,
     ModMeta,
@@ -215,10 +221,10 @@ def test_meta_from_dll_no_version_override_is_empty(tmp_path: Path) -> None:
 _SAMPLE_MOD_INFO = ModInfo(
     name="SAIN",
     version="3.2.1",
-    mod_type="hybrid",
+    mod_type=ModType.HYBRID,
     author="Solarint",
     spt_range="~4.1.0",
-    state="installed",
+    state=ModState.INSTALLED,
     commit="abc1234",
     date=datetime(2026, 1, 1, tzinfo=UTC),
     forge_id="1234",
@@ -381,10 +387,10 @@ def test_build_trailers_roundtrips_through_mod_info_from_commit() -> None:
     [
         replace(_SAMPLE_MOD_INFO, guid="com.sain.mod"),
         replace(_SAMPLE_MOD_INFO, forge_id="9999", forge_version_id="8888"),
-        replace(_SAMPLE_MOD_INFO, mod_type="server"),
-        replace(_SAMPLE_MOD_INFO, mod_type="client"),
-        replace(_SAMPLE_MOD_INFO, state="disabled"),
-        replace(_SAMPLE_MOD_INFO, state="removed"),
+        replace(_SAMPLE_MOD_INFO, mod_type=ModType.SERVER),
+        replace(_SAMPLE_MOD_INFO, mod_type=ModType.CLIENT),
+        replace(_SAMPLE_MOD_INFO, state=ModState.DISABLED),
+        replace(_SAMPLE_MOD_INFO, state=ModState.REMOVED),
     ],
     ids=["guid", "forge-ids", "type-server", "type-client", "state-disabled", "state-removed"],
 )

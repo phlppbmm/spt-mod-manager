@@ -46,7 +46,7 @@ type ExportFormat = Literal["text", "json"]
 EXPORT_FORMATS: Final[tuple[ExportFormat, ...]] = ("text", "json")
 
 
-_CLIENT_TYPES: Final[tuple[ModType, ...]] = ("client", "hybrid")
+_CLIENT_TYPES: Final[tuple[ModType, ...]] = (ModType.CLIENT, ModType.HYBRID)
 
 
 _LINK_MARKER: Final = "://"
@@ -66,7 +66,7 @@ class ExportEntry:
 
     name: str
     version: str
-    mod_type: ModType = "server"
+    mod_type: ModType = ModType.SERVER
     link: str = ""
 
 
@@ -348,7 +348,7 @@ def _mod_list_entry(source: str, item: Json) -> ExportEntry:
     return ExportEntry(
         name=name,
         version=version,
-        mod_type=mod_type if mod_type in MOD_TYPES else "server",
+        mod_type=ModType(mod_type) if mod_type in MOD_TYPES else ModType.SERVER,
         link=link if isinstance(link, str) else "",
     )
 

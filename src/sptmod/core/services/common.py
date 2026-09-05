@@ -10,8 +10,9 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final
 
 from sptmod.core.archive import (
     CLIENT_PATCHERS_TARGET,
@@ -48,36 +49,30 @@ from sptmod.core.models import (
 from sptmod.core.modmeta import mod_info_from_commit
 from sptmod.core.repo import Repo
 
-type InstallStep = Literal[
-    "check",
-    "extract",
-    "anchor",
-    "metadata",
-    "conflicts",
-    "copy",
-    "commit",
-]
+
+class InstallStep(StrEnum):
+    """The phases an install or update reports progress for."""
+
+    CHECK = "check"
+    EXTRACT = "extract"
+    ANCHOR = "anchor"
+    METADATA = "metadata"
+    CONFLICTS = "conflicts"
+    COPY = "copy"
+    COMMIT = "commit"
 
 
-INSTALL_STEPS: Final[tuple[InstallStep, ...]] = (
-    "check",
-    "extract",
-    "anchor",
-    "metadata",
-    "conflicts",
-    "copy",
-    "commit",
-)
+INSTALL_STEPS: Final[tuple[InstallStep, ...]] = tuple(InstallStep)
 
 
 _STEP_PERCENT: Final[dict[InstallStep, int]] = {
-    "check": 0,
-    "extract": 10,
-    "anchor": 30,
-    "metadata": 45,
-    "conflicts": 60,
-    "copy": 75,
-    "commit": 90,
+    InstallStep.CHECK: 0,
+    InstallStep.EXTRACT: 10,
+    InstallStep.ANCHOR: 30,
+    InstallStep.METADATA: 45,
+    InstallStep.CONFLICTS: 60,
+    InstallStep.COPY: 75,
+    InstallStep.COMMIT: 90,
 }
 
 

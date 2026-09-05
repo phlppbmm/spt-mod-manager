@@ -52,6 +52,7 @@ from sptmod.core.modmeta import (
 from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
     DEPENDENCY_KINDS,
+    InstallStep,
     blocked_message,
     current_mods,
     for_game_layout,
@@ -383,7 +384,7 @@ def _apply_update(
 
     with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
-        report_step(reporter, "check", "downloading the new version")
+        report_step(reporter, InstallStep.CHECK, "downloading the new version")
         archive = download_entry(
             client,
             candidate.link,
@@ -394,13 +395,13 @@ def _apply_update(
         )
         unpacked = temp / "unpacked"
         unpacked.mkdir()
-        report_step(reporter, "extract", f"extracting {archive.name}")
+        report_step(reporter, InstallStep.EXTRACT, f"extracting {archive.name}")
         extract(archive, unpacked)
 
-        report_step(reporter, "anchor", "searching the mod anchor")
+        report_step(reporter, InstallStep.ANCHOR, "searching the mod anchor")
         layout = for_game_layout(find_anchor(unpacked), game_layout)
 
-        report_step(reporter, "metadata", "reading the mod metadata")
+        report_step(reporter, InstallStep.METADATA, "reading the mod metadata")
         meta = read_meta(
             layout, game_layout.mods_dir, mod.name, candidate.new_version, archive
         )
@@ -408,13 +409,17 @@ def _apply_update(
         with game_lock(path, f"updating {mod.name}", reporter):
             ensure_installable(repo)
 
-            report_step(reporter, "conflicts", "checking conflicts and dependencies")
+            report_step(
+                reporter, InstallStep.CONFLICTS, "checking conflicts and dependencies"
+            )
             warnings = _check_update_conflicts(
                 repo, game_layout, layout, meta, mod, force
             )
 
             removed = [file for file in obsolete if file not in set(layout.files)]
-            report_step(reporter, "copy", f"copying {len(layout.files)} files")
+            report_step(
+                reporter, InstallStep.COPY, f"copying {len(layout.files)} files"
+            )
             for file in removed:
                 (path / file).unlink(missing_ok=True)
             for mapping in layout.mappings:
@@ -427,7 +432,9 @@ def _apply_update(
                 prune_empty(path, directory, mod_prefixes(game_layout))
 
             report_step(
-                reporter, "commit", f"committing {mod.name} {candidate.new_version}"
+                reporter,
+                InstallStep.COMMIT,
+                f"committing {mod.name} {candidate.new_version}",
             )
             draft = replace(
                 mod,
@@ -451,7 +458,7 @@ def _apply_update(
 
     report_step(
         reporter,
-        "commit",
+        InstallStep.COMMIT,
         f"updated {mod.name} to {candidate.new_version}",
         percent=100,
     )

@@ -32,6 +32,7 @@ DATA_VERSION_KEY: Final = "data_version"
 # full, so existing rows pick the new fields up without a manual --full.
 DATA_VERSION: Final = "2"
 SYNC_OVERLAP_DAYS: Final = 1
+SYNC_PAGE_STEP: Final = "page"
 
 SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS mods (
@@ -616,7 +617,7 @@ class Catalog:
                     self._advance_watermark(mod.updated_at)
                 if progress is not None:
                     progress(
-                        "page",
+                        SYNC_PAGE_STEP,
                         _percent(page.meta.current_page, page.meta.last_page),
                         f"page {page.meta.current_page} of {page.meta.last_page}",
                     )

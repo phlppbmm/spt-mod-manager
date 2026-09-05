@@ -54,6 +54,7 @@ from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
     DEPENDENCY_KINDS,
     UNSET_DATE,
+    InstallStep,
     blocked_message,
     current_mods,
     for_game_layout,
@@ -155,19 +156,21 @@ def install_from_archive(
     """
     game_layout = detect_layout(path)
     repo = Repo(path)
-    report_step(progress, "check", "checking the working tree and running processes")
+    report_step(
+        progress, InstallStep.CHECK, "checking the working tree and running processes"
+    )
     if not is_locked(path):
         ensure_installable(repo)
 
     with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
         temp = Path(temp_name)
-        report_step(progress, "extract", f"extracting {archive.name}")
+        report_step(progress, InstallStep.EXTRACT, f"extracting {archive.name}")
         extract(archive, temp)
 
-        report_step(progress, "anchor", "searching the mod anchor")
+        report_step(progress, InstallStep.ANCHOR, "searching the mod anchor")
         layout = for_game_layout(find_anchor(temp), game_layout)
 
-        report_step(progress, "metadata", "reading the mod metadata")
+        report_step(progress, InstallStep.METADATA, "reading the mod metadata")
         meta = read_meta(
             layout, game_layout.mods_dir, name_override, version_override, archive
         )
@@ -175,17 +178,23 @@ def install_from_archive(
         with game_lock(path, f"installing {meta.name}", progress):
             ensure_installable(repo)
 
-            report_step(progress, "conflicts", "checking conflicts and dependencies")
+            report_step(
+                progress, InstallStep.CONFLICTS, "checking conflicts and dependencies"
+            )
             warnings = _check_install_conflicts(repo, game_layout, layout, meta, force)
 
-            report_step(progress, "copy", f"copying {len(layout.files)} files")
+            report_step(
+                progress, InstallStep.COPY, f"copying {len(layout.files)} files"
+            )
             added = [file for file in layout.files if not (path / file).exists()]
             for mapping in layout.mappings:
                 shutil.copytree(
                     mapping.source, path / mapping.target, dirs_exist_ok=True
                 )
 
-            report_step(progress, "commit", f"committing {meta.name} {meta.version}")
+            report_step(
+                progress, InstallStep.COMMIT, f"committing {meta.name} {meta.version}"
+            )
             matched_id, matched_version_id = (
                 _catalog_match(meta.name, meta.version, db_path)
                 if forge_match and not forge_id
@@ -215,7 +224,12 @@ def install_from_archive(
                 _remove_copied(path, added, game_layout)
                 raise
             committed = repo.log()[0]
-    report_step(progress, "commit", f"installed {meta.name} {meta.version}", percent=100)
+    report_step(
+        progress,
+        InstallStep.COMMIT,
+        f"installed {meta.name} {meta.version}",
+        percent=100,
+    )
     return InstallResult(
         mod=replace(draft, commit=commit_hash, date=committed.date),
         files=list(layout.files),

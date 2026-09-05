@@ -6,6 +6,7 @@ the installation itself with a self-signed certificate, zlib bodies and PUT
 writes. Only the two calls a launch needs live here — reachability and sign-in.
 """
 
+import http
 import json
 import zlib
 from pathlib import Path
@@ -67,7 +68,7 @@ def probe(base_url: str, timeout: float = REQUEST_TIMEOUT) -> PortState:
         return "timeout"
     except httpx.HTTPError:
         return "foreign"
-    if response.status_code != httpx.codes.OK:
+    if response.status_code != http.HTTPStatus.OK:
         return "foreign"
     payload = _decode(response.content)
     if isinstance(payload, dict) and payload.get("Response") == PONG:

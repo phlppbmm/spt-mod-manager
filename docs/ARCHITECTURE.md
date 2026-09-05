@@ -220,7 +220,7 @@ to avoid losing unknown payload data.
 `plan_profile_cleanup(path, mod_name)` reads only and reports what a cleanup
 would remove; `clean_profile(path, mod_name, profiles=None)` applies it. The
 plan is built by the exact code that does the cleaning — a single private
-function `_clean_document(profile, ids)` produces both the cleaned document and
+function `clean_document(profile, ids)` produces both the cleaned document and
 the report — so the preview never disagrees with the real run.
 
 ### Write sequence and backup protocol

@@ -269,7 +269,7 @@ def _dispatch(spec: RpcSpec, request: schemas.CoreModel) -> int:
 
 def _serialise(spec: RpcSpec, result: object, operation_id: str) -> JsonValue:
     """Render ``result`` as the JSON body of the response model of ``spec``."""
-    adapter: TypeAdapter[JsonValue] = TypeAdapter(spec.response)
+    adapter = TypeAdapter(spec.response)
     if spec.wrap is not None:
         payload: object = {spec.wrap: result}
     elif spec.operation_id:

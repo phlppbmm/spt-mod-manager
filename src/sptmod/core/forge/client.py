@@ -2,7 +2,7 @@
 
 import os
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Final, Literal
@@ -1161,7 +1161,7 @@ class ForgeClient:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         headers: Mapping[str, str] | None = None,
-    ) -> Iterator[DownloadStream]:
+    ) -> Generator[DownloadStream]:
         """Stream an arbitrary download URL without envelope handling or throttling.
 
         This method bypasses the token bucket and API envelope envelope parsing.

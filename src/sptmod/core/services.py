@@ -117,14 +117,14 @@ from sptmod.core.modmeta import (
 )
 from sptmod.core.profile import (
     CheckResult,
-    _clean_document,
-    _parse_profile,
-    _write_profile,
     check_all,
+    clean_document,
     collect_mod_ids,
     find_residues,
+    parse_profile,
     profile_paths,
     profile_summaries,
+    write_profile,
 )
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import (
@@ -1117,11 +1117,11 @@ def plan_profile_cleanup(path: Path, mod_name: str) -> CleanupPlan:
     removals: list[ProfileResidue] = []
     untouched: list[UntouchedResidue] = []
     for target in profile_paths(layout):
-        parsed = _parse_profile(target)
+        parsed = parse_profile(target)
         if parsed is None:
             warnings.append(_unreadable_profile(target))
             continue
-        cleaned = _clean_document(parsed, ids)
+        cleaned = clean_document(parsed, ids)
         untouched.extend(_untouched_in(cleaned.untouched, target.stem))
         if cleaned.removed:
             profiles.append(target.stem)
@@ -2778,11 +2778,11 @@ def _clean_profiles_inline(
     removed: list[ProfileResidue] = []
     untouched: list[UntouchedResidue] = []
     for target in _selected_profiles(layout, profiles):
-        parsed = _parse_profile(target)
+        parsed = parse_profile(target)
         if parsed is None:
             warnings.append(_unreadable_profile(target))
             continue
-        cleaned = _clean_document(parsed, ids)
+        cleaned = clean_document(parsed, ids)
         untouched.extend(_untouched_in(cleaned.untouched, target.stem))
         if not cleaned.removed:
             continue
@@ -2790,7 +2790,7 @@ def _clean_profiles_inline(
         try:
             backup_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(target, backup)
-            _write_profile(target, cleaned.document)
+            write_profile(target, cleaned.document)
         except OSError as error:
             if changed:
                 _snapshot(repo.path, snapshot_message)

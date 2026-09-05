@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -724,7 +724,7 @@ def _state_file(path: Path) -> Path:
 
 
 @contextmanager
-def _launch_lock(path: Path) -> Iterator[None]:
+def _launch_lock(path: Path) -> Generator[None]:
     """Let only one launch at a time run for the installation at ``path``.
 
     Raises:

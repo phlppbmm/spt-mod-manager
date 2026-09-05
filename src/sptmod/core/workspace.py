@@ -14,7 +14,7 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -95,7 +95,7 @@ def game_lock(
     *,
     timeout: float | None = None,
     poll_interval: float | None = None,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold the exclusive right to change ``game_dir`` for the block.
 
     ``operation`` describes the work in plain language, for example

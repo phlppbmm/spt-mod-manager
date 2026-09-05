@@ -208,7 +208,7 @@ def find_residues(profile_path: Path, ids: ModIds) -> list[ProfileResidue]:
     A missing container, or one of an unexpected type, is simply no hit.
     The profile file is only read, never written.
     """
-    parsed = _parse_profile(profile_path)
+    parsed = parse_profile(profile_path)
     if parsed is None:
         return []
     return _residues_in(parsed, ids)
@@ -227,7 +227,7 @@ def check_all(repo: Repo, layout: GameLayout) -> CheckResult:
     profiles = [
         parsed
         for path in profile_paths(layout)
-        if (parsed := _parse_profile(path)) is not None
+        if (parsed := parse_profile(path)) is not None
     ]
     result = CheckResult()
     for name, commit in _active_mod_commits(repo).items():
@@ -274,7 +274,7 @@ def profile_summaries(layout: GameLayout) -> list[ProfileSummary]:
 def _summary(path: Path) -> ProfileSummary:
     """Describe one profile file by its PMC character and its file data."""
     modified = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
-    parsed = _parse_profile(path)
+    parsed = parse_profile(path)
     if parsed is None:
         return ProfileSummary(
             file=path.name,
@@ -306,7 +306,7 @@ class _ParsedProfile:
     root: dict[str, object]
 
 
-def _parse_profile(profile_path: Path) -> _ParsedProfile | None:
+def parse_profile(profile_path: Path) -> _ParsedProfile | None:
     """Parse a profile JSON file into a _ParsedProfile if valid.
 
     Returns None if the file does not exist, cannot be read, is not UTF-8
@@ -408,7 +408,7 @@ def _residues_in(profile: _ParsedProfile, ids: ModIds) -> list[ProfileResidue]:
     return [*residues, *_string_residue(profile.name, profile.text, ids, matched)]
 
 
-def _clean_document(profile: _ParsedProfile, ids: ModIds) -> _Cleaned:
+def clean_document(profile: _ParsedProfile, ids: ModIds) -> _Cleaned:
     """Return a copy of ``profile`` freed of the content of ``ids``.
 
     Every category that reports a hit also clears it, so the report is exactly
@@ -434,7 +434,7 @@ def _clean_document(profile: _ParsedProfile, ids: ModIds) -> _Cleaned:
     )
 
 
-def _write_profile(path: Path, data: dict[str, object]) -> None:
+def write_profile(path: Path, data: dict[str, object]) -> None:
     """Write ``data`` to ``path`` the way the game writes profiles itself.
 
     Serialises without indentation, without a trailing newline and with

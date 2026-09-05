@@ -1,6 +1,6 @@
 """Command-line interface for sptmod."""
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Final
@@ -75,7 +75,7 @@ _BYTES_PER_MB: Final = 1024 * 1024
 
 
 @contextmanager
-def _handled() -> Iterator[None]:
+def _handled() -> Generator[None]:
     """Turn a typed core error into a stderr message and an exit code."""
     try:
         yield

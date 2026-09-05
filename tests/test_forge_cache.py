@@ -19,8 +19,8 @@ from sptmod.core.errors import ArchiveError
 from sptmod.core.forge import cache
 from sptmod.core.forge.cache import (
     DEFAULT_MAX_BYTES,
-    MAX_GB_ENV_VAR,
     PART_MAX_AGE_SECONDS,
+    CacheEnv,
 )
 
 
@@ -82,7 +82,7 @@ def _dir_size(path: Path) -> int:
 
 def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     """max_bytes() returns DEFAULT_MAX_BYTES when environment variable is unset."""
-    monkeypatch.delenv(MAX_GB_ENV_VAR, raising=False)
+    monkeypatch.delenv(CacheEnv.MAX_GB, raising=False)
 
     assert cache.max_bytes() == DEFAULT_MAX_BYTES
 
@@ -94,7 +94,7 @@ def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> N
 )
 def test_max_bytes_reads_a_valid_gb_value(monkeypatch: pytest.MonkeyPatch, raw: str, expected: int) -> None:
     """max_bytes() parses integer and fractional gigabyte values from environment variable."""
-    monkeypatch.setenv(MAX_GB_ENV_VAR, raw)
+    monkeypatch.setenv(CacheEnv.MAX_GB, raw)
 
     assert cache.max_bytes() == expected
 
@@ -128,7 +128,7 @@ def test_max_bytes_falls_back_to_default_for_garbage_or_non_positive(
     monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
     """max_bytes() returns DEFAULT_MAX_BYTES for invalid, non-positive, or malformed values."""
-    monkeypatch.setenv(MAX_GB_ENV_VAR, raw)
+    monkeypatch.setenv(CacheEnv.MAX_GB, raw)
 
     assert cache.max_bytes() == DEFAULT_MAX_BYTES
 

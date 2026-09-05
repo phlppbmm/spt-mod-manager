@@ -25,6 +25,7 @@ import shutil
 import stat
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -32,12 +33,17 @@ from sptmod.core import workspace
 from sptmod.core.errors import ArchiveError
 from sptmod.core.models import Json
 
-MAX_GB_ENV_VAR: Final = "SPTMOD_DOWNLOAD_CACHE_MAX_GB"
 DEFAULT_MAX_BYTES: Final = 20 * 1024**3
 PART_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
 
 _META_FILE_NAME: Final = "meta.json"
 _PART_SUFFIX: Final = ".part"
+
+
+class CacheEnv(StrEnum):
+    """Names of the environment variables the download cache reads."""
+
+    MAX_GB = "SPTMOD_DOWNLOAD_CACHE_MAX_GB"
 
 
 @dataclass(frozen=True)
@@ -57,7 +63,7 @@ def max_bytes() -> int:
     Read from the environment on every call so a changed limit takes effect
     without a restart; anything unreadable or not positive means the default.
     """
-    raw = os.environ.get(MAX_GB_ENV_VAR)
+    raw = os.environ.get(CacheEnv.MAX_GB)
     if raw is None:
         return DEFAULT_MAX_BYTES
     try:

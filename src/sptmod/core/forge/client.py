@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Final, Literal
 
 import httpx
@@ -13,7 +14,6 @@ from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
 from sptmod.core.models import Json
 
 DEFAULT_BASE_URL: Final = "https://sp-mod.com/api/v0"
-BASE_URL_ENV_VAR: Final = "SPTMOD_FORGE_URL"
 MAX_PER_PAGE: Final = 50
 DEFAULT_RATE_PER_MINUTE: Final = 200
 DEFAULT_MAX_RETRIES: Final = 4
@@ -24,6 +24,17 @@ BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_MAX_SECONDS: Final = 60.0
 
 type FikaCompatibility = Literal["compatible", "incompatible", "unknown"]
+
+
+class ForgeEnv(StrEnum):
+    """Names of the environment variables the Forge client reads."""
+
+    BASE_URL = "SPTMOD_FORGE_URL"
+
+
+def forge_base_url() -> str:
+    """Return the Forge base URL from the environment, or the default when unset or empty."""
+    return os.environ.get(ForgeEnv.BASE_URL) or DEFAULT_BASE_URL
 
 
 @dataclass(frozen=True)
@@ -753,7 +764,7 @@ class ForgeClient:
         if rate_per_minute <= 0:
             raise ValueError("rate_per_minute must be greater than 0")
         if base_url is None:
-            base_url = os.environ.get(BASE_URL_ENV_VAR) or DEFAULT_BASE_URL
+            base_url = forge_base_url()
         self.base_url = base_url.rstrip("/")
         self.rate_per_minute = rate_per_minute
         self.max_retries = max_retries

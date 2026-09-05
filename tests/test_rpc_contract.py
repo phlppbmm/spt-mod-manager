@@ -31,7 +31,7 @@ from sptmod.core.models import (
     ProfileSummary,
 )
 from sptmod.server import schemas
-from sptmod.server.errors import ERROR_MAPPING, FALLBACK_ERROR_CODE, error_code
+from sptmod.server.errors import ERROR_MAPPING, ErrorCode, error_code
 from sptmod.server.rpc import RPC_FUNCTIONS
 
 SERVICE_FUNCTION_NAMES = service_function_names()
@@ -199,14 +199,14 @@ def test_there_are_twentyfive_concrete_core_error_classes() -> None:
 def test_every_concrete_core_error_maps_to_a_non_fallback_code(
     error_type: type[Exception],
 ) -> None:
-    """error_code(error_type) != FALLBACK_ERROR_CODE and error_type in ERROR_MAPPING.
+    """error_code(error_type) is not INTERNAL_ERROR and error_type in ERROR_MAPPING.
 
-    All core exceptions must have machine-readable codes; FALLBACK_ERROR_CODE
+    All core exceptions must have machine-readable codes; INTERNAL_ERROR
     is only for unhandled exceptions outside the core domain.
     """
     code = error_code(error_type)
 
-    assert code != FALLBACK_ERROR_CODE
+    assert code != ErrorCode.INTERNAL_ERROR
     assert error_type in ERROR_MAPPING
 
 

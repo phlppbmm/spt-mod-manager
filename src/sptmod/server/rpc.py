@@ -23,13 +23,11 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from sptmod.core import services
 from sptmod.core.models import Progress
 from sptmod.server import schemas
-from sptmod.server.errors import error_code, error_details
+from sptmod.server.errors import ErrorCode, error_code, error_details
 
 EXIT_OK: Final = 0
 EXIT_ERROR: Final = 1
 EXIT_REQUEST: Final = 2
-
-REQUEST_ERROR_CODE: Final = "VALIDATION_ERROR"
 
 
 @dataclass(frozen=True)
@@ -234,15 +232,15 @@ def main(name: str) -> int:
     """Run the service function ``name`` on the request read from stdin."""
     spec = RPC_FUNCTIONS.get(name)
     if spec is None:
-        return _write_error(f"unknown function: {name}", REQUEST_ERROR_CODE)
+        return _write_error(f"unknown function: {name}", ErrorCode.VALIDATION_ERROR)
     try:
         payload = json.loads(sys.stdin.buffer.read())
     except ValueError as error:
-        return _write_error(f"invalid JSON request: {error}", REQUEST_ERROR_CODE)
+        return _write_error(f"invalid JSON request: {error}", ErrorCode.VALIDATION_ERROR)
     try:
         request = spec.request.model_validate(payload)
     except ValidationError as error:
-        return _write_error(str(error), REQUEST_ERROR_CODE)
+        return _write_error(str(error), ErrorCode.VALIDATION_ERROR)
     return _dispatch(spec, request)
 
 
@@ -332,7 +330,7 @@ def _progress(operation_id: str) -> Progress:
     return report
 
 
-def _write_error(message: str, code: str) -> int:
+def _write_error(message: str, code: ErrorCode) -> int:
     """Write an error envelope to stdout and return EXIT_REQUEST (code 2).
 
     Used for validation/request errors (malformed JSON, unknown function).

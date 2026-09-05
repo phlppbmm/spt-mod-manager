@@ -4,6 +4,8 @@ Every typed core exception has a machine-readable code; the structured payload
 an exception carries becomes an :class:`ErrorDetails` body.
 """
 
+from enum import StrEnum
+
 from sptmod.core.errors import (
     AlreadyInitializedError,
     AmbiguousModError,
@@ -35,50 +37,84 @@ from sptmod.core.forge.catalog import NoCompatibleVersionError
 from sptmod.core.modmeta import InvalidMetadataError, UnsupportedRangeError
 from sptmod.server import schemas
 
-FALLBACK_ERROR_CODE = "INTERNAL_ERROR"
+
+class ErrorCode(StrEnum):
+    """Stable machine-readable error codes of the adapter contract."""
+
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    NOT_A_GAME_DIR = "NOT_A_GAME_DIR"
+    ARCHIVE_ERROR = "ARCHIVE_ERROR"
+    INVALID_METADATA = "INVALID_METADATA"
+    INVALID_PATH = "INVALID_PATH"
+    UNSUPPORTED_RANGE = "UNSUPPORTED_RANGE"
+    SPT_VERSION_UNKNOWN = "SPT_VERSION_UNKNOWN"
+    MOD_NOT_FOUND = "MOD_NOT_FOUND"
+    NO_COMPATIBLE_VERSION = "NO_COMPATIBLE_VERSION"
+    AMBIGUOUS_MOD = "AMBIGUOUS_MOD"
+    DIRTY_TREE = "DIRTY_TREE"
+    GAME_RUNNING = "GAME_RUNNING"
+    LAUNCH_FAILED = "LAUNCH_FAILED"
+    SERVER_PORT_BUSY = "SERVER_PORT_BUSY"
+    LOGIN_FAILED = "LOGIN_FAILED"
+    LAUNCHER_SETTINGS_MISSING = "LAUNCHER_SETTINGS_MISSING"
+    OPERATION_IN_PROGRESS = "OPERATION_IN_PROGRESS"
+    CONFLICT = "CONFLICT"
+    DEPENDENCY = "DEPENDENCY"
+    UNRESOLVABLE_DEPENDENCY = "UNRESOLVABLE_DEPENDENCY"
+    PROFILE_RESIDUE = "PROFILE_RESIDUE"
+    PARTIAL_INSTALL = "PARTIAL_INSTALL"
+    ALREADY_INITIALIZED = "ALREADY_INITIALIZED"
+    GIT_ERROR = "GIT_ERROR"
+    SPTMOD_ERROR = "SPTMOD_ERROR"
+    NOT_IMPLEMENTED_YET = "NOT_IMPLEMENTED_YET"
+    FORGE_API_ERROR = "FORGE_API_ERROR"
+    FORGE_UNAVAILABLE = "FORGE_UNAVAILABLE"
+    CATALOG_UNAVAILABLE = "CATALOG_UNAVAILABLE"
+
 
 # Stable machine-readable code per core exception class. The lookup walks the
 # MRO, so subclasses inherit the entry of their base.
-ERROR_MAPPING: dict[type[Exception], str] = {
-    NotAGameDirError: "NOT_A_GAME_DIR",
-    ArchiveError: "ARCHIVE_ERROR",
-    InvalidMetadataError: "INVALID_METADATA",
-    InvalidPathError: "INVALID_PATH",
-    UnsupportedRangeError: "UNSUPPORTED_RANGE",
-    SptVersionUnknownError: "SPT_VERSION_UNKNOWN",
-    ModNotFoundError: "MOD_NOT_FOUND",
-    NoCompatibleVersionError: "NO_COMPATIBLE_VERSION",
-    AmbiguousModError: "AMBIGUOUS_MOD",
-    DirtyTreeError: "DIRTY_TREE",
-    GameRunningError: "GAME_RUNNING",
-    LaunchError: "LAUNCH_FAILED",
-    ServerPortBusyError: "SERVER_PORT_BUSY",
-    LoginFailedError: "LOGIN_FAILED",
-    LauncherSettingsError: "LAUNCHER_SETTINGS_MISSING",
-    OperationInProgressError: "OPERATION_IN_PROGRESS",
-    ConflictError: "CONFLICT",
-    DependencyError: "DEPENDENCY",
-    UnresolvableDependencyError: "UNRESOLVABLE_DEPENDENCY",
-    ProfileResidueError: "PROFILE_RESIDUE",
-    PartialInstallError: "PARTIAL_INSTALL",
-    AlreadyInitializedError: "ALREADY_INITIALIZED",
-    GitError: "GIT_ERROR",
-    SptmodError: "SPTMOD_ERROR",
-    NotImplementedYetError: "NOT_IMPLEMENTED_YET",
-    NotImplementedError: "NOT_IMPLEMENTED_YET",
-    ForgeApiError: "FORGE_API_ERROR",
-    ForgeUnavailableError: "FORGE_UNAVAILABLE",
-    CatalogUnavailableError: "CATALOG_UNAVAILABLE",
+ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
+    NotAGameDirError: ErrorCode.NOT_A_GAME_DIR,
+    ArchiveError: ErrorCode.ARCHIVE_ERROR,
+    InvalidMetadataError: ErrorCode.INVALID_METADATA,
+    InvalidPathError: ErrorCode.INVALID_PATH,
+    UnsupportedRangeError: ErrorCode.UNSUPPORTED_RANGE,
+    SptVersionUnknownError: ErrorCode.SPT_VERSION_UNKNOWN,
+    ModNotFoundError: ErrorCode.MOD_NOT_FOUND,
+    NoCompatibleVersionError: ErrorCode.NO_COMPATIBLE_VERSION,
+    AmbiguousModError: ErrorCode.AMBIGUOUS_MOD,
+    DirtyTreeError: ErrorCode.DIRTY_TREE,
+    GameRunningError: ErrorCode.GAME_RUNNING,
+    LaunchError: ErrorCode.LAUNCH_FAILED,
+    ServerPortBusyError: ErrorCode.SERVER_PORT_BUSY,
+    LoginFailedError: ErrorCode.LOGIN_FAILED,
+    LauncherSettingsError: ErrorCode.LAUNCHER_SETTINGS_MISSING,
+    OperationInProgressError: ErrorCode.OPERATION_IN_PROGRESS,
+    ConflictError: ErrorCode.CONFLICT,
+    DependencyError: ErrorCode.DEPENDENCY,
+    UnresolvableDependencyError: ErrorCode.UNRESOLVABLE_DEPENDENCY,
+    ProfileResidueError: ErrorCode.PROFILE_RESIDUE,
+    PartialInstallError: ErrorCode.PARTIAL_INSTALL,
+    AlreadyInitializedError: ErrorCode.ALREADY_INITIALIZED,
+    GitError: ErrorCode.GIT_ERROR,
+    SptmodError: ErrorCode.SPTMOD_ERROR,
+    NotImplementedYetError: ErrorCode.NOT_IMPLEMENTED_YET,
+    NotImplementedError: ErrorCode.NOT_IMPLEMENTED_YET,
+    ForgeApiError: ErrorCode.FORGE_API_ERROR,
+    ForgeUnavailableError: ErrorCode.FORGE_UNAVAILABLE,
+    CatalogUnavailableError: ErrorCode.CATALOG_UNAVAILABLE,
 }
 
 
-def error_code(error_type: type[Exception]) -> str:
+def error_code(error_type: type[Exception]) -> ErrorCode:
     """Return the stable code mapped to ``error_type``."""
     for base in error_type.__mro__:
         mapped = ERROR_MAPPING.get(base)
         if mapped is not None:
             return mapped
-    return FALLBACK_ERROR_CODE
+    return ErrorCode.INTERNAL_ERROR
 
 
 def error_details(error: Exception) -> schemas.ErrorDetails:

@@ -4,6 +4,7 @@ import httpx
 import respx
 
 from test_forge_client_fixtures import (
+    ClientFactory,
     client_factory,
     fake_clock,
     page_envelope,
@@ -16,7 +17,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_mods_serializes_query_filters_sort_include_fields(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
@@ -45,7 +46,7 @@ def test_mods_serializes_query_filters_sort_include_fields(
 
 
 def test_mod_versions_serializes_filters_and_sort(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(200, json=page_envelope([]))
@@ -67,7 +68,7 @@ def test_mod_versions_serializes_filters_and_sort(
 
 
 def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     minimal_data = {
         "spt_version": "3.11.5",
@@ -91,7 +92,7 @@ def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
 
 
 def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = respx_router.get("/mods/dependencies").mock(
         return_value=httpx.Response(200, json=success_envelope({}))
@@ -108,7 +109,7 @@ def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
 
 
 def test_updates_serializes_single_pair_without_trailing_comma(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     minimal_data = {
         "spt_version": "3.11.5",

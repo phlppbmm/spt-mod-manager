@@ -20,6 +20,7 @@ from sptmod.core.forge.client import (
     SourceCodeLink,
 )
 from test_forge_client_fixtures import (
+    ClientFactory,
     client_factory,
     error_envelope,
     fake_clock,
@@ -34,7 +35,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_mods_unwraps_success_envelope(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
@@ -52,7 +53,7 @@ def test_mods_unwraps_success_envelope(
 
 
 def test_mod_unwraps_success_envelope(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mod/42").mock(
         return_value=httpx.Response(
@@ -109,7 +110,7 @@ def test_mod_unwraps_success_envelope(
 
 
 def test_mods_400_validation_failed_raises_forge_api_error(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = respx_router.get("/mods").mock(
         return_value=httpx.Response(
@@ -128,7 +129,7 @@ def test_mods_400_validation_failed_raises_forge_api_error(
 
 
 def test_mod_404_not_found_raises_forge_api_error(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = respx_router.get("/mod/999").mock(
         return_value=httpx.Response(
@@ -147,7 +148,7 @@ def test_mod_404_not_found_raises_forge_api_error(
 
 
 def test_mods_with_a_non_json_body_raises_forge_unavailable(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mods").mock(
         return_value=httpx.Response(200, content=b"not json at all")
@@ -159,7 +160,7 @@ def test_mods_with_a_non_json_body_raises_forge_unavailable(
 
 
 def test_ping_true_when_api_answers(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/ping").mock(
         return_value=httpx.Response(200, json={"success": True})
@@ -170,7 +171,7 @@ def test_ping_true_when_api_answers(
 
 
 def test_ping_false_on_connection_error(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/ping").mock(side_effect=httpx.ConnectError("boom"))
     client = client_factory()
@@ -179,7 +180,7 @@ def test_ping_false_on_connection_error(
 
 
 def test_ping_false_on_server_error(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/ping").mock(return_value=httpx.Response(500))
     client = client_factory()

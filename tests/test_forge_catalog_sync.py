@@ -13,6 +13,7 @@ from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     catalog,
     client_factory,
     db_path,
@@ -141,7 +142,7 @@ def _full_sync_pages() -> list[httpx.Response]:
 
 
 def test_full_sync_fills_the_cache_from_a_multi_page_response(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -173,7 +174,7 @@ def test_full_sync_fills_the_cache_from_a_multi_page_response(
 
 
 def test_full_sync_watermark_is_the_max_updated_at_seen(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -188,7 +189,7 @@ def test_last_synced_at_is_none_before_the_first_sync(catalog: Catalog) -> None:
 
 
 def test_full_sync_caches_embedded_version_summaries_without_link(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -204,7 +205,7 @@ def test_full_sync_caches_embedded_version_summaries_without_link(
 
 
 def test_delta_sync_requests_updated_between_from_watermark_minus_overlap_and_sort(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -223,7 +224,7 @@ def test_delta_sync_requests_updated_between_from_watermark_minus_overlap_and_so
 
 
 def test_delta_sync_updates_only_changed_rows_and_counts_correctly(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -260,7 +261,7 @@ def test_delta_sync_updates_only_changed_rows_and_counts_correctly(
 
 
 def test_delta_sync_is_idempotent_when_run_twice_in_a_row(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -290,7 +291,7 @@ def test_delta_sync_is_idempotent_when_run_twice_in_a_row(
 
 
 def test_delta_sync_without_prior_watermark_falls_back_to_full_listing(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -305,7 +306,7 @@ def test_delta_sync_without_prior_watermark_falls_back_to_full_listing(
 
 
 def test_fetch_versions_fills_link_and_content_length(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -351,7 +352,7 @@ def test_fetch_versions_fills_link_and_content_length(
 )
 def test_fetch_versions_stores_and_exposes_fika_compatibility(
     catalog: Catalog,
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     fika_compatibility: str,
 ) -> None:
@@ -385,7 +386,7 @@ def test_fetch_versions_stores_and_exposes_fika_compatibility(
 
 
 def test_sync_after_fetch_versions_does_not_wipe_stored_fika_compatibility(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -422,7 +423,7 @@ def test_sync_after_fetch_versions_does_not_wipe_stored_fika_compatibility(
 def test_forge_unavailable_during_sync_raises_but_keeps_prior_cache(
     catalog: Catalog,
     db_path: Path,
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
@@ -445,7 +446,7 @@ def test_forge_unavailable_during_sync_raises_but_keeps_prior_cache(
 
 
 def test_full_sync_prunes_mods_no_longer_returned_by_the_api(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -472,7 +473,7 @@ def test_full_sync_prunes_mods_no_longer_returned_by_the_api(
 
 
 def test_full_sync_with_an_empty_page_does_not_prune_the_cache(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -495,7 +496,7 @@ def test_full_sync_with_an_empty_page_does_not_prune_the_cache(
 
 
 def test_delta_sync_does_not_prune_mods_absent_from_the_response(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -522,7 +523,7 @@ def test_delta_sync_does_not_prune_mods_absent_from_the_response(
 
 
 def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     page1 = page_envelope(
         [_alpha_mod()],
@@ -552,7 +553,7 @@ def test_full_sync_rolls_back_page_one_writes_when_a_later_page_fails(
 
 
 def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     route = _mods_route_queue(
         respx_router,
@@ -584,7 +585,7 @@ def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable
 
 
 def test_full_sync_with_no_updated_at_on_any_mod_leaves_the_watermark_unset(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
@@ -616,7 +617,7 @@ class _RecordingProgress:
 
 
 def test_sync_reports_a_page_of_a_zero_last_page_listing_as_complete(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
@@ -633,7 +634,7 @@ def test_sync_reports_a_page_of_a_zero_last_page_listing_as_complete(
 
 
 def test_fetch_versions_rolls_back_on_failure_and_keeps_the_prior_cache(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _mods_route_queue(respx_router, _full_sync_pages())
     client = client_factory()
@@ -656,7 +657,7 @@ def test_fetch_versions_rolls_back_on_failure_and_keeps_the_prior_cache(
 def test_get_mod_tolerates_a_corrupted_source_links_column(
     catalog: Catalog,
     db_path: Path,
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     raw_source_links: str,
 ) -> None:

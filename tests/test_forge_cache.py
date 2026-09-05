@@ -10,6 +10,7 @@ public functions (``max_bytes``, ``find``, ``claim``, ``keep``, ``release``,
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -583,10 +584,10 @@ def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails
     state = cache.claim("k20", None, "http://x", cache_dir)
     state.work.write_bytes(b"full-archive-content")
 
-    def failing_replace(src: object, dst: object, *a: object, **kw: object) -> None:
+    def failing_replace(*args: object, **kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(cache.os, "replace", failing_replace)
+    monkeypatch.setattr(os, "replace", failing_replace)
 
     with pytest.raises(ArchiveError) as excinfo:
         cache.keep(state, "mod.zip", "k20", cache_dir)
@@ -644,12 +645,12 @@ def test_clear_reports_bytes_freed_only_for_entries_it_can_actually_remove(
     "call",
     [
         lambda cache_dir: cache.sweep(cache_dir=cache_dir),
-        lambda cache_dir: cache.clear(cache_dir),
+        cache.clear,
     ],
     ids=["sweep", "clear"],
 )
 def test_an_unreadable_cache_dir_frees_nothing_instead_of_raising(
-    tmp_path: Path, call
+    tmp_path: Path, call: Callable[[Path], int]
 ) -> None:
     unreadable = tmp_path / "cache"
     unreadable.mkdir()

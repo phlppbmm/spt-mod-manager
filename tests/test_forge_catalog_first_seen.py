@@ -7,8 +7,11 @@ from datetime import UTC, datetime
 import httpx
 import respx
 
+from fixture_types import JsonDict
 from sptmod.core.forge.catalog import Catalog
+from sptmod.core.forge.client import ForgeClient
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     catalog,
     client_factory,
     db_path,
@@ -32,7 +35,9 @@ __all__ = [
 _ISO_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
-def _mod(mod_id: int, name: str, *, updated_at: str, downloads: int = 1) -> dict:
+def _mod(
+    mod_id: int, name: str, *, updated_at: str, downloads: int = 1
+) -> JsonDict:
     return mod_json_full(
         id=mod_id,
         name=name,
@@ -44,7 +49,11 @@ def _mod(mod_id: int, name: str, *, updated_at: str, downloads: int = 1) -> dict
     )
 
 
-def _sync_page(mods, respx_router, client_factory):
+def _sync_page(
+    mods: list[JsonDict],
+    respx_router: respx.MockRouter,
+    client_factory: ClientFactory,
+) -> ForgeClient:
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
             200,
@@ -57,7 +66,7 @@ def _sync_page(mods, respx_router, client_factory):
 
 
 def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     before = datetime.now(UTC).timestamp()
     client = _sync_page(
@@ -81,7 +90,7 @@ def test_first_sync_stamps_a_new_mod_with_an_iso8601_now_timestamp(
 
 
 def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updated(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     mods = [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")]
     client = _sync_page(mods, respx_router, client_factory)
@@ -101,7 +110,7 @@ def test_unchanged_mod_on_a_later_sync_keeps_the_stamp_and_is_not_reported_updat
 
 
 def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],
@@ -127,7 +136,7 @@ def test_updated_mod_on_a_later_sync_keeps_its_original_first_seen_stamp(
 
 
 def test_mod_appearing_only_in_a_later_delta_sync_gets_a_later_stamp_and_is_counted_new(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     client = _sync_page(
         [_mod(1, "Alpha Mod", updated_at="2025-06-01T00:00:00Z")],

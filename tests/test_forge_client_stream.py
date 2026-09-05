@@ -3,14 +3,21 @@
 import httpx
 import respx
 
-from test_forge_client_fixtures import client_factory, fake_clock, recording_sleep
+from test_forge_client_fixtures import (
+    ClientFactory,
+    client_factory,
+    fake_clock,
+    recording_sleep,
+)
 
 __all__ = ["client_factory", "fake_clock", "recording_sleep"]
 
 DOWNLOAD_URL = "https://cdn.example.com/releases/mod-1.0.0.zip"
 
 
-def test_stream_delivers_chunks_and_exposes_headers(client_factory) -> None:
+def test_stream_delivers_chunks_and_exposes_headers(
+    client_factory: ClientFactory,
+) -> None:
     body = b"0123456789" * 50  # 500 bytes
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
@@ -37,7 +44,7 @@ def test_stream_delivers_chunks_and_exposes_headers(client_factory) -> None:
         assert download.headers["Content-Length"] == "500"
 
 
-def test_stream_of_empty_body_yields_no_chunks(client_factory) -> None:
+def test_stream_of_empty_body_yields_no_chunks(client_factory: ClientFactory) -> None:
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(
             return_value=httpx.Response(

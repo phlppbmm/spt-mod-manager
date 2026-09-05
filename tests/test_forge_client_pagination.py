@@ -6,6 +6,7 @@ import respx
 
 from sptmod.core.forge.client import DEFAULT_BASE_URL
 from test_forge_client_fixtures import (
+    ClientFactory,
     client_factory,
     fake_clock,
     mod_json_minimal,
@@ -18,7 +19,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_iter_mods_walks_every_page_exactly_once_in_order(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     page1 = page_envelope(
         [
@@ -52,7 +53,7 @@ def test_iter_mods_walks_every_page_exactly_once_in_order(
 
 
 def test_iter_mods_stops_at_last_page(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     single_page = page_envelope(
         [mod_json_minimal(id=1, name="Only Mod")],
@@ -73,7 +74,7 @@ def test_iter_mods_stops_at_last_page(
 
 
 def test_iter_mods_stops_when_next_url_repeats_an_already_fetched_url(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """A page whose links.next points back at a URL already fetched must not loop.
 
@@ -119,7 +120,7 @@ def test_iter_mods_stops_when_next_url_repeats_an_already_fetched_url(
 
 
 def test_iter_mods_stops_when_a_page_short_of_last_page_has_no_next_url(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """meta says there is more to fetch (current_page < last_page) but the
     envelope's links.next is null: an inconsistent API response the client
@@ -142,7 +143,7 @@ def test_iter_mods_stops_when_a_page_short_of_last_page_has_no_next_url(
 
 
 def test_iter_mods_stops_when_next_url_points_back_at_the_page_just_fetched(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """links.next pointing back at a URL already fetched (here, page 1 itself)
     must not be re-fetched, even while meta still claims more pages remain.
@@ -164,7 +165,7 @@ def test_iter_mods_stops_when_next_url_points_back_at_the_page_just_fetched(
 
 
 def test_iter_mods_stops_when_last_page_reached_despite_non_null_next(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """meta says current_page >= last_page: stop even if links.next is set."""
     bogus_next_url = f"{DEFAULT_BASE_URL}/mods?page=99"
@@ -197,7 +198,7 @@ def test_iter_mods_stops_when_last_page_reached_despite_non_null_next(
     [(999, "50"), (50, "50"), (10, "10"), (1, "1")],
 )
 def test_mods_per_page_is_clamped_to_50(
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     requested_per_page: int,
     expected_sent: str,

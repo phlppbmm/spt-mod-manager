@@ -5,6 +5,7 @@ import respx
 
 from sptmod.core.forge.catalog import Catalog
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     catalog,
     client_factory,
     db_path,
@@ -28,7 +29,7 @@ __all__ = [
 
 
 def _seed_classify_mods(
-    client_factory, respx_router: respx.MockRouter, catalog: Catalog
+    client_factory: ClientFactory, respx_router: respx.MockRouter, catalog: Catalog
 ) -> None:
     """Sync four mods used across the classify scenarios.
 
@@ -135,7 +136,7 @@ def _seed_classify_mods(
 
 
 def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
@@ -154,7 +155,7 @@ def test_classify_matches_installed_mod_by_forge_id_and_detects_update(
 
 
 def test_classify_matches_installed_mod_by_name_case_insensitively(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
     installed = [
@@ -170,7 +171,7 @@ def test_classify_matches_installed_mod_by_name_case_insensitively(
 
 
 def test_classify_marks_never_installed_mods_as_available(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
 
@@ -184,7 +185,7 @@ def test_classify_marks_never_installed_mods_as_available(
 
 
 def test_classify_orders_entries_by_mod_name(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
 
@@ -200,7 +201,7 @@ def test_classify_orders_entries_by_mod_name(
 
 
 def test_classify_compatible_with_drops_mods_without_a_compatible_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
 
@@ -210,7 +211,7 @@ def test_classify_compatible_with_drops_mods_without_a_compatible_version(
 
 
 def test_classify_compatible_with_restricts_update_check_to_compatible_versions(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_classify_mods(client_factory, respx_router, catalog)
     # Epsilon Mod's newest version overall (2.0.0) is only 4.0-compatible;

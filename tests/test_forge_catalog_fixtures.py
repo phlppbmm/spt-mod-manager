@@ -17,6 +17,7 @@ import pytest
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.models import ModInfo
 from test_forge_client_fixtures import (
+    ClientFactory,
     client_factory,
     error_envelope,
     fake_clock,
@@ -31,6 +32,7 @@ from test_forge_client_fixtures import (
 )
 
 __all__ = [
+    "ClientFactory",
     "catalog",
     "client_factory",
     "db_path",

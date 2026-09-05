@@ -10,6 +10,7 @@ import httpx
 import pytest
 import respx
 
+from fixture_types import JsonDict
 from sptmod.core.forge.client import (
     BlockedUpdate,
     BlockingMod,
@@ -26,6 +27,7 @@ from sptmod.core.forge.client import (
     UpToDateMod,
 )
 from test_forge_client_fixtures import (
+    ClientFactory,
     client_factory,
     fake_clock,
     page_envelope,
@@ -39,7 +41,7 @@ __all__ = ["client_factory", "fake_clock", "recording_sleep", "respx_router"]
 
 
 def test_mod_versions_parses_null_content_length_and_embedded_dependency(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(
@@ -80,7 +82,7 @@ def test_mod_versions_parses_null_content_length_and_embedded_dependency(
 
 
 def test_mod_versions_parses_incompatible_fika_compatibility(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     respx_router.get("/mod/42/versions").mock(
         return_value=httpx.Response(
@@ -95,7 +97,7 @@ def test_mod_versions_parses_incompatible_fika_compatibility(
 
 
 def test_updates_parses_all_four_lists_with_blocked_update_quirks(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     data = {
         "spt_version": "3.11.5",
@@ -214,7 +216,7 @@ def test_updates_parses_all_four_lists_with_blocked_update_quirks(
 
 
 def test_updates_parses_populated_blocking_mods(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     data = {
         "spt_version": "3.11.5",
@@ -266,7 +268,7 @@ def test_updates_parses_populated_blocking_mods(
 
 
 def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     nested_dep = {
         "id": 100,
@@ -325,11 +327,11 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
 
 
 def test_dependencies_omits_unresolvable_pairs_and_keeps_empty_list_for_no_deps(
-    client_factory, respx_router: respx.MockRouter
+    client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     # Two pairs queried; only one resolves ("9:9.9.9" is unresolvable and
     # omitted by the server). The resolved pair has no dependencies -> [].
-    data = {"5:1.2.0": []}
+    data: JsonDict = {"5:1.2.0": []}
     respx_router.get("/mods/dependencies").mock(
         return_value=httpx.Response(200, json=success_envelope(data))
     )
@@ -349,7 +351,7 @@ def test_dependencies_omits_unresolvable_pairs_and_keeps_empty_list_for_no_deps(
     ids=["string", "int", "null", "false"],
 )
 def test_dependencies_conflict_flag_fails_safe_for_any_non_false_value(
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     raw_conflict: object,
     expected: bool,

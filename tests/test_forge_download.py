@@ -8,7 +8,12 @@ import respx
 
 from sptmod.core.errors import ArchiveError, ForgeUnavailableError
 from sptmod.core.forge.download import FALLBACK_FILE_NAME, download
-from test_forge_client_fixtures import client_factory, fake_clock, recording_sleep
+from test_forge_client_fixtures import (
+    ClientFactory,
+    client_factory,
+    fake_clock,
+    recording_sleep,
+)
 
 __all__ = ["client_factory", "fake_clock", "recording_sleep"]
 
@@ -33,7 +38,7 @@ def dest_dir(tmp_path: Path) -> Path:
 
 
 def test_download_progress_is_monotonic_and_reaches_100_with_known_length(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"x" * 300_000  # several 64 KiB chunks at the client's default chunk size
     with respx.mock() as router:
@@ -59,7 +64,7 @@ def test_download_progress_is_monotonic_and_reaches_100_with_known_length(
 
 
 def test_download_progress_stays_at_zero_while_total_size_is_unknown(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"y" * 200_000
     with respx.mock() as router:
@@ -82,7 +87,7 @@ def test_download_progress_stays_at_zero_while_total_size_is_unknown(
 
 
 def test_download_progress_stays_at_zero_when_content_length_is_malformed(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"z" * 200_000
     with respx.mock() as router:
@@ -134,7 +139,7 @@ def test_download_progress_stays_at_zero_when_content_length_is_malformed(
     ],
 )
 def test_download_derives_the_file_name_from_header_url_or_fallback(
-    client_factory,
+    client_factory: ClientFactory,
     dest_dir: Path,
     content_disposition: str | None,
     url: str,
@@ -160,7 +165,7 @@ def test_download_derives_the_file_name_from_header_url_or_fallback(
 
 
 def test_download_size_match_succeeds_and_returns_final_path(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"exact-size-content"
     with respx.mock() as router:
@@ -174,7 +179,7 @@ def test_download_size_match_succeeds_and_returns_final_path(
 
 
 def test_download_size_mismatch_raises_archive_error_and_removes_temp_file(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"exact-size-content"
     with respx.mock() as router:
@@ -188,7 +193,7 @@ def test_download_size_mismatch_raises_archive_error_and_removes_temp_file(
 
 
 def test_download_expected_length_none_skips_the_size_check(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     body = b"a-body-of-777-declared-content-length"
     with respx.mock() as router:
@@ -207,7 +212,7 @@ def test_download_expected_length_none_skips_the_size_check(
 
 
 def test_download_follows_a_redirect_to_the_final_url(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     """Forge download links can 30x-redirect to a CDN URL; the client's
     ``httpx.Client`` must follow it (``follow_redirects=True``), not treat
@@ -228,7 +233,7 @@ def test_download_follows_a_redirect_to_the_final_url(
 
 
 def test_download_propagates_forge_unavailable_error_and_leaves_no_temp_file(
-    client_factory, dest_dir: Path
+    client_factory: ClientFactory, dest_dir: Path
 ) -> None:
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(side_effect=httpx.ConnectError("boom"))

@@ -6,6 +6,7 @@ mocked with respx.
 import json
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -16,7 +17,12 @@ from sptmod.core.errors import ArchiveError, ForgeUnavailableError
 from sptmod.core.forge import cache
 from sptmod.core.forge.client import DEFAULT_CHUNK_SIZE
 from sptmod.core.forge.download import CACHE_HIT_MESSAGE, DOWNLOAD_STEP, download_cached
-from test_forge_client_fixtures import client_factory, fake_clock, recording_sleep
+from test_forge_client_fixtures import (
+    ClientFactory,
+    client_factory,
+    fake_clock,
+    recording_sleep,
+)
 
 __all__ = ["client_factory", "fake_clock", "recording_sleep"]
 
@@ -54,7 +60,7 @@ class _RaisingAfterFirstChunk(httpx.SyncByteStream):
     def __init__(self, first_chunk: bytes) -> None:
         self._first_chunk = first_chunk
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[bytes]:
         yield self._first_chunk
         raise httpx.ReadError("connection dropped mid-stream")
 
@@ -63,7 +69,7 @@ class _RaisingAfterFirstChunk(httpx.SyncByteStream):
 
 
 def test_first_call_downloads_and_second_call_hits_the_cache(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     body = b"archive-bytes-for-hit-test"
     with respx.mock() as router:
@@ -112,7 +118,7 @@ def test_first_call_downloads_and_second_call_hits_the_cache(
 
 
 def test_resume_continues_from_the_leftover_offset_on_a_206_response(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     total = 70_000
     full_payload = bytes(i % 251 for i in range(total))
@@ -168,7 +174,7 @@ def test_resume_continues_from_the_leftover_offset_on_a_206_response(
 
 
 def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     total = 40
     full_payload = bytes(range(total))
@@ -223,7 +229,7 @@ def test_a_200_answer_to_a_range_request_restarts_the_download_from_zero(
     ],
 )
 def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
-    client_factory,
+    client_factory: ClientFactory,
     cache_dir: Path,
     key: str,
     range_status: int,
@@ -273,7 +279,7 @@ def test_an_untrustworthy_answer_to_a_resume_restarts_the_download_from_zero(
 
 
 def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     total = DEFAULT_CHUNK_SIZE + 5_000
     full_payload = bytes(i % 251 for i in range(total))
@@ -329,7 +335,7 @@ def test_interruption_mid_stream_leaves_a_resumable_part_and_reraises(
 
 
 def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     entry = cache_dir / "46"
     entry.mkdir()
@@ -364,7 +370,7 @@ def test_a_size_mismatched_cache_entry_is_deleted_and_downloaded_exactly_once(
 
 
 def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     body = b"actual-body-of-eighteen-b"
     with respx.mock() as router:
@@ -385,7 +391,7 @@ def test_a_fresh_download_size_mismatch_raises_and_leaves_no_complete_entry(
 
 
 def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     entry = cache_dir / "48"
     entry.mkdir()
@@ -420,18 +426,24 @@ def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
 
 
 def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
-    client_factory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+    client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     body = b"body-for-publish-failure-test"
     real_replace = os.replace
 
-    def failing_replace(src: object, dst: object, *a: object, **kw: object) -> object:
+    def failing_replace(
+        src: str | os.PathLike[str],
+        dst: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
         # Only the final publish rename (to the plain archive name) fails;
         # the ".part"/".part.json" renames the resume machinery performs
         # must keep working, or the interrupted download couldn't recover.
         if ".part" not in Path(dst).suffixes:
             raise OSError("disk full")
-        return real_replace(src, dst, *a, **kw)
+        real_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(
@@ -464,7 +476,7 @@ def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
 
 
 def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(416))
@@ -488,7 +500,7 @@ def test_a_fresh_download_answered_with_416_raises_forge_unavailable(
 
 
 def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
-    client_factory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+    client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     old_entry = cache_dir / "old-key"
     old_entry.mkdir()
@@ -525,7 +537,7 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
 
 
 def test_progress_messages_never_mention_git_vocabulary(
-    client_factory, cache_dir: Path
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
     body = b"body-for-vocabulary-test"
     all_messages: list[str] = []

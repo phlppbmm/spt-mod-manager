@@ -13,6 +13,10 @@ import respx
 
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 
+# The factory forwards arbitrary keyword arguments to ``ForgeClient``, so the
+# parameter list stays open; tests annotate their fixture argument with this.
+type ClientFactory = Callable[..., ForgeClient]
+
 
 class FakeClock:
     """A monotonic-clock stand-in that only advances when told to.
@@ -59,7 +63,7 @@ def recording_sleep() -> RecordingSleep:
 @pytest.fixture
 def client_factory(
     fake_clock: FakeClock, recording_sleep: RecordingSleep
-) -> Iterator[Callable[..., ForgeClient]]:
+) -> Iterator[ClientFactory]:
     """Build ``ForgeClient`` instances wired to the fake clock/recording sleep.
 
     Every client built through the factory is closed on teardown.

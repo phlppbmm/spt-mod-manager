@@ -10,6 +10,7 @@ import respx
 
 from sptmod.core.forge.catalog import Catalog
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     client_factory,
     fake_clock,
     mod_json_full,
@@ -136,7 +137,7 @@ def test_init_upgrades_a_database_without_first_seen_at_reads_it_as_none(
 
 
 def test_legacy_mod_without_first_seen_at_keeps_it_none_after_a_later_sync(
-    tmp_path: Path, client_factory, respx_router: respx.MockRouter
+    tmp_path: Path, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """A pre-migration row has no first-seen stamp to preserve; re-syncing the
     same mod id must not backfill one, since the real first-seen moment is

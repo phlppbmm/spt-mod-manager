@@ -11,6 +11,7 @@ from sptmod.core.forge.catalog import Catalog, NoCompatibleVersionError
 from sptmod.core.forge.resolve import plan_install
 from sptmod.core.models import PlanEntry
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     catalog,
     client_factory,
     db_path,
@@ -39,7 +40,7 @@ SPT_CONSTRAINT = "^3.8.0"
 
 
 def _seed_target(
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     catalog: Catalog,
     *,
@@ -162,7 +163,7 @@ def _mock_empty_dependencies_response(respx_router: respx.MockRouter) -> None:
 
 
 def test_plan_install_orders_dependency_before_the_requested_mod(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep")
@@ -197,7 +198,7 @@ def test_plan_install_orders_dependency_before_the_requested_mod(
 
 
 def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
@@ -211,7 +212,7 @@ def test_plan_install_skips_dependency_already_satisfied_by_forge_id(
 
 
 def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_id(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid=None, version="1.0.0")
@@ -225,7 +226,7 @@ def test_plan_install_skips_dependency_already_satisfied_by_name_without_forge_i
 
 
 def test_plan_install_includes_outdated_installed_dependency(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="2.0.0")
@@ -242,7 +243,7 @@ def test_plan_install_includes_outdated_installed_dependency(
 
 
 def test_plan_install_orders_a_transitive_dependency_chain(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep_b = _dep_node(id=3, name="Dep B", version="1.0.0")
@@ -257,7 +258,7 @@ def test_plan_install_orders_a_transitive_dependency_chain(
 
 
 def test_plan_install_diamond_dependency_appears_once_before_its_dependents(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     """A -> {B, C}, both B and C -> D: D must be planned once, before B and C."""
     _seed_target(client_factory, respx_router, catalog)
@@ -282,7 +283,7 @@ def test_plan_install_diamond_dependency_appears_once_before_its_dependents(
 
 
 def test_plan_install_target_pair_omitted_from_response_raises_naming_the_target(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     _mock_empty_dependencies_response(respx_router)
@@ -295,7 +296,7 @@ def test_plan_install_target_pair_omitted_from_response_raises_naming_the_target
 
 
 def test_plan_install_installed_dependency_with_unparseable_version_is_not_satisfied(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Dep Mod", guid="com.example.dep", version="1.0.0")
@@ -309,7 +310,7 @@ def test_plan_install_installed_dependency_with_unparseable_version_is_not_satis
 
 
 def test_plan_install_conflicting_dependency_raises_naming_it(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(id=2, name="Conflicted Dep", conflict=True)
@@ -323,7 +324,7 @@ def test_plan_install_conflicting_dependency_raises_naming_it(
 
 
 def test_plan_install_null_compatible_version_raises_naming_the_dependency(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     dep = _dep_node(
@@ -339,7 +340,7 @@ def test_plan_install_null_compatible_version_raises_naming_the_dependency(
 
 
 def test_plan_install_dependency_cycle_raises_naming_the_dependency(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_target(client_factory, respx_router, catalog)
     # "Dep A" (id=2) reappears on its own path -> a cycle.
@@ -355,7 +356,7 @@ def test_plan_install_dependency_cycle_raises_naming_the_dependency(
 
 
 def test_plan_install_unknown_mod_raises_no_compatible_version_error(
-    catalog: Catalog, client_factory
+    catalog: Catalog, client_factory: ClientFactory
 ) -> None:
     client = client_factory()
 
@@ -364,7 +365,7 @@ def test_plan_install_unknown_mod_raises_no_compatible_version_error(
 
 
 def test_plan_install_without_wanted_version_resolves_the_highest_compatible(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     mod = mod_json_full(
         id=1,

@@ -6,6 +6,7 @@ import respx
 
 from sptmod.core.forge.catalog import Catalog, NoCompatibleVersionError
 from test_forge_catalog_fixtures import (
+    ClientFactory,
     catalog,
     client_factory,
     db_path,
@@ -28,7 +29,7 @@ __all__ = [
 
 
 def _seed_search_mods(
-    client_factory, respx_router: respx.MockRouter, catalog: Catalog
+    client_factory: ClientFactory, respx_router: respx.MockRouter, catalog: Catalog
 ) -> None:
     """Sync three mods: two compatible with 3.8.x, one only with 4.x."""
     alpha = mod_json_full(
@@ -88,7 +89,7 @@ def _seed_search_mods(
 
 
 def test_get_mod_returns_the_cached_mod(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -105,7 +106,7 @@ def test_get_mod_returns_none_for_unknown_id(catalog: Catalog) -> None:
 
 
 def test_find_mod_matches_name_case_insensitively(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -116,7 +117,7 @@ def test_find_mod_matches_name_case_insensitively(
 
 
 def test_find_mod_returns_none_when_no_name_matches(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -124,7 +125,7 @@ def test_find_mod_returns_none_when_no_name_matches(
 
 
 def test_search_matches_name_case_insensitively(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -134,7 +135,7 @@ def test_search_matches_name_case_insensitively(
 
 
 def test_search_matches_author_case_insensitively(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -144,7 +145,7 @@ def test_search_matches_author_case_insensitively(
 
 
 def test_search_with_empty_query_returns_every_mod_ordered_by_name(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -154,7 +155,7 @@ def test_search_with_empty_query_returns_every_mod_ordered_by_name(
 
 
 def test_search_with_no_match_returns_empty_list(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -162,7 +163,7 @@ def test_search_with_no_match_returns_empty_list(
 
 
 def test_search_compatible_with_excludes_mods_without_a_compatible_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -172,7 +173,7 @@ def test_search_compatible_with_excludes_mods_without_a_compatible_version(
 
 
 def _seed_versions_for_resolve(
-    client_factory, respx_router: respx.MockRouter, catalog: Catalog
+    client_factory: ClientFactory, respx_router: respx.MockRouter, catalog: Catalog
 ) -> None:
     """Sync one mod ("Alpha Mod", id=1) with three versions of varying compatibility."""
     mod = mod_json_full(
@@ -212,7 +213,7 @@ def _seed_versions_for_resolve(
 
 
 def test_get_versions_orders_by_published_at_desc_then_id_desc(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     mod = mod_json_full(
         id=1,
@@ -254,7 +255,7 @@ def test_get_versions_orders_by_published_at_desc_then_id_desc(
 
 
 def test_get_versions_compatible_with_filters_out_incompatible_versions(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -264,7 +265,7 @@ def test_get_versions_compatible_with_filters_out_incompatible_versions(
 
 
 def test_resolve_version_picks_newest_by_default(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -274,7 +275,7 @@ def test_resolve_version_picks_newest_by_default(
 
 
 def test_resolve_version_picks_newest_compatible_with_spt_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -284,7 +285,7 @@ def test_resolve_version_picks_newest_compatible_with_spt_version(
 
 
 def test_resolve_version_honours_explicit_wanted_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -294,7 +295,7 @@ def test_resolve_version_honours_explicit_wanted_version(
 
 
 def test_resolve_version_by_name_case_insensitive(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -309,7 +310,7 @@ def test_resolve_version_raises_for_unknown_mod(catalog: Catalog) -> None:
 
 
 def test_resolve_version_raises_for_unknown_wanted_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -318,7 +319,7 @@ def test_resolve_version_raises_for_unknown_wanted_version(
 
 
 def test_resolve_version_raises_when_no_version_is_compatible(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
@@ -327,7 +328,7 @@ def test_resolve_version_raises_when_no_version_is_compatible(
 
 
 def _sync_single_mod_with_versions(
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     catalog: Catalog,
     mod_id: int,
@@ -392,7 +393,7 @@ def _version_row(version_id: int, version: str, published_at: str) -> dict[str, 
 )
 def test_resolve_version_default_pick(
     catalog: Catalog,
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     versions: list[dict[str, object]],
     expected_id: int,
@@ -412,7 +413,7 @@ def test_resolve_version_default_pick(
 
 
 def test_search_matches_unicode_name_and_author_via_casefold(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     mod = mod_json_full(
         id=1,
@@ -433,7 +434,7 @@ def test_search_matches_unicode_name_and_author_via_casefold(
 
 
 def test_find_mod_matches_unicode_name_via_casefold(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     mod = mod_json_full(
         id=1, name="Örakel", owner=owner_json(name="Müller"), versions=[]
@@ -450,7 +451,7 @@ def test_find_mod_matches_unicode_name_via_casefold(
 
 
 def test_search_treats_percent_and_underscore_as_literal_characters(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     # SQL LIKE treats "_" as "match any single character"; an unescaped
     # search must not let "a_b" accidentally match an unrelated "aXb" mod.
@@ -471,7 +472,7 @@ def test_search_treats_percent_and_underscore_as_literal_characters(
 
 
 def test_resolve_version_error_names_the_spt_version(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     # Real data: every cached version of Boss Notifier targets SPT 3.x or
     # carries no constraint at all, so SPT 4.1.3 has nothing to install.
@@ -517,7 +518,7 @@ def test_get_description_returns_none_for_an_unknown_mod(catalog: Catalog) -> No
 
 
 def test_get_description_returns_none_before_a_description_is_stored(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
 
@@ -529,7 +530,7 @@ def test_get_description_returns_none_before_a_description_is_stored(
 )
 def test_store_description_round_trips_text_and_stamp(
     catalog: Catalog,
-    client_factory,
+    client_factory: ClientFactory,
     respx_router: respx.MockRouter,
     stamp: str | None,
 ) -> None:
@@ -552,7 +553,7 @@ def test_store_description_for_an_unknown_mod_stores_nothing(
 
 
 def test_store_description_survives_a_later_sync_of_the_same_mod(
-    catalog: Catalog, client_factory, respx_router: respx.MockRouter
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:
     _seed_search_mods(client_factory, respx_router, catalog)
     catalog.store_description(1, "Plain text.", "2025-06-01T00:00:00Z")

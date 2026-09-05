@@ -5,6 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal, Protocol
 
+# Any value json.load/json.loads can produce. Declaring a parsed document as
+# Json keeps isinstance narrowing typed instead of falling back to Any.
+type Json = str | int | float | bool | None | list[Json] | dict[str, Json]
+
 type ModType = Literal["server", "client", "hybrid"]
 type ModState = Literal["installed", "updated", "disabled", "enabled", "removed"]
 type FileChange = Literal["added", "modified", "deleted"]
@@ -78,15 +82,15 @@ class CommitInfo:
     hash: str
     subject: str
     date: datetime
-    trailers: dict[str, str] = field(default_factory=dict)
+    trailers: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
 class RepoStatus:
     """Parsed porcelain status of the game repository."""
 
-    modified: list[Path] = field(default_factory=list)
-    untracked: list[Path] = field(default_factory=list)
+    modified: list[Path] = field(default_factory=list[Path])
+    untracked: list[Path] = field(default_factory=list[Path])
 
 
 type ConflictKind = Literal[

@@ -3,7 +3,8 @@
 import httpx
 import respx
 
-from fixture_types import ClientFactory
+from conftest import recorded_requests
+from fixture_types import ClientFactory, JsonDict
 from forge_json import page_envelope, success_envelope
 
 
@@ -30,7 +31,7 @@ def test_mods_serializes_query_filters_sort_include_fields(
         per_page=25,
     )
 
-    params = route.calls[0].request.url.params
+    params = recorded_requests(route)[0].url.params
     assert params["query"] == "terminator"
     assert params["filter[name]"] == "abc"
     assert params["filter[featured]"] == "true"
@@ -55,7 +56,7 @@ def test_mod_versions_serializes_filters_and_sort(
         include=["dependencies"],
     )
 
-    params = route.calls[0].request.url.params
+    params = recorded_requests(route)[0].url.params
     assert params["filter[version]"] == "^1.0.0"
     assert params["filter[fika_compatibility]"] == "compatible"
     assert params["sort"] == "-published_at"
@@ -71,7 +72,7 @@ def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
     produce wire params mods="5:1.2.0,com.example.mod:2.0.5" and spt_version="3.11.5";
     identifiers can be numeric IDs (as strings) or GUIDs, and are joined with commas.
     """
-    minimal_data = {
+    minimal_data: JsonDict = {
         "spt_version": "3.11.5",
         "updates": [],
         "blocked_updates": [],
@@ -85,7 +86,7 @@ def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
 
     client.updates(mods=[("5", "1.2.0"), ("com.example.mod", "2.0.5")], spt_version="3.11.5")
 
-    params = route.calls[0].request.url.params
+    params = recorded_requests(route)[0].url.params
     assert params["mods"] == "5:1.2.0,com.example.mod:2.0.5"
     assert params["spt_version"] == "3.11.5"
 
@@ -104,7 +105,7 @@ def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
 
     client.dependencies(mods=[("5", "1.2.0"), ("com.example.mod", "2.0.5")], spt_version="3.11.5")
 
-    params = route.calls[0].request.url.params
+    params = recorded_requests(route)[0].url.params
     assert params["mods"] == "5:1.2.0,com.example.mod:2.0.5"
     assert params["spt_version"] == "3.11.5"
 
@@ -117,7 +118,7 @@ def test_updates_serializes_single_pair_without_trailing_comma(
     A single-element mod list [("5", "1.2.0")] produces mods="5:1.2.0" (no comma),
     not "5:1.2.0," (which would be incorrect and rejected by the API).
     """
-    minimal_data = {
+    minimal_data: JsonDict = {
         "spt_version": "3.11.5",
         "updates": [],
         "blocked_updates": [],
@@ -131,4 +132,4 @@ def test_updates_serializes_single_pair_without_trailing_comma(
 
     client.updates(mods=[("5", "1.2.0")], spt_version="3.11.5")
 
-    assert route.calls[0].request.url.params["mods"] == "5:1.2.0"
+    assert recorded_requests(route)[0].url.params["mods"] == "5:1.2.0"

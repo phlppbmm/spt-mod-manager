@@ -18,6 +18,7 @@ from sptmod.core.models import (
     TRAILER_MOD,
     TRAILER_MOD_STATE,
     CommitInfo,
+    Json,
     ProfileResidue,
     ProfileSummary,
     ResidueCategory,
@@ -63,12 +64,12 @@ class ModIds:
             such file, so warnings never mean an incomplete abort.
     """
 
-    items: set[str] = field(default_factory=set)
-    traders: set[str] = field(default_factory=set)
-    quests: set[str] = field(default_factory=set)
-    recipes: set[str] = field(default_factory=set)
-    achievements: set[str] = field(default_factory=set)
-    warnings: list[str] = field(default_factory=list)
+    items: set[str] = field(default_factory=set[str])
+    traders: set[str] = field(default_factory=set[str])
+    quests: set[str] = field(default_factory=set[str])
+    recipes: set[str] = field(default_factory=set[str])
+    achievements: set[str] = field(default_factory=set[str])
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -82,8 +83,8 @@ class CheckResult:
             with the mod name.
     """
 
-    residues: dict[str, list[ProfileResidue]] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
+    residues: dict[str, list[ProfileResidue]] = field(default_factory=dict[str, list[ProfileResidue]])
+    warnings: list[str] = field(default_factory=list[str])
 
 
 def collect_mod_ids(repo: Repo, install_commit: str, layout: GameLayout) -> ModIds:
@@ -303,7 +304,7 @@ class _ParsedProfile:
 
     name: str
     text: str
-    root: dict[str, object]
+    root: dict[str, Json]
 
 
 def parse_profile(profile_path: Path) -> _ParsedProfile | None:
@@ -314,7 +315,7 @@ def parse_profile(profile_path: Path) -> _ParsedProfile | None:
     """
     try:
         text = profile_path.read_text(encoding="utf-8-sig")
-        profile = json.loads(text)
+        profile: Json = json.loads(text)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     root = profile if isinstance(profile, dict) else {}
@@ -347,7 +348,7 @@ class _Scope:
             shared sections, which hold no inventory.
     """
 
-    node: dict[str, object]
+    node: dict[str, Json]
     ids: ModIds
     item_closure: frozenset[str]
 
@@ -387,7 +388,7 @@ class _Cleaned:
             what they are used for.
     """
 
-    document: dict[str, object]
+    document: dict[str, Json]
     removed: list[ProfileResidue]
     untouched: list[ProfileResidue]
 
@@ -434,7 +435,7 @@ def clean_document(profile: _ParsedProfile, ids: ModIds) -> _Cleaned:
     )
 
 
-def write_profile(path: Path, data: dict[str, object]) -> None:
+def write_profile(path: Path, data: dict[str, Json]) -> None:
     """Write ``data`` to ``path`` the way the game writes profiles itself.
 
     Serialises without indentation, without a trailing newline and with
@@ -456,13 +457,13 @@ def write_profile(path: Path, data: dict[str, object]) -> None:
         raise
 
 
-def _dumps(data: dict[str, object]) -> str:
+def _dumps(data: dict[str, Json]) -> str:
     """Return the JSON text of a profile document in the game's own format."""
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
 def _hits_in(
-    root: dict[str, object], ids: ModIds
+    root: dict[str, Json], ids: ModIds
 ) -> list[tuple[_Category, _Scope, str, _Hits]]:
     """Return every category that matches something, with its scope and hits.
 
@@ -482,7 +483,7 @@ def _hits_in(
     return hits_found
 
 
-def _scopes(root: dict[str, object], ids: ModIds) -> list[tuple[str, _Scope]]:
+def _scopes(root: dict[str, Json], ids: ModIds) -> list[tuple[str, _Scope]]:
     """Return the scopes of a profile: both characters, then the shared part.
 
     The inventory closure of a character is computed once here, because both
@@ -546,7 +547,7 @@ def _db_relative(path: Path, layout: GameLayout) -> Path | None:
     return Path(*parts[2:])
 
 
-def _collect_from_file(db_path: Path, data: object, ids: ModIds) -> None:
+def _collect_from_file(db_path: Path, data: Json, ids: ModIds) -> None:
     """Extract and collect content IDs from a parsed db JSON file.
 
     Updates every set of ``ids`` based on the file path segments and content
@@ -580,7 +581,7 @@ def _collect_from_file(db_path: Path, data: object, ids: ModIds) -> None:
         ids.achievements.update(_entry_ids(data, key=_PLAIN_ID_FIELD))
 
 
-def _entry_ids(data: object, key: str = _ID_FIELD) -> set[str]:
+def _entry_ids(data: Json, key: str = _ID_FIELD) -> set[str]:
     """Return the ``key`` values of a JSON object or of a list of objects."""
     entries = data if isinstance(data, list) else [data]
     found: set[str] = set()
@@ -597,10 +598,10 @@ def _all_ids(ids: ModIds) -> set[str]:
     return ids.items | ids.traders | ids.quests | ids.recipes | ids.achievements
 
 
-type _Match = Callable[[str, object], set[str]]
+type _Match = Callable[[str, Json], set[str]]
 
 
-def _dict_at(scope: object, *keys: str) -> dict[str, object]:
+def _dict_at(scope: Json, *keys: str) -> dict[str, Json]:
     """Return the object at ``keys`` below ``scope``, empty if it is none."""
     node = scope
     for key in keys:
@@ -610,7 +611,7 @@ def _dict_at(scope: object, *keys: str) -> dict[str, object]:
     return node if isinstance(node, dict) else {}
 
 
-def _list_at(scope: object, *keys: str) -> list[object]:
+def _list_at(scope: Json, *keys: str) -> list[Json]:
     """Return the list at ``keys`` below ``scope``, empty if it is none."""
     node = scope
     for key in keys:
@@ -625,19 +626,19 @@ def _counted(counts: dict[str, int]) -> _Hits:
     return _Hits(frozenset(counts), sum(counts.values()))
 
 
-def _key_hits(container: dict[str, object], wanted: set[str]) -> _Hits:
+def _key_hits(container: dict[str, Json], wanted: set[str]) -> _Hits:
     """Return the keys of ``container`` that are in ``wanted``, one entry each."""
     keys = {key for key in container if key in wanted}
     return _Hits(frozenset(keys), len(keys))
 
 
-def _remove_keys(container: dict[str, object], wanted: set[str]) -> None:
+def _remove_keys(container: dict[str, Json], wanted: set[str]) -> None:
     """Delete the keys of ``container`` that are in ``wanted``."""
     for key in [key for key in container if key in wanted]:
         del container[key]
 
 
-def _entry_hits(container: dict[str, object], match: _Match) -> _Hits:
+def _entry_hits(container: dict[str, Json], match: _Match) -> _Hits:
     """Return the hits of a container whose entries match by key and value."""
     found: set[str] = set()
     count = 0
@@ -649,14 +650,14 @@ def _entry_hits(container: dict[str, object], match: _Match) -> _Hits:
     return _Hits(frozenset(found), count)
 
 
-def _remove_entries(container: dict[str, object], match: _Match) -> None:
+def _remove_entries(container: dict[str, Json], match: _Match) -> None:
     """Delete the entries of ``container`` that ``match`` ties to the mod."""
     for key in [key for key, value in container.items() if match(key, value)]:
         del container[key]
 
 
 def _filter_list(
-    owner: dict[str, object], key: str, keep: Callable[[object], bool]
+    owner: dict[str, Json], key: str, keep: Callable[[Json], bool]
 ) -> None:
     """Keep only the entries of the list ``key`` of ``owner`` that ``keep``."""
     values = owner.get(key)
@@ -664,27 +665,27 @@ def _filter_list(
         owner[key] = [value for value in values if keep(value)]
 
 
-def _id_in(value: object, wanted: Container[str]) -> bool:
+def _id_in(value: Json, wanted: Container[str]) -> bool:
     """Return whether ``value`` is an ID that ``wanted`` holds."""
     return isinstance(value, str) and value in wanted
 
 
-def _item_id(item: object) -> str:
+def _item_id(item: Json) -> str:
     """Return the ``_id`` of an inventory item, empty when it has none."""
     if isinstance(item, dict) and isinstance(item_id := item.get(_ID_FIELD), str):
         return item_id
     return ""
 
 
-def _remove_items(owner: dict[str, object], removed: Container[str]) -> None:
+def _remove_items(owner: dict[str, Json], removed: Container[str]) -> None:
     """Delete the items of ``removed`` from the ``items`` list of ``owner``."""
     _filter_list(owner, "items", lambda item: _item_id(item) not in removed)
 
 
-def _templates_below(node: object, wanted: set[str]) -> set[str]:
+def _templates_below(node: Json, wanted: set[str]) -> set[str]:
     """Return every ``_tpl`` in ``wanted`` found anywhere below ``node``."""
     found: set[str] = set()
-    pending: list[object] = [node]
+    pending: list[Json] = [node]
     while pending:
         current = pending.pop()
         if isinstance(current, dict):
@@ -697,7 +698,7 @@ def _templates_below(node: object, wanted: set[str]) -> set[str]:
     return found
 
 
-def _item_closure(items: list[object], wanted: set[str]) -> set[str]:
+def _item_closure(items: list[Json], wanted: set[str]) -> set[str]:
     """Return the IDs of the items of ``wanted`` and of everything inside them.
 
     An item belongs to the closure when its ``_tpl`` is in ``wanted`` or when
@@ -727,7 +728,7 @@ def _item_closure(items: list[object], wanted: set[str]) -> set[str]:
     return closure
 
 
-def _matching_templates(items: list[object], wanted: set[str]) -> set[str]:
+def _matching_templates(items: list[Json], wanted: set[str]) -> set[str]:
     """Return the ``_tpl`` values of ``items`` that are in ``wanted``."""
     return {
         template
@@ -803,7 +804,7 @@ def _trader_purchase_remover(scope: _Scope) -> None:
     _remove_keys(_dict_at(scope.node, "traderPurchases"), scope.ids.traders)
 
 
-def _quest_id_of(quest: object, ids: ModIds) -> str:
+def _quest_id_of(quest: Json, ids: ModIds) -> str:
     """Return the mod's quest a quest entry belongs to, empty when it is none."""
     if not isinstance(quest, dict):
         return ""
@@ -853,7 +854,7 @@ def _repeatable_quest_remover(scope: _Scope) -> None:
             )
 
 
-def _repeatable_quest_ids(quest: object, ids: ModIds) -> set[str]:
+def _repeatable_quest_ids(quest: Json, ids: ModIds) -> set[str]:
     """Return the IDs that tie one repeatable quest to the mod."""
     if not isinstance(quest, dict):
         return set()
@@ -872,9 +873,9 @@ def _repeatable_quest_ids(quest: object, ids: ModIds) -> set[str]:
     return matched
 
 
-def _task_counter_ids(key: str, value: object, ids: ModIds) -> set[str]:
+def _task_counter_ids(key: str, value: Json, ids: ModIds) -> set[str]:
     """Return the mod's quests one progress counter belongs to."""
-    matched = {key} if key in ids.quests else set()
+    matched: set[str] = {key} if key in ids.quests else set()
     if isinstance(value, dict):
         source = value.get("sourceId")
         if isinstance(source, str) and source in ids.quests:
@@ -898,9 +899,9 @@ def _task_counter_remover(scope: _Scope) -> None:
     )
 
 
-def _hideout_production_ids(key: str, value: object, ids: ModIds) -> set[str]:
+def _hideout_production_ids(key: str, value: Json, ids: ModIds) -> set[str]:
     """Return the mod's recipes one hideout production belongs to."""
-    matched = {key} if key in ids.recipes else set()
+    matched: set[str] = {key} if key in ids.recipes else set()
     if isinstance(value, dict):
         recipe = value.get("recipeId")
         if isinstance(recipe, str) and recipe in ids.recipes:
@@ -924,7 +925,7 @@ def _hideout_production_remover(scope: _Scope) -> None:
     )
 
 
-def _hideout_slot_hits(scope: _Scope) -> Iterator[tuple[list[object], int, set[str]]]:
+def _hideout_slot_hits(scope: _Scope) -> Iterator[tuple[list[Json], int, set[str]]]:
     """Yield the hideout slots holding items of the mod.
 
     Each hit names the slot list, the position of the slot in it and the item
@@ -959,7 +960,7 @@ def _hideout_area_remover(scope: _Scope) -> None:
         slots[index] = _empty_slot(slots[index])
 
 
-def _empty_slot(slot: object) -> dict[str, object]:
+def _empty_slot(slot: Json) -> dict[str, Json]:
     """Return the empty form of a hideout slot, keeping its position."""
     index = slot.get("locationIndex") if isinstance(slot, dict) else None
     return {"locationIndex": index} if isinstance(index, int) else {}
@@ -983,7 +984,7 @@ def _unlocked_recipe_remover(scope: _Scope) -> None:
     )
 
 
-def _insured_item_ids(entry: object, scope: _Scope) -> set[str]:
+def _insured_item_ids(entry: Json, scope: _Scope) -> set[str]:
     """Return the IDs that tie one insured item to the mod."""
     if not isinstance(entry, dict):
         return set()
@@ -1026,7 +1027,7 @@ def _achievement_remover(scope: _Scope) -> None:
     _remove_keys(_dict_at(scope.node, "Achievements"), scope.ids.achievements)
 
 
-def _insurance_trader(entry: object, ids: ModIds) -> str:
+def _insurance_trader(entry: Json, ids: ModIds) -> str:
     """Return the mod's trader an insurance return is from, empty if none."""
     if not isinstance(entry, dict):
         return ""
@@ -1097,7 +1098,7 @@ def _dialogue_remover(scope: _Scope) -> None:
             )
 
 
-def _message_ids(message: object, ids: ModIds) -> set[str]:
+def _message_ids(message: Json, ids: ModIds) -> set[str]:
     """Return the IDs that tie one dialogue message to the mod."""
     if not isinstance(message, dict):
         return set()

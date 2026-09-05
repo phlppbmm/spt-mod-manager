@@ -35,7 +35,7 @@ from sptmod.core.errors import (
     ServerPortBusyError,
 )
 from sptmod.core.game_dir import GameLayout, GameProcess, detect_layout
-from sptmod.core.models import Progress
+from sptmod.core.models import Json, Progress
 
 LAUNCH_STATE_FILE_NAME: Final = ".sptmod-launch.json"
 LAUNCH_LOCK_FILE_NAME: Final = ".sptmod-launch.lock"
@@ -435,7 +435,7 @@ def _profile_login(layout: GameLayout, profile_id: str) -> tuple[str, str]:
         raise LaunchError(f"The player profile {profile_id} cannot be read.")
     profile_file = layout.root / layout.profiles_dir / f"{profile_id}.json"
     try:
-        payload = json.loads(profile_file.read_text(encoding="utf-8-sig"))
+        payload: Json = json.loads(profile_file.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError, ValueError) as error:
         raise LaunchError(
             f"The player profile {profile_id} cannot be read: {error}"
@@ -450,9 +450,9 @@ def _profile_login(layout: GameLayout, profile_id: str) -> tuple[str, str]:
     return username, _nickname(payload, username)
 
 
-def _nickname(payload: object, fallback: str) -> str:
+def _nickname(payload: Json, fallback: str) -> str:
     """Return the player name of a parsed profile, or ``fallback``."""
-    node: object = payload
+    node: Json = payload
     for key in ("characters", "pmc", "Info", "Nickname"):
         node = node.get(key) if isinstance(node, dict) else None
     return node if isinstance(node, str) and node else fallback
@@ -553,7 +553,7 @@ def _linux_settings(layout: GameLayout) -> _LinuxSettings:
     """Read the Linux settings the official SPT launcher writes."""
     settings_file = layout.root / layout.launcher_settings_file
     try:
-        payload = json.loads(settings_file.read_text(encoding="utf-8-sig"))
+        payload: Json = json.loads(settings_file.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError, ValueError) as error:
         raise LauncherSettingsError(
             f"The SPT launcher settings in {settings_file} cannot be read. "
@@ -584,7 +584,7 @@ def _linux_settings(layout: GameLayout) -> _LinuxSettings:
     )
 
 
-def _setting(linux: dict[str, object], key: str) -> str:
+def _setting(linux: dict[str, Json], key: str) -> str:
     """Return one text setting, empty when it is missing or not text."""
     value = linux.get(key)
     return value if isinstance(value, str) else ""
@@ -761,7 +761,7 @@ def _read_state(path: Path) -> _LaunchState:
     is a hint, and the process table is the truth.
     """
     try:
-        payload = json.loads(_state_file(path).read_text(encoding="utf-8"))
+        payload: Json = json.loads(_state_file(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return _LaunchState()
     if not isinstance(payload, dict):
@@ -781,7 +781,7 @@ def _read_state(path: Path) -> _LaunchState:
     )
 
 
-def _reference(value: object) -> _ProcessRef | None:
+def _reference(value: Json) -> _ProcessRef | None:
     """Read one remembered process, ``None`` when the entry is unusable."""
     if not isinstance(value, dict):
         return None

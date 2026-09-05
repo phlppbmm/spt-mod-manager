@@ -22,7 +22,7 @@ import respx
 from typer.testing import CliRunner
 
 from conftest import clean_repo_at, invoke_rpc
-from fixture_types import InstallCommit, MakeArchive, TrailerInstallCommit
+from fixture_types import InstallCommit, JsonDict, MakeArchive, TrailerInstallCommit
 from forge_json import mod_json_full, mod_json_minimal, owner_json, page_envelope, version_json
 from sptmod.cli import app
 from sptmod.core import services
@@ -618,10 +618,12 @@ def test_locate_directory_serialises_every_matched_directory(tmp_path: Path, mon
         services.LocatedDirectory(path=tmp_path / "backup" / "SPT", is_game_dir=False),
     ]
     original = rpc.RPC_FUNCTIONS["locate_directory"]
+
+    def locate(**_kwargs: object) -> list[services.LocatedDirectory]:
+        return matches
+
     monkeypatch.setitem(
-        rpc.RPC_FUNCTIONS,
-        "locate_directory",
-        dataclasses.replace(original, function=lambda **_kwargs: matches),
+        rpc.RPC_FUNCTIONS, "locate_directory", dataclasses.replace(original, function=locate)
     )
 
     exit_code, lines = invoke_rpc("locate_directory", {"name": "SPT", "fingerprint": ["BepInEx", "cache"]})
@@ -799,7 +801,7 @@ def test_plan_profile_cleanup_reports_removals_through_rpc(clean_repo: Repo, ins
             "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps({item_id: {"_id": item_id, "_name": "item"}})
         },
     )
-    profile = {
+    profile: JsonDict = {
         "characters": {
             "pmc": {
                 "Inventory": {"items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]},
@@ -838,7 +840,7 @@ def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
             "SPT/user/mods/ServerMod/db/templates/items.json": json.dumps({item_id: {"_id": item_id, "_name": "item"}})
         },
     )
-    profile = {
+    profile: JsonDict = {
         "characters": {
             "pmc": {
                 "Inventory": {"items": [{"_id": "i1", "_tpl": item_id, "slotId": "main"}]},

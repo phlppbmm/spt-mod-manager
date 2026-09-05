@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 
+from conftest import recorded_requests
 from fixture_types import ClientFactory
 from forge_json import mod_json_minimal, page_envelope
 from sptmod.core.forge.client import DEFAULT_BASE_URL
@@ -37,7 +38,11 @@ def test_iter_mods_walks_every_page_exactly_once_in_order(
         next_url=None,
     )
     responses = iter([httpx.Response(200, json=page1), httpx.Response(200, json=page2)])
-    route = respx_router.get("/mods").mock(side_effect=lambda request: next(responses))
+
+    def next_response(_request: httpx.Request) -> httpx.Response:
+        return next(responses)
+
+    route = respx_router.get("/mods").mock(side_effect=next_response)
     client = client_factory()
 
     items = list(client.iter_mods())
@@ -207,4 +212,5 @@ def test_mods_per_page_is_clamped_to_50(
 
     client.mods(per_page=requested_per_page)
 
-    assert route.calls[0].request.url.params["per_page"] == expected_sent
+    request = recorded_requests(route)[0]
+    assert request.url.params["per_page"] == expected_sent

@@ -9,6 +9,7 @@ import httpx
 import pytest
 import respx
 
+from conftest import recorded_requests
 from fixture_types import ClientFactory
 from forge_json import make_mod_info, mod_json_full, owner_json, page_envelope, version_json
 from sptmod.core.errors import ForgeUnavailableError
@@ -241,8 +242,7 @@ def test_delta_sync_requests_updated_between_from_watermark_minus_overlap_and_so
     )
     catalog.sync(client, full=False)
 
-    delta_call = route.calls[-1]
-    params = delta_call.request.url.params
+    params = recorded_requests(route)[-1].url.params
     assert params["filter[updated_between]"].startswith("2025-06-09,")
     assert params["sort"] == "-updated_at"
 
@@ -331,8 +331,8 @@ def test_delta_sync_without_prior_watermark_falls_back_to_full_listing(
 
     catalog.sync(client, full=False)
 
-    for call in route.calls:
-        assert "filter[updated_between]" not in call.request.url.params
+    for request in recorded_requests(route):
+        assert "filter[updated_between]" not in request.url.params
     assert catalog.get_mod(1) is not None
     assert catalog.get_mod(2) is not None
     assert catalog.get_mod(3) is not None
@@ -643,8 +643,7 @@ def test_delta_sync_falls_back_to_full_listing_when_the_watermark_is_unparseable
     )
     catalog.sync(client, full=False)
 
-    delta_call = route.calls[-1]
-    assert "filter[updated_between]" not in delta_call.request.url.params
+    assert "filter[updated_between]" not in recorded_requests(route)[-1].url.params
 
 
 def test_full_sync_with_no_updated_at_on_any_mod_leaves_the_watermark_unset(

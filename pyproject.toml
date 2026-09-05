@@ -40,49 +40,16 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 strict = true
 files = ["src"]
-mypy_path = "src"
-
-[[tool.mypy.overrides]]
-# rarfile ships no py.typed marker and no stub package exists on PyPI.
-module = "rarfile"
-ignore_missing_imports = true
+# typings/ holds the local rarfile stub (see typings/rarfile.pyi).
+mypy_path = "src:typings"
 
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
-typeCheckingMode = "standard"
-# Strict-mode rules that are reachable without cast/Any noise.
-reportMissingParameterType = "error"
-reportMissingTypeArgument = "error"
-reportUnknownParameterType = "error"
-reportPrivateUsage = "error"
-reportDeprecated = "error"
-reportUnusedFunction = "error"
-reportUnusedVariable = "error"
-reportUnusedImport = "error"
-reportUnusedExpression = "error"
-reportUnnecessaryComparison = "error"
-reportUnnecessaryIsInstance = "error"
-reportConstantRedefinition = "error"
-reportIncompatibleMethodOverride = "error"
-reportUntypedFunctionDecorator = "error"
-reportUntypedBaseClass = "error"
-reportUntypedNamedTuple = "error"
-reportTypeCommentUsage = "error"
-reportInvalidStubStatement = "error"
-reportSelfClsParameterName = "error"
-# Off: strict's Unknown-propagation family. Those findings come from
-# json.load/psutil/Popen returning Any; removing them needs TypedDicts and casts
-# across core JSON handling, and mypy --strict already covers that ground.
-reportUnknownVariableType = "none"
-reportUnknownArgumentType = "none"
-reportUnknownMemberType = "none"
-reportUnknownLambdaType = "none"
-# rarfile ships no py.typed marker and no stub package exists on PyPI
-# (same reason as the mypy override above).
-reportMissingTypeStubs = "none"
+typeCheckingMode = "strict"
+stubPath = "typings"
 
 [tool.pylint.main]
 load-plugins = ["pylint_pytest"]

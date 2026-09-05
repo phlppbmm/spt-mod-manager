@@ -921,7 +921,7 @@ def test_clean_profile_tolerates_malformed_entries_mixed_with_real_hits(
     while preserving the malformed entries intact.
     """
     _install_mod(clean_repo, install_commit)
-    profile = {
+    profile: JsonDict = {
         "characters": {
             "pmc": {
                 "Inventory": {

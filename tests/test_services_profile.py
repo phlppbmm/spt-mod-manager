@@ -223,7 +223,7 @@ def test_check_profiles_reports_scav_and_top_level_residues_with_character_and_p
     )
 
     profiles_dir = clean_repo.path / "SPT" / "user" / "profiles"
-    profile = {
+    profile: JsonDict = {
         "characters": {
             "pmc": {"Inventory": {"items": []}, "TradersInfo": {}, "Quests": []},
             "scav": {
@@ -507,7 +507,7 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
     item_id = "5c0d1b8b86f7744bb2683cfb"
     repo = clean_repo_at(fake_game_dir)
     _install_server_mod_with_item(repo, install_commit, item_id)
-    profile = {
+    profile: JsonDict = {
         "characters": {
             "pmc": {
                 "Inventory": {"items": []},

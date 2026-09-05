@@ -467,77 +467,72 @@ def test_update_mod_keeps_the_runtime_data_the_mod_wrote_into_its_own_folder(
     assert "SPT/user/mods/CoolMod/new_file.txt" not in {file.path.as_posix() for file in result.files}
 
 
+_UP_TO_DATE_PAYLOAD: JsonDict = {
+    "spt_version": SPT_VERSION,
+    "updates": [],
+    "blocked_updates": [],
+    "up_to_date": [
+        {
+            "id": 100,
+            "mod_id": 10,
+            "guid": None,
+            "name": "CoolMod",
+            "version": "1.0.0",
+            "spt_versions": [SPT_VERSION],
+        }
+    ],
+    "incompatible_with_spt": [],
+}
+
+_BLOCKED_PAYLOAD: JsonDict = {
+    "spt_version": SPT_VERSION,
+    "updates": [],
+    "blocked_updates": [
+        {
+            "current_version": current_version_json(
+                version_id=100,
+                mod_id=10,
+                name="CoolMod",
+                version="1.0.0",
+            ),
+            "latest_version": {
+                "id": 200,
+                "version": "2.0.0",
+                "spt_versions": [SPT_VERSION],
+            },
+            "block_reason": "Conflicting mod dependency.",
+            "blocking_mods": [],
+        }
+    ],
+    "up_to_date": [],
+    "incompatible_with_spt": [],
+}
+
+_INCOMPATIBLE_PAYLOAD: JsonDict = {
+    "spt_version": SPT_VERSION,
+    "updates": [],
+    "blocked_updates": [],
+    "up_to_date": [],
+    "incompatible_with_spt": [
+        {
+            "id": 100,
+            "mod_id": 10,
+            "guid": None,
+            "name": "CoolMod",
+            "version": "0.9.0",
+            "reason": "No version for this SPT release.",
+            "latest_compatible_version": "1.0.0",
+        }
+    ],
+}
+
+
 @pytest.mark.parametrize(
     ("mod_version", "payload"),
     [
-        pytest.param(
-            "1.0.0",
-            {
-                "spt_version": SPT_VERSION,
-                "updates": [],
-                "blocked_updates": [],
-                "up_to_date": [
-                    {
-                        "id": 100,
-                        "mod_id": 10,
-                        "guid": None,
-                        "name": "CoolMod",
-                        "version": "1.0.0",
-                        "spt_versions": [SPT_VERSION],
-                    }
-                ],
-                "incompatible_with_spt": [],
-            },
-            id="up_to_date",
-        ),
-        pytest.param(
-            "1.0.0",
-            {
-                "spt_version": SPT_VERSION,
-                "updates": [],
-                "blocked_updates": [
-                    {
-                        "current_version": current_version_json(
-                            version_id=100,
-                            mod_id=10,
-                            name="CoolMod",
-                            version="1.0.0",
-                        ),
-                        "latest_version": {
-                            "id": 200,
-                            "version": "2.0.0",
-                            "spt_versions": [SPT_VERSION],
-                        },
-                        "block_reason": "Conflicting mod dependency.",
-                        "blocking_mods": [],
-                    }
-                ],
-                "up_to_date": [],
-                "incompatible_with_spt": [],
-            },
-            id="blocked",
-        ),
-        pytest.param(
-            "0.9.0",
-            {
-                "spt_version": SPT_VERSION,
-                "updates": [],
-                "blocked_updates": [],
-                "up_to_date": [],
-                "incompatible_with_spt": [
-                    {
-                        "id": 100,
-                        "mod_id": 10,
-                        "guid": None,
-                        "name": "CoolMod",
-                        "version": "0.9.0",
-                        "reason": "No version for this SPT release.",
-                        "latest_compatible_version": "1.0.0",
-                    }
-                ],
-            },
-            id="incompatible",
-        ),
+        pytest.param("1.0.0", _UP_TO_DATE_PAYLOAD, id="up_to_date"),
+        pytest.param("1.0.0", _BLOCKED_PAYLOAD, id="blocked"),
+        pytest.param("0.9.0", _INCOMPATIBLE_PAYLOAD, id="incompatible"),
     ],
 )
 def test_update_mod_without_an_applicable_update_is_a_noop_with_notice(

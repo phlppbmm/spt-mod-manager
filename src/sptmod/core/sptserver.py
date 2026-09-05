@@ -16,6 +16,7 @@ import httpx
 
 from sptmod.core.errors import LaunchError
 from sptmod.core.game_dir import GameLayout
+from sptmod.core.models import Json
 
 DEFAULT_HOST: Final = "127.0.0.1"
 DEFAULT_PORT: Final = 6969
@@ -110,26 +111,29 @@ def _request(
         )
 
 
-def _decode(body: bytes) -> object:
+def _decode(body: bytes) -> Json:
     """Return the JSON document in ``body``, or ``None`` when it holds none.
 
     The server answers with plain JSON when asked to, but deflates it when it
     ignores that request, so both encodings are accepted.
     """
     try:
-        return json.loads(body)
+        plain: Json = json.loads(body)
     except (UnicodeDecodeError, ValueError):
         pass
+    else:
+        return plain
     try:
-        return json.loads(zlib.decompress(body))
+        deflated: Json = json.loads(zlib.decompress(body))
     except (UnicodeDecodeError, ValueError, zlib.error):
         return None
+    return deflated
 
 
-def _read_http_config(config_file: Path) -> dict[str, object]:
+def _read_http_config(config_file: Path) -> dict[str, Json]:
     """Return the parsed HTTP configuration, empty when it cannot be read."""
     try:
-        parsed = json.loads(config_file.read_text(encoding="utf-8-sig"))
+        parsed: Json = json.loads(config_file.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}

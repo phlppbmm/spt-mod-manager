@@ -56,7 +56,10 @@ def _not_running(monkeypatch: Any) -> None:
 
     Used to avoid interference from actual game processes during tests.
     """
-    monkeypatch.setattr(game_dir, "game_processes", lambda: [])
+    def no_game_processes() -> list[GameProcess]:
+        return []
+
+    monkeypatch.setattr(game_dir, "game_processes", no_game_processes)
 
 
 def test_launch_profile_rpc_reports_the_four_phases_and_the_result(

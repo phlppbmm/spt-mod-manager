@@ -130,11 +130,19 @@ def test_429_with_a_malformed_retry_after_falls_back_to_exponential_backoff(
     assert recording_sleep.calls[0] == BACKOFF_BASE_SECONDS
 
 
+def _always_rate_limited(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(429)
+
+
+def _always_server_error(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(500)
+
+
 @pytest.mark.parametrize(
     ("side_effect", "client_kwargs"),
     [
-        (lambda request: httpx.Response(429), {"max_retries": 3}),
-        (lambda request: httpx.Response(500), {}),
+        (_always_rate_limited, {"max_retries": 3}),
+        (_always_server_error, {}),
         (httpx.ConnectError("boom"), {}),
     ],
     ids=["429", "500", "connection-error"],

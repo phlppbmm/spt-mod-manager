@@ -15,6 +15,8 @@ from typing import Final
 
 import platformdirs
 
+from sptmod.core.models import Json
+
 FAVORITES_FILE_NAME: Final = "favorites.json"
 
 _APP_NAME: Final = "sptmod"
@@ -34,7 +36,7 @@ def load_favorites(path: Path) -> list[int]:
     error.
     """
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload: Json = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     if not isinstance(payload, list):

@@ -163,7 +163,10 @@ def test_ensure_game_not_running_passes_when_no_processes(
     Patches running_game_processes() to return an empty list; must return
     without raising.
     """
-    monkeypatch.setattr("sptmod.core.game_dir.running_game_processes", lambda: [])
+    def no_running_processes() -> list[str]:
+        return []
+
+    monkeypatch.setattr("sptmod.core.game_dir.running_game_processes", no_running_processes)
 
     ensure_game_not_running()  # must not raise
 
@@ -425,6 +428,9 @@ def test_process_alive_false_for_a_zombie_process(
     Patches psutil.Process to return a _ZombieProcess with matching creation
     time; must return False (zombie is not alive).
     """
-    monkeypatch.setattr("sptmod.core.game_dir.psutil.Process", lambda pid: _ZombieProcess(5.0))
+    def zombie_process(_pid: int) -> _ZombieProcess:
+        return _ZombieProcess(5.0)
+
+    monkeypatch.setattr("sptmod.core.game_dir.psutil.Process", zombie_process)
 
     assert process_alive(4242, 5.0) is False

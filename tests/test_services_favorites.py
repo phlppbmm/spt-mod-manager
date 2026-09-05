@@ -136,10 +136,10 @@ def isolated_default_favorites_path(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     Mirrors ``isolated_default_db_path`` in ``test_services_catalog.py``.
     """
     config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.favorites.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
+    def user_config_path(*_args: object, **_kwargs: object) -> Path:
+        return config_dir
+
+    monkeypatch.setattr("sptmod.core.favorites.platformdirs.user_config_path", user_config_path)
     return config_dir / FAVORITES_FILE_NAME
 
 
@@ -176,14 +176,11 @@ def test_favorites_survive_clear_catalog_cache(monkeypatch: pytest.MonkeyPatch, 
     would report [] after the clear instead of [7].
     """
     config_dir = tmp_path / "config"
-    monkeypatch.setattr(
-        "sptmod.core.favorites.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
-    )
+    def user_config_path(*_args: object, **_kwargs: object) -> Path:
+        return config_dir
+
+    monkeypatch.setattr("sptmod.core.favorites.platformdirs.user_config_path", user_config_path)
+    monkeypatch.setattr("sptmod.core.forge.catalog.platformdirs.user_config_path", user_config_path)
     services.set_favorite(7, True)
     db_path = default_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)

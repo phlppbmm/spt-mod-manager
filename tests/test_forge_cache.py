@@ -785,12 +785,13 @@ def test_clear_reports_bytes_freed_only_for_entries_it_can_actually_remove(
     assert not (cache_dir / "b").exists()
 
 
+def _sweep(cache_dir: Path) -> int:
+    return cache.sweep(cache_dir=cache_dir)
+
+
 @pytest.mark.parametrize(
     "call",
-    [
-        lambda cache_dir: cache.sweep(cache_dir=cache_dir),
-        cache.clear,
-    ],
+    [_sweep, cache.clear],
     ids=["sweep", "clear"],
 )
 def test_an_unreadable_cache_dir_frees_nothing_instead_of_raising(tmp_path: Path, call: Callable[[Path], int]) -> None:

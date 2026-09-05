@@ -50,6 +50,21 @@ from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
 pytestmark = pytest.mark.timeout(5)
 
 
+def _no_game_processes() -> list[GameProcess]:
+    """Stand in for ``game_dir.game_processes`` when nothing runs."""
+    return []
+
+
+def _process_alive(_pid: int, _started_at: float) -> bool:
+    """Stand in for ``game_dir.process_alive`` reporting a running process."""
+    return True
+
+
+def _process_gone(_pid: int, _started_at: float) -> bool:
+    """Stand in for ``game_dir.process_alive`` reporting a finished process."""
+    return False
+
+
 @pytest.fixture(autouse=True)
 def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate every test here from whatever this sandbox happens to run.
@@ -57,7 +72,7 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     Individual tests override this again through the same ``monkeypatch``
     fixture when they need a specific scan result.
     """
-    monkeypatch.setattr(game_dir, "game_processes", lambda: [])
+    monkeypatch.setattr(game_dir, "game_processes", _no_game_processes)
 
 
 def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
@@ -975,7 +990,7 @@ def test_launch_status_reports_alive_processes_from_the_state_file(
     both started at epoch times 1.0 and 2.0. process_alive returns True for both;
     launch_status returns LaunchStatus reporting both running with the profile_id.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
+    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
     write_launch_state(
         tmp_path,
         profile_id="profile-a",
@@ -995,7 +1010,7 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
     doesn't help). game_processes scan finds SPT.Server.Linux (pid 333) and
     EscapeFromTarkov.exe (pid 444). Result reports both running, profile_id empty.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
+    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
@@ -1019,7 +1034,7 @@ def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
     """
     # The Linux case: the process the launch spawned was only the wrapper and
     # is gone, while the game itself still runs under its own name.
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
+    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
@@ -1042,7 +1057,7 @@ def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
     process_alive check) and no scan results. Result shows both_running false
     with pids 0, but profile_id="stale-profile" is retained.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: False)
+    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     write_launch_state(
         tmp_path,
         profile_id="stale-profile",
@@ -1061,7 +1076,7 @@ def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
     State file records server pid 111 (alive per process_alive); scan simultaneously
     finds SPT.Server.Linux at pid 999. Result server_pid is 111, not 999.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
+    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
@@ -1387,7 +1402,7 @@ def test_launch_status_ignores_a_state_entry_with_an_unusable_pid(
     positive int. launch_status detects type/value violation and skips the entry,
     returning server_running=False.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
+    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
     write_launch_state(tmp_path, server={"pid": bad_pid, "started_at": 1.0})
 
     assert launch_status(tmp_path).server_running is False
@@ -1403,7 +1418,7 @@ def test_launch_status_ignores_a_state_entry_with_an_unusable_started_at(
     launch_status detects type violation and skips the entry, returning
     server_running=False.
     """
-    monkeypatch.setattr(game_dir, "process_alive", lambda pid, started_at: True)
+    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
     write_launch_state(tmp_path, server={"pid": 111, "started_at": bad_started_at})
 
     assert launch_status(tmp_path).server_running is False

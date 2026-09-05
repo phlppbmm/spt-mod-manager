@@ -23,7 +23,7 @@ from typing import Final
 import platformdirs
 
 from sptmod.core.errors import OperationInProgressError
-from sptmod.core.models import Progress
+from sptmod.core.models import Json, Progress
 
 if sys.platform == "win32":
     import msvcrt
@@ -210,7 +210,7 @@ def _holder(lock: Path) -> str:
     except OSError:
         return ""
     try:
-        content: object = json.loads(raw)
+        content: Json = json.loads(raw)
     except json.JSONDecodeError:
         return ""
     if not isinstance(content, dict):

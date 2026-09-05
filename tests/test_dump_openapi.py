@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from conftest import service_function_names
+from sptmod.core.models import Json
 from sptmod.server.dump_openapi import DEFAULT_TARGET, build_openapi, dump, main
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -46,7 +47,7 @@ def _resolved_ref_name(schema: dict[str, Any]) -> str | None:
     return None
 
 
-def _find_nulls(value: Any, path: str, sink: list[str]) -> None:
+def _find_nulls(value: Json, path: str, sink: list[str]) -> None:
     """Collect JSON-Pointer-ish paths of every ``None`` value under ``value``."""
     if value is None:
         sink.append(path)

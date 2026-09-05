@@ -97,6 +97,7 @@ from sptmod.core.models import (
     Conflict,
     ConflictKind,
     InstallPlan,
+    Json,
     ModFile,
     ModInfo,
     ModState,
@@ -209,9 +210,9 @@ class InitResult:
     game_dir: Path
     commit: str
     spt_version: str
-    warnings: list[str] = field(default_factory=list)
-    pre_existing_mods: list[Path] = field(default_factory=list)
-    adopted: list[ModInfo] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list[str])
+    pre_existing_mods: list[Path] = field(default_factory=list[Path])
+    adopted: list[ModInfo] = field(default_factory=list[ModInfo])
 
 
 @dataclass(frozen=True)
@@ -223,8 +224,8 @@ class InstallResult:
     """
 
     mod: ModInfo
-    files: list[Path] = field(default_factory=list)
-    warnings: list[Conflict] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
+    warnings: list[Conflict] = field(default_factory=list[Conflict])
 
 
 @dataclass(frozen=True)
@@ -255,10 +256,10 @@ class CleanupPlan:
     """
 
     mod: str
-    profiles: list[str] = field(default_factory=list)
-    removals: list[ProfileResidue] = field(default_factory=list)
-    untouched: list[UntouchedResidue] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=list[str])
+    removals: list[ProfileResidue] = field(default_factory=list[ProfileResidue])
+    untouched: list[UntouchedResidue] = field(default_factory=list[UntouchedResidue])
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -279,12 +280,12 @@ class CleanupResult:
     """
 
     mod: str
-    profiles: list[str] = field(default_factory=list)
-    backups: list[Path] = field(default_factory=list)
-    removed: list[ProfileResidue] = field(default_factory=list)
-    untouched: list[UntouchedResidue] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=list[str])
+    backups: list[Path] = field(default_factory=list[Path])
+    removed: list[ProfileResidue] = field(default_factory=list[ProfileResidue])
+    untouched: list[UntouchedResidue] = field(default_factory=list[UntouchedResidue])
     snapshot: str = ""
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -298,8 +299,8 @@ class RemoveResult:
 
     name: str
     commit: str
-    files: list[Path] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
+    warnings: list[str] = field(default_factory=list[str])
     cleanup: CleanupResult | None = None
 
 
@@ -314,7 +315,7 @@ class ToggleResult:
     name: str
     state: ModState
     commit: str = ""
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
     notice: str = ""
 
 
@@ -323,7 +324,7 @@ class AdoptResult:
     """Outcome of :func:`adopt_mod`."""
 
     mod: ModInfo
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -336,7 +337,7 @@ class ManualMod:
     """
 
     path: Path
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -347,11 +348,11 @@ class StatusReport:
     a profile, a BepInEx config nor an untracked file below a mod path.
     """
 
-    modified_profiles: list[Path] = field(default_factory=list)
-    modified_configs: list[Path] = field(default_factory=list)
-    manual_mods: list[ManualMod] = field(default_factory=list)
-    other_modified: list[Path] = field(default_factory=list)
-    other_untracked: list[Path] = field(default_factory=list)
+    modified_profiles: list[Path] = field(default_factory=list[Path])
+    modified_configs: list[Path] = field(default_factory=list[Path])
+    manual_mods: list[ManualMod] = field(default_factory=list[ManualMod])
+    other_modified: list[Path] = field(default_factory=list[Path])
+    other_untracked: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -360,7 +361,7 @@ class SnapshotResult:
 
     commit: str
     message: str
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -401,7 +402,7 @@ class InstallModResult:
     """
 
     plan: InstallPlan
-    installed: list[InstallResult] = field(default_factory=list)
+    installed: list[InstallResult] = field(default_factory=list[InstallResult])
 
 
 @dataclass(frozen=True)
@@ -412,10 +413,10 @@ class ImportDiff:
     entry per mod of ``missing`` that was installed from Forge.
     """
 
-    missing: list[ImportEntry] = field(default_factory=list)
-    different: list[ImportEntry] = field(default_factory=list)
-    extra: list[ImportEntry] = field(default_factory=list)
-    installed: list[InstallModResult] = field(default_factory=list)
+    missing: list[ImportEntry] = field(default_factory=list[ImportEntry])
+    different: list[ImportEntry] = field(default_factory=list[ImportEntry])
+    extra: list[ImportEntry] = field(default_factory=list[ImportEntry])
+    installed: list[InstallModResult] = field(default_factory=list[InstallModResult])
 
 
 @dataclass(frozen=True)
@@ -462,7 +463,7 @@ class BlockedUpdate:
     installed_version: str
     new_version: str
     reason: str = ""
-    blocking_mods: list[str] = field(default_factory=list)
+    blocking_mods: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -488,11 +489,11 @@ class UpdatesReport:
     """
 
     spt_version: str
-    available: list[UpdateCandidate] = field(default_factory=list)
-    blocked: list[BlockedUpdate] = field(default_factory=list)
-    up_to_date: list[str] = field(default_factory=list)
-    incompatible: list[IncompatibleMod] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
+    available: list[UpdateCandidate] = field(default_factory=list[UpdateCandidate])
+    blocked: list[BlockedUpdate] = field(default_factory=list[BlockedUpdate])
+    up_to_date: list[str] = field(default_factory=list[str])
+    incompatible: list[IncompatibleMod] = field(default_factory=list[IncompatibleMod])
+    skipped: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -509,8 +510,8 @@ class UpdateResult:
     previous_version: str
     version: str = ""
     commit: str = ""
-    files: list[ModFile] = field(default_factory=list)
-    warnings: list[Conflict] = field(default_factory=list)
+    files: list[ModFile] = field(default_factory=list[ModFile])
+    warnings: list[Conflict] = field(default_factory=list[Conflict])
     notice: str = ""
 
 
@@ -532,7 +533,7 @@ class DirectoryListing:
 
     path: Path
     parent: Path | None
-    entries: list[DirectoryEntry] = field(default_factory=list)
+    entries: list[DirectoryEntry] = field(default_factory=list[DirectoryEntry])
 
 
 @dataclass(frozen=True)
@@ -3362,7 +3363,7 @@ def _parse_mod_list(source: str, raw: str) -> list[ExportEntry]:
 
 def _parse_mod_list_json(source: str, raw: str) -> list[ExportEntry]:
     try:
-        data = json.loads(raw)
+        data: Json = json.loads(raw)
     except json.JSONDecodeError as error:
         raise InvalidMetadataError(f"{source} is no valid JSON: {error}") from error
     mods = data.get("mods") if isinstance(data, dict) else None
@@ -3371,7 +3372,7 @@ def _parse_mod_list_json(source: str, raw: str) -> list[ExportEntry]:
     return [_mod_list_entry(source, item) for item in mods]
 
 
-def _mod_list_entry(source: str, item: object) -> ExportEntry:
+def _mod_list_entry(source: str, item: Json) -> ExportEntry:
     if not isinstance(item, dict):
         raise InvalidMetadataError(f"{source}: a mod entry is no object")
     name = item.get("name")

@@ -22,6 +22,7 @@ from sptmod.core.models import (
     TRAILER_MOD_TYPE,
     TRAILER_MOD_VERSION,
     CommitInfo,
+    Json,
     ModInfo,
 )
 
@@ -58,10 +59,10 @@ class ModMeta:
     spt_range: str = ""
     author: str = ""
     guid: str = ""
-    dependencies: dict[str, str] = field(default_factory=dict)
+    dependencies: dict[str, str] = field(default_factory=dict[str, str])
 
 
-def _mandatory_string(value: object, field_name: str, mod_dir: Path) -> str:
+def _mandatory_string(value: Json, field_name: str, mod_dir: Path) -> str:
     if not isinstance(value, str) or not value:
         raise InvalidMetadataError(
             f"{mod_dir / PACKAGE_JSON_NAME}: field {field_name!r} is missing or empty"
@@ -69,11 +70,11 @@ def _mandatory_string(value: object, field_name: str, mod_dir: Path) -> str:
     return value
 
 
-def _optional_string(value: object) -> str:
+def _optional_string(value: Json) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _dependencies(value: object) -> dict[str, str]:
+def _dependencies(value: Json) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {
@@ -106,7 +107,7 @@ def read_package_json(mod_dir: Path) -> ModMeta:
     except OSError as error:
         raise InvalidMetadataError(f"{package_file} cannot be read: {error}") from error
     try:
-        data = json.loads(raw)
+        data: Json = json.loads(raw)
     except json.JSONDecodeError as error:
         raise InvalidMetadataError(
             f"{package_file} is no valid JSON: {error}"

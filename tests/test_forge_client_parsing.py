@@ -300,7 +300,7 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
     has conflict=False and a valid CompatibleVersion. The recursive structure is
     preserved through all levels.
     """
-    nested_dep = {
+    nested_dep: JsonDict = {
         "id": 100,
         "guid": "com.example.nested",
         "name": "Nested Dep",
@@ -315,7 +315,7 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
         "conflict": False,
         "dependencies": [],
     }
-    dep_with_conflict = {
+    dep_with_conflict: JsonDict = {
         "id": 200,
         "guid": "com.example.conflicted",
         "name": "Conflicted Dep",
@@ -324,7 +324,7 @@ def test_dependencies_parses_recursive_tree_with_conflict_and_nullable_version(
         "conflict": True,
         "dependencies": [nested_dep],
     }
-    data = {"5:1.2.0": [dep_with_conflict]}
+    data: JsonDict = {"5:1.2.0": [dep_with_conflict]}
     respx_router.get("/mods/dependencies").mock(return_value=httpx.Response(200, json=success_envelope(data)))
     client = client_factory()
 
@@ -391,7 +391,7 @@ def test_dependencies_conflict_flag_fails_safe_for_any_non_false_value(
     expected: bool,
 ) -> None:
     """Only JSON ``false`` clears the conflict flag; anything else sets it."""
-    node = {
+    node: JsonDict = {
         "id": 1,
         "guid": "com.example.dep",
         "name": "Dep",

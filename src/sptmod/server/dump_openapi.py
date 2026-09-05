@@ -14,6 +14,7 @@ from typing import Any, Final
 from pydantic import BaseModel, TypeAdapter
 from pydantic.json_schema import JsonSchemaMode
 
+from sptmod.core.models import Json
 from sptmod.server import schemas
 
 USAGE = "usage: python -m sptmod.server.dump_openapi [outfile]"
@@ -156,14 +157,14 @@ def _title(name: str) -> str:
     return " ".join(word.capitalize() for word in name.split("_"))
 
 
-def _without_none(document: dict[str, Any]) -> dict[str, Any]:
+def _without_none(document: dict[str, Json]) -> dict[str, Json]:
     """Return ``document`` with every ``None`` mapping entry dropped."""
     return {
         key: _stripped(value) for key, value in document.items() if value is not None
     }
 
 
-def _stripped(value: Any) -> Any:
+def _stripped(value: Json) -> Json:
     """Recursively remove None values from dicts and lists."""
     if isinstance(value, dict):
         return _without_none(value)

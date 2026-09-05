@@ -10,6 +10,7 @@ from typing import Final, Literal
 import httpx
 
 from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
+from sptmod.core.models import Json
 
 DEFAULT_BASE_URL: Final = "https://sp-mod.com/api/v0"
 BASE_URL_ENV_VAR: Final = "SPTMOD_FORGE_URL"
@@ -106,7 +107,7 @@ class ForgeMod:
     endorsements_count: int = 0
     license: ForgeLicense | None = None
     category: ForgeCategory | None = None
-    versions: list[ForgeVersionSummary] = field(default_factory=list)
+    versions: list[ForgeVersionSummary] = field(default_factory=list[ForgeVersionSummary])
 
 
 @dataclass(frozen=True)
@@ -141,8 +142,8 @@ class ForgeVersion:
     published_at: str | None
     created_at: str | None
     updated_at: str | None
-    dependencies: list[ForgeVersionDependency] = field(default_factory=list)
-    virus_total_links: list[str] = field(default_factory=list)
+    dependencies: list[ForgeVersionDependency] = field(default_factory=list[ForgeVersionDependency])
+    virus_total_links: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -234,7 +235,7 @@ class BlockedUpdate:
     current_version: CurrentVersion
     latest_version: LatestVersion
     block_reason: str
-    blocking_mods: list[BlockingMod] = field(default_factory=list)
+    blocking_mods: list[BlockingMod] = field(default_factory=list[BlockingMod])
 
 
 @dataclass(frozen=True)
@@ -328,51 +329,51 @@ class DownloadStream:
     chunks: Iterator[bytes]
 
 
-def _mapping(value: object) -> Mapping[str, object]:
+def _mapping(value: Json) -> Mapping[str, Json]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _optional_mapping(value: object) -> Mapping[str, object] | None:
+def _optional_mapping(value: Json) -> Mapping[str, Json] | None:
     return value if isinstance(value, Mapping) else None
 
 
-def _elements(value: object) -> list[object]:
+def _elements(value: Json) -> list[Json]:
     return list(value) if isinstance(value, list) else []
 
 
-def _mappings(value: object) -> list[Mapping[str, object]]:
+def _mappings(value: Json) -> list[Mapping[str, Json]]:
     return [_mapping(item) for item in _elements(value)]
 
 
-def _text(value: object) -> str:
+def _text(value: Json) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _optional_text(value: object) -> str | None:
+def _optional_text(value: Json) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _texts(value: object) -> list[str]:
+def _texts(value: Json) -> list[str]:
     return [item for item in _elements(value) if isinstance(item, str)]
 
 
-def _number(value: object) -> int:
+def _number(value: Json) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def _optional_number(value: object) -> int | None:
+def _optional_number(value: Json) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _flag(value: object) -> bool:
+def _flag(value: Json) -> bool:
     return value is True
 
 
-def _optional_flag(value: object) -> bool | None:
+def _optional_flag(value: Json) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _fika(value: object) -> FikaCompatibility:
+def _fika(value: Json) -> FikaCompatibility:
     if value == "compatible":
         return "compatible"
     if value == "incompatible":
@@ -380,7 +381,7 @@ def _fika(value: object) -> FikaCompatibility:
     return "unknown"
 
 
-def _parse_user(data: Mapping[str, object]) -> ForgeUser:
+def _parse_user(data: Mapping[str, Json]) -> ForgeUser:
     return ForgeUser(
         id=_number(data.get("id")),
         name=_text(data.get("name")),
@@ -389,11 +390,11 @@ def _parse_user(data: Mapping[str, object]) -> ForgeUser:
     )
 
 
-def _parse_source_code_link(data: Mapping[str, object]) -> SourceCodeLink:
+def _parse_source_code_link(data: Mapping[str, Json]) -> SourceCodeLink:
     return SourceCodeLink(url=_text(data.get("url")), label=_text(data.get("label")))
 
 
-def _parse_version_summary(data: Mapping[str, object]) -> ForgeVersionSummary:
+def _parse_version_summary(data: Mapping[str, Json]) -> ForgeVersionSummary:
     return ForgeVersionSummary(
         id=_number(data.get("id")),
         version=_text(data.get("version")),
@@ -403,7 +404,7 @@ def _parse_version_summary(data: Mapping[str, object]) -> ForgeVersionSummary:
     )
 
 
-def _parse_license(data: Mapping[str, object] | None) -> ForgeLicense | None:
+def _parse_license(data: Mapping[str, Json] | None) -> ForgeLicense | None:
     if data is None:
         return None
     return ForgeLicense(
@@ -413,7 +414,7 @@ def _parse_license(data: Mapping[str, object] | None) -> ForgeLicense | None:
     )
 
 
-def _parse_category(data: Mapping[str, object] | None) -> ForgeCategory | None:
+def _parse_category(data: Mapping[str, Json] | None) -> ForgeCategory | None:
     if data is None:
         return None
     return ForgeCategory(
@@ -424,7 +425,7 @@ def _parse_category(data: Mapping[str, object] | None) -> ForgeCategory | None:
     )
 
 
-def _parse_mod(data: Mapping[str, object]) -> ForgeMod:
+def _parse_mod(data: Mapping[str, Json]) -> ForgeMod:
     owner = _optional_mapping(data.get("owner"))
     return ForgeMod(
         id=_number(data.get("id")),
@@ -464,7 +465,7 @@ def _parse_mod(data: Mapping[str, object]) -> ForgeMod:
     )
 
 
-def _parse_version_dependency(data: Mapping[str, object]) -> ForgeVersionDependency:
+def _parse_version_dependency(data: Mapping[str, Json]) -> ForgeVersionDependency:
     return ForgeVersionDependency(
         id=_number(data.get("id")),
         mod_id=_number(data.get("mod_id")),
@@ -475,7 +476,7 @@ def _parse_version_dependency(data: Mapping[str, object]) -> ForgeVersionDepende
     )
 
 
-def _parse_version(data: Mapping[str, object]) -> ForgeVersion:
+def _parse_version(data: Mapping[str, Json]) -> ForgeVersion:
     return ForgeVersion(
         id=_number(data.get("id")),
         hub_id=_optional_number(data.get("hub_id")),
@@ -498,7 +499,7 @@ def _parse_version(data: Mapping[str, object]) -> ForgeVersion:
 
 
 def _parse_page[T](
-    payload: Mapping[str, object], parse: Callable[[Mapping[str, object]], T]
+    payload: Mapping[str, Json], parse: Callable[[Mapping[str, Json]], T]
 ) -> Page[T]:
     meta = _mapping(payload.get("meta"))
     links = _mapping(payload.get("links"))
@@ -514,7 +515,7 @@ def _parse_page[T](
     )
 
 
-def _parse_current_version(data: Mapping[str, object]) -> CurrentVersion:
+def _parse_current_version(data: Mapping[str, Json]) -> CurrentVersion:
     return CurrentVersion(
         id=_number(data.get("id")),
         mod_id=_number(data.get("mod_id")),
@@ -525,7 +526,7 @@ def _parse_current_version(data: Mapping[str, object]) -> CurrentVersion:
     )
 
 
-def _parse_recommended_version(data: Mapping[str, object]) -> RecommendedVersion:
+def _parse_recommended_version(data: Mapping[str, Json]) -> RecommendedVersion:
     return RecommendedVersion(
         id=_number(data.get("id")),
         version=_text(data.get("version")),
@@ -536,7 +537,7 @@ def _parse_recommended_version(data: Mapping[str, object]) -> RecommendedVersion
     )
 
 
-def _parse_update(data: Mapping[str, object]) -> ModUpdate:
+def _parse_update(data: Mapping[str, Json]) -> ModUpdate:
     return ModUpdate(
         current_version=_parse_current_version(_mapping(data.get("current_version"))),
         recommended_version=_parse_recommended_version(
@@ -546,7 +547,7 @@ def _parse_update(data: Mapping[str, object]) -> ModUpdate:
     )
 
 
-def _parse_latest_version(data: Mapping[str, object]) -> LatestVersion:
+def _parse_latest_version(data: Mapping[str, Json]) -> LatestVersion:
     return LatestVersion(
         id=_number(data.get("id")),
         version=_text(data.get("version")),
@@ -554,7 +555,7 @@ def _parse_latest_version(data: Mapping[str, object]) -> LatestVersion:
     )
 
 
-def _parse_blocking_mod(data: Mapping[str, object]) -> BlockingMod:
+def _parse_blocking_mod(data: Mapping[str, Json]) -> BlockingMod:
     return BlockingMod(
         mod_id=_number(data.get("mod_id")),
         mod_guid=_optional_text(data.get("mod_guid")),
@@ -565,7 +566,7 @@ def _parse_blocking_mod(data: Mapping[str, object]) -> BlockingMod:
     )
 
 
-def _parse_blocked_update(data: Mapping[str, object]) -> BlockedUpdate:
+def _parse_blocked_update(data: Mapping[str, Json]) -> BlockedUpdate:
     return BlockedUpdate(
         current_version=_parse_current_version(_mapping(data.get("current_version"))),
         latest_version=_parse_latest_version(_mapping(data.get("latest_version"))),
@@ -576,7 +577,7 @@ def _parse_blocked_update(data: Mapping[str, object]) -> BlockedUpdate:
     )
 
 
-def _parse_up_to_date(data: Mapping[str, object]) -> UpToDateMod:
+def _parse_up_to_date(data: Mapping[str, Json]) -> UpToDateMod:
     return UpToDateMod(
         id=_number(data.get("id")),
         mod_id=_number(data.get("mod_id")),
@@ -587,7 +588,7 @@ def _parse_up_to_date(data: Mapping[str, object]) -> UpToDateMod:
     )
 
 
-def _parse_incompatible(data: Mapping[str, object]) -> IncompatibleMod:
+def _parse_incompatible(data: Mapping[str, Json]) -> IncompatibleMod:
     return IncompatibleMod(
         id=_number(data.get("id")),
         mod_id=_number(data.get("mod_id")),
@@ -599,7 +600,7 @@ def _parse_incompatible(data: Mapping[str, object]) -> IncompatibleMod:
     )
 
 
-def _parse_updates(data: Mapping[str, object]) -> UpdatesResult:
+def _parse_updates(data: Mapping[str, Json]) -> UpdatesResult:
     return UpdatesResult(
         spt_version=_text(data.get("spt_version")),
         updates=[_parse_update(item) for item in _mappings(data.get("updates"))],
@@ -618,7 +619,7 @@ def _parse_updates(data: Mapping[str, object]) -> UpdatesResult:
 
 
 def _parse_compatible_version(
-    data: Mapping[str, object] | None,
+    data: Mapping[str, Json] | None,
 ) -> CompatibleVersion | None:
     if data is None:
         return None
@@ -631,7 +632,7 @@ def _parse_compatible_version(
     )
 
 
-def _parse_dependency_node(data: Mapping[str, object]) -> DependencyNode:
+def _parse_dependency_node(data: Mapping[str, Json]) -> DependencyNode:
     """Parse a dependency tree node from the API response.
 
     The conflict field treats anything not JSON false as True (fail-safe:
@@ -821,7 +822,7 @@ class ForgeClient:
 
     def _fetch(
         self, url: str, params: Mapping[str, str] | None = None
-    ) -> Mapping[str, object]:
+    ) -> Mapping[str, Json]:
         """Fetch and parse a response, unwrapping the success envelope.
 
         Maps success=false responses to ForgeApiError with code, message, and
@@ -857,7 +858,7 @@ class ForgeClient:
         self,
         url: str,
         params: dict[str, str],
-        parse: Callable[[Mapping[str, object]], T],
+        parse: Callable[[Mapping[str, Json]], T],
     ) -> Iterator[T]:
         """Yield items from all pages of a paginated resource.
 

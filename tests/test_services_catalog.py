@@ -460,23 +460,26 @@ def _blocked_db_path(tmp_path: Path) -> Path:
     return blocked / "catalog.db"
 
 
+def _search_catalog(path: Path, db: Path) -> object:
+    return services.search_catalog(path, query="", db_path=db)
+
+
+def _browse_catalog(path: Path, db: Path) -> object:
+    return services.browse_catalog(path, db_path=db)
+
+
+def _sync_catalog(path: Path, db: Path) -> object:
+    # A closed client is enough: Catalog(db_path) must fail before the client
+    # is ever used to talk to Forge.
+    return services.sync_catalog(path, db_path=db, client=_ClosedClient())
+
+
 @pytest.mark.parametrize(
     "call",
     [
-        pytest.param(
-            lambda path, db: services.search_catalog(path, query="", db_path=db),
-            id="search_catalog",
-        ),
-        pytest.param(
-            lambda path, db: services.browse_catalog(path, db_path=db),
-            id="browse_catalog",
-        ),
-        pytest.param(
-            # A closed client is enough: Catalog(db_path) must fail before
-            # the client is ever used to talk to Forge.
-            lambda path, db: services.sync_catalog(path, db_path=db, client=_ClosedClient()),
-            id="sync_catalog",
-        ),
+        pytest.param(_search_catalog, id="search_catalog"),
+        pytest.param(_browse_catalog, id="browse_catalog"),
+        pytest.param(_sync_catalog, id="sync_catalog"),
     ],
 )
 def test_catalog_reads_raise_catalog_unavailable_not_os_error(

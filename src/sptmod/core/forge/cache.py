@@ -30,6 +30,7 @@ from typing import Final
 
 from sptmod.core import workspace
 from sptmod.core.errors import ArchiveError
+from sptmod.core.models import Json
 
 MAX_GB_ENV_VAR: Final = "SPTMOD_DOWNLOAD_CACHE_MAX_GB"
 DEFAULT_MAX_BYTES: Final = 20 * 1024**3
@@ -271,13 +272,13 @@ def _write(path: Path, content: dict[str, str | int | None]) -> None:
         path.write_text(json.dumps(content), encoding="utf-8")
 
 
-def _read(path: Path) -> dict[str, object]:
+def _read(path: Path) -> dict[str, Json]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return {}
     try:
-        content: object = json.loads(raw)
+        content: Json = json.loads(raw)
     except json.JSONDecodeError:
         return {}
     return content if isinstance(content, dict) else {}

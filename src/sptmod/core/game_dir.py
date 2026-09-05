@@ -10,6 +10,7 @@ from typing import IO, Final, Literal
 import psutil
 
 from sptmod.core.errors import GameRunningError, NotAGameDirError
+from sptmod.core.models import Json
 from sptmod.core.repo import Repo
 
 RUNTIME_DIR_NAMES: Final[tuple[str, ...]] = ("SPT_Runtime", "SPT")
@@ -228,7 +229,7 @@ def read_core_json_version(layout: GameLayout) -> str | None:
     except (OSError, UnicodeDecodeError):
         return None
     try:
-        config = json.loads(raw)
+        config: Json = json.loads(raw)
     except json.JSONDecodeError:
         return None
     if not isinstance(config, dict):

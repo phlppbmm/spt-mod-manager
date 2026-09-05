@@ -14,10 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psutil
 import py7zr
 import pytest
 import respx
+from respx.models import Call
 from typer.testing import CliRunner
 
 from fixture_types import (
@@ -35,6 +37,7 @@ from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.launch import LAUNCH_STATE_FILE_NAME
+from sptmod.core.models import Json
 from sptmod.core.repo import Repo
 
 
@@ -88,7 +91,7 @@ def fake_game_dir(tmp_path: Path) -> Path:
     (root / "BepInEx" / "config").mkdir(parents=True)
     (root / "EscapeFromTarkov_Data").mkdir(parents=True)
 
-    profile = {
+    profile: JsonDict = {
         "Inventory": {"items": []},
         "TradersInfo": {},
         "Quests": [],
@@ -136,7 +139,7 @@ def fake_game_dir_runtime(tmp_path: Path) -> Path:
     (root / "BepInEx" / "config").mkdir(parents=True)
     (root / "EscapeFromTarkov_Data").mkdir(parents=True)
 
-    profile = {
+    profile: JsonDict = {
         "Inventory": {"items": []},
         "TradersInfo": {},
         "Quests": [],
@@ -717,11 +720,12 @@ def kill_launchable_processes(root: Path) -> None:
     state_file = root / ".sptmod-launch.json"
     if state_file.is_file():
         with suppress(OSError, ValueError):
-            state = json.loads(state_file.read_text(encoding="utf-8"))
+            state: Json = json.loads(state_file.read_text(encoding="utf-8"))
             for key in ("server", "client", "watcher"):
                 entry = state.get(key) if isinstance(state, dict) else None
-                if isinstance(entry, dict) and isinstance(entry.get("pid"), int):
-                    pids.add(entry["pid"])
+                pid = entry.get("pid") if isinstance(entry, dict) else None
+                if isinstance(pid, int):
+                    pids.add(pid)
     processes: list[psutil.Process] = []
     for pid in pids:
         with suppress(psutil.Error):
@@ -867,6 +871,16 @@ class FakeClock:
     def advance(self, seconds: float) -> None:
         """Moves the fake clock forward by ``seconds``."""
         self.value += seconds
+
+
+def recorded_requests(route: respx.Route) -> list[httpx.Request]:
+    """Return the requests a respx route recorded, in call order.
+
+    ``respx.CallList`` derives from a bare ``list``, so its entries carry no
+    type; copying it into a typed list restores what respx documents.
+    """
+    calls: list[Call] = list(route.calls)
+    return [call.request for call in calls]
 
 
 class RecordingSleep:
@@ -1032,7 +1046,10 @@ def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
     suite whose service calls would otherwise raise ``GameRunningError``
     when the developer happens to play while the tests run.
     """
-    monkeypatch.setattr(game_dir, "running_game_processes", lambda: [])
+    def no_running_processes() -> list[str]:
+        return []
+
+    monkeypatch.setattr(game_dir, "running_game_processes", no_running_processes)
 
 
 @pytest.fixture
@@ -1052,9 +1069,11 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     real config directory.
     """
     config_dir = tmp_path / "config"
+    def user_config_path(*_args: object, **_kwargs: object) -> Path:
+        return config_dir
+
     monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path",
-        lambda *args, **kwargs: config_dir,
+        "sptmod.core.forge.catalog.platformdirs.user_config_path", user_config_path
     )
     return config_dir / DB_FILE_NAME
 

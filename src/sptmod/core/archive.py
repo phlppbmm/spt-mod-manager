@@ -72,8 +72,8 @@ class ArchiveLayout:
     """
 
     mod_type: ModType
-    mappings: list[AnchorMapping] = field(default_factory=list)
-    files: list[Path] = field(default_factory=list)
+    mappings: list[AnchorMapping] = field(default_factory=list[AnchorMapping])
+    files: list[Path] = field(default_factory=list[Path])
 
 
 def rar_backend_available() -> bool:

@@ -7,8 +7,6 @@ import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Final, Literal
 
@@ -30,31 +28,14 @@ from sptmod.core.errors import (
     CatalogUnavailableError,
     ConflictError,
     DependencyError,
-    ForgeUnavailableError,
     GitError,
     InvalidPathError,
     ModNotFoundError,
     NotAGameDirError,
     PartialInstallError,
-    ProfileResidueError,
-    SptmodError,
     SptVersionUnknownError,
 )
-from sptmod.core.favorites import (
-    default_favorites_path,
-    load_favorites,
-    save_favorites,
-)
-from sptmod.core.forge import cache as download_cache
-from sptmod.core.forge.catalog import (
-    Catalog,
-    CatalogEntry,
-    CatalogMod,
-    CatalogState,
-    CatalogVersion,
-    SyncResult,
-    default_db_path,
-)
+from sptmod.core.forge.catalog import Catalog, default_db_path
 from sptmod.core.forge.client import ForgeClient, UpdatesResult
 from sptmod.core.forge.download import download_cached
 from sptmod.core.forge.resolve import plan_install
@@ -93,8 +74,6 @@ from sptmod.core.models import (
     ModState,
     ModType,
     PlanEntry,
-    ProfileResidue,
-    ProfileSummary,
     Progress,
 )
 from sptmod.core.modmeta import (
@@ -105,18 +84,19 @@ from sptmod.core.modmeta import (
     meta_from_dll,
     read_package_json,
 )
-from sptmod.core.profile import (
-    CheckResult,
-    check_all,
-    clean_document,
-    collect_mod_ids,
-    find_residues,
-    parse_profile,
-    profile_paths,
-    profile_summaries,
-    write_profile,
-)
 from sptmod.core.repo import Repo
+from sptmod.core.services.catalog import (
+    BrowseFilter,
+    ClearCacheResult,
+    ModDetails,
+    browse_catalog,
+    clear_catalog_cache,
+    get_mod_details,
+    list_favorites,
+    search_catalog,
+    set_favorite,
+    sync_catalog,
+)
 from sptmod.core.services.common import (
     DEPENDENCY_KINDS,
     INSTALL_STEPS,
@@ -124,7 +104,6 @@ from sptmod.core.services.common import (
     InstallStep,
     blocked_message,
     current_mods,
-    detected_spt_version,
     for_game_layout,
     install_commit,
     last_touching_mod,
@@ -139,6 +118,17 @@ from sptmod.core.services.common import (
     required_spt_version,
     resolve_mod,
 )
+from sptmod.core.services.profiles import (
+    CleanupPlan,
+    CleanupResult,
+    UntouchedResidue,
+    check_profile_residue,
+    check_profiles,
+    clean_profile,
+    clean_profiles_inline,
+    list_profiles,
+    plan_profile_cleanup,
+)
 from sptmod.core.services.state import (
     ManualMod,
     SnapshotResult,
@@ -149,10 +139,8 @@ from sptmod.core.services.state import (
     mod_files,
     snapshot,
     status,
-    take_snapshot,
 )
 from sptmod.core.workspace import (
-    download_cache_dir,
     game_lock,
     is_locked,
     staging_dir,
@@ -240,18 +228,12 @@ UNKNOWN_SPT_VERSION: Final = "unknown"
 
 
 
-type BrowseFilter = Literal["all", "installed", "available"]
 type ExportFormat = Literal["text", "json"]
 
 EXPORT_FORMATS: Final[tuple[ExportFormat, ...]] = ("text", "json")
 
 
 _CLIENT_TYPES: Final[tuple[ModType, ...]] = ("client", "hybrid")
-# The game names its own profile backup directories this way.
-_BACKUP_TIME_FORMAT: Final = "%Y-%m-%d_%H-%M-%S"
-_UNTOUCHED_REASON: Final = (
-    "sptmod cannot tell what these IDs are used for, so it leaves them alone"
-)
 _LINK_MARKER: Final = "://"
 _CONTENT_SOURCE: Final = "the given mod list"
 _LOCATE_MOUNTS: Final[tuple[str, ...]] = ("/mnt", "/media", "/opt")
@@ -294,64 +276,10 @@ class InstallResult:
     warnings: list[Conflict] = field(default_factory=list[Conflict])
 
 
-@dataclass(frozen=True)
-class UntouchedResidue:
-    """Residue a profile cleanup leaves in place, and why it does.
-
-    Attributes:
-        residue: The residue that was not removed.
-        reason: Why the cleanup cannot attribute and remove it.
-    """
-
-    residue: ProfileResidue
-    reason: str
 
 
-@dataclass(frozen=True)
-class CleanupPlan:
-    """What cleaning the profiles of one mod would remove.
-
-    Attributes:
-        mod: The mod the plan is for.
-        profiles: The profile files the cleanup would change, by file name
-            without the extension.
-        removals: What would go, one entry per profile and category.
-        untouched: What would stay, each with the reason it cannot be removed.
-        warnings: Db files of the mod that could not be read and profiles that
-            could not be understood.
-    """
-
-    mod: str
-    profiles: list[str] = field(default_factory=list[str])
-    removals: list[ProfileResidue] = field(default_factory=list[ProfileResidue])
-    untouched: list[UntouchedResidue] = field(default_factory=list[UntouchedResidue])
-    warnings: list[str] = field(default_factory=list[str])
 
 
-@dataclass(frozen=True)
-class CleanupResult:
-    """Outcome of :func:`clean_profile`.
-
-    Attributes:
-        mod: The mod the profiles were cleaned of.
-        profiles: The profile files that changed.
-        backups: The copies of those files taken beforehand, relative to the
-            game directory.
-        removed: What was removed, one entry per profile and category.
-        untouched: What stayed, each with the reason it cannot be removed.
-        snapshot: The snapshot the change was secured in, empty when no
-            profile changed.
-        warnings: Db files of the mod that could not be read and profiles that
-            could not be understood.
-    """
-
-    mod: str
-    profiles: list[str] = field(default_factory=list[str])
-    backups: list[Path] = field(default_factory=list[Path])
-    removed: list[ProfileResidue] = field(default_factory=list[ProfileResidue])
-    untouched: list[UntouchedResidue] = field(default_factory=list[UntouchedResidue])
-    snapshot: str = ""
-    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -454,19 +382,6 @@ class ImportDiff:
     installed: list[InstallModResult] = field(default_factory=list[InstallModResult])
 
 
-@dataclass(frozen=True)
-class ClearCacheResult:
-    """Outcome of :func:`clear_catalog_cache`.
-
-    ``removed`` is false when there was no cache file to delete.
-    ``downloads_path`` is set only when the kept mod archives were cleared
-    too, and ``downloads_freed_bytes`` says how much space that gave back.
-    """
-
-    db_path: Path
-    removed: bool
-    downloads_path: Path | None = None
-    downloads_freed_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -1065,234 +980,20 @@ def remove_mod(
     )
 
 
-def list_profiles(path: Path) -> list[ProfileSummary]:
-    """Describe the player profiles of the installation at ``path``.
-
-    Reads only. Every profile file is listed, sorted by file name; a file that
-    cannot be read is listed as unreadable with the reason instead of being
-    dropped.
-
-    Raises:
-        NotAGameDirError: ``path`` is no SPT game directory.
-    """
-    return profile_summaries(detect_layout(path))
-
-
-def check_profiles(path: Path) -> CheckResult:
-    """Report which active mods the player profiles at ``path`` still reference.
-
-    Reads only: neither the repository nor the profiles are changed, so
-    residues are reported and never block.
-
-    Raises:
-        GitError: git failed.
-    """
-    return check_all(Repo(path), detect_layout(path))
-
-
-def plan_profile_cleanup(path: Path, mod_name: str) -> CleanupPlan:
-    """Report what cleaning the profiles at ``path`` of ``mod_name`` removes.
-
-    Reads only: neither the repository nor the profiles are changed, so the
-    plan can be shown before anything is decided. It is built by the very code
-    that does the cleaning, so it lists exactly what :func:`clean_profile`
-    would remove. A mod that was already removed can still be planned for.
-
-    Args:
-        path: The tracked game directory.
-        mod_name: The name of the mod to plan a cleanup for; matched
-            case-insensitively.
-
-    Returns:
-        What would be removed and left untouched, per profile and category.
-
-    Raises:
-        NotAGameDirError: ``path`` is no SPT game directory.
-        ModNotFoundError: no mod matches ``mod_name``.
-        AmbiguousModError: several mods match ``mod_name``.
-        GitError: git failed.
-    """
-    repo = Repo(path)
-    layout = detect_layout(path)
-    mod = resolve_mod(current_mods(repo), mod_name)
-    ids = collect_mod_ids(repo, install_commit(repo, mod.name), layout)
-    warnings = list(ids.warnings)
-    profiles: list[str] = []
-    removals: list[ProfileResidue] = []
-    untouched: list[UntouchedResidue] = []
-    for target in profile_paths(layout):
-        parsed = parse_profile(target)
-        if parsed is None:
-            warnings.append(_unreadable_profile(target))
-            continue
-        cleaned = clean_document(parsed, ids)
-        untouched.extend(_untouched_in(cleaned.untouched, target.stem))
-        if cleaned.removed:
-            profiles.append(target.stem)
-            removals.extend(_found_in(cleaned.removed, target.stem))
-    return CleanupPlan(
-        mod=mod.name,
-        profiles=profiles,
-        removals=removals,
-        untouched=untouched,
-        warnings=warnings,
-    )
-
-
-def clean_profile(
-    path: Path, mod_name: str, profiles: list[str] | None = None
-) -> CleanupResult:
-    """Remove the content of ``mod_name`` from the player profiles at ``path``.
-
-    Cleans every profile, or only the ones named in ``profiles`` by their file
-    name without the extension. A copy of each profile that changes is put
-    into the backups folder the game uses itself, and the change is secured in
-    a snapshot afterwards. Profiles without anything to remove are not
-    touched at all.
-
-    Args:
-        path: The tracked game directory.
-        mod_name: The name of the mod to clean profiles of; matched
-            case-insensitively.
-        profiles: The file names (without extension) of profiles to clean, or
-            ``None`` to clean every profile.
-
-    Returns:
-        What was removed and left untouched, the backup copies created, and
-        the snapshot commit hash, empty when nothing changed.
-
-    Raises:
-        NotAGameDirError: ``path`` is no SPT game directory.
-        ModNotFoundError: no mod matches ``mod_name``.
-        AmbiguousModError: several mods match ``mod_name``.
-        InvalidPathError: there is no profile with one of the given names.
-        DirtyTreeError: the game folder holds files sptmod does not manage.
-        GameRunningError: the SPT server or client is running.
-        OperationInProgressError: another operation holds the game directory.
-        SptmodError: a profile could not be backed up or written.
-        GitError: git failed.
-    """
-    repo = Repo(path)
-    with game_lock(path, f"cleaning profiles for {mod_name}"):
-        ensure_installable(repo)
-        mod = resolve_mod(current_mods(repo), mod_name)
-        return clean_profiles_inline(repo, mod, profiles)
 
 
 
 
-def sync_catalog(
-    path: Path,
-    full: bool = False,
-    progress: Progress | None = None,
-    *,
-    db_path: Path | None = None,
-    client: ForgeClient | None = None,
-) -> SyncResult:
-    """Refresh the local Forge catalog cache of the game directory at ``path``.
-
-    Delegates to :meth:`Catalog.sync`; ``full`` forces a full pagination
-    instead of a delta sync and ``progress`` is reported once per fetched page.
-    The game directory is only used to locate the installation the cache serves;
-    the cache itself never lives inside it.
-
-    Args:
-        path: The tracked game directory.
-        full: Force a full sync.
-        progress: Optional per-page progress callback.
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
-        client: Forge API client; a default one is built when omitted.
-
-    Returns:
-        The counts of inserted and updated mods and versions.
-
-    Raises:
-        CatalogUnavailableError: The catalog cache cannot be opened.
-        ForgeUnavailableError: The API is unreachable; the cache keeps its
-            previous contents.
-        ForgeApiError: The API answered with an error envelope.
-    """
-    # The cache is machine-wide, so the game directory only identifies the
-    # caller here; every service function takes it for a uniform RPC contract.
-    del path
-    if client is not None:
-        with open_catalog(db_path) as catalog:
-            return catalog.sync(client, full=full, progress=progress)
-    with ForgeClient() as owned, open_catalog(db_path) as catalog:
-        return catalog.sync(owned, full=full, progress=progress)
 
 
-def search_catalog(
-    path: Path,
-    query: str,
-    compatible_only: bool = False,
-    *,
-    db_path: Path | None = None,
-) -> list[CatalogEntry]:
-    """Search the cached catalog and join the result with the installed mods.
-
-    Matches ``query`` case-insensitively against mod name and author and
-    classifies every hit against the active mods of the repository at ``path``,
-    so callers see whether a mod is installed, outdated or merely available.
-
-    Args:
-        path: The tracked game directory.
-        query: Substring matched against name and author; empty matches all.
-        compatible_only: Keep only mods with a version compatible with the SPT
-            version of the game directory.
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
-
-    Returns:
-        The matching entries ordered by mod name.
-
-    Raises:
-        CatalogUnavailableError: The catalog cache cannot be opened.
-        GitError: git failed.
-    """
-    installed = list_mods(path)
-    compatible_with = _compatible_with(path, compatible_only)
-    with open_catalog(db_path) as catalog:
-        matched = {
-            mod.id for mod in catalog.search(query, compatible_with=compatible_with)
-        }
-        entries = _classified(catalog, installed, path, compatible_only)
-    return [entry for entry in entries if entry.mod.id in matched]
 
 
-def browse_catalog(
-    path: Path,
-    catalog_filter: BrowseFilter = "all",
-    compatible_only: bool = False,
-    *,
-    db_path: Path | None = None,
-) -> list[CatalogEntry]:
-    """Return the cached catalog joined with the installed mods of ``path``.
 
-    ``catalog_filter`` selects one of the three frontend lists: ``installed`` keeps the
-    entries matching an active mod, including the ones with an update
-    available, ``available`` keeps the rest, and ``all`` keeps everything.
 
-    Args:
-        path: The tracked game directory.
-        catalog_filter: Which of the three lists to return.
-        compatible_only: Keep only mods with a version compatible with the SPT
-            version of the game directory.
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
 
-    Returns:
-        The selected entries ordered by mod name.
 
-    Raises:
-        CatalogUnavailableError: The catalog cache cannot be opened.
-        GitError: git failed.
-    """
-    installed = list_mods(path)
-    with open_catalog(db_path) as catalog:
-        entries = _classified(catalog, installed, path, compatible_only)
-    if catalog_filter == "all":
-        return entries
-    wanted = catalog_filter == "installed"
-    return [entry for entry in entries if (entry.state != "available") == wanted]
+
+
 
 
 def disable_mod(path: Path, name: str) -> ToggleResult:
@@ -1566,85 +1267,10 @@ def export_mods(
     )
 
 
-def clear_catalog_cache(
-    db_path: Path | None = None, *, downloads: bool = False
-) -> ClearCacheResult:
-    """Delete the local Forge catalog cache.
-
-    Removes the SQLite file the catalog lives in, so the next
-    :func:`sync_catalog` starts from an empty cache. The cache holds no truth
-    about the installation, hence nothing else is touched.
-
-    Args:
-        db_path: Catalog database path; defaults to :func:`default_db_path`.
-        downloads: Also remove the kept mod archives, which are downloaded
-            again when they are needed next.
-
-    Returns:
-        The path that was cleared, whether a file was actually deleted and,
-        when ``downloads`` was asked for, the archive directory and how many
-        bytes it gave back.
-
-    Raises:
-        OSError: the cache file exists but cannot be deleted.
-    """
-    cache = db_path or default_db_path()
-    removed = cache.exists()
-    cache.unlink(missing_ok=True)
-    if not downloads:
-        return ClearCacheResult(db_path=cache, removed=removed)
-    freed = download_cache.clear()
-    return ClearCacheResult(
-        db_path=cache,
-        removed=removed,
-        downloads_path=download_cache_dir(),
-        downloads_freed_bytes=freed,
-    )
 
 
-def list_favorites(*, favorites_path: Path | None = None) -> list[int]:
-    """Return the Forge ids of the mods marked as favorites.
-
-    Args:
-        favorites_path: Favorites file; defaults to
-            :func:`default_favorites_path`.
-
-    Returns:
-        The favored Forge mod ids, sorted and without duplicates. An
-        unreadable list counts as empty.
-    """
-    return load_favorites(favorites_path or default_favorites_path())
 
 
-def set_favorite(
-    mod_id: int, favorite: bool, *, favorites_path: Path | None = None
-) -> list[int]:
-    """Mark or unmark the mod ``mod_id`` as a favorite.
-
-    Marking is independent of the catalog and of any game directory, so any id
-    is accepted and marking twice changes nothing.
-
-    Args:
-        mod_id: Forge id of the mod.
-        favorite: Whether the mod should be a favorite.
-        favorites_path: Favorites file; defaults to
-            :func:`default_favorites_path`.
-
-    Returns:
-        All favored Forge mod ids after the change, sorted.
-
-    Raises:
-        OSError: the favorites file cannot be written.
-    """
-    path = favorites_path or default_favorites_path()
-    current = set(load_favorites(path))
-    if favorite:
-        current.add(mod_id)
-    else:
-        current.discard(mod_id)
-    mod_ids = sorted(current)
-    save_favorites(path, mod_ids)
-    return mod_ids
 
 
 def launch_profile(
@@ -1701,127 +1327,14 @@ def stop_game(path: Path) -> StopResult:
     return _stop_game(path)
 
 
-@dataclass(frozen=True)
-class ModDetails:
-    """Everything the detail view shows about a catalog mod.
-
-    ``mod``, ``versions`` and the description all come from the local cache;
-    the description is refreshed from the Forge whenever the cached mod row
-    moved on to a newer ``updated_at`` than the stored text.
-    """
-
-    mod: CatalogMod | None
-    versions: list[CatalogVersion]
-    description: str
 
 
-class _HtmlTextExtractor(HTMLParser):
-    """Collect the text content of an HTML fragment, dropping every tag."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.parts: list[str] = []
-        self._skip_depth = 0
-
-    def handle_data(self, data: str) -> None:
-        if self._skip_depth == 0:
-            self.parts.append(data)
-
-    def handle_starttag(self, tag: str, attrs: object) -> None:
-        if tag in ("script", "style"):
-            self._skip_depth += 1
-        elif tag in ("p", "br", "li", "div"):
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("script", "style") and self._skip_depth > 0:
-            self._skip_depth -= 1
 
 
-def _html_to_text(html: str) -> str:
-    """Strip HTML tags from a Forge description, keeping paragraph breaks."""
-    extractor = _HtmlTextExtractor()
-    extractor.feed(html)
-    text = "".join(extractor.parts)
-    lines = [line.strip() for line in text.splitlines()]
-    return "\n".join(line for line in lines if line).strip()
 
 
-def _load_mod_details(
-    catalog: Catalog,
-    client: ForgeClient,
-    mod_id: int,
-    versions: list[CatalogVersion],
-    description: str | None,
-    stamp: str | None,
-) -> tuple[list[CatalogVersion], str]:
-    """Fetch what the cache is missing: the description and version links.
-
-    Args:
-        catalog: The open catalog cache to store the description in.
-        client: The Forge API client to read from.
-        mod_id: The numeric Forge mod ID.
-        versions: The cached versions; refetched when none carries a link.
-        description: The stored description, or None when it must be fetched.
-        stamp: The cached mod's ``updated_at``, stored with the description.
-
-    Returns:
-        The versions to show and the plain-text description.
-    """
-    if description is None:
-        description = _html_to_text(client.mod(mod_id).description or "")
-        catalog.store_description(mod_id, description, stamp)
-    if not any(version.link for version in versions):
-        versions = catalog.fetch_versions(client, mod_id)
-    return versions, description
 
 
-def get_mod_details(
-    mod_id: int,
-    *,
-    db_path: Path | None = None,
-    client: ForgeClient | None = None,
-) -> ModDetails:
-    """Return everything the detail view shows about a catalog mod.
-
-    The cached mod row and its versions come from the local catalog (version
-    details are fetched once when the cache only holds summaries). The
-    description is reduced from HTML to plain text so callers can render it
-    without trusting markup, and stored in the catalog with the mod's
-    ``updated_at``: it is served from disk until a sync moves that stamp on,
-    then fetched from the Forge detail endpoint once. An unreachable Forge
-    degrades to the stored description, or to an empty one when nothing was
-    stored yet, instead of failing the whole view.
-    """
-    cached: CatalogMod | None = None
-    versions: list[CatalogVersion] = []
-    with open_catalog(db_path) as catalog:
-        cached = catalog.get_mod(mod_id)
-        versions = catalog.get_versions(mod_id)
-        stamp = None if cached is None else cached.updated_at
-        stored = catalog.get_description(mod_id)
-        description: str | None = None
-        if stored is not None and stored.updated_at == stamp:
-            description = stored.text
-            if any(version.link for version in versions):
-                return ModDetails(
-                    mod=cached, versions=versions, description=description
-                )
-        try:
-            if client is not None:
-                versions, description = _load_mod_details(
-                    catalog, client, mod_id, versions, description, stamp
-                )
-            else:
-                with ForgeClient() as owned:
-                    versions, description = _load_mod_details(
-                        catalog, owned, mod_id, versions, description, stamp
-                    )
-        except ForgeUnavailableError:
-            if cached is None:
-                raise
-            description = None if stored is None else stored.text
-    return ModDetails(mod=cached, versions=versions, description=description or "")
 
 
 def plan_mod_install(
@@ -2545,39 +2058,8 @@ def _no_update_notice(mod: ModInfo, report: UpdatesReport) -> str:
     return f"Forge reports no update for {mod.name} {mod.version}"
 
 
-def _classified(
-    catalog: Catalog,
-    installed: Sequence[ModInfo],
-    path: Path,
-    compatible_only: bool,
-) -> list[CatalogEntry]:
-    """Join the catalog with ``installed``, judged against the SPT version.
-
-    ``latest_version`` always holds a version the installer can actually
-    resolve, so a mod without one is listed as ``available``/``installed``
-    without a version to offer instead of promising an install or update that
-    the resolver would refuse. Without ``compatible_only`` those mods stay in
-    the list.
-    """
-    spt_version = detected_spt_version(path)
-    compatible = catalog.classify(installed, compatible_with=spt_version)
-    if compatible_only or spt_version is None:
-        return compatible
-
-    known = {entry.mod.id for entry in compatible}
-    entries = list(compatible)
-    for entry in catalog.classify(installed):
-        if entry.mod.id in known:
-            continue
-        state: CatalogState = (
-            "installed" if entry.installed_version is not None else "available"
-        )
-        entries.append(replace(entry, state=state, latest_version=None))
-    return sorted(entries, key=lambda entry: (entry.mod.name.casefold(), entry.mod.id))
 
 
-def _compatible_with(path: Path, compatible_only: bool) -> str | None:
-    return detected_spt_version(path) if compatible_only else None
 
 
 
@@ -2620,138 +2102,20 @@ def _check_install_conflicts(
 
 
 
-def check_profile_residue(repo: Repo, mod: ModInfo, force: bool) -> list[str]:
-    """Search every profile for content IDs of ``mod``.
-
-    Returns the collection warnings of ``collect_mod_ids`` and raises
-    ``ProfileResidueError`` when a profile still references content of ``mod``
-    unless ``force`` is set.
-    """
-    layout = detect_layout(repo.path)
-    ids = collect_mod_ids(repo, mod.commit, layout)
-    residues = [
-        residue
-        for profile in profile_paths(layout)
-        for residue in find_residues(profile, ids)
-    ]
-    if residues and not force:
-        raise ProfileResidueError(_residue_message(mod.name, residues), residues)
-    return ids.warnings
 
 
-def clean_profiles_inline(
-    repo: Repo, mod: ModInfo, profiles: list[str] | None = None
-) -> CleanupResult:
-    """Clean the profiles of ``mod`` without taking the lock.
-
-    Backs a profile up before it is written, so the copy in the game's own
-    backups folder always holds the state before the cleanup; the snapshot
-    afterwards leaves the tree clean for whatever the caller does next.
-    """
-    layout = detect_layout(repo.path)
-    ids = collect_mod_ids(repo, install_commit(repo, mod.name), layout)
-    snapshot_message = f"cleaned profiles for {mod.name}"
-    stamp = datetime.now(UTC).strftime(_BACKUP_TIME_FORMAT)
-    backup_dir = layout.root / layout.profile_backups_dir / stamp
-    warnings = list(ids.warnings)
-    changed: list[str] = []
-    backups: list[Path] = []
-    removed: list[ProfileResidue] = []
-    untouched: list[UntouchedResidue] = []
-    for target in _selected_profiles(layout, profiles):
-        parsed = parse_profile(target)
-        if parsed is None:
-            warnings.append(_unreadable_profile(target))
-            continue
-        cleaned = clean_document(parsed, ids)
-        untouched.extend(_untouched_in(cleaned.untouched, target.stem))
-        if not cleaned.removed:
-            continue
-        backup = backup_dir / target.name
-        try:
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, backup)
-            write_profile(target, cleaned.document)
-        except OSError as error:
-            if changed:
-                take_snapshot(repo.path, snapshot_message)
-            raise SptmodError(_cleanup_failed(target, changed, error)) from error
-        changed.append(target.stem)
-        backups.append(backup.relative_to(layout.root))
-        removed.extend(_found_in(cleaned.removed, target.stem))
-    snapshot_hash = ""
-    if changed:
-        # No mod trailer: the youngest commit carrying one is taken as the
-        # mod's own, which would point it at a profile commit holding none of
-        # its files.
-        snapshot_hash = take_snapshot(repo.path, snapshot_message).commit
-    return CleanupResult(
-        mod=mod.name,
-        profiles=changed,
-        backups=backups,
-        removed=removed,
-        untouched=untouched,
-        snapshot=snapshot_hash,
-        warnings=warnings,
-    )
 
 
-def _cleanup_failed(target: Path, changed: Sequence[str], error: OSError) -> str:
-    """Return the message for a cleanup that stopped at ``target``.
-
-    Names the profiles that were already cleaned in the same run, so nobody
-    has to guess how far the cleanup got.
-    """
-    message = f"the player profile {target.name} could not be changed: {error}"
-    if not changed:
-        return message
-    return (
-        f"{message}. Already cleaned: {', '.join(changed)} -- a copy of each "
-        "is in the game's backups folder"
-    )
 
 
-def _selected_profiles(layout: GameLayout, profiles: list[str] | None) -> list[Path]:
-    """Return the profile files named by ``profiles``, or all of them."""
-    available = profile_paths(layout)
-    if profiles is None:
-        return available
-    by_name = {path.stem: path for path in available}
-    missing = sorted(set(profiles) - set(by_name))
-    if missing:
-        raise InvalidPathError(f"there is no player profile named {', '.join(missing)}")
-    return [by_name[name] for name in profiles]
 
 
-def _found_in(residues: Sequence[ProfileResidue], name: str) -> list[ProfileResidue]:
-    """Return ``residues`` marked as found in the profile ``name``."""
-    return [replace(residue, profile=name) for residue in residues]
 
 
-def _untouched_in(
-    residues: Sequence[ProfileResidue], name: str
-) -> list[UntouchedResidue]:
-    """Return the residues of profile ``name`` a cleanup has to leave alone."""
-    return [
-        UntouchedResidue(residue=residue, reason=_UNTOUCHED_REASON)
-        for residue in _found_in(residues, name)
-    ]
 
 
-def _unreadable_profile(target: Path) -> str:
-    return f"{target.name} could not be read and was left unchanged"
 
 
-def _residue_message(name: str, residues: Sequence[ProfileResidue]) -> str:
-    details = "; ".join(
-        f"profile {residue.profile}: {residue.count} {residue.category} "
-        f"({', '.join(residue.ids)})"
-        for residue in residues
-    )
-    return (
-        f"cannot remove {name}, player profiles still reference it: {details} "
-        f"(use --force to remove anyway)"
-    )
 
 
 

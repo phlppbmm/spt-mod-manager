@@ -46,9 +46,9 @@ export function updatableFromCatalog(
 	entries: readonly CatalogEntry[],
 	installed: readonly ModInfo[]
 ): UpdateTarget[] {
-	const disabledMods = installed
-		.filter((mod) => mod.state === 'disabled')
-		.map((mod) => mod.name);
+	const disabledMods = new Set(
+		installed.filter((mod) => mod.state === 'disabled').map((mod) => mod.name.toLowerCase())
+	);
 	const byForgeId = new Map(
 		installed.filter((mod) => mod.forge_id !== '').map((mod) => [mod.forge_id, mod] as const)
 	);

@@ -513,13 +513,20 @@
 			<h3>Versions</h3>
 			<table class="versions">
 				<thead>
-					<tr><th>Version</th><th>SPT</th><th>Downloads</th><th>Released</th></tr>
+					<tr><th>Version</th><th>SPT</th><th>Fika</th><th>Downloads</th><th>Released</th></tr>
 				</thead>
 				<tbody>
 					{#each details.versions as version (version.id)}
 						<tr>
 							<td>{version.version}</td>
 							<td>{version.spt_version_constraint || '—'}</td>
+							<td>
+								{#if version.fika_compatibility === 'compatible'}
+									<span class="tag">Fika</span>
+								{:else if version.fika_compatibility === 'incompatible'}
+									<span class="tag warn">No Fika</span>
+								{/if}
+							</td>
 							<td>{version.downloads.toLocaleString()}</td>
 							<td>{version.published_at ? version.published_at.slice(0, 10) : '—'}</td>
 						</tr>

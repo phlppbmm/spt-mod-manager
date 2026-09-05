@@ -4,6 +4,7 @@ import type { components } from './types';
 type Schemas = components['schemas'];
 
 export type ModInfo = Schemas['ModInfo'];
+export type ModType = Schemas['ModType'];
 export type ModFile = Schemas['ModFile'];
 export type CommitInfo = Schemas['CommitInfo'];
 export type Conflict = Schemas['Conflict'];

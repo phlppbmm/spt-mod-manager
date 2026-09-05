@@ -4,18 +4,25 @@
 		browseCatalog,
 		listFavorites,
 		listMods,
-		searchCatalog,
 		type CatalogEntry,
-		type ModInfo
+		type ModInfo,
+		type ModType
 	} from '$lib/api/client';
 	import {
+		categoriesOf,
+		chipCounts,
 		filterEntries,
 		rowState,
 		sortEntries,
+		CHIP_IDS,
+		CHIP_LABELS,
+		type ChipId,
+		type FilterContext,
+		type ModFilter,
 		type ModSort,
-		type ModTab,
 		type SortKey
 	} from '$lib/modfilter';
+	import { clearFilter, getFilter, isDefaultFilter, setFilter } from '$lib/filterstate';
 	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
 	import { cached, invalidate } from '$lib/viewcache';
 
@@ -30,18 +37,13 @@
 	let { path, refreshKey, locked, onbusy, onupdatable }: Props = $props();
 
 	const busyIds = new Set<number>();
+	const restored = getFilter();
 
-	const TABS: { id: ModTab; label: string }[] = [
-		{ id: 'all', label: 'All' },
-		{ id: 'installed', label: 'Installed' },
-		{ id: 'favorited', label: 'Favorited' }
-	];
-
-	let tab: ModTab = $state('all');
-	let compatibleOnly = $state(true);
+	let chips = $state(new Set(restored.chips));
+	let category: string | null = $state(restored.category);
 	let favorites: number[] = $state([]);
-	let searchInput = $state('');
-	let search = $state('');
+	let searchInput = $state(restored.search);
+	let search = $state(restored.search);
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	let entries: CatalogEntry[] = $state([]);
 	let mods: ModInfo[] = $state([]);
@@ -50,9 +52,12 @@
 	let reload = $state(0);
 	let requestId = 0;
 	let seenMutations: string | null = null;
+	let now = $state(Date.now());
 
-	let disabledMods = $derived(
-		mods.filter((mod) => mod.state === 'disabled').map((mod) => mod.name)
+	let disabledNames = $derived(
+		new Set(
+			mods.filter((mod) => mod.state === 'disabled').map((mod) => mod.name.toLowerCase())
+		)
 	);
 	let installedByName = $derived(
 		new Map(mods.map((mod) => [mod.name.toLowerCase(), mod] as const))
@@ -66,19 +71,50 @@
 				.map((mod) => [mod.forge_id, mod] as const)
 		)
 	);
+	let modTypes = $derived.by(() => {
+		const types = new Map<number, ModType>();
+		for (const mod of mods) {
+			const forgeId = Number(mod.forge_id);
+			if (mod.forge_id !== '' && Number.isFinite(forgeId)) {
+				types.set(forgeId, mod.mod_type);
+			}
+		}
+		return types;
+	});
 	let favoriteIds = $derived(new Set(favorites));
 	let sort = $state<ModSort | null>(null);
-	let rows = $derived(
-		sortEntries(
-			filterEntries(entries, {
-				tab,
-				compatibleOnly,
-				favorites: favoriteIds,
-				search
-			}),
-			sort
-		)
-	);
+	let filter = $derived<ModFilter>({ chips, category, search });
+	let context = $derived<FilterContext>({
+		favorites: favoriteIds,
+		disabled: disabledNames,
+		modTypes,
+		now
+	});
+	let rows = $derived(sortEntries(filterEntries(entries, filter, context), sort));
+	let counts = $derived(chipCounts(entries, filter, context));
+	let categories = $derived(categoriesOf(entries));
+
+	$effect(() => {
+		setFilter(filter);
+	});
+
+	function toggleChip(chip: ChipId): void {
+		const next = new Set(chips);
+		if (!next.delete(chip)) {
+			next.add(chip);
+		}
+		chips = next;
+	}
+
+	function clearAll(): void {
+		clearFilter();
+		const fresh = getFilter();
+		chips = new Set(fresh.chips);
+		category = fresh.category;
+		searchInput = fresh.search;
+		search = fresh.search;
+		clearTimeout(searchTimer);
+	}
 
 	function toggleSort(key: SortKey): void {
 		if (sort?.key === key) {
@@ -104,41 +140,22 @@
 			invalidate(path);
 		}
 		seenMutations = mutations;
-		void load(path, compatibleOnly, search, refreshKey, reload);
+		void load(path, refreshKey, reload);
 	});
 
-	function apply(
-		catalog: CatalogEntry[],
-		installed: ModInfo[],
-		favored: number[],
-		query: string
-	): void {
+	function apply(catalog: CatalogEntry[], installed: ModInfo[], favored: number[]): void {
 		entries = catalog;
 		mods = installed;
 		favorites = favored;
-		// The update count must come from the full mod list, not from search results.
-		if (query === '') {
-			onupdatable(updatableFromCatalog(catalog, installed));
-		}
+		onupdatable(updatableFromCatalog(catalog, installed));
 	}
 
-	async function load(
-		gameDir: string,
-		compatible: boolean,
-		query: string,
-		_refreshKey: number,
-		_reload: number
-	): Promise<void> {
+	async function load(gameDir: string, _refreshKey: number, _reload: number): Promise<void> {
 		const request = ++requestId;
-		const trimmed = query.trim();
-		const catalogView =
-			trimmed === ''
-				? cached(gameDir, 'browse_catalog', [compatible], () =>
-						browseCatalog(gameDir, 'all', compatible)
-					)
-				: cached(gameDir, 'search_catalog', [trimmed, compatible], () =>
-						searchCatalog(gameDir, query, compatible)
-					);
+		now = Date.now();
+		const catalogView = cached(gameDir, 'browse_catalog', [], () =>
+			browseCatalog(gameDir, 'all', false)
+		);
 		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
 		const favoritesView = cached(gameDir, 'list_favorites', [], async () => {
 			const favored = await listFavorites();
@@ -148,7 +165,7 @@
 		const modsHit = modsView.value;
 		const favoritesHit = favoritesView.value;
 		if (catalogHit !== undefined && modsHit !== undefined && favoritesHit !== undefined) {
-			apply(catalogHit, modsHit, favoritesHit, trimmed);
+			apply(catalogHit, modsHit, favoritesHit);
 			loading = false;
 		} else {
 			loading = true;
@@ -163,7 +180,7 @@
 			if (request !== requestId) {
 				return;
 			}
-			apply(catalog, installed, favored, trimmed);
+			apply(catalog, installed, favored);
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
@@ -199,18 +216,31 @@
 </script>
 
 <section class="mods">
+	<div class="chips">
+		{#each CHIP_IDS as chip (chip)}
+			<button
+				type="button"
+				class="chip"
+				class:selected={chips.has(chip)}
+				aria-pressed={chips.has(chip)}
+				onclick={() => toggleChip(chip)}
+			>
+				{CHIP_LABELS[chip]}
+				<span class="count">{counts[chip]}</span>
+			</button>
+		{/each}
+	</div>
 	<div class="controls">
-		<div class="tabs">
-			{#each TABS as entry (entry.id)}
-				<button
-					type="button"
-					class:selected={tab === entry.id}
-					onclick={() => (tab = entry.id)}
-				>
-					{entry.label}
-				</button>
+		<select
+			aria-label="Category"
+			value={category ?? ''}
+			onchange={(event) => (category = event.currentTarget.value || null)}
+		>
+			<option value="">All categories</option>
+			{#each categories as title (title)}
+				<option value={title}>{title}</option>
 			{/each}
-		</div>
+		</select>
 		<input
 			type="search"
 			placeholder="Search name or author"
@@ -218,10 +248,9 @@
 			value={searchInput}
 			oninput={(event) => onSearch(event.currentTarget.value)}
 		/>
-		<label class="compat">
-			<input type="checkbox" bind:checked={compatibleOnly} />
-			Only compatible with my SPT version
-		</label>
+		<button type="button" disabled={isDefaultFilter(filter)} onclick={clearAll}>
+			Clear filters
+		</button>
 	</div>
 
 	{#if error !== ''}
@@ -252,7 +281,7 @@
 				{path}
 				index={position + 1}
 				{entry}
-				modState={rowState(entry, disabledMods)}
+				modState={rowState(entry, disabledNames)}
 				installed={installedByForgeId.get(String(entry.mod.id)) ??
 					installedByName.get(entry.mod.name.toLowerCase()) ??
 					null}
@@ -265,7 +294,7 @@
 		{/each}
 		{#if rows.length === 0}
 			<p class="empty">
-				{loading ? 'Loading…' : 'No mods match the current tab, search and filter.'}
+				{loading ? 'Loading…' : 'No mods match the current filters.'}
 			</p>
 		{/if}
 	</div>
@@ -276,6 +305,33 @@
 		padding: 1rem;
 	}
 
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-bottom: 0.6rem;
+	}
+
+	.chip {
+		border-radius: 999px;
+		padding: 0.25rem 0.7rem;
+	}
+
+	.chip.selected {
+		background: #35506b;
+		border-color: #4c7aa8;
+	}
+
+	.chip .count {
+		color: #98a2ad;
+		margin-left: 0.35rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.chip.selected .count {
+		color: #cfe0f0;
+	}
+
 	.controls {
 		display: flex;
 		flex-wrap: wrap;
@@ -284,36 +340,18 @@
 		margin-bottom: 0.8rem;
 	}
 
-	.tabs button {
-		background: none;
-		border: 1px solid #3a4048;
+	select {
+		font: inherit;
+		background: #1e2228;
 		color: inherit;
-		padding: 0.35rem 0.8rem;
-		cursor: pointer;
-	}
-
-	.tabs button:first-child {
-		border-radius: 4px 0 0 4px;
-	}
-
-	.tabs button:last-child {
-		border-radius: 0 4px 4px 0;
-	}
-
-	.tabs button.selected {
-		background: #2c3138;
+		border: 1px solid #3a4048;
+		border-radius: 4px;
+		padding: 0.35rem 0.5rem;
 	}
 
 	input[type='search'] {
 		flex: 1;
 		min-width: 12rem;
-	}
-
-	.compat {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		white-space: nowrap;
 	}
 
 	.list {

@@ -41,7 +41,18 @@ src/sptmod/
     modmeta.py          package.json parsing, trailer mapping, npm-style semver
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
     profile.py          profile residue detection from install commits (§7)
-    services.py         all user-facing operations as pure functions
+    services/           all user-facing operations as pure functions
+      __init__.py       facade: the 34 service functions and their result types
+      common.py         shared constants, repo mod lookups, layout path translation
+      state.py          status, history, snapshot, installability guard
+      gamedir.py        directory browsing/locating, init, SPT version, launch
+      profiles.py       profile listing, residue detection, cleanup
+      lifecycle.py      remove, disable, enable, adopt
+      install_archive.py  install from a local archive, archive metadata
+      install_forge.py  Forge install planning and execution
+      update.py         update discovery and application
+      catalog.py        catalog sync/search/browse, mod details, favorites
+      transfer.py       export and import of mod lists
     workspace.py        staging dir for downloads/extraction, apply lock
     favorites.py        list and persist per-user favorited mod IDs
     forge/
@@ -161,7 +172,7 @@ Before any mod operation: game-running check, then — if the tree is dirty —
 changed profiles/configs are secured in an AUTOMATIC snapshot commit and the
 operation proceeds (that state is the normal aftermath of playing). Only
 unmanaged files (manual mod copies, tampered tracked files) block, with a
-plain-language message suggesting adopt. `ensure_installable` in services.py.
+plain-language message suggesting adopt. `ensure_installable` in services/state.py.
 Untracked files an active mod writes inside its own directory (settings a mod
 generates while playing) are runtime data: `status` leaves them out of the
 report, so they never block and are never snapshotted. `remove` and `disable`
@@ -243,7 +254,7 @@ to SPT's own format when the profile is unchanged.
 
 After any profile changes, a snapshot commit is created with the message
 `snapshot: cleaned profiles for <mod>` and **no Mod trailers**. A `Mod:` trailer
-would make the profile commit look like a mod's own commit, so `current_mods`
+would make the profile commit look like a mod's own commit, so `current_mods` (services/common.py)
 would take it as the mod's head and forget its db files.
 
 ### `remove_mod(clean_profiles=True)` ordering
@@ -318,7 +329,7 @@ LRU by directory mtime (touched on reuse), default 20 GiB capacity, sweep
 after each completed download. Partials older than 7 days are swept. The archive
 keeps its real name so extraction messages stay readable.
 
-Implementation: `core/forge/cache.py` and `core/forge/download.py`. `_install_plan`
+Implementation: `core/forge/cache.py` and `core/forge/download.py`. `_install_plan` (services/install_forge.py)
 temp dir is gone (`install_from_archive` creates its own); `update_mod` keeps its
 temp dir for extraction. `clear_catalog_cache` with `downloads: true` wipes the
 download cache.
@@ -335,7 +346,7 @@ download cache.
 - A hybrid archive must anchor both halves or fail — never silently install
   the client half only.
 - Canonical internal target is `SPT/user/mods`; services translate it to the
-  detected runtime dir on copy (`for_game_layout`).
+  detected runtime dir on copy (`for_game_layout` in services/common.py).
 - Extraction: traversal-validated member names for all formats; encrypted
   archives raise typed `ArchiveError`; rar via rarfile with the bsdtar
   backend (rar CREATION is impossible in tests — real samples live in

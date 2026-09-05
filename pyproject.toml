@@ -76,7 +76,7 @@ min-similarity-lines = 24
 
 [tool.pylint.format]
 max-line-length = 119
-max-module-lines = 4000      # core/services.py (3480 lines) until it is split
+max-module-lines = 1891      # tests/test_profile.py, the longest module in the tree
 
 [dependency-groups]
 dev = [

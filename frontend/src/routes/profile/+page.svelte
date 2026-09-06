@@ -214,33 +214,37 @@
 	}
 </script>
 
-<section class="profiles">
-	<h1>Profiles</h1>
+<section class="page">
+	<div class="page-head">
+		<h1 class="page-title">Profiles</h1>
+		{#if path !== null}
+			<div class="page-actions">
+				<input
+					type="text"
+					placeholder="Snapshot message (optional)"
+					aria-label="Snapshot message"
+					bind:value={message}
+				/>
+				<button type="button" disabled={saving} onclick={() => void takeSnapshot()}>
+					{saving ? 'Saving…' : 'Snapshot profiles and configs'}
+				</button>
+			</div>
+		{/if}
+	</div>
 
 	{#if path === null}
-		<p class="notice">No game directory yet. <a href="/">Run the setup</a> first.</p>
+		<p class="page-empty">No game directory yet. <a href="/">Run the setup</a> first.</p>
 	{:else}
-		<div class="snapshot">
-			<input
-				type="text"
-				placeholder="Snapshot message (optional)"
-				aria-label="Snapshot message"
-				bind:value={message}
-			/>
-			<button type="button" disabled={saving} onclick={() => void takeSnapshot()}>
-				{saving ? 'Saving…' : 'Snapshot profiles and configs'}
-			</button>
-		</div>
 		{#if snapshotNote !== ''}
 			<p class="note">{snapshotNote}</p>
 		{/if}
 
 		{#if error !== ''}
-			<p class="error">{error}</p>
+			<p class="error-text">{error}</p>
 		{/if}
 
 		{#each result?.warnings ?? [] as warning, index (index)}
-			<p class="warning">{warning}</p>
+			<p class="warn-text">{warning}</p>
 		{/each}
 
 		{#if launchNote !== ''}
@@ -249,7 +253,7 @@
 
 		{#each groups as group (group.profile.file)}
 			{@const action = launchAction(gameStatus, group.profile.profile_id, launching !== '')}
-			<article class="profile">
+			<article class="panel profile">
 				<div class="header">
 					<div class="identity">
 						<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
@@ -267,6 +271,7 @@
 						<div class="launch">
 							<button
 								type="button"
+								class={action.mode === 'stop' ? '' : 'btn-primary'}
 								disabled={action.disabled}
 								onclick={() =>
 									action.mode === 'stop'
@@ -284,12 +289,10 @@
 					{/if}
 				</div>
 
-				{#if !group.profile.readable}
-					<p class="error">{group.profile.error}</p>
-				{/if}
-
-				{#if group.profile.readable}
-					{#if group.mods.length === 0}
+				<div class="body">
+					{#if !group.profile.readable}
+						<p class="error-text">{group.profile.error}</p>
+					{:else if group.mods.length === 0}
 						<p class="note">No traces left by mods.</p>
 					{:else}
 						{#each group.mods as entry (entry.mod)}
@@ -297,6 +300,7 @@
 								<h3>{entry.mod}</h3>
 								<button
 									type="button"
+									class="btn-sm"
 									disabled={planning !== '' || cleaning}
 									onclick={() => void preview(group.profile.profile_id, entry.mod)}
 								>
@@ -305,10 +309,10 @@
 										: 'Preview cleanup'}
 								</button>
 							</div>
-							<ul class="residues">
+							<ul class="residues panel">
 								{#each entry.residues as residue, index (index)}
-									<li>
-										<span class="category">{categoryLabel(residue.category)}</span>
+									<li class="panel-row">
+										<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
 										<span class="count">{characterLabel(residue.character)}</span>
 										<span class="count">
 											{residue.count}
@@ -320,7 +324,7 @@
 							</ul>
 						{/each}
 					{/if}
-				{/if}
+				</div>
 			</article>
 		{/each}
 
@@ -338,7 +342,7 @@
 		<p class="note">The SPT server is closed with it.</p>
 
 		{#snippet actions()}
-			<button type="button" disabled={stopping} onclick={() => void stop()}>
+			<button type="button" class="btn-primary" disabled={stopping} onclick={() => void stop()}>
 				{stopping ? 'Closing…' : 'Close the game'}
 			</button>
 		{/snippet}
@@ -352,10 +356,10 @@
 		{:else}
 			{#each planGroups as group (group.profile)}
 				<h3>{group.file}</h3>
-				<ul class="residues">
+				<ul class="residues panel">
 					{#each group.residues as residue, index (index)}
-						<li>
-							<span class="category">{categoryLabel(residue.category)}</span>
+						<li class="panel-row">
+							<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
 							<span class="count">{characterLabel(residue.character)}</span>
 							<span class="count">
 								{residue.count}
@@ -369,10 +373,10 @@
 
 		{#if plan.untouched.length > 0}
 			<h3>Stays untouched</h3>
-			<ul class="residues">
+			<ul class="residues panel">
 				{#each plan.untouched as entry, index (index)}
-					<li>
-						<span class="category">{categoryLabel(entry.residue.category)}</span>
+					<li class="panel-row">
+						<span class="badge badge-warn">{categoryLabel(entry.residue.category)}</span>
 						<span class="count">
 							{entry.residue.count}
 							{entry.residue.count === 1 ? 'entry' : 'entries'}
@@ -384,7 +388,7 @@
 		{/if}
 
 		{#each plan.warnings as warning, index (index)}
-			<p class="warning">{warning}</p>
+			<p class="warn-text">{warning}</p>
 		{/each}
 
 		<p class="note">
@@ -400,6 +404,7 @@
 		{#snippet actions()}
 			<button
 				type="button"
+				class="btn-primary"
 				disabled={cleaning || planGroups.length === 0}
 				onclick={() => void clean()}
 			>
@@ -410,113 +415,80 @@
 {/if}
 
 <style>
-	.profiles {
-		padding: 1rem;
-	}
-
-	h1 {
-		font-size: 1.1rem;
-		margin: 0 0 0.8rem;
-	}
-
-	h2 {
-		font-size: 1rem;
-		margin: 0;
-	}
-
-	h3 {
-		font-size: 0.9rem;
-		margin: 0;
+	.page-actions input {
+		width: 20rem;
 	}
 
 	.profile {
-		margin: 1.2rem 0;
-		padding: 0.7rem;
-		border: 1px solid #2c3138;
-		border-radius: 4px;
-	}
-
-	.meta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.8rem;
-		margin: 0.25rem 0 0;
-		color: #98a2ad;
-		font-size: 0.85rem;
-	}
-
-	.mod {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		margin: 0.9rem 0 0.4rem;
+		margin: var(--space-4) 0;
 	}
 
 	.header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--space-4);
+		padding: var(--space-4);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.identity {
 		min-width: 0;
 	}
 
+	.meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+		margin: var(--space-1) 0 0;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+
 	.launch {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.3rem;
+		gap: var(--space-1);
 		flex-shrink: 0;
 		text-align: right;
 	}
 
-	.snapshot {
-		display: flex;
-		gap: 0.5rem;
-		align-items: center;
+	.body {
+		padding: var(--space-4);
 	}
 
-	.snapshot input {
-		flex: 1;
-		max-width: 24rem;
+	.body > :global(p) {
+		margin: 0;
+	}
+
+	.mod {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		margin: var(--space-4) 0 var(--space-2);
+	}
+
+	.mod:first-child {
+		margin-top: 0;
 	}
 
 	.residues {
 		list-style: none;
 		margin: 0;
 		padding: 0;
-		border: 1px solid #2c3138;
-		border-radius: 4px;
 	}
 
 	.residues li {
-		padding: 0.35rem 0.6rem;
-		border-bottom: 1px solid #2c3138;
-	}
-
-	.category {
-		display: inline-block;
-		min-width: 5rem;
-		color: #f0cf7d;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
 	}
 
 	.count {
-		color: #98a2ad;
-		margin-right: 0.5rem;
-	}
-
-	.note,
-	.notice {
-		color: #98a2ad;
-	}
-
-	.warning {
-		color: #f0cf7d;
-	}
-
-	.error {
-		color: #ff8f8f;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
 	}
 </style>

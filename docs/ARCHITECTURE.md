@@ -93,15 +93,21 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/updateall.ts       bulk update orchestration
   src/lib/gamedir.ts         game directory path resolution
   src/lib/launch.ts          game launch UI logic (localStorage toggle, buttons, poll cadence)
-  src/lib/api/transport.ts   uses Tauri `invoke()` and `listen()` (not fetch)
+  src/lib/theme.ts           theme preference (system|light|dark), localStorage, apply
+  src/lib/window.ts          window chrome (minimize/maximize/close) — Tauri boundary
+  src/lib/styles/tokens.css  design tokens; light on :root, dark on [data-theme='dark']
+  src/lib/styles/base.css    reset, native controls, global utility classes
+  src/lib/api/transport.ts   the app's `rpc` invoke() and progress listen() site
   src/lib/api/types.ts       GENERATED from openapi.json — never hand-edit
   src/lib/api/client.ts      typed wrappers per RPC function
   src/lib/modfilter.ts       filter and sort predicates; schema for chips, categories
   src/lib/filterstate.ts     module-scope filter state (survives route nav, not restart)
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog
+  src/routes/+layout.svelte  app shell: top bar, nav tabs, window controls
   src/routes/                / (setup or mods), /history, /profile, /settings
 docs/HANDOFF.md         product specification (English; History lists changes)
 docs/FORGE_API.md       verified API reference (canonical host sp-mod.com)
+docs/design/            UI redesign brief, Stripe reference, README of omissions
 openapi.json            committed contract dump; frontend types derive from it
 _data/mods/             untracked corpus of 21 real mod archives for local runs
 ```
@@ -121,8 +127,12 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   `tests/test_rpc_contract.py`; contract drift detection in `tests/test_dump_openapi.py`.
 - Contract change loop: edit schemas → `uv run python -m sptmod.server.dump_openapi
   openapi.json` → `pnpm gen:api` in frontend/ → fix client.ts/test literals.
-- Frontend transport: async Tauri `invoke()` and `listen()` (progress events);
-  `subscribe()` returns `Promise<unsubscribe>` for future extensibility.
+- Two sanctioned Tauri boundaries in the frontend, nothing else imports
+  `@tauri-apps/api`: `src/lib/api/transport.ts` is the only site of the app's
+  `rpc` `invoke()` and progress `listen()` (`subscribe()` returns
+  `Promise<unsubscribe>`); `src/lib/window.ts` covers window chrome only
+  (`getCurrentWindow()`: minimize, toggle maximize, close, is-maximized) and
+  never calls `invoke('rpc', ...)`.
 - All paths via pathlib; no Linux-only assumptions.
 - English in every generated artifact.
 - User-facing text never uses git vocabulary (see auto-snapshot below).
@@ -515,7 +525,7 @@ missing or unreadable, Linux only). "Game already running" reuses the existing
 
 **Frontend:** Three new routes in the Profiles tab (Launch/Stop buttons per
 readable profile with phase-progress display) and the Mods view (running-game
-banner, mod-row lock while game is up). Settings page gains a "Game" section with
+banner, mod-row lock while game is up). Settings page gains a "Launching" section with
 one checkbox: "Stop the server when the game closes" (persisted in localStorage,
 default true, passed as a parameter to each launch call).
 
@@ -557,8 +567,55 @@ default true, passed as a parameter to each launch call).
 - Detail dialog (click the mod name): stats, category/flag tags, license and
   source links, dates, description, version table with per-version Fika
   compatibility (compatible/incompatible shown as tags).
-- Settings page: export/import mod list, catalog cache management (two actions:
-  clear cache alone, or clear cache + remove downloaded mod files).
+- Mods view shows a result count line ("N mods") above the table.
+- Settings page: sections Game directory, Appearance (theme select: system,
+  light, dark), Launching, Export the mod list, Import a mod list, Catalog cache
+  (two actions: clear cache alone, or clear cache + remove downloaded mod
+  files). A left sub-nav links the sections by hash; the active entry follows
+  `page.url.hash`.
+
+## Frontend design system
+
+The redesign brief and its visual reference live in `docs/design/`; the README
+there lists what was deliberately left out. What exists:
+
+- **Tokens.** `src/lib/styles/tokens.css` is the single source of colours,
+  spacing, type, radii, shadows and z-indices as CSS custom properties. The
+  light palette sits on `:root`, the dark palette on `[data-theme='dark']`.
+  Each block sets `color-scheme` (`light`/`dark`), so native controls and
+  scrollbars follow the theme — this is what fixed the unreadable native
+  selects in dark mode.
+- **Theming rule.** Components never hard-code colours; they reference tokens.
+  Native controls (`input`, `select`, `option`, `checkbox`, `progress`,
+  scrollbars, focus rings) are styled once, globally, in `base.css`, together
+  with the global utility classes `.btn-*`, `.badge-*`, `.chip`, `.panel*`,
+  `.page-*`. Per-component `<style>` blocks carry layout only.
+- **Theme state.** `src/lib/theme.ts` holds the preference `system|light|dark`
+  under the localStorage key `sptmod.theme`; `resolveTheme` maps `system`
+  through `prefers-color-scheme`, `applyTheme` writes `data-theme` on
+  `<html>`, `watchSystemTheme` follows OS changes while the preference is
+  `system`. Because the layout is prerendered, an inline script in
+  `src/app.html` applies the stored (or system) theme before first paint; it
+  repeats the key literal since it cannot import from `theme.ts`. The layout
+  toggle and the Settings select both apply the theme; each keeps its state in
+  sync by observing the `data-theme` attribute (MutationObserver) rather than
+  trusting its own last write.
+- **App shell.** `src/routes/+layout.svelte` renders the undecorated window:
+  a top bar with brand, theme toggle and window controls, then the nav tabs
+  Mods / Profiles / History / Settings (active tab = filled pill), then the
+  routed content. The top bar, brand and spacer carry `data-tauri-drag-region`;
+  the buttons do not, so they stay clickable. Window controls go through
+  `src/lib/window.ts` and need the four `core:window:allow-*` permissions
+  (`start-dragging`, `minimize`, `toggle-maximize`, `close`) in
+  `src-tauri/capabilities/default.json`. The SetupScreen renders inside the
+  shell like every other route.
+- **Section sub-nav.** Only Settings has a left sub-nav, because it is the only
+  screen with real sections; the other screens are single lists.
+- **Deferred** (no data or demand for them yet): shadcn-svelte / Tailwind /
+  TanStack Table, command palette, keyboard shortcut layer, loading skeletons,
+  detail side panel (the detail dialog covers it), bulk selection and bulk
+  action bar, pagination, top-bar profile switcher, global search, filter-pill
+  popovers with "+ Add filter".
 
 ## Testing
 
@@ -573,7 +630,7 @@ uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (269 tests; 100% coverage)
+cd frontend && pnpm vitest run --coverage  # frontend (294 tests; 100% coverage)
 cargo build && cargo test            # Rust (13 driver + 2 ignored e2e)
 cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 ```
@@ -584,7 +641,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 269 vitest tests in 9 files; strict 100% statements/branches/functions/lines on
+- **Frontend:** 294 vitest tests in 11 files; strict 100% statements/branches/functions/lines on
   `src/lib/**/*.ts` (minus `*.test.ts` and generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
   reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume

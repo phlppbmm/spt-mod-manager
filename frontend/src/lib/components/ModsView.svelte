@@ -215,22 +215,20 @@
 	}
 </script>
 
-<section class="mods">
-	<div class="chips">
+<section>
+	<div class="filterbar">
 		{#each CHIP_IDS as chip (chip)}
 			<button
 				type="button"
 				class="chip"
-				class:selected={chips.has(chip)}
+				class:is-active={chips.has(chip)}
 				aria-pressed={chips.has(chip)}
 				onclick={() => toggleChip(chip)}
 			>
 				{CHIP_LABELS[chip]}
-				<span class="count">{counts[chip]}</span>
+				<span class="chip-count">{counts[chip]}</span>
 			</button>
 		{/each}
-	</div>
-	<div class="controls">
 		<select
 			aria-label="Category"
 			value={category ?? ''}
@@ -248,17 +246,22 @@
 			value={searchInput}
 			oninput={(event) => onSearch(event.currentTarget.value)}
 		/>
-		<button type="button" disabled={isDefaultFilter(filter)} onclick={clearAll}>
+		<button
+			type="button"
+			class="btn-ghost btn-sm clear"
+			disabled={isDefaultFilter(filter)}
+			onclick={clearAll}
+		>
 			Clear filters
 		</button>
 	</div>
 
 	{#if error !== ''}
-		<p class="error">{error}</p>
+		<p class="error-text">{error}</p>
 	{/if}
 
-	<div class="list">
-		<div class="head">
+	<div class="panel list">
+		<div class="panel-head head">
 			<div class="index">#</div>
 			<button class="sort" onclick={() => toggleSort('name')}>Mod{sortMark('name')}</button>
 			<button class="sort" onclick={() => toggleSort('installed')}>
@@ -298,66 +301,29 @@
 			</p>
 		{/if}
 	</div>
+	<p class="result-count">{rows.length === 1 ? '1 mod' : `${rows.length} mods`}</p>
 </section>
 
 <style>
-	.mods {
-		padding: 1rem;
-	}
-
-	.chips {
+	.filterbar {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
-		margin-bottom: 0.6rem;
-	}
-
-	.chip {
-		border-radius: 999px;
-		padding: 0.25rem 0.7rem;
-	}
-
-	.chip.selected {
-		background: #35506b;
-		border-color: #4c7aa8;
-	}
-
-	.chip .count {
-		color: #98a2ad;
-		margin-left: 0.35rem;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.chip.selected .count {
-		color: #cfe0f0;
-	}
-
-	.controls {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.8rem;
 		align-items: center;
-		margin-bottom: 0.8rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
 	}
 
-	select {
-		font: inherit;
-		background: #1e2228;
-		color: inherit;
-		border: 1px solid #3a4048;
-		border-radius: 4px;
-		padding: 0.35rem 0.5rem;
-	}
-
-	input[type='search'] {
+	.filterbar input[type='search'] {
 		flex: 1;
 		min-width: 12rem;
 	}
 
+	.filterbar .clear {
+		margin-left: auto;
+	}
+
 	.list {
 		--mods-grid: 2.5rem minmax(12rem, 1fr) 5rem 5rem 6rem 5.5rem 5.5rem 5rem 7.5rem 8rem;
-		border: 1px solid #2c3138;
-		border-radius: 4px;
 	}
 
 	@media (max-width: 1000px) {
@@ -373,10 +339,8 @@
 	.head {
 		display: grid;
 		grid-template-columns: var(--mods-grid);
-		gap: 0.6rem;
-		padding: 0.45rem 0.6rem;
-		border-bottom: 1px solid #3a4048;
-		color: #98a2ad;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
 	}
 
 	.head .index {
@@ -384,26 +348,31 @@
 	}
 
 	.head .sort {
+		display: block;
+		height: auto;
+		padding: 0;
 		background: none;
 		border: none;
-		padding: 0;
 		font: inherit;
 		color: inherit;
+		letter-spacing: inherit;
+		text-transform: inherit;
 		text-align: left;
 		cursor: pointer;
 	}
 
 	.head .sort:hover {
-		color: #d7dde3;
-		font-size: 0.85em;
+		background: none;
+		color: var(--color-text);
 	}
 
 	.empty {
-		padding: 1rem;
-		color: #98a2ad;
+		margin: 0;
+		padding: var(--space-4);
+		color: var(--color-text-muted);
 	}
 
-	.error {
-		color: #ff8f8f;
+	.result-count {
+		margin: var(--space-3) 0 0;
 	}
 </style>

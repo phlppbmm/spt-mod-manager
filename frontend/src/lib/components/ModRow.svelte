@@ -65,6 +65,14 @@
 		available: 'not installed'
 	};
 
+	const STATE_BADGES: Record<RowState, string> = {
+		active: 'badge-success',
+		disabled: 'badge-neutral',
+		update_available: 'badge-warn',
+		incompatible: 'badge-danger',
+		available: 'badge-neutral'
+	};
+
 	let busy = $state(false);
 	let progress: ProgressEvent | null = $state(null);
 	let plan: InstallPlan | null = $state(null);
@@ -235,7 +243,7 @@
 	}
 </script>
 
-<div class="row" class:busy>
+<div class="row panel-row" class:busy>
 	<div class="index">{index}</div>
 	<div class="name">
 		<button
@@ -270,23 +278,34 @@
 	<div>{entry.mod.downloads.toLocaleString()}</div>
 	<div>{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
 	<div>{installed?.mod_type ?? '—'}</div>
-	<div><span class="chip {modState}">{STATE_LABELS[modState]}</span></div>
+	<div><span class="badge {STATE_BADGES[modState]}">{STATE_LABELS[modState]}</span></div>
 	<div class="actions">
 		{#if progress !== null}
 			<span class="progress" title={progress.message}>
 				{progress.step} {Math.round(progress.percent)}%
 			</span>
 		{:else if modState === 'available'}
-			<button type="button" disabled={locked || busy || planning} onclick={() => void openPlan()}>
+			<button
+				type="button"
+				class="btn-primary btn-sm"
+				disabled={locked || busy || planning}
+				onclick={() => void openPlan()}
+			>
 				{planning ? 'Planning…' : 'Install'}
 			</button>
 		{:else if modState === 'incompatible'}
-			<button type="button" disabled title="No version compatible with your SPT version">
+			<button
+				type="button"
+				class="btn-primary btn-sm"
+				disabled
+				title="No version compatible with your SPT version"
+			>
 				Install
 			</button>
 		{:else if modState === 'update_available'}
 			<button
 				type="button"
+				class="btn-primary btn-sm"
 				disabled={locked || busy}
 				onclick={() => void perform(update, false, 'Update anyway')}
 			>
@@ -295,13 +314,19 @@
 		{:else if modState === 'disabled'}
 			<button
 				type="button"
+				class="btn-sm"
 				disabled={locked || busy}
 				onclick={() => void perform(() => enableMod(path, installedName()), false, null)}
 			>
 				Enable
 			</button>
 		{:else}
-			<button type="button" disabled={locked || busy} onclick={() => (confirmation = 'disable')}>
+			<button
+				type="button"
+				class="btn-sm"
+				disabled={locked || busy}
+				onclick={() => (confirmation = 'disable')}
+			>
 				Disable
 			</button>
 		{/if}
@@ -369,6 +394,7 @@
 		{#snippet actions()}
 			<button
 				type="button"
+				class="btn-primary"
 				onclick={() => {
 					plan = null;
 					void perform(install, false, 'Install anyway');
@@ -435,6 +461,7 @@
 		{#snippet actions()}
 			<button
 				type="button"
+				class="btn-primary"
 				onclick={() => {
 					const kind = confirmation;
 					const clean = cleanProfiles;
@@ -483,11 +510,19 @@
 						{/if}
 					</div>
 					<div class="detail-tags">
-						{#if details.mod.category}<span class="tag">{details.mod.category}</span>{/if}
-						{#if details.mod.featured}<span class="tag">featured</span>{/if}
-						{#if details.mod.fika_compatibility}<span class="tag">Fika</span>{/if}
-						{#if details.mod.contains_ads}<span class="tag warn">contains ads</span>{/if}
-						{#if details.mod.contains_ai_content}<span class="tag warn">AI content</span>{/if}
+						{#if details.mod.category}
+							<span class="badge badge-neutral">{details.mod.category}</span>
+						{/if}
+						{#if details.mod.featured}<span class="badge badge-neutral">featured</span>{/if}
+						{#if details.mod.fika_compatibility}
+							<span class="badge badge-neutral">Fika</span>
+						{/if}
+						{#if details.mod.contains_ads}
+							<span class="badge badge-warn">contains ads</span>
+						{/if}
+						{#if details.mod.contains_ai_content}
+							<span class="badge badge-warn">AI content</span>
+						{/if}
 					</div>
 					<div class="detail-links">
 						{#if details.mod.license_link}
@@ -522,9 +557,9 @@
 							<td>{version.spt_version_constraint || '—'}</td>
 							<td>
 								{#if version.fika_compatibility === 'compatible'}
-									<span class="tag">Fika</span>
+									<span class="badge badge-neutral">Fika</span>
 								{:else if version.fika_compatibility === 'incompatible'}
-									<span class="tag warn">No Fika</span>
+									<span class="badge badge-warn">No Fika</span>
 								{/if}
 							</td>
 							<td>{version.downloads.toLocaleString()}</td>
@@ -553,7 +588,11 @@
 			<ul class="findings">
 				{#each errorConflicts as conflict, index (index)}
 					<li>
-						<span class="severity {conflict.severity}">{conflict.severity}</span>
+						<span
+							class="badge severity {conflict.severity === 'error'
+								? 'badge-danger'
+								: 'badge-warn'}">{conflict.severity}</span
+						>
 						<span class="kind">{conflict.kind}</span>
 						{conflict.message}
 						{#if conflict.path}<code>{conflict.path}</code>{/if}
@@ -585,6 +624,7 @@
 			{#if retry !== null}
 				<button
 					type="button"
+					class="btn-primary"
 					onclick={() => {
 						const again = retry;
 						errorMessage = '';
@@ -607,9 +647,9 @@
 		display: grid;
 		grid-template-columns: var(--mods-grid);
 		align-items: center;
-		gap: 0.6rem;
-		padding: 0.45rem 0.6rem;
-		border-bottom: 1px solid #2c3138;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--text-base);
 	}
 
 	.row.busy {
@@ -624,37 +664,42 @@
 
 	.index {
 		text-align: right;
-		color: #98a2ad;
+		color: var(--color-text-subtle);
 		font-variant-numeric: tabular-nums;
 	}
 
 	.name {
 		display: flex;
 		align-items: center;
-		gap: 0.55rem;
+		gap: var(--space-2);
 		min-width: 0;
 	}
 
 	.favorite {
+		height: auto;
+		padding: 0;
 		background: none;
 		border: none;
-		padding: 0;
-		font-size: 1.1rem;
+		color: var(--color-text-subtle);
+		font-size: var(--text-lg);
 		line-height: 1;
-		color: #98a2ad;
-		cursor: pointer;
 		flex-shrink: 0;
 	}
 
+	.favorite:hover:not(:disabled),
+	.favorite:disabled {
+		background: none;
+	}
+
 	.favorite.marked {
-		color: #f0cf7d;
+		color: var(--color-warn);
 	}
 
 	.thumb {
-		width: 2.4rem;
-		height: 2.4rem;
+		width: var(--thumb-size);
+		height: var(--thumb-size);
 		object-fit: cover;
-		border-radius: 4px;
+		border-radius: var(--radius-md);
 		flex-shrink: 0;
 	}
 
@@ -662,9 +707,10 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #2c333b;
-		color: #98a2ad;
-		font-size: 1.1rem;
+		background: var(--color-elevated);
+		border: 1px solid var(--color-border);
+		color: var(--color-text-muted);
+		font-size: var(--text-lg);
 		text-transform: uppercase;
 	}
 
@@ -674,87 +720,152 @@
 		min-width: 0;
 	}
 
-	.teaser {
-		color: #98a2ad;
-		font-size: 0.78rem;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	.name strong {
+		display: block;
 	}
 
 	.name-link {
+		display: block;
+		height: auto;
+		padding: 0;
 		background: none;
 		border: none;
-		padding: 0;
 		font: inherit;
 		color: inherit;
 		text-align: left;
 		cursor: pointer;
 	}
 
+	.name-link:hover {
+		background: none;
+	}
+
 	.name-link:hover strong {
 		text-decoration: underline;
 	}
 
+	.author {
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+
+	.teaser {
+		color: var(--color-text-subtle);
+		font-size: var(--text-sm);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.actions {
+		display: flex;
+		gap: var(--space-1);
+		align-items: center;
+		justify-content: flex-end;
+	}
+
+	.progress {
+		font-size: var(--text-sm);
+		color: var(--color-success);
+	}
+
+	.menu {
+		position: relative;
+	}
+
+	.menu summary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: var(--control-height-sm);
+		padding: 0 var(--space-2);
+		border: 1px solid var(--color-control-border);
+		border-radius: var(--radius-md);
+		color: var(--color-text-muted);
+		cursor: pointer;
+		list-style: none;
+	}
+
+	.menu summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.menu summary:hover {
+		background: var(--color-hover);
+		color: var(--color-text);
+	}
+
+	.menu ul {
+		position: absolute;
+		right: 0;
+		z-index: var(--z-menu);
+		margin: var(--space-1) 0 0;
+		padding: var(--space-1);
+		min-width: 11rem;
+		list-style: none;
+		background: var(--color-elevated);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-md);
+	}
+
+	.menu ul button,
+	.menu ul a {
+		display: block;
+		width: 100%;
+		height: auto;
+		padding: var(--space-1) var(--space-2);
+		background: none;
+		border: none;
+		border-radius: var(--radius-sm);
+		color: var(--color-text);
+		font: inherit;
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.menu ul button:hover:not(:disabled),
+	.menu ul a:hover {
+		background: var(--color-hover);
+		text-decoration: none;
+	}
+
 	.detail-head {
 		display: flex;
-		gap: 0.8rem;
-		margin-bottom: 0.6rem;
+		gap: var(--space-4);
+		margin-bottom: var(--space-3);
+	}
+
+	.detail-thumb {
+		max-width: 12rem;
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-3);
 	}
 
 	.detail-meta {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
-		font-size: 0.85rem;
+		gap: var(--space-1);
+		font-size: var(--text-sm);
 	}
 
 	.detail-stats,
 	.detail-links {
 		display: flex;
-		gap: 0.7rem;
+		gap: var(--space-3);
 		flex-wrap: wrap;
 	}
 
 	.detail-tags {
 		display: flex;
-		gap: 0.4rem;
+		gap: var(--space-2);
 		flex-wrap: wrap;
 	}
 
-	.tag {
-		background: #2c333b;
-		border-radius: 999px;
-		padding: 0.05rem 0.55rem;
-		font-size: 0.75rem;
-	}
-
-	.tag.warn {
-		background: #4a3a25;
-	}
-
 	.detail-dates {
-		color: #98a2ad;
-		font-size: 0.78rem;
-	}
-
-	.versions {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.85rem;
-	}
-
-	.versions th,
-	.versions td {
-		text-align: left;
-		padding: 0.25rem 0.6rem 0.25rem 0;
-		border-bottom: 1px solid #3a4048;
-	}
-
-	.detail-thumb {
-		max-width: 12rem;
-		border-radius: 6px;
-		margin-bottom: 0.6rem;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
 	}
 
 	.description {
@@ -763,91 +874,25 @@
 		overflow-y: auto;
 	}
 
-	.name strong {
-		display: block;
-	}
-
-	.author {
-		color: #98a2ad;
-		font-size: 0.85em;
-	}
-
-	.chip {
-		display: inline-block;
-		padding: 0.1rem 0.5rem;
-		border-radius: 999px;
-		font-size: 0.8em;
-		border: 1px solid #4a525c;
-	}
-
-	.chip.active {
-		border-color: #3f8f52;
-		color: #9ce0ac;
-	}
-
-	.chip.disabled {
-		border-color: #6b7280;
-		color: #b6bec8;
-	}
-
-	.chip.update_available {
-		border-color: #b58a2b;
-		color: #f0cf7d;
-	}
-
-	.chip.incompatible {
-		border-color: #a3453f;
-		color: #f2a19c;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.4rem;
-		align-items: center;
-		justify-content: flex-end;
-	}
-
-	.progress {
-		font-size: 0.85em;
-		color: #9ce0ac;
-	}
-
-	.menu {
-		position: relative;
-	}
-
-	.menu summary {
-		cursor: pointer;
-		list-style: none;
-		padding: 0.2rem 0.5rem;
-		border: 1px solid #3a4048;
-		border-radius: 4px;
-	}
-
-	.menu ul {
-		position: absolute;
-		right: 0;
-		z-index: 5;
-		margin: 0.2rem 0 0;
-		padding: 0.3rem;
-		list-style: none;
-		background: #1e2228;
-		border: 1px solid #3a4048;
-		border-radius: 4px;
-		min-width: 11rem;
-	}
-
-	.menu ul button,
-	.menu ul a {
-		display: block;
+	.versions {
 		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--text-base);
+	}
+
+	.versions th,
+	.versions td {
 		text-align: left;
-		background: none;
-		border: none;
-		color: inherit;
-		padding: 0.3rem 0.4rem;
-		cursor: pointer;
-		text-decoration: none;
+		padding: var(--space-1) var(--space-3) var(--space-1) 0;
+		border-bottom: 1px solid var(--color-divider);
+	}
+
+	.versions th {
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		letter-spacing: var(--tracking-caps);
+		text-transform: uppercase;
 	}
 
 	.files,
@@ -861,37 +906,29 @@
 	.files li,
 	.plan li,
 	.findings li {
-		padding: 0.15rem 0;
+		padding: var(--space-1) 0;
 	}
 
 	.severity {
-		font-size: 0.8em;
+		margin-right: var(--space-2);
+		letter-spacing: var(--tracking-caps);
 		text-transform: uppercase;
-		margin-right: 0.4rem;
-	}
-
-	.severity.error {
-		color: #f2a19c;
-	}
-
-	.severity.warning {
-		color: #f0cf7d;
 	}
 
 	.kind {
-		color: #98a2ad;
-		margin-right: 0.4rem;
+		color: var(--color-text-muted);
+		margin-right: var(--space-2);
 	}
 
 	.hint {
-		color: #98a2ad;
-		font-size: 0.9em;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
 	}
 
 	.clean {
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
-		margin: 0.6rem 0 0.2rem;
+		gap: var(--space-2);
+		margin: var(--space-3) 0 var(--space-1);
 	}
 </style>

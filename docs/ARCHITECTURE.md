@@ -577,14 +577,17 @@ default true, passed as a parameter to each launch call).
 ## Frontend design system
 
 The redesign brief and its visual reference live in `docs/design/`; the README
-there lists what was deliberately left out. What exists:
+there lists what is implemented and what is not. What exists:
 
 - **Tokens.** `src/lib/styles/tokens.css` is the single source of colours,
   spacing, type, radii, shadows and z-indices as CSS custom properties. The
   light palette sits on `:root`, the dark palette on `[data-theme='dark']`.
   Each block sets `color-scheme` (`light`/`dark`), so native controls and
   scrollbars follow the theme — this is what fixed the unreadable native
-  selects in dark mode.
+  selects in dark mode. Later additions: `--text-base` (14px, the body size),
+  `--page-gutter` (32px), `--row-height` (44px), `--z-popover` (60),
+  `--subnav-width` (200px) and `--select-arrow`, the inline SVG chevron for
+  native selects, defined once per theme.
 - **Theming rule.** Components never hard-code colours; they reference tokens.
   Native controls (`input`, `select`, `option`, `checkbox`, `progress`,
   scrollbars, focus rings) are styled once, globally, in `base.css`, together
@@ -601,21 +604,92 @@ there lists what was deliberately left out. What exists:
   sync by observing the `data-theme` attribute (MutationObserver) rather than
   trusting its own last write.
 - **App shell.** `src/routes/+layout.svelte` renders the undecorated window:
-  a top bar with brand, theme toggle and window controls, then the nav tabs
-  Mods / Profiles / History / Settings (active tab = filled pill), then the
-  routed content. The top bar, brand and spacer carry `data-tauri-drag-region`;
-  the buttons do not, so they stay clickable. Window controls go through
+  the top bar, then the nav row Mods / Profiles / History / Settings (active
+  entry = filled pill), then the body — an optional sub-nav column plus the
+  routed content. The layout subscribes to the sub-nav channel on mount and
+  unsubscribes on destroy; the sub-nav heading is the label of the current nav
+  entry. The top bar, brand and spacers carry `data-tauri-drag-region`; the
+  buttons do not, so they stay clickable. Window controls go through
   `src/lib/window.ts` and need the four `core:window:allow-*` permissions
   (`start-dragging`, `minimize`, `toggle-maximize`, `close`) in
   `src-tauri/capabilities/default.json`. The SetupScreen renders inside the
   shell like every other route.
-- **Section sub-nav.** Only Settings has a left sub-nav, because it is the only
-  screen with real sections; the other screens are single lists.
-- **Deferred** (no data or demand for them yet): shadcn-svelte / Tailwind /
-  TanStack Table, command palette, keyboard shortcut layer, loading skeletons,
-  detail side panel (the detail dialog covers it), bulk selection and bulk
-  action bar, pagination, top-bar profile switcher, global search, filter-pill
-  popovers with "+ Add filter".
+
+### Component map (`src/lib/components/`)
+
+- `TopBar` — brand, game-folder switcher, centered search input, sync button,
+  theme toggle, window controls. The input writes into the mods filter after a
+  250 ms debounce, is disabled while no view claims search, `/` focuses it from
+  anywhere outside a text field, Escape leaves it.
+- `GameDirMenu` — shows the last segment of the game folder path; its menu
+  shows the full path and a "Change folder" button that emits the request.
+- `SubNav` — the left column the layout renders when a page publishes entries;
+  a click emits the selection back to that page.
+- `PageHeader` — title, optional subtitle, and the `aside`, `secondary` and
+  `primary` action snippets.
+- `QuickTabs` — the underlined tab row All / Installed / Updates / Favorites /
+  New above the mod table.
+- `FilterBar` — the active pills, the "Add filter" pill and "Clear filters";
+  a pill picked from the add menu is shown with "Select…" until it has a value.
+- `FilterPill` — label, current value and a remove button; the value opens a
+  popover with the options, their leave-one-out counts and an Apply button.
+- `AddFilterPill` — dashed pill whose popover lists the filters not yet active.
+- `Popover` — fixed panel placed under its anchor, closes on outside
+  pointer-down, returns focus to the anchor when it goes away.
+- `ModTable` — header with the select-all checkbox and the sortable columns,
+  one `ModRow` per entry, the empty/loading line and the result count.
+- `ModRow` — one catalog row with its actions, install plan, detail, file and
+  conflict dialogs.
+- `SelectionBar` — sits above the table while rows are selected: count, the
+  applicable bulk actions, progress text, "Clear selection".
+- `StatusBadge` — the badge for a row state, each with its own icon.
+
+### Pure logic (`src/lib/`, unit-tested)
+
+- `shellstate.ts` — the channel between the layout and the pages: stores for
+  the sub-nav entries, the search-enabled flag and the game folder path, plus
+  signals for sub-nav selection, sync request and change-folder request. A
+  subscription delivers the current value immediately and returns an
+  unsubscribe function; every page calls it on destroy and resets what it
+  published.
+- `filterstate.ts` — the single source for search text, pills and quick tabs.
+  It holds one `ModFilter` (chips, category, search), defaults to
+  compatible-only, survives route changes but not an app restart, and notifies
+  subscribers only when the value really differs.
+- `filterpills.ts` — the pill definitions (Compatibility, Category, Type,
+  Fika, State, Featured), which pills are active for a filter, applying and
+  removing a pill, and the quick tabs. Every pill is a radio because chips are
+  ANDed; the Compatibility pill shows the SPT version as its label when one is
+  known.
+- `popover.ts` — the key handling of a popover: Escape closes, Tab and
+  Shift+Tab cycle through the focusable elements of the panel.
+- `selection.ts` — toggle one row or all, the tri-state header checkbox,
+  pruning a selection to the visible rows, the bulk actions a selection offers,
+  and `runBulk`, which walks the names one at a time and records failures
+  instead of aborting.
+
+### Mods view behaviour
+
+- `ModsView` mirrors `filterstate` into local state and writes changes back,
+  publishes the sub-nav entries with the active quick tab, and enables the
+  top-bar search while it is mounted.
+- A filter change prunes the selection to the rows that stay visible, so a bulk
+  action can never touch a mod the user cannot see.
+- Bulk actions reuse the per-row RPCs `enable_mod`, `disable_mod` and
+  `update_mod` sequentially; there is no multi-row RPC. Two mod operations at
+  once would queue on the backend lock for minutes. Failures are collected and
+  shown as one line above the table.
+- `ModTable` is a container-query container: below 1060px table width the
+  Downloads, Updated and Type columns drop out of the header and the rows, and
+  the shared `--mods-grid` template shrinks with them.
+- `StatusReport` carries an additive `spt_version` field (empty string when
+  unknown), filled locally by `resolve_spt_version`. The Mods page takes it
+  from the status call it already makes and hands it to the Compatibility pill,
+  which then reads "SPT <version>" instead of "Compatible".
+
+**Deferred** (no data or demand for them yet): shadcn-svelte / Tailwind /
+TanStack Table, command palette (Ctrl+K), arrow-key row navigation, loading
+skeletons, detail side panel (the detail dialog covers it), pagination.
 
 ## Testing
 

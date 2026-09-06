@@ -323,12 +323,12 @@
 	}
 
 	.list {
-		--mods-grid: 2.5rem minmax(12rem, 1fr) 5rem 5rem 6rem 5.5rem 5.5rem 5rem 7.5rem 8rem;
+		--mods-grid: 2rem minmax(12rem, 1fr) 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem 7rem 8rem;
 	}
 
 	@media (max-width: 1000px) {
 		.list {
-			--mods-grid: 2.5rem minmax(10rem, 1fr) 5rem 5rem 6rem 7.5rem 8rem;
+			--mods-grid: 2rem minmax(10rem, 1fr) 5rem 5rem 5rem 7rem 8rem;
 		}
 
 		.head > :nth-child(n + 6):nth-child(-n + 8) {

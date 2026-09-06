@@ -19,6 +19,14 @@
 
 	const UNDOABLE_STATES: ModInfo['state'][] = ['installed', 'updated', 'enabled'];
 
+	const STATE_BADGES = {
+		installed: 'badge-success',
+		updated: 'badge-success',
+		enabled: 'badge-success',
+		disabled: 'badge-neutral',
+		removed: 'badge-danger'
+	} satisfies Record<ModInfo['state'], string>;
+
 	const FORCEABLE_CODES = [
 		'CONFLICT',
 		'DEPENDENCY',
@@ -90,12 +98,21 @@
 		if (name === '') {
 			return '';
 		}
-		const parts = [
-			commit.trailers['Mod-Version'],
-			commit.trailers['Mod-Type'],
-			commit.trailers['Mod-State']
-		].filter((part) => part !== undefined && part !== '');
+		const parts = [commit.trailers['Mod-Version'], commit.trailers['Mod-Type']].filter(
+			(part) => part !== undefined && part !== ''
+		);
 		return [name, ...parts].join(' · ');
+	}
+
+	function modStateLabel(commit: CommitInfo): string {
+		return commit.trailers['Mod-State'] ?? '';
+	}
+
+	function modStateBadge(commit: CommitInfo): string {
+		const label = modStateLabel(commit);
+		return label in STATE_BADGES
+			? STATE_BADGES[label as ModInfo['state']]
+			: 'badge-neutral';
 	}
 
 	function undoable(commit: CommitInfo): boolean {
@@ -181,6 +198,9 @@
 								{new Date(commit.date).toLocaleString()}
 								{#if summary(commit) !== ''}
 									· {summary(commit)}
+								{/if}
+								{#if modStateLabel(commit) !== ''}
+									<span class="badge {modStateBadge(commit)}">{modStateLabel(commit)}</span>
 								{/if}
 							</span>
 						</div>
@@ -342,6 +362,10 @@
 	}
 
 	.meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
 		font-size: var(--text-sm);
 	}
 

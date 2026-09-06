@@ -265,6 +265,9 @@
 								<span>Last changed {lastChanged(group.profile.modified)}</span>
 							{/if}
 						</p>
+						{#if !group.profile.readable}
+							<p class="error-text">{group.profile.error}</p>
+						{/if}
 					</div>
 
 					{#if group.profile.readable}
@@ -289,42 +292,42 @@
 					{/if}
 				</div>
 
-				<div class="body">
-					{#if !group.profile.readable}
-						<p class="error-text">{group.profile.error}</p>
-					{:else if group.mods.length === 0}
-						<p class="note">No traces left by mods.</p>
-					{:else}
-						{#each group.mods as entry (entry.mod)}
-							<div class="mod">
-								<h3>{entry.mod}</h3>
-								<button
-									type="button"
-									class="btn-sm"
-									disabled={planning !== '' || cleaning}
-									onclick={() => void preview(group.profile.profile_id, entry.mod)}
-								>
-									{planning === busyKey(group.profile.profile_id, entry.mod)
-										? 'Loading…'
-										: 'Preview cleanup'}
-								</button>
-							</div>
-							<ul class="residues panel">
-								{#each entry.residues as residue, index (index)}
-									<li class="panel-row">
-										<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
-										<span class="count">{characterLabel(residue.character)}</span>
-										<span class="count">
-											{residue.count}
-											{residue.count === 1 ? 'reference' : 'references'}
-										</span>
-										<code>{residue.ids.join(', ')}</code>
-									</li>
-								{/each}
-							</ul>
-						{/each}
-					{/if}
-				</div>
+				{#if group.profile.readable}
+					<div class="body">
+						{#if group.mods.length === 0}
+							<p class="note">No traces left by mods.</p>
+						{:else}
+							{#each group.mods as entry (entry.mod)}
+								<div class="mod">
+									<h3>{entry.mod}</h3>
+									<button
+										type="button"
+										class="btn-sm"
+										disabled={planning !== '' || cleaning}
+										onclick={() => void preview(group.profile.profile_id, entry.mod)}
+									>
+										{planning === busyKey(group.profile.profile_id, entry.mod)
+											? 'Loading…'
+											: 'Preview cleanup'}
+									</button>
+								</div>
+								<ul class="residues">
+									{#each entry.residues as residue, index (index)}
+										<li class="panel-row">
+											<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
+											<span class="count">{characterLabel(residue.character)}</span>
+											<span class="count">
+												{residue.count}
+												{residue.count === 1 ? 'reference' : 'references'}
+											</span>
+											<code>{residue.ids.join(', ')}</code>
+										</li>
+									{/each}
+								</ul>
+							{/each}
+						{/if}
+					</div>
+				{/if}
 			</article>
 		{/each}
 
@@ -356,7 +359,7 @@
 		{:else}
 			{#each planGroups as group (group.profile)}
 				<h3>{group.file}</h3>
-				<ul class="residues panel">
+				<ul class="residues">
 					{#each group.residues as residue, index (index)}
 						<li class="panel-row">
 							<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
@@ -373,7 +376,7 @@
 
 		{#if plan.untouched.length > 0}
 			<h3>Stays untouched</h3>
-			<ul class="residues panel">
+			<ul class="residues">
 				{#each plan.untouched as entry, index (index)}
 					<li class="panel-row">
 						<span class="badge badge-warn">{categoryLabel(entry.residue.category)}</span>
@@ -432,6 +435,10 @@
 		border-bottom: 1px solid var(--color-border);
 	}
 
+	.header:last-child {
+		border-bottom: none;
+	}
+
 	.identity {
 		min-width: 0;
 	}
@@ -443,6 +450,10 @@
 		margin: var(--space-1) 0 0;
 		color: var(--color-text-muted);
 		font-size: var(--text-sm);
+	}
+
+	.identity .error-text {
+		margin: var(--space-1) 0 0;
 	}
 
 	.launch {
@@ -484,7 +495,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
+		padding: var(--space-2) 0;
 	}
 
 	.count {

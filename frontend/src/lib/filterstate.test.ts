@@ -1,5 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_FILTER, clearFilter, getFilter, isDefaultFilter, setFilter } from './filterstate';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	DEFAULT_FILTER,
+	clearFilter,
+	filtersEqual,
+	getFilter,
+	isDefaultFilter,
+	setFilter,
+	subscribeFilter
+} from './filterstate';
 import type { ChipId, ModFilter } from './modfilter';
 
 beforeEach(() => {
@@ -114,5 +122,137 @@ describe('isDefaultFilter', () => {
 		}
 	])('is $expected for $id', ({ filter, expected }) => {
 		expect(isDefaultFilter(filter)).toBe(expected);
+	});
+});
+
+describe('filtersEqual', () => {
+	it('is true for two independently built filters with the same category, search and chip content', () => {
+		const a: ModFilter = { chips: new Set<ChipId>(['compatible', 'featured']), category: 'Weapons', search: 'ammo' };
+		const b: ModFilter = { chips: new Set<ChipId>(['featured', 'compatible']), category: 'Weapons', search: 'ammo' };
+
+		expect(filtersEqual(a, b)).toBe(true);
+	});
+
+	it.each([
+		{
+			id: 'a different category',
+			a: { chips: new Set<ChipId>(['featured']), category: 'Weapons', search: 'ammo' },
+			b: { chips: new Set<ChipId>(['featured']), category: 'Armor', search: 'ammo' }
+		},
+		{
+			id: 'a different search',
+			a: { chips: new Set<ChipId>(['featured']), category: 'Weapons', search: 'ammo' },
+			b: { chips: new Set<ChipId>(['featured']), category: 'Weapons', search: 'plate' }
+		},
+		{
+			id: 'a different chip count',
+			a: { chips: new Set<ChipId>(['featured']), category: 'Weapons', search: 'ammo' },
+			b: { chips: new Set<ChipId>(['featured', 'new']), category: 'Weapons', search: 'ammo' }
+		},
+		{
+			id: 'the same chip count with a different chip',
+			a: { chips: new Set<ChipId>(['featured']), category: 'Weapons', search: 'ammo' },
+			b: { chips: new Set<ChipId>(['new']), category: 'Weapons', search: 'ammo' }
+		}
+	])('is false for $id', ({ a, b }) => {
+		expect(filtersEqual(a, b)).toBe(false);
+	});
+});
+
+describe('subscribeFilter', () => {
+	it('calls the listener immediately with the current filter', () => {
+		setFilter({ chips: new Set<ChipId>(['featured']), category: 'Ammo', search: 'x' });
+		const listener = vi.fn();
+
+		subscribeFilter(listener);
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(listener).toHaveBeenCalledWith({
+			chips: new Set(['featured']),
+			category: 'Ammo',
+			search: 'x'
+		});
+	});
+
+	it('notifies subscribers with the new filter when setFilter changes the filter', () => {
+		const listener = vi.fn();
+		subscribeFilter(listener);
+		listener.mockClear();
+
+		setFilter({ chips: new Set<ChipId>(['new']), category: 'Gear', search: 'foo' });
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(listener).toHaveBeenCalledWith({ chips: new Set(['new']), category: 'Gear', search: 'foo' });
+	});
+
+	it('does not notify subscribers when setFilter is called with an equivalent filter', () => {
+		setFilter({ chips: new Set<ChipId>(['featured']), category: 'Ammo', search: 'x' });
+		const listener = vi.fn();
+		subscribeFilter(listener);
+		listener.mockClear();
+
+		setFilter({ chips: new Set<ChipId>(['featured']), category: 'Ammo', search: 'x' });
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it('does not notify subscribers when clearFilter is called while already at the default filter', () => {
+		const listener = vi.fn();
+		subscribeFilter(listener);
+		listener.mockClear();
+
+		clearFilter();
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it('notifies subscribers when clearFilter changes away from a custom filter', () => {
+		setFilter({ chips: new Set<ChipId>(['new']), category: 'Gear', search: 'foo' });
+		const listener = vi.fn();
+		subscribeFilter(listener);
+		listener.mockClear();
+
+		clearFilter();
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(listener).toHaveBeenCalledWith({ chips: new Set(['compatible']), category: null, search: '' });
+	});
+
+	it('stops delivering notifications to a subscriber after unsubscribe', () => {
+		const listener = vi.fn();
+		const unsubscribe = subscribeFilter(listener);
+		listener.mockClear();
+
+		unsubscribe();
+		setFilter({ chips: new Set<ChipId>(['new']), category: 'Gear', search: 'foo' });
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it('delivers copies that do not alias the stored filter', () => {
+		setFilter({ chips: new Set<ChipId>(['featured']), category: 'Ammo', search: 'x' });
+		let received: ModFilter | undefined;
+		subscribeFilter((filter) => {
+			received = filter;
+		});
+
+		(received!.chips as Set<ChipId>).add('new');
+		received!.search = 'changed';
+
+		expect(getFilter()).toEqual({ chips: new Set(['featured']), category: 'Ammo', search: 'x' });
+	});
+
+	it('notifies every registered subscriber', () => {
+		const listenerA = vi.fn();
+		const listenerB = vi.fn();
+		subscribeFilter(listenerA);
+		subscribeFilter(listenerB);
+		listenerA.mockClear();
+		listenerB.mockClear();
+
+		setFilter({ chips: new Set<ChipId>(['new']), category: 'Gear', search: 'foo' });
+
+		expect(listenerA).toHaveBeenCalledTimes(1);
+		expect(listenerB).toHaveBeenCalledTimes(1);
 	});
 });

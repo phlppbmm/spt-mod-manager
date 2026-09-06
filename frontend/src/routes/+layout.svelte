@@ -2,6 +2,9 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
+	import SubNav from '$lib/components/SubNav.svelte';
+	import TopBar from '$lib/components/TopBar.svelte';
+	import { subscribeSubNav, type SubNavState } from '$lib/shellstate';
 	import {
 		applyTheme,
 		loadPreference,
@@ -11,12 +14,7 @@
 		watchSystemTheme,
 		type ResolvedTheme
 	} from '$lib/theme';
-	import {
-		closeWindow,
-		isWindowMaximized,
-		minimizeWindow,
-		toggleMaximizeWindow
-	} from '$lib/window';
+	import { isWindowMaximized, toggleMaximizeWindow } from '$lib/window';
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
 
@@ -31,6 +29,11 @@
 
 	let theme = $state<ResolvedTheme>('light');
 	let maximized = $state(false);
+	let subnav = $state<SubNavState>({ items: [], active: null });
+
+	const sectionLabel = $derived(
+		LINKS.find((link) => link.href === page.url.pathname)?.label ?? ''
+	);
 
 	onMount(() => {
 		theme = resolveTheme(loadPreference());
@@ -45,9 +48,13 @@
 				applyTheme(systemTheme);
 			}
 		});
+		const unsubscribeSubNav = subscribeSubNav((value) => {
+			subnav = value;
+		});
 		return () => {
 			observer.disconnect();
 			unwatch();
+			unsubscribeSubNav();
 		};
 	});
 
@@ -76,104 +83,7 @@
 </svelte:head>
 
 <div class="shell">
-	<header class="topbar" data-tauri-drag-region>
-		<span class="brand" data-tauri-drag-region>sptmod</span>
-		<div class="topbar-spacer" data-tauri-drag-region></div>
-		<button
-			class="btn-icon"
-			aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-			title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-			onclick={toggleTheme}
-		>
-			{#if theme === 'dark'}
-				<svg
-					width="16"
-					height="16"
-					viewBox="0 0 16 16"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="1.4"
-					stroke-linecap="round"
-					aria-hidden="true"
-				>
-					<circle cx="8" cy="8" r="3.2" />
-					<path
-						d="M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M12.8 3.2l-1.1 1.1M4.3 11.7l-1.1 1.1"
-					/>
-				</svg>
-			{:else}
-				<svg
-					width="16"
-					height="16"
-					viewBox="0 0 16 16"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="1.4"
-					stroke-linejoin="round"
-					aria-hidden="true"
-				>
-					<path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z" />
-				</svg>
-			{/if}
-		</button>
-		<div class="window-controls">
-			<button class="win" aria-label="Minimize" title="Minimize" onclick={minimizeWindow}>
-				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-					<path d="M0 5h10" stroke="currentColor" stroke-width="1" />
-				</svg>
-			</button>
-			<button
-				class="win"
-				aria-label={maximized ? 'Restore' : 'Maximize'}
-				title={maximized ? 'Restore' : 'Maximize'}
-				onclick={toggleMaximize}
-			>
-				{#if maximized}
-					<svg
-						width="10"
-						height="10"
-						viewBox="0 0 10 10"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1"
-						aria-hidden="true"
-					>
-						<path d="M2.5 2.5h5v5h-5z" />
-						<path d="M4 2.5V1h4.5v4.5H7" />
-					</svg>
-				{:else}
-					<svg
-						width="10"
-						height="10"
-						viewBox="0 0 10 10"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1"
-						aria-hidden="true"
-					>
-						<path d="M0.5 0.5h9v9h-9z" />
-					</svg>
-				{/if}
-			</button>
-			<button
-				class="win win-close"
-				aria-label="Close"
-				title="Close"
-				onclick={closeWindow}
-			>
-				<svg
-					width="10"
-					height="10"
-					viewBox="0 0 10 10"
-					stroke="currentColor"
-					stroke-width="1"
-					aria-hidden="true"
-				>
-					<path d="M0.5 0.5l9 9M9.5 0.5l-9 9" />
-				</svg>
-			</button>
-		</div>
-	</header>
+	<TopBar {theme} {maximized} onToggleTheme={toggleTheme} onToggleMaximize={toggleMaximize} />
 
 	<nav class="mainnav">
 		{#each LINKS as link (link.href)}
@@ -188,7 +98,12 @@
 		{/each}
 	</nav>
 
-	<main class="content">{@render children()}</main>
+	<div class="body">
+		{#if subnav.items.length > 0}
+			<SubNav heading={sectionLabel} items={subnav.items} active={subnav.active} />
+		{/if}
+		<main class="content">{@render children()}</main>
+	</div>
 </div>
 
 <style>
@@ -198,62 +113,12 @@
 		height: 100vh;
 	}
 
-	.topbar {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		height: var(--topbar-height);
-		padding: 0 var(--space-2) 0 var(--space-4);
-		background: var(--color-surface);
-		border-bottom: 1px solid var(--color-border);
-		user-select: none;
-		z-index: var(--z-header);
-	}
-
-	.brand {
-		color: var(--color-text);
-		font-size: var(--text-sm);
-		font-weight: var(--weight-semibold);
-		letter-spacing: var(--tracking-caps);
-	}
-
-	.topbar-spacer {
-		flex: 1;
-		align-self: stretch;
-	}
-
-	.window-controls {
-		display: flex;
-		gap: var(--space-1);
-		margin-left: var(--space-2);
-	}
-
-	.win {
-		width: var(--control-height);
-		height: var(--control-height);
-		padding: 0;
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		color: var(--color-text-muted);
-	}
-
-	.win:hover {
-		background: var(--color-hover);
-		color: var(--color-text);
-	}
-
-	.win-close:hover {
-		background: var(--color-danger);
-		color: var(--color-text-inverse);
-	}
-
 	.mainnav {
 		display: flex;
 		align-items: center;
 		gap: var(--space-1);
 		height: var(--nav-height);
-		padding: 0 var(--space-3);
+		padding: 0 var(--page-gutter, 32px);
 		background: var(--color-surface);
 		border-bottom: 1px solid var(--color-border);
 	}
@@ -261,7 +126,7 @@
 	.tab {
 		display: inline-flex;
 		align-items: center;
-		height: 26px;
+		height: 28px;
 		padding: 0 var(--space-3);
 		border-radius: var(--radius-pill);
 		color: var(--color-text-muted);
@@ -281,8 +146,20 @@
 		color: var(--color-accent-fg);
 	}
 
+	.tab.is-active:hover {
+		background: var(--color-accent-hover);
+		color: var(--color-accent-fg);
+	}
+
+	.body {
+		display: flex;
+		flex: 1;
+		min-height: 0;
+	}
+
 	.content {
 		flex: 1;
+		min-width: 0;
 		min-height: 0;
 		overflow: auto;
 	}

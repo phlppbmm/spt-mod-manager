@@ -72,6 +72,35 @@ def test_status_groups_modified_config(clean_repo: Repo) -> None:
     assert not report.modified_profiles
 
 
+def test_status_reports_the_resolved_spt_version(clean_repo: Repo) -> None:
+    """status() fills spt_version from the game directory's core.json.
+
+    clean_repo builds on fake_game_dir, whose core.json carries sptVersion
+    "4.1.0"; status() must surface that value, not leave it at the empty
+    dataclass default.
+    """
+    report = services.status(clean_repo.path)
+
+    assert report.spt_version == "4.1.0"
+
+
+def test_status_spt_version_is_empty_when_no_version_source_resolves(
+    fake_game_dir_runtime: Path,
+) -> None:
+    """status() reports an empty spt_version when the fallback chain is empty.
+
+    fake_game_dir_runtime ships a 4.x-style core.json without a sptVersion
+    field and no SPT.Server.exe, and clean_repo_at never stores a version, so
+    resolve_spt_version() returns None; status() must surface that as "",
+    never as the string "None".
+    """
+    repo = clean_repo_at(fake_game_dir_runtime)
+
+    report = services.status(repo.path)
+
+    assert report.spt_version == ""
+
+
 def test_status_puts_a_modified_tracked_mod_file_into_other_modified(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:

@@ -598,6 +598,7 @@ def test_rpc_output_does_not_depend_on_the_current_working_directory(
         {
             "event": "result",
             "data": {
+                "spt_version": "4.1.0",
                 "modified_profiles": [],
                 "modified_configs": [],
                 "manual_mods": [],
@@ -606,6 +607,24 @@ def test_rpc_output_does_not_depend_on_the_current_working_directory(
             },
         }
     ]
+
+
+def test_rpc_status_reports_an_empty_spt_version_when_it_cannot_be_resolved(
+    fake_game_dir_runtime: Path,
+) -> None:
+    """status via RPC serialises an unresolvable spt_version as "", not null.
+
+    fake_game_dir_runtime's core.json carries no sptVersion field and there is
+    no SPT.Server.exe or stored version, so the fallback chain resolves to
+    None; the RPC envelope must carry the empty string sptmod's schema
+    default, not JSON null or the literal "None".
+    """
+    repo = clean_repo_at(fake_game_dir_runtime)
+
+    exit_code, lines = invoke_rpc("status", {"path": str(repo.path)})
+
+    assert exit_code == 0
+    assert lines[-1]["data"]["spt_version"] == ""
 
 
 # --------------------------------------------------------------------------

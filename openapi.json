@@ -4016,6 +4016,11 @@
       "StatusReport": {
         "description": "The interpreted working-tree status of a game directory.",
         "properties": {
+          "spt_version": {
+            "default": "",
+            "title": "Spt Version",
+            "type": "string"
+          },
           "modified_profiles": {
             "default": [],
             "items": {

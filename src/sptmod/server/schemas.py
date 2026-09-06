@@ -259,6 +259,7 @@ class ManualMod(CoreModel):
 class StatusReport(CoreModel):
     """The interpreted working-tree status of a game directory."""
 
+    spt_version: str = ""
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
     manual_mods: list[ManualMod] = []

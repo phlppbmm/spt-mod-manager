@@ -51,7 +51,7 @@ def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
 
     report = services.status(clean_repo.path)
 
-    assert report == services.StatusReport()
+    assert report == services.StatusReport(spt_version="4.1.0")
 
 
 @pytest.mark.parametrize("game_dir_fixture", ["fake_game_dir", "fake_game_dir_runtime"])

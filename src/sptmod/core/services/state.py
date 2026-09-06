@@ -18,6 +18,7 @@ from sptmod.core.game_dir import (
     GameLayout,
     detect_layout,
     ensure_game_not_running,
+    resolve_spt_version,
 )
 from sptmod.core.models import (
     ACTIVE_STATES,
@@ -58,8 +59,10 @@ class StatusReport:
 
     ``other_modified`` and ``other_untracked`` hold everything that is neither
     a profile, a BepInEx config nor an untracked file below a mod path.
+    ``spt_version`` is the locally resolved SPT version, empty when unknown.
     """
 
+    spt_version: str = ""
     modified_profiles: list[Path] = field(default_factory=list[Path])
     modified_configs: list[Path] = field(default_factory=list[Path])
     manual_mods: list[ManualMod] = field(default_factory=list[ManualMod])
@@ -173,6 +176,7 @@ def status(path: Path) -> StatusReport:
         )
 
     return StatusReport(
+        spt_version=resolve_spt_version(layout, repo) or "",
         modified_profiles=modified_profiles,
         modified_configs=modified_configs,
         manual_mods=[

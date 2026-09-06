@@ -1961,6 +1961,11 @@ export interface components {
          */
         StatusReport: {
             /**
+             * Spt Version
+             * @default
+             */
+            spt_version: string;
+            /**
              * Modified Profiles
              * @default []
              */

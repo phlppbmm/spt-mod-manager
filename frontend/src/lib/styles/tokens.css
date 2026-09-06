@@ -1,72 +1,71 @@
 :root {
 	color-scheme: light;
 
-	--color-bg: #f6f7f9;
+	--color-bg: #f6f8fa;
 	--color-surface: #ffffff;
 	--color-elevated: #ffffff;
-	--color-overlay: rgba(17, 20, 26, 0.45);
-	--color-border: #e3e6ea;
-	--color-border-strong: #cbd1d9;
-	--color-divider: #eceef1;
-	--color-hover: rgba(17, 20, 26, 0.04);
-	--color-active: rgba(17, 20, 26, 0.07);
+	--color-overlay: rgba(26, 31, 54, 0.4);
+	--color-border: #e3e8ee;
+	--color-border-strong: #d3dae2;
+	--color-divider: #eef1f5;
+	--color-hover: rgba(26, 31, 54, 0.04);
 
-	--color-text: #1a1d23;
-	--color-text-muted: #5b6472;
-	--color-text-subtle: #858d99;
+	--color-text: #1a1f36;
+	--color-text-muted: #5f6a7d;
+	--color-text-subtle: #667084;
 	--color-text-inverse: #ffffff;
 
 	--color-accent: #635bff;
 	--color-accent-hover: #564deb;
 	--color-accent-active: #4a43d6;
 	--color-accent-fg: #ffffff;
-	--color-accent-text: #514ae0;
-	--color-accent-soft: rgba(99, 91, 255, 0.1);
-	--color-accent-border: rgba(99, 91, 255, 0.4);
+	--color-accent-text: #5548e8;
+	--color-accent-soft: rgba(99, 91, 255, 0.09);
+	--color-accent-border: rgba(99, 91, 255, 0.38);
 
-	--color-success: #197a45;
-	--color-success-soft: rgba(25, 122, 69, 0.1);
-	--color-success-border: rgba(25, 122, 69, 0.28);
-	--color-neutral: #5b6472;
-	--color-neutral-soft: rgba(91, 100, 114, 0.1);
-	--color-neutral-border: rgba(91, 100, 114, 0.25);
+	--color-success: #17743f;
+	--color-success-soft: rgba(23, 116, 63, 0.08);
+	--color-success-border: rgba(23, 116, 63, 0.26);
+	--color-neutral: #5f6a7d;
+	--color-neutral-soft: rgba(95, 106, 125, 0.08);
+	--color-neutral-border: rgba(95, 106, 125, 0.24);
 	--color-warn: #8a5d0c;
 	--color-warn-soft: rgba(138, 93, 12, 0.1);
-	--color-warn-border: rgba(138, 93, 12, 0.28);
+	--color-warn-border: rgba(138, 93, 12, 0.26);
 	--color-danger: #b3372e;
 	--color-danger-soft: rgba(179, 55, 46, 0.1);
-	--color-danger-border: rgba(179, 55, 46, 0.28);
+	--color-danger-border: rgba(179, 55, 46, 0.26);
 
 	--color-control-bg: #ffffff;
-	--color-control-border: #cbd1d9;
+	--color-control-border: #d3dae2;
 	--color-control-hover: #f2f4f7;
 	--color-control-disabled-bg: #f2f4f7;
 
 	--focus-ring: rgba(99, 91, 255, 0.45);
-	--color-scrollbar-thumb: rgba(17, 20, 26, 0.22);
+	--color-scrollbar-thumb: rgba(26, 31, 54, 0.2);
 
-	--shadow-sm: 0 1px 2px rgba(17, 20, 26, 0.06);
-	--shadow-md: 0 6px 16px rgba(17, 20, 26, 0.12);
-	--shadow-lg: 0 18px 48px rgba(17, 20, 26, 0.2);
+	--select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23667084' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+
+	--shadow-md: 0 4px 14px rgba(26, 31, 54, 0.14);
+	--shadow-lg: 0 18px 48px rgba(26, 31, 54, 0.2);
 }
 
 [data-theme='dark'] {
 	color-scheme: dark;
 
-	--color-bg: #0f1115;
-	--color-surface: #161920;
-	--color-elevated: #1c2028;
+	--color-bg: #0e1014;
+	--color-surface: #15181e;
+	--color-elevated: #1c2029;
 	--color-overlay: rgba(0, 0, 0, 0.62);
-	--color-border: #272c35;
-	--color-border-strong: #363d48;
-	--color-divider: #1f242c;
+	--color-border: #262b34;
+	--color-border-strong: #333a45;
+	--color-divider: #1e232b;
 	--color-hover: rgba(255, 255, 255, 0.04);
-	--color-active: rgba(255, 255, 255, 0.07);
 
 	--color-text: #e6e9ee;
-	--color-text-muted: #98a2b3;
-	--color-text-subtle: #6f7887;
-	--color-text-inverse: #0f1115;
+	--color-text-muted: #97a1b0;
+	--color-text-subtle: #7b8493;
+	--color-text-inverse: #0e1014;
 
 	--color-accent: #6a5cf0;
 	--color-accent-hover: #5f52e0;
@@ -74,31 +73,32 @@
 	--color-accent-fg: #ffffff;
 	--color-accent-text: #a99cf9;
 	--color-accent-soft: rgba(106, 92, 240, 0.16);
-	--color-accent-border: rgba(106, 92, 240, 0.45);
+	--color-accent-border: rgba(106, 92, 240, 0.42);
 
-	--color-success: #6fd096;
-	--color-success-soft: rgba(111, 208, 150, 0.13);
-	--color-success-border: rgba(111, 208, 150, 0.3);
-	--color-neutral: #98a2b3;
-	--color-neutral-soft: rgba(152, 162, 179, 0.13);
-	--color-neutral-border: rgba(152, 162, 179, 0.28);
-	--color-warn: #e0bb6a;
-	--color-warn-soft: rgba(224, 187, 106, 0.13);
-	--color-warn-border: rgba(224, 187, 106, 0.3);
-	--color-danger: #ef8b83;
-	--color-danger-soft: rgba(239, 139, 131, 0.13);
-	--color-danger-border: rgba(239, 139, 131, 0.3);
+	--color-success: #74c99a;
+	--color-success-soft: rgba(116, 201, 154, 0.12);
+	--color-success-border: rgba(116, 201, 154, 0.26);
+	--color-neutral: #97a1b0;
+	--color-neutral-soft: rgba(151, 161, 176, 0.12);
+	--color-neutral-border: rgba(151, 161, 176, 0.24);
+	--color-warn: #d7b573;
+	--color-warn-soft: rgba(215, 181, 115, 0.12);
+	--color-warn-border: rgba(215, 181, 115, 0.26);
+	--color-danger: #e59089;
+	--color-danger-soft: rgba(229, 144, 137, 0.12);
+	--color-danger-border: rgba(229, 144, 137, 0.26);
 
-	--color-control-bg: #1c2028;
-	--color-control-border: #363d48;
+	--color-control-bg: #1c2029;
+	--color-control-border: #333a45;
 	--color-control-hover: #232833;
 	--color-control-disabled-bg: #191d24;
 
 	--focus-ring: rgba(106, 92, 240, 0.55);
-	--color-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+	--color-scrollbar-thumb: rgba(255, 255, 255, 0.16);
 
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-	--shadow-md: 0 6px 16px rgba(0, 0, 0, 0.48);
+	--select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%237b8493' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+
+	--shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5);
 	--shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.58);
 }
 
@@ -108,10 +108,11 @@
 	--font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', monospace;
 	--text-xs: 11px;
 	--text-sm: 12px;
-	--text-base: 13px;
+	--text-base: 14px;
 	--text-md: 14px;
 	--text-lg: 16px;
 	--text-xl: 20px;
+	--text-2xl: 24px;
 	--leading-tight: 1.25;
 	--leading-normal: 1.45;
 	--weight-medium: 500;
@@ -134,11 +135,15 @@
 
 	--z-header: 20;
 	--z-menu: 40;
+	--z-popover: 60;
 	--z-dialog: 100;
 
-	--topbar-height: 38px;
-	--nav-height: 38px;
-	--control-height: 28px;
-	--control-height-sm: 24px;
+	--page-gutter: 32px;
+	--row-height: 44px;
+	--topbar-height: 44px;
+	--nav-height: 44px;
+	--subnav-width: 200px;
+	--control-height: 32px;
+	--control-height-sm: 26px;
 	--thumb-size: 34px;
 }

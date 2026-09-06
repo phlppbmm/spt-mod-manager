@@ -36,23 +36,33 @@
 		theme = resolveTheme(loadPreference());
 		applyTheme(theme);
 		void refreshMaximized();
-		return watchSystemTheme((systemTheme) => {
+		// The settings page applies the theme too, so follow the attribute
+		// rather than the local state.
+		const observer = new MutationObserver(readAppliedTheme);
+		observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+		const unwatch = watchSystemTheme((systemTheme) => {
 			if (loadPreference() === 'system') {
-				theme = systemTheme;
 				applyTheme(systemTheme);
 			}
 		});
+		return () => {
+			observer.disconnect();
+			unwatch();
+		};
 	});
+
+	function readAppliedTheme(): void {
+		theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+	}
 
 	async function refreshMaximized(): Promise<void> {
 		maximized = await isWindowMaximized();
 	}
 
 	function toggleTheme(): void {
-		const preference = toggledPreference(theme);
+		const preference = toggledPreference(resolveTheme(loadPreference()));
 		savePreference(preference);
-		theme = resolveTheme(preference);
-		applyTheme(theme);
+		applyTheme(resolveTheme(preference));
 	}
 
 	async function toggleMaximize(): Promise<void> {

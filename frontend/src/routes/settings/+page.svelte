@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { open, save } from '@tauri-apps/plugin-dialog';
 	import { writeTextFile } from '@tauri-apps/plugin-fs';
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -14,9 +15,32 @@
 	} from '$lib/api/client';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
 	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
+	import {
+		applyTheme,
+		loadPreference,
+		resolveTheme,
+		savePreference,
+		type ThemePreference
+	} from '$lib/theme';
+
+	const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+		{ value: 'system', label: 'Use system setting' },
+		{ value: 'light', label: 'Light' },
+		{ value: 'dark', label: 'Dark' }
+	];
+
+	const SECTIONS = [
+		{ id: 'game-directory', label: 'Game directory' },
+		{ id: 'appearance', label: 'Appearance' },
+		{ id: 'launching', label: 'Launching' },
+		{ id: 'export', label: 'Export the mod list' },
+		{ id: 'import', label: 'Import a mod list' },
+		{ id: 'catalog-cache', label: 'Catalog cache' }
+	];
 
 	let path: string | null = $state(null);
 	let stopServerOnExit = $state(true);
+	let themePreference: ThemePreference = $state('system');
 
 	let format: ExportFormat = $state('text');
 	let clientOnly = $state(false);
@@ -36,14 +60,38 @@
 	let cacheNote = $state('');
 	let cacheError = $state('');
 
+	const active = $derived(
+		SECTIONS.some((section) => `#${section.id}` === page.url.hash)
+			? page.url.hash.slice(1)
+			: SECTIONS[0].id
+	);
+
 	onMount(() => {
 		path = loadGameDir();
 		stopServerOnExit = loadStopServerOnExit();
+		themePreference = loadPreference();
+		const observer = new MutationObserver(() => {
+			themePreference = loadPreference();
+		});
+		observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+		return () => {
+			observer.disconnect();
+		};
 	});
 
 	function changeStopServerOnExit(value: boolean): void {
 		stopServerOnExit = value;
 		saveStopServerOnExit(value);
+	}
+
+	function changeTheme(value: string): void {
+		const option = THEME_OPTIONS.find((entry) => entry.value === value);
+		if (option === undefined) {
+			return;
+		}
+		themePreference = option.value;
+		savePreference(option.value);
+		applyTheme(resolveTheme(option.value));
 	}
 
 	function changePath(): void {
@@ -169,181 +217,283 @@
 	}
 </script>
 
-<section class="settings">
-	<h1>Settings</h1>
-
-	<h2>Game directory</h2>
-	{#if path === null}
-		<p class="note">No game directory yet. <a href="/">Run the setup</a> first.</p>
-	{:else}
-		<p class="row"><code>{path}</code></p>
-		<p class="note">
-			Changing the path returns to the setup, where another SPT installation can be
-			selected. The current repository stays untouched.
-		</p>
-		<button type="button" onclick={changePath}>Change path</button>
-	{/if}
-
-	<h2>Launching</h2>
-	<div class="row">
-		<label>
-			<input
-				type="checkbox"
-				checked={stopServerOnExit}
-				onchange={(event) => changeStopServerOnExit(event.currentTarget.checked)}
-			/>
-			Stop the server when the game closes
-		</label>
+<div class="page">
+	<div class="page-head">
+		<h1 class="page-title">Settings</h1>
 	</div>
-	<p class="note">
-		Applies to games started from the Profiles page. A server that was already running when
-		the game started stays running.
-	</p>
 
-	<h2>Export the mod list</h2>
-	<div class="row">
-		<label>
-			Format
-			<select bind:value={format}>
-				<option value="text">Text</option>
-				<option value="json">JSON</option>
-			</select>
-		</label>
-		<label>
-			<input type="checkbox" bind:checked={clientOnly} />
-			Only mods with a client part (Fika)
-		</label>
-		<button type="button" disabled={path === null || exporting} onclick={() => void runExport()}>
-			{exporting ? 'Exporting…' : 'Export'}
-		</button>
-	</div>
-	{#if exportError !== ''}
-		<p class="error">{exportError}</p>
-	{/if}
-	{#if exported !== ''}
-		<textarea readonly rows="10" aria-label="Exported mod list" value={exported}></textarea>
-		<div class="row">
-			<button type="button" onclick={() => void copyExport()}>Copy</button>
-			<button type="button" onclick={() => void saveExport()}>
-				Save as {format === 'json' ? 'JSON' : 'text'}
-			</button>
-			{#if copyNote !== ''}<span class="note">{copyNote}</span>{/if}
-		</div>
-	{/if}
+	<div class="layout">
+		<nav class="subnav" aria-label="Settings sections">
+			{#each SECTIONS as section (section.id)}
+				<a
+					href="#{section.id}"
+					class:is-active={active === section.id}
+					aria-current={active === section.id ? 'page' : undefined}
+				>
+					{section.label}
+				</a>
+			{/each}
+		</nav>
 
-	<h2>Import a mod list</h2>
-	<p class="note">
-		Either name a file sptmod can read or paste the list itself. Pasted content wins over the
-		file path.
-	</p>
-	<div class="row">
-		<input
-			type="text"
-			placeholder="/path/to/mods.txt"
-			aria-label="Mod list file"
-			bind:value={listFile}
-		/>
-		<button type="button" onclick={() => void pickListFile()}>Choose file…</button>
-	</div>
-	<div class="row">
-		<textarea
-			rows="6"
-			placeholder="Paste an exported text or JSON list"
-			aria-label="Mod list content"
-			bind:value={listContent}
-		></textarea>
-		<button
-			type="button"
-			disabled={path === null || importing || !hasList()}
-			onclick={() => void runImport(false)}
-		>
-			Compare
-		</button>
-		<button
-			type="button"
-			disabled={path === null || importing || diff === null}
-			onclick={() => void runImport(true)}
-		>
-			Install missing mods
-		</button>
-	</div>
-	{#if importError !== ''}
-		<p class="error">{importError}</p>
-	{/if}
-	{#if importNote !== ''}
-		<p class="note">{importNote}</p>
-	{/if}
-	{#if diff !== null}
-		{#each entries() as group (group.title)}
-			<h3>{group.title} ({group.rows.length})</h3>
-			<ul class="diff">
-				{#each group.rows as entry (entry.name)}
-					<li>
-						<span class="name">{entry.name}</span>
-						<span class="versions">
-							{entry.installed_version === '' ? '—' : entry.installed_version}
-							→
-							{entry.wanted_version === '' ? '—' : entry.wanted_version}
-						</span>
-						{#if entry.link !== ''}
-							<a href={entry.link} target="_blank" rel="noreferrer">Forge page</a>
-						{/if}
-					</li>
-				{/each}
-				{#if group.rows.length === 0}
-					<li class="note">Nothing.</li>
+		<div class="sections">
+			<section class="section panel">
+				<h2 id="game-directory">Game directory</h2>
+				{#if path === null}
+					<p class="note">No game directory yet. <a href="/">Run the setup</a> first.</p>
+				{:else}
+					<p class="row"><code>{path}</code></p>
+					<p class="note">
+						Changing the path returns to the setup, where another SPT installation can be
+						selected. The current repository stays untouched.
+					</p>
+					<div class="row">
+						<button type="button" onclick={changePath}>Change path</button>
+					</div>
 				{/if}
-			</ul>
-		{/each}
-	{/if}
+			</section>
 
-	<h2>Catalog cache</h2>
-	<p class="note">
-		The Forge catalog is cached in <code>forge-catalog.db</code> inside the sptmod configuration
-		directory, never inside the game directory.
-	</p>
-	<div class="row">
-		<button type="button" disabled={clearing} onclick={() => void clearCache(false)}>
-			{clearing ? 'Clearing…' : 'Clear the catalog cache'}
-		</button>
-		<button type="button" disabled={clearing} onclick={() => void clearCache(true)}>
-			{clearing ? 'Clearing…' : 'Clear the cache and the downloaded mod files'}
-		</button>
-		{#if cacheNote !== ''}<span class="note">{cacheNote}</span>{/if}
+			<section class="section panel">
+				<h2 id="appearance">Appearance</h2>
+				<div class="row">
+					<label>
+						Theme
+						<select
+							value={themePreference}
+							onchange={(event) => changeTheme(event.currentTarget.value)}
+						>
+							{#each THEME_OPTIONS as option (option.value)}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+				<p class="note">
+					The sun and moon button in the title bar switches between light and dark.
+					<em>Use system setting</em> follows the operating system instead.
+				</p>
+			</section>
+
+			<section class="section panel">
+				<h2 id="launching">Launching</h2>
+				<div class="row">
+					<label>
+						<input
+							type="checkbox"
+							checked={stopServerOnExit}
+							onchange={(event) => changeStopServerOnExit(event.currentTarget.checked)}
+						/>
+						Stop the server when the game closes
+					</label>
+				</div>
+				<p class="note">
+					Applies to games started from the Profiles page. A server that was already running
+					when the game started stays running.
+				</p>
+			</section>
+
+			<section class="section panel">
+				<h2 id="export">Export the mod list</h2>
+				<div class="row">
+					<label>
+						Format
+						<select bind:value={format}>
+							<option value="text">Text</option>
+							<option value="json">JSON</option>
+						</select>
+					</label>
+					<label>
+						<input type="checkbox" bind:checked={clientOnly} />
+						Only mods with a client part (Fika)
+					</label>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || exporting}
+						onclick={() => void runExport()}
+					>
+						{exporting ? 'Exporting…' : 'Export'}
+					</button>
+				</div>
+				{#if exportError !== ''}
+					<p class="error-text">{exportError}</p>
+				{/if}
+				{#if exported !== ''}
+					<textarea readonly rows="10" aria-label="Exported mod list" value={exported}
+					></textarea>
+					<div class="row">
+						<button type="button" onclick={() => void copyExport()}>Copy</button>
+						<button type="button" onclick={() => void saveExport()}>
+							Save as {format === 'json' ? 'JSON' : 'text'}
+						</button>
+						{#if copyNote !== ''}<span class="note">{copyNote}</span>{/if}
+					</div>
+				{/if}
+			</section>
+
+			<section class="section panel">
+				<h2 id="import">Import a mod list</h2>
+				<p class="note">
+					Either name a file sptmod can read or paste the list itself. Pasted content wins
+					over the file path.
+				</p>
+				<div class="row">
+					<input
+						type="text"
+						placeholder="/path/to/mods.txt"
+						aria-label="Mod list file"
+						bind:value={listFile}
+					/>
+					<button type="button" onclick={() => void pickListFile()}>Choose file…</button>
+				</div>
+				<div class="row">
+					<textarea
+						rows="6"
+						placeholder="Paste an exported text or JSON list"
+						aria-label="Mod list content"
+						bind:value={listContent}
+					></textarea>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || importing || !hasList()}
+						onclick={() => void runImport(false)}
+					>
+						Compare
+					</button>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || importing || diff === null}
+						onclick={() => void runImport(true)}
+					>
+						Install missing mods
+					</button>
+				</div>
+				{#if importError !== ''}
+					<p class="error-text">{importError}</p>
+				{/if}
+				{#if importNote !== ''}
+					<p class="note">{importNote}</p>
+				{/if}
+				{#if diff !== null}
+					{#each entries() as group (group.title)}
+						<div class="group">
+							<h3>{group.title} ({group.rows.length})</h3>
+							<ul class="diff panel">
+								{#each group.rows as entry (entry.name)}
+									<li class="panel-row">
+										<span class="name">{entry.name}</span>
+										<span class="versions">
+											{entry.installed_version === ''
+												? '—'
+												: entry.installed_version}
+											→
+											{entry.wanted_version === ''
+												? '—'
+												: entry.wanted_version}
+										</span>
+										{#if entry.link !== ''}
+											<a href={entry.link} target="_blank" rel="noreferrer">
+												Forge page
+											</a>
+										{/if}
+									</li>
+								{/each}
+								{#if group.rows.length === 0}
+									<li class="panel-row note">Nothing.</li>
+								{/if}
+							</ul>
+						</div>
+					{/each}
+				{/if}
+			</section>
+
+			<section class="section panel">
+				<h2 id="catalog-cache">Catalog cache</h2>
+				<p class="note">
+					The Forge catalog is cached in <code>forge-catalog.db</code> inside the sptmod
+					configuration directory, never inside the game directory.
+				</p>
+				<div class="row">
+					<button type="button" disabled={clearing} onclick={() => void clearCache(false)}>
+						{clearing ? 'Clearing…' : 'Clear the catalog cache'}
+					</button>
+					<button type="button" disabled={clearing} onclick={() => void clearCache(true)}>
+						{clearing ? 'Clearing…' : 'Clear the cache and the downloaded mod files'}
+					</button>
+					{#if cacheNote !== ''}<span class="note">{cacheNote}</span>{/if}
+				</div>
+				{#if cacheError !== ''}
+					<p class="error-text">{cacheError}</p>
+				{/if}
+			</section>
+		</div>
 	</div>
-	{#if cacheError !== ''}
-		<p class="error">{cacheError}</p>
-	{/if}
-</section>
+</div>
 
 <style>
-	.settings {
-		padding: 1rem;
+	.layout {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-8);
+	}
+
+	.subnav {
+		position: sticky;
+		top: 0;
+		display: flex;
+		flex: none;
+		flex-direction: column;
+		gap: var(--space-1);
+		width: 12rem;
+	}
+
+	.subnav a {
+		padding: var(--space-1) var(--space-3);
+		border-left: 2px solid transparent;
+		color: var(--color-text-muted);
+		font-size: var(--text-base);
+	}
+
+	.subnav a:hover {
+		color: var(--color-text);
+		text-decoration: none;
+	}
+
+	.subnav a.is-active {
+		border-left-color: var(--color-accent);
+		color: var(--color-text);
+	}
+
+	.sections {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: var(--space-5);
+		min-width: 0;
 		max-width: 52rem;
 	}
 
-	h1 {
-		font-size: 1.1rem;
-		margin: 0 0 0.8rem;
+	.section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		padding: var(--space-5);
 	}
 
-	h2 {
-		font-size: 1rem;
-		margin: 1.4rem 0 0.4rem;
+	.section h2 {
+		scroll-margin-top: var(--space-4);
 	}
 
-	h3 {
-		font-size: 0.9rem;
-		margin: 0.8rem 0 0.3rem;
-		color: #98a2ad;
+	.section p {
+		margin: 0;
 	}
 
 	.row {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.6rem;
-		margin: 0.4rem 0;
+		gap: var(--space-3);
 	}
 
 	.row input[type='text'] {
@@ -354,43 +504,38 @@
 	label {
 		display: flex;
 		align-items: center;
-		gap: 0.35rem;
-	}
-
-	select {
-		font: inherit;
-		background: #1e2228;
-		color: inherit;
-		border: 1px solid #3a4048;
-		border-radius: 4px;
-		padding: 0.3rem;
+		gap: var(--space-2);
 	}
 
 	textarea {
 		width: 100%;
-		font-family: ui-monospace, monospace;
-		font-size: 0.9em;
-		background: #1e2228;
-		color: inherit;
-		border: 1px solid #3a4048;
-		border-radius: 4px;
-		padding: 0.5rem;
-		box-sizing: border-box;
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+	}
+
+	.group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.group h3 {
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+		letter-spacing: var(--tracking-caps);
+		text-transform: uppercase;
 	}
 
 	.diff {
-		list-style: none;
 		margin: 0;
 		padding: 0;
-		border: 1px solid #2c3138;
-		border-radius: 4px;
+		list-style: none;
 	}
 
 	.diff li {
 		display: flex;
-		gap: 0.6rem;
-		padding: 0.3rem 0.6rem;
-		border-bottom: 1px solid #2c3138;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
 	}
 
 	.name {
@@ -398,14 +543,12 @@
 	}
 
 	.versions {
-		color: #98a2ad;
+		color: var(--color-text-muted);
 	}
 
-	.note {
-		color: #98a2ad;
-	}
-
-	.error {
-		color: #ff8f8f;
+	@media (max-width: 900px) {
+		.subnav {
+			display: none;
+		}
 	}
 </style>

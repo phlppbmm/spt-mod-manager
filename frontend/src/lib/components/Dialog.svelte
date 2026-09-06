@@ -57,18 +57,19 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.55);
+		background: var(--color-overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 1rem;
-		z-index: 10;
+		padding: var(--space-4);
+		z-index: var(--z-dialog);
 	}
 
 	.dialog {
-		background: #1e2228;
-		border: 1px solid #3a4048;
-		border-radius: 6px;
+		background: var(--color-elevated);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-lg);
 		max-width: 44rem;
 		width: 100%;
 		max-height: 80vh;
@@ -77,22 +78,20 @@
 	}
 
 	h2 {
-		margin: 0;
-		padding: 0.9rem 1.1rem;
-		font-size: 1.05rem;
-		border-bottom: 1px solid #3a4048;
+		padding: var(--space-4) var(--space-5);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.body {
-		padding: 1.1rem;
+		padding: var(--space-5);
 		overflow: auto;
 	}
 
 	.actions {
 		display: flex;
 		justify-content: flex-end;
-		gap: 0.5rem;
-		padding: 0.8rem 1.1rem;
-		border-top: 1px solid #3a4048;
+		gap: var(--space-2);
+		padding: var(--space-4) var(--space-5);
+		border-top: 1px solid var(--color-border);
 	}
 </style>

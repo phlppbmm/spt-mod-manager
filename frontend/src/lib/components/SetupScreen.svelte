@@ -100,11 +100,11 @@
 	}
 </script>
 
-<section class="setup">
+<section class="setup-card panel">
 	<h1>Set up sptmod</h1>
 
 	{#if candidates.length === 0}
-		<p>Enter the folder your SPT installation lives in. sptmod validates it.</p>
+		<p class="muted">Enter the folder your SPT installation lives in. sptmod validates it.</p>
 		<form
 			onsubmit={(event) => {
 				event.preventDefault();
@@ -132,19 +132,20 @@
 			{/if}
 			<button
 				type="submit"
+				class="btn-primary"
 				disabled={busy || path.trim() === '' || (needsVersion && sptVersion.trim() === '')}
 			>
 				{busy ? 'Checking…' : 'Continue'}
 			</button>
 		</form>
 	{:else}
-		<p>
+		<p class="muted">
 			These mods are already installed in the folder. Adopt them so sptmod can track, update and
 			remove them.
 		</p>
-		<ul class="candidates">
+		<ul class="candidates panel">
 			{#each candidates as name (name)}
-				<li>
+				<li class="panel-row">
 					<label>
 						<input
 							type="checkbox"
@@ -158,7 +159,12 @@
 			{/each}
 		</ul>
 		<div class="row">
-			<button type="button" disabled={busy} onclick={() => void confirmAdoption()}>
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={busy}
+				onclick={() => void confirmAdoption()}
+			>
 				{busy ? 'Working…' : `Adopt ${adopted.length} of ${candidates.length} and finish`}
 			</button>
 			<button type="button" disabled={busy} onclick={() => (candidates = [])}>Back</button>
@@ -166,20 +172,27 @@
 	{/if}
 
 	{#if error !== ''}
-		<p class="error">{error}</p>
+		<p class="error-text">{error}</p>
 	{/if}
 </section>
 
 <style>
-	.setup {
-		max-width: 40rem;
-		margin: 3rem auto;
-		padding: 0 1rem;
+	.setup-card {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+		max-width: 34rem;
+		margin: var(--space-10) auto;
+		padding: var(--space-6);
+	}
+
+	p {
+		margin: 0;
 	}
 
 	form {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 
 	input[type='text'] {
@@ -189,21 +202,21 @@
 	.candidates {
 		list-style: none;
 		padding: 0;
-		margin: 0 0 1rem;
+		margin: 0;
 		max-height: 40vh;
 		overflow: auto;
 	}
 
-	.candidates li {
-		padding: 0.15rem 0;
+	.candidates label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		cursor: pointer;
 	}
 
 	.row {
 		display: flex;
-		gap: 0.5rem;
-	}
-
-	.error {
-		color: #ff8f8f;
+		gap: var(--space-2);
 	}
 </style>

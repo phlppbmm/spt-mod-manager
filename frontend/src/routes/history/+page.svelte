@@ -158,23 +158,25 @@
 	}
 </script>
 
-<section class="history">
-	<h1>History</h1>
+<section class="page">
+	<div class="page-head">
+		<h1 class="page-title">History</h1>
+	</div>
 
 	{#if path === null}
-		<p class="notice">No game directory yet. <a href="/">Run the setup</a> first.</p>
+		<p class="page-empty">No game directory yet. <a href="/">Run the setup</a> first.</p>
 	{:else}
 		{#if error !== ''}
-			<p class="error">{error}</p>
+			<p class="error-text">{error}</p>
 		{/if}
 
-		<ul class="commits">
+		<ul class="panel entries">
 			{#each commits as commit (commit.hash)}
-				<li>
+				<li class="panel-row">
 					<div class="entry">
 						<div class="text">
-							<strong>{commit.subject}</strong>
-							<span class="meta">
+							<span class="subject">{commit.subject}</span>
+							<span class="meta muted">
 								<code>{commit.hash.slice(0, 8)}</code>
 								{new Date(commit.date).toLocaleString()}
 								{#if summary(commit) !== ''}
@@ -184,12 +186,13 @@
 						</div>
 						<div class="actions">
 							{#if modName(commit) !== ''}
-								<button type="button" onclick={() => void toggleFiles(commit)}>
+								<button class="btn-sm" type="button" onclick={() => void toggleFiles(commit)}>
 									{expanded === commit.hash ? 'Hide files' : 'Files'}
 								</button>
 							{/if}
 							{#if undoable(commit)}
 								<button
+									class="btn-sm"
 									type="button"
 									disabled={busy}
 									onclick={() =>
@@ -198,6 +201,7 @@
 									Disable
 								</button>
 								<button
+									class="btn-sm"
 									type="button"
 									disabled={busy}
 									onclick={() =>
@@ -211,7 +215,7 @@
 					{#if expanded === commit.hash}
 						<ul class="files">
 							{#if filesError !== ''}
-								<li class="error">{filesError}</li>
+								<li class="error-text">{filesError}</li>
 							{/if}
 							{#each files as file (file.path)}
 								<li><code>{file.change}</code> {file.path}</li>
@@ -221,9 +225,14 @@
 				</li>
 			{/each}
 			{#if commits.length === 0}
-				<li class="empty">{loading ? 'Loading…' : 'No commits yet.'}</li>
+				<li class="empty">{loading ? 'Loading…' : 'No history yet.'}</li>
 			{/if}
 		</ul>
+
+		<p class="result-count">
+			{commits.length}
+			{commits.length === 1 ? 'entry' : 'entries'}
+		</p>
 	{/if}
 </section>
 
@@ -236,11 +245,12 @@
 	>
 		<p>
 			{confirmation.kind === 'remove'
-				? 'The mod files are reverted; the history keeps them.'
+				? 'The mod files are removed from the game directory; the history keeps a record of the change.'
 				: 'The mod files leave the game directory until you enable the mod again.'}
 		</p>
 		{#snippet actions()}
 			<button
+				class="btn-primary"
 				type="button"
 				onclick={() => {
 					const pending = confirmation;
@@ -263,7 +273,11 @@
 			<ul class="findings">
 				{#each failure.conflicts as conflict, index (index)}
 					<li>
-						<span class="severity {conflict.severity}">{conflict.severity}</span>
+						<span
+							class="badge {conflict.severity === 'error' ? 'badge-danger' : 'badge-warn'}"
+						>
+							{conflict.severity}
+						</span>
 						<span class="kind">{conflict.kind}</span>
 						{conflict.message}
 						{#if conflict.path}<code>{conflict.path}</code>{/if}
@@ -286,6 +300,7 @@
 		{#snippet actions()}
 			{#if failure?.forceable}
 				<button
+					class="btn-primary"
 					type="button"
 					onclick={() => {
 						const name = failure?.name;
@@ -303,32 +318,17 @@
 {/if}
 
 <style>
-	.history {
-		padding: 1rem;
-	}
-
-	h1 {
-		font-size: 1.1rem;
-		margin: 0 0 0.8rem;
-	}
-
-	.commits {
+	.entries {
 		list-style: none;
 		margin: 0;
 		padding: 0;
-		border: 1px solid #2c3138;
-		border-radius: 4px;
-	}
-
-	.commits > li {
-		border-bottom: 1px solid #2c3138;
 	}
 
 	.entry {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
-		padding: 0.45rem 0.6rem;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
 	}
 
 	.text {
@@ -336,25 +336,28 @@
 		min-width: 0;
 	}
 
-	.text strong {
+	.subject {
 		display: block;
+		font-weight: var(--weight-medium);
 	}
 
 	.meta {
-		color: #98a2ad;
-		font-size: 0.85em;
+		font-size: var(--text-sm);
 	}
 
 	.actions {
 		display: flex;
-		gap: 0.4rem;
+		gap: var(--space-2);
 	}
 
 	.files {
 		list-style: none;
-		margin: 0;
-		padding: 0 0.6rem 0.6rem 1.6rem;
-		font-size: 0.9em;
+		margin: 0 var(--space-3) var(--space-3) var(--space-6);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg);
+		border-radius: var(--radius-md);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 	}
 
 	.findings {
@@ -364,35 +367,24 @@
 	}
 
 	.findings li {
-		padding: 0.15rem 0;
-	}
-
-	.severity {
-		font-size: 0.8em;
-		text-transform: uppercase;
-		margin-right: 0.4rem;
-	}
-
-	.severity.error {
-		color: #f2a19c;
-	}
-
-	.severity.warning {
-		color: #f0cf7d;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-1) 0;
 	}
 
 	.kind {
-		color: #98a2ad;
-		margin-right: 0.4rem;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
 	}
 
-	.empty,
-	.notice {
-		padding: 1rem;
-		color: #98a2ad;
+	.empty {
+		padding: var(--space-5) var(--space-3);
+		color: var(--color-text-muted);
 	}
 
-	.error {
-		color: #ff8f8f;
+	.result-count {
+		margin: var(--space-3) 0 0;
 	}
 </style>

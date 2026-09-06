@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
 	import {
 		launchStatus,
@@ -12,11 +13,13 @@
 		syncCatalog,
 		updateMod,
 		type LaunchStatus,
+		type StatusReport,
 		type SyncCatalogResponse
 	} from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
 	import { bannerText, isGameUp, nextPollDelay } from '$lib/launch';
+	import { onChangeFolder, onSyncRequest, setGameDir } from '$lib/shellstate';
 	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
 	import { cached } from '$lib/viewcache';
 
@@ -25,6 +28,7 @@
 	let phase: Phase = $state('checking');
 	let path = $state('');
 	let error = $state('');
+	let sptVersion: string | null = $state(null);
 	let syncProgress: ProgressEvent | null = $state(null);
 	let syncNote = $state('');
 	let syncNoteSuccess = $state(false);
@@ -43,7 +47,22 @@
 
 	onMount(() => {
 		void detect();
-		return () => clearTimeout(pollTimer);
+		const unsubscribeSync = onSyncRequest(() => void sync());
+		const unsubscribeFolder = onChangeFolder(() => {
+			clearTimeout(pollTimer);
+			forgetGameDir();
+			phase = 'setup';
+		});
+		return () => {
+			clearTimeout(pollTimer);
+			unsubscribeSync();
+			unsubscribeFolder();
+			setGameDir(null);
+		};
+	});
+
+	$effect(() => {
+		setGameDir(phase === 'ready' ? path : null);
 	});
 
 	async function pollGameStatus(gameDir: string): Promise<void> {
@@ -55,6 +74,10 @@
 		pollTimer = setTimeout(() => void pollGameStatus(gameDir), nextPollDelay(gameStatus));
 	}
 
+	function noteSptVersion(report: StatusReport): void {
+		sptVersion = report.spt_version === '' ? null : report.spt_version;
+	}
+
 	async function detect(): Promise<void> {
 		error = '';
 		const stored = loadGameDir();
@@ -64,22 +87,26 @@
 		}
 		const view = cached(stored, 'status', [], () => status(stored));
 		if (view.value !== undefined) {
+			noteSptVersion(view.value);
 			path = stored;
 			phase = 'ready';
 			void pollGameStatus(stored);
-			void view.refresh().catch((cause: unknown) => {
-				if (cause instanceof ApiError && cause.code === 'NOT_A_GAME_DIR') {
-					clearTimeout(pollTimer);
-					forgetGameDir();
-					phase = 'setup';
-				}
-			});
+			void view
+				.refresh()
+				.then(noteSptVersion)
+				.catch((cause: unknown) => {
+					if (cause instanceof ApiError && cause.code === 'NOT_A_GAME_DIR') {
+						clearTimeout(pollTimer);
+						forgetGameDir();
+						phase = 'setup';
+					}
+				});
 			autoSync(stored);
 			return;
 		}
 		phase = 'checking';
 		try {
-			await view.refresh();
+			noteSptVersion(await view.refresh());
 			path = stored;
 			phase = 'ready';
 			void pollGameStatus(stored);
@@ -206,12 +233,18 @@
 		<p class="banner">{bannerText(gameStatus)}</p>
 	{/if}
 	<div class="page">
-		<div class="page-head">
-			<div class="head-text">
-				<h1 class="page-title">Mods</h1>
-				<span class="page-subtitle" title={path}>{path}</span>
-			</div>
-			<div class="page-actions">
+		<PageHeader title="Mods">
+			{#snippet secondary()}
+				<button
+					type="button"
+					class="btn-secondary"
+					disabled={syncing || updatingAll}
+					onclick={() => void sync()}
+				>
+					{syncing ? 'Syncing…' : 'Sync catalog'}
+				</button>
+			{/snippet}
+			{#snippet primary()}
 				<button
 					type="button"
 					class="btn-primary"
@@ -223,11 +256,8 @@
 				>
 					{updatingAll ? 'Updating…' : `Update all (${candidates.length})`}
 				</button>
-				<button type="button" disabled={syncing || updatingAll} onclick={() => void sync()}>
-					{syncing ? 'Syncing…' : 'Sync catalog'}
-				</button>
-			</div>
-		</div>
+			{/snippet}
+		</PageHeader>
 		{#if syncing}
 			<div class="page-status status-progress">
 				<progress max="100" value={syncProgress?.percent ?? 0}></progress>
@@ -254,6 +284,7 @@
 		<ModsView
 			{path}
 			{refreshKey}
+			{sptVersion}
 			locked={updatingAll || isGameUp(gameStatus)}
 			onbusy={(busy) => (rowsBusy = busy)}
 			onupdatable={(targets) => {
@@ -265,19 +296,6 @@
 {/if}
 
 <style>
-	.head-text {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
-	.page-subtitle {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
 	.page-empty p {
 		margin: 0 0 var(--space-4);
 	}

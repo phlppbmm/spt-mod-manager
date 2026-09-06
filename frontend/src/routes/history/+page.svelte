@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import {
 		disableMod,
 		history,
@@ -16,6 +17,7 @@
 	import { ApiError } from '$lib/api/transport';
 	import { loadGameDir } from '$lib/gamedir';
 	import { cached, invalidate } from '$lib/viewcache';
+	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
 
 	const UNDOABLE_STATES: ModInfo['state'][] = ['installed', 'updated', 'enabled'];
 
@@ -53,13 +55,18 @@
 	let busy = $state(false);
 
 	onMount(() => {
+		setSubNav([], null);
+		setSearchEnabled(false);
 		const stored = loadGameDir();
 		path = stored;
 		if (stored === null) {
 			loading = false;
-			return;
+		} else {
+			void load(stored);
 		}
-		void load(stored);
+		return () => {
+			setSubNav([], null);
+		};
 	});
 
 	function apply(log: CommitInfo[], mods: ModInfo[]): void {
@@ -176,9 +183,7 @@
 </script>
 
 <section class="page">
-	<div class="page-head">
-		<h1 class="page-title">History</h1>
-	</div>
+	<PageHeader title="History" />
 
 	{#if path === null}
 		<p class="page-empty">No game directory yet. <a href="/">Run the setup</a> first.</p>
@@ -338,6 +343,10 @@
 {/if}
 
 <style>
+	.page {
+		padding: var(--page-gutter, 32px);
+	}
+
 	.entries {
 		list-style: none;
 		margin: 0;

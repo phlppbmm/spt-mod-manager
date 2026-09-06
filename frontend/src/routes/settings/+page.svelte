@@ -13,8 +13,10 @@
 		type ImportDiff,
 		type ImportEntry
 	} from '$lib/api/client';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
 	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
+	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import {
 		applyTheme,
 		loadPreference,
@@ -67,6 +69,8 @@
 	);
 
 	onMount(() => {
+		setSubNav([], null);
+		setSearchEnabled(false);
 		path = loadGameDir();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
@@ -76,6 +80,7 @@
 		observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
 		return () => {
 			observer.disconnect();
+			setSubNav([], null);
 		};
 	});
 
@@ -218,9 +223,7 @@
 </script>
 
 <div class="page">
-	<div class="page-head">
-		<h1 class="page-title">Settings</h1>
-	</div>
+	<PageHeader title="Settings" />
 
 	<div class="layout">
 		<nav class="subnav" aria-label="Settings sections">
@@ -432,6 +435,10 @@
 </div>
 
 <style>
+	.page {
+		padding: var(--page-gutter, 32px);
+	}
+
 	.layout {
 		display: flex;
 		align-items: flex-start;

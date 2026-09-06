@@ -1,9 +1,16 @@
 <script lang="ts">
-	import ModRow from './ModRow.svelte';
+	import { onMount, untrack } from 'svelte';
+	import FilterBar from './FilterBar.svelte';
+	import ModTable from './ModTable.svelte';
+	import QuickTabs from './QuickTabs.svelte';
+	import SelectionBar from './SelectionBar.svelte';
 	import {
 		browseCatalog,
+		disableMod,
+		enableMod,
 		listFavorites,
 		listMods,
+		updateMod,
 		type CatalogEntry,
 		type ModInfo,
 		type ModType
@@ -14,15 +21,27 @@
 		filterEntries,
 		rowState,
 		sortEntries,
-		CHIP_IDS,
-		CHIP_LABELS,
-		type ChipId,
 		type FilterContext,
 		type ModFilter,
 		type ModSort,
 		type SortKey
 	} from '$lib/modfilter';
-	import { clearFilter, getFilter, isDefaultFilter, setFilter } from '$lib/filterstate';
+	import {
+		activeQuickTab,
+		applyQuickTab,
+		pillDefinitions,
+		QUICK_TABS,
+		type QuickTabId
+	} from '$lib/filterpills';
+	import { filtersEqual, getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
+	import {
+		bulkActions,
+		pruneSelection,
+		runBulk,
+		type BulkActionId,
+		type BulkProgress
+	} from '$lib/selection';
+	import { onSubNavSelect, setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
 	import { cached, invalidate } from '$lib/viewcache';
 
@@ -30,25 +49,35 @@
 		path: string;
 		refreshKey: number;
 		locked: boolean;
+		sptVersion: string | null;
 		onbusy: (busy: boolean) => void;
 		onupdatable: (targets: UpdateTarget[]) => void;
 	}
 
-	let { path, refreshKey, locked, onbusy, onupdatable }: Props = $props();
+	let { path, refreshKey, locked, sptVersion, onbusy, onupdatable }: Props = $props();
+
+	const SUB_NAV = [
+		{ id: 'all', label: 'All mods' },
+		{ id: 'installed', label: 'Installed' },
+		{ id: 'updates', label: 'Updates' },
+		{ id: 'favorites', label: 'Favorites' }
+	];
 
 	const busyIds = new Set<number>();
 	const restored = getFilter();
 
 	let chips = $state(new Set(restored.chips));
 	let category: string | null = $state(restored.category);
-	let favorites: number[] = $state([]);
-	let searchInput = $state(restored.search);
 	let search = $state(restored.search);
-	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	let favorites: number[] = $state([]);
 	let entries: CatalogEntry[] = $state([]);
 	let mods: ModInfo[] = $state([]);
 	let loading = $state(false);
 	let error = $state('');
+	let bulkError = $state('');
+	let bulkBusy = $state(false);
+	let bulkProgress: BulkProgress | null = $state(null);
+	let selected = $state(new Set<number>());
 	let reload = $state(0);
 	let requestId = 0;
 	let seenMutations: string | null = null;
@@ -93,27 +122,80 @@
 	let rows = $derived(sortEntries(filterEntries(entries, filter, context), sort));
 	let counts = $derived(chipCounts(entries, filter, context));
 	let categories = $derived(categoriesOf(entries));
+	let selectedTargets = $derived(
+		rows
+			.filter((entry) => selected.has(entry.mod.id))
+			.map((entry) => ({
+				modId: entry.mod.id,
+				name: installedFor(entry)?.name ?? entry.mod.name,
+				state: rowState(entry, disabledNames)
+			}))
+	);
+	let actions = $derived(bulkActions(selectedTargets));
 
-	$effect(() => {
-		setFilter(filter);
+	onMount(() => {
+		setSearchEnabled(true);
+		const unsubscribeFilter = subscribeFilter(adopt);
+		const unsubscribeSubNav = onSubNavSelect(selectTab);
+		return () => {
+			setSearchEnabled(false);
+			setSubNav([], null);
+			unsubscribeFilter();
+			unsubscribeSubNav();
+		};
 	});
 
-	function toggleChip(chip: ChipId): void {
-		const next = new Set(chips);
-		if (!next.delete(chip)) {
-			next.add(chip);
+	$effect(() => {
+		setSubNav(SUB_NAV, activeQuickTab(filter));
+	});
+
+	$effect(() => {
+		if (!filtersEqual(filter, getFilter())) {
+			setFilter(filter);
 		}
-		chips = next;
+	});
+
+	$effect(() => {
+		const ids = rows.map((entry) => entry.mod.id);
+		const pruned = pruneSelection(untrack(() => selected), ids);
+		if (pruned.size !== untrack(() => selected).size) {
+			selected = pruned;
+		}
+	});
+
+	function adopt(next: ModFilter): void {
+		if (filtersEqual(next, filter)) {
+			return;
+		}
+		chips = new Set(next.chips);
+		category = next.category;
+		search = next.search;
 	}
 
-	function clearAll(): void {
-		clearFilter();
-		const fresh = getFilter();
-		chips = new Set(fresh.chips);
-		category = fresh.category;
-		searchInput = fresh.search;
-		search = fresh.search;
-		clearTimeout(searchTimer);
+	function setFilterAndState(next: ModFilter): void {
+		chips = new Set(next.chips);
+		category = next.category;
+		search = next.search;
+		setFilter(next);
+	}
+
+	function selectTab(id: string): void {
+		const tab = QUICK_TABS.find((entry) => entry.id === id);
+		if (tab !== undefined) {
+			setFilterAndState(applyQuickTab(filter, tab.id));
+		}
+	}
+
+	function pickTab(tab: QuickTabId): void {
+		setFilterAndState(applyQuickTab(filter, tab));
+	}
+
+	function installedFor(entry: CatalogEntry): ModInfo | null {
+		return (
+			installedByForgeId.get(String(entry.mod.id)) ??
+			installedByName.get(entry.mod.name.toLowerCase()) ??
+			null
+		);
 	}
 
 	function toggleSort(key: SortKey): void {
@@ -123,13 +205,6 @@
 			// Numeric/date columns start descending (biggest/newest first).
 			sort = { key, descending: key === 'downloads' || key === 'updated' };
 		}
-	}
-
-	function sortMark(key: SortKey): string {
-		if (sort?.key !== key) {
-			return '';
-		}
-		return sort.descending ? ' ▼' : ' ▲';
 	}
 
 	$effect(() => {
@@ -206,173 +281,94 @@
 		onbusy(busyIds.size > 0);
 	}
 
-	function onSearch(value: string): void {
-		searchInput = value;
-		clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => {
-			search = value;
-		}, 250);
+	function runOne(id: BulkActionId, name: string): Promise<unknown> {
+		if (id === 'enable') {
+			return enableMod(path, name);
+		}
+		if (id === 'disable') {
+			return disableMod(path, name);
+		}
+		return updateMod(path, name);
+	}
+
+	async function runAction(id: BulkActionId): Promise<void> {
+		const action = actions.find((entry) => entry.id === id);
+		if (action === undefined) {
+			return;
+		}
+		bulkBusy = true;
+		bulkError = '';
+		onbusy(true);
+		const result = await runBulk(
+			action.names,
+			(name) => runOne(id, name),
+			(progress) => (bulkProgress = progress)
+		);
+		bulkBusy = false;
+		bulkProgress = null;
+		bulkError = result.failed
+			.map((failure) => `${failure.name}: ${failure.message}`)
+			.join(' · ');
+		selected = new Set();
+		reload += 1;
+		onbusy(busyIds.size > 0);
 	}
 </script>
 
 <section>
-	<div class="filterbar">
-		{#each CHIP_IDS as chip (chip)}
-			<button
-				type="button"
-				class="chip"
-				class:is-active={chips.has(chip)}
-				aria-pressed={chips.has(chip)}
-				onclick={() => toggleChip(chip)}
-			>
-				{CHIP_LABELS[chip]}
-				<span class="chip-count">{counts[chip]}</span>
-			</button>
-		{/each}
-		<select
-			aria-label="Category"
-			value={category ?? ''}
-			onchange={(event) => (category = event.currentTarget.value || null)}
-		>
-			<option value="">All categories</option>
-			{#each categories as title (title)}
-				<option value={title}>{title}</option>
-			{/each}
-		</select>
-		<input
-			type="search"
-			placeholder="Search name or author"
-			aria-label="Search mods"
-			value={searchInput}
-			oninput={(event) => onSearch(event.currentTarget.value)}
+	<div class="controls">
+		<QuickTabs active={activeQuickTab(filter)} onselect={pickTab} />
+		<FilterBar
+			{filter}
+			definitions={pillDefinitions(categories, sptVersion)}
+			{counts}
+			onchange={setFilterAndState}
 		/>
-		<button
-			type="button"
-			class="btn-ghost btn-sm clear"
-			disabled={isDefaultFilter(filter)}
-			onclick={clearAll}
-		>
-			Clear filters
-		</button>
 	</div>
 
 	{#if error !== ''}
 		<p class="error-text">{error}</p>
 	{/if}
 
-	<div class="panel list">
-		<div class="panel-head head">
-			<div class="index">#</div>
-			<button class="sort" onclick={() => toggleSort('name')}>Mod{sortMark('name')}</button>
-			<button class="sort" onclick={() => toggleSort('installed')}>
-				Installed{sortMark('installed')}
-			</button>
-			<button class="sort" onclick={() => toggleSort('latest')}>Latest{sortMark('latest')}</button>
-			<button class="sort" onclick={() => toggleSort('spt')}>SPT{sortMark('spt')}</button>
-			<button class="sort" onclick={() => toggleSort('downloads')}>
-				Downloads{sortMark('downloads')}
-			</button>
-			<button class="sort" onclick={() => toggleSort('updated')}>
-				Updated{sortMark('updated')}
-			</button>
-			<div>Type</div>
-			<div>State</div>
-			<div></div>
-		</div>
-		{#each rows as entry, position (entry.mod.id)}
-			<ModRow
-				{path}
-				index={position + 1}
-				{entry}
-				modState={rowState(entry, disabledNames)}
-				installed={installedByForgeId.get(String(entry.mod.id)) ??
-					installedByName.get(entry.mod.name.toLowerCase()) ??
-					null}
-				{locked}
-				favorite={favoriteIds.has(entry.mod.id)}
-				onfavorite={onFavorites}
-				onchanged={() => (reload += 1)}
-				onbusy={onRowBusy}
-			/>
-		{/each}
-		{#if rows.length === 0}
-			<p class="empty">
-				{loading ? 'Loading…' : 'No mods match the current filters.'}
-			</p>
-		{/if}
-	</div>
-	<p class="result-count">{rows.length === 1 ? '1 mod' : `${rows.length} mods`}</p>
+	{#if bulkError !== ''}
+		<p class="error-text">Some mods could not be changed. {bulkError}</p>
+	{/if}
+
+	{#if selected.size > 0}
+		<SelectionBar
+			count={selected.size}
+			{actions}
+			busy={bulkBusy}
+			progress={bulkProgress}
+			onrun={(id) => void runAction(id)}
+			onclear={() => (selected = new Set())}
+		/>
+	{/if}
+
+	<ModTable
+		{path}
+		{rows}
+		{disabledNames}
+		{installedByForgeId}
+		{installedByName}
+		locked={locked || bulkBusy}
+		{favoriteIds}
+		{selected}
+		{sort}
+		{loading}
+		onsort={toggleSort}
+		onselect={(next) => (selected = next)}
+		onfavorite={onFavorites}
+		onchanged={() => (reload += 1)}
+		onbusy={onRowBusy}
+	/>
 </section>
 
 <style>
-	.filterbar {
+	.controls {
 		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--space-2);
+		flex-direction: column;
+		gap: var(--space-3);
 		margin-bottom: var(--space-4);
-	}
-
-	.filterbar input[type='search'] {
-		flex: 1;
-		min-width: 12rem;
-	}
-
-	.filterbar .clear {
-		margin-left: auto;
-	}
-
-	.list {
-		--mods-grid: 2rem minmax(12rem, 1fr) 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem 7rem 8rem;
-	}
-
-	@media (max-width: 1000px) {
-		.list {
-			--mods-grid: 2rem minmax(10rem, 1fr) 5rem 5rem 5rem 7rem 8rem;
-		}
-
-		.head > :nth-child(n + 6):nth-child(-n + 8) {
-			display: none;
-		}
-	}
-
-	.head {
-		display: grid;
-		grid-template-columns: var(--mods-grid);
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-	}
-
-	.head .index {
-		text-align: right;
-	}
-
-	.head .sort {
-		display: block;
-		height: auto;
-		padding: 0;
-		background: none;
-		border: none;
-		font: inherit;
-		color: inherit;
-		letter-spacing: inherit;
-		text-transform: inherit;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.head .sort:hover {
-		background: none;
-		color: var(--color-text);
-	}
-
-	.empty {
-		margin: 0;
-		padding: var(--space-4);
-		color: var(--color-text-muted);
-	}
-
-	.result-count {
-		margin: var(--space-3) 0 0;
 	}
 </style>

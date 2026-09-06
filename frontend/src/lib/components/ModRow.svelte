@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Dialog from './Dialog.svelte';
+	import StatusBadge from './StatusBadge.svelte';
 	import {
 		disableMod,
 		enableMod,
@@ -32,6 +33,8 @@
 		installed: ModInfo | null;
 		locked: boolean;
 		favorite: boolean;
+		selected: boolean;
+		onselect: () => void;
 		onchanged: () => void;
 		onfavorite: (modIds: number[]) => void;
 		onbusy: (modId: number, busy: boolean) => void;
@@ -45,6 +48,8 @@
 		installed,
 		locked,
 		favorite,
+		selected,
+		onselect,
 		onchanged,
 		onfavorite,
 		onbusy
@@ -56,22 +61,6 @@
 		'UNRESOLVABLE_DEPENDENCY',
 		'PROFILE_RESIDUE'
 	];
-
-	const STATE_LABELS: Record<RowState, string> = {
-		active: 'active',
-		disabled: 'disabled',
-		update_available: 'update available',
-		incompatible: 'incompatible',
-		available: 'not installed'
-	};
-
-	const STATE_BADGES: Record<RowState, string> = {
-		active: 'badge-success',
-		disabled: 'badge-neutral',
-		update_available: 'badge-warn',
-		incompatible: 'badge-danger',
-		available: 'badge-neutral'
-	};
 
 	let busy = $state(false);
 	let progress: ProgressEvent | null = $state(null);
@@ -244,6 +233,15 @@
 </script>
 
 <div class="row panel-row" class:busy>
+	<div class="pick">
+		<input
+			type="checkbox"
+			aria-label={`Select ${entry.mod.name}`}
+			checked={selected}
+			disabled={locked}
+			onchange={onselect}
+		/>
+	</div>
 	<div class="index">{index}</div>
 	<div class="name">
 		<button
@@ -278,7 +276,7 @@
 	<div>{entry.mod.downloads.toLocaleString()}</div>
 	<div>{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
 	<div>{installed?.mod_type ?? '—'}</div>
-	<div><span class="badge {STATE_BADGES[modState]}">{STATE_LABELS[modState]}</span></div>
+	<div><StatusBadge state={modState} /></div>
 	<div class="actions">
 		{#if progress !== null}
 			<span class="progress" title={progress.message}>
@@ -648,6 +646,7 @@
 		grid-template-columns: var(--mods-grid);
 		align-items: center;
 		gap: var(--space-2);
+		min-height: var(--row-height, 44px);
 		padding: var(--space-2) var(--space-3);
 		font-size: var(--text-base);
 	}
@@ -656,15 +655,21 @@
 		opacity: 0.6;
 	}
 
-	@media (max-width: 1000px) {
-		.row > :nth-child(n + 6):nth-child(-n + 8) {
+	@container mods (max-width: 1060px) {
+		.row > :nth-child(n + 7):nth-child(-n + 9) {
 			display: none;
 		}
+	}
+
+	.pick {
+		display: flex;
+		align-items: center;
 	}
 
 	.index {
 		text-align: right;
 		color: var(--color-text-subtle);
+		font-size: var(--text-sm);
 		font-variant-numeric: tabular-nums;
 	}
 

@@ -17,6 +17,7 @@
 	import { subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { launchAction, loadStopServerOnExit } from '$lib/launch';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import {
 		categoryLabel,
 		characterLabel,
@@ -26,6 +27,7 @@
 	} from '$lib/cleanup';
 	import { loadGameDir } from '$lib/gamedir';
 	import { cached, invalidate } from '$lib/viewcache';
+	import { onSubNavSelect, setSearchEnabled, setSubNav } from '$lib/shellstate';
 
 	let path: string | null = $state(null);
 	let summaries: ProfileSummary[] = $state([]);
@@ -47,7 +49,14 @@
 	let planning = $state('');
 	let cleaning = $state(false);
 
+	let activeProfile = $state('');
+
 	let groups = $derived.by(() => groupResiduesByProfile(summaries, result?.residues ?? {}));
+	let subNavActive = $derived(
+		groups.some((group) => group.profile.profile_id === activeProfile)
+			? activeProfile
+			: (groups[0]?.profile.profile_id ?? null)
+	);
 	let planGroups = $derived.by(() =>
 		groupRemovalsByProfile(
 			(plan?.removals ?? []).filter((residue) => residue.profile === planProfile)
@@ -55,15 +64,43 @@
 	);
 
 	onMount(() => {
+		setSubNav([], null);
+		setSearchEnabled(false);
+		const unsubscribe = onSubNavSelect(showProfile);
 		const stored = loadGameDir();
 		path = stored;
 		if (stored === null) {
 			loading = false;
-			return;
+		} else {
+			void check(stored);
+			void refreshGameStatus(stored);
 		}
-		void check(stored);
-		void refreshGameStatus(stored);
+		return () => {
+			unsubscribe();
+			setSubNav([], null);
+		};
 	});
+
+	$effect(() => {
+		setSubNav(
+			groups.map((group) => ({
+				id: group.profile.profile_id,
+				label: profileLabel(group.profile)
+			})),
+			subNavActive
+		);
+	});
+
+	function profileLabel(profile: ProfileSummary): string {
+		return profile.nickname === '' ? profile.file : profile.nickname;
+	}
+
+	function showProfile(profileId: string): void {
+		activeProfile = profileId;
+		document
+			.getElementById(`profile-${profileId}`)
+			?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
 
 	async function refreshGameStatus(gameDir: string): Promise<void> {
 		try {
@@ -215,22 +252,7 @@
 </script>
 
 <section class="page">
-	<div class="page-head">
-		<h1 class="page-title">Profiles</h1>
-		{#if path !== null}
-			<div class="page-actions">
-				<input
-					type="text"
-					placeholder="Snapshot message (optional)"
-					aria-label="Snapshot message"
-					bind:value={message}
-				/>
-				<button type="button" disabled={saving} onclick={() => void takeSnapshot()}>
-					{saving ? 'Saving…' : 'Snapshot profiles and configs'}
-				</button>
-			</div>
-		{/if}
-	</div>
+	<PageHeader title="Profiles" secondary={path === null ? undefined : snapshotAction} />
 
 	{#if path === null}
 		<p class="page-empty">No game directory yet. <a href="/">Run the setup</a> first.</p>
@@ -253,7 +275,11 @@
 
 		{#each groups as group (group.profile.file)}
 			{@const action = launchAction(gameStatus, group.profile.profile_id, launching !== '')}
-			<article class="panel profile">
+			<article
+				class="panel profile"
+				class:is-active={group.profile.profile_id === subNavActive}
+				id="profile-{group.profile.profile_id}"
+			>
 				<div class="header">
 					<div class="identity">
 						<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
@@ -339,6 +365,19 @@
 	{/if}
 </section>
 
+{#snippet snapshotAction()}
+	<input
+		class="head-input"
+		type="text"
+		placeholder="Snapshot message (optional)"
+		aria-label="Snapshot message"
+		bind:value={message}
+	/>
+	<button type="button" disabled={saving} onclick={() => void takeSnapshot()}>
+		{saving ? 'Saving…' : 'Snapshot'}
+	</button>
+{/snippet}
+
 {#if stopTarget !== ''}
 	<Dialog title="Close the game" onclose={() => (stopTarget = '')}>
 		<p>This closes the game immediately. Progress since the last save is lost.</p>
@@ -418,12 +457,20 @@
 {/if}
 
 <style>
-	.page-actions input {
+	.page {
+		padding: var(--page-gutter, 32px);
+	}
+
+	.head-input {
 		width: 20rem;
 	}
 
 	.profile {
 		margin: var(--space-4) 0;
+	}
+
+	.profile.is-active {
+		border-color: var(--color-accent-border);
 	}
 
 	.header {

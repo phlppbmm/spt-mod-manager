@@ -2,7 +2,13 @@
 	import { onMount } from 'svelte';
 	import GameDirMenu from '$lib/components/GameDirMenu.svelte';
 	import { getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
-	import { requestSync, subscribeGameDir, subscribeSearchEnabled } from '$lib/shellstate';
+	import { loadGameDir } from '$lib/gamedir';
+	import {
+		requestSync,
+		setGameDir,
+		subscribeGameDir,
+		subscribeSearchEnabled
+	} from '$lib/shellstate';
 	import type { ResolvedTheme } from '$lib/theme';
 	import { closeWindow, minimizeWindow } from '$lib/window';
 
@@ -23,6 +29,7 @@
 	let pending: string | null = null;
 
 	onMount(() => {
+		setGameDir(loadGameDir());
 		const unsubscribeFilter = subscribeFilter((filter) => {
 			search = filter.search;
 		});

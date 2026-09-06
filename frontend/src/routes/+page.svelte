@@ -57,7 +57,6 @@
 			clearTimeout(pollTimer);
 			unsubscribeSync();
 			unsubscribeFolder();
-			setGameDir(null);
 		};
 	});
 

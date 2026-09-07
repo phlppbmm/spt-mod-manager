@@ -4004,6 +4004,24 @@
             },
             "title": "Files",
             "type": "array"
+          },
+          "game_files": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Game Files",
+            "type": "array"
+          },
+          "mod_settings": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Mod Settings",
+            "type": "array"
           }
         },
         "required": [

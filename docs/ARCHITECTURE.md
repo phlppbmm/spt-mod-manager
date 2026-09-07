@@ -211,6 +211,13 @@ SPT version is resolved again and stored in `sptmod.sptversion`. What is left
 in `other_modified` — a tampered tracked file no active mod owns, such as a
 loose plugin DLL — and untracked manual mod copies still block, with a
 plain-language message suggesting adopt. `ensure_installable` in services/state.py.
+The explicit `snapshot` service (`sptmod snapshot`, RPC `snapshot`, the
+Profiles-tab button) secures the same two classes first, through the shared
+`secure_updated_files`, and only then commits the profiles and configs, so
+an SPT update the user snapshots is committed instead of being left behind.
+`SnapshotResult` reports the three classes separately: `game_files`,
+`mod_settings` and `commit`/`files`, the latter empty when no profile or
+config changed. Only a call that commits nothing at all raises.
 Untracked files an active mod writes inside its own directory (settings a mod
 generates while playing) are runtime data: `status` leaves them out of the
 report, so they never block and are never snapshotted. Ownership of a path is

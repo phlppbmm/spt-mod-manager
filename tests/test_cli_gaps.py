@@ -227,6 +227,41 @@ def test_snapshot_commits_the_modified_profile_and_reports_it(
     assert len(repo.log()) == commits_before + 1
 
 
+def test_snapshot_reports_the_secured_game_files_and_mod_settings(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
+) -> None:
+    """``snapshot`` names both classes it secured and prints no snapshot line without one.
+
+    A game file an SPT update rewrote and a setting an active mod rewrote are the only
+    changes, so the CLI must report both counts and stay silent about the profile snapshot,
+    which never happened. Without the counts the user has no idea the 1130 changed game
+    files were taken care of.
+    """
+    repo = clean_repo_at(fake_game_dir)
+    install_commit(
+        repo,
+        "ClientMod",
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
+    )
+    spt_dll = fake_game_dir / "BepInEx" / "plugins" / "spt" / "spt-common.dll"
+    spt_dll.parent.mkdir(parents=True)
+    spt_dll.write_bytes(b"4.1.0-build")
+    repo.commit("chore: seed SPT client files", paths=[Path("BepInEx/plugins/spt/spt-common.dll")])
+    spt_dll.write_bytes(b"4.0.0-build")
+    (fake_game_dir / "BepInEx" / "plugins" / "ClientMod" / "config.json").write_text('{"v": 2}', encoding="utf-8")
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["snapshot"])
+
+    assert result.exit_code == 0
+    assert "secured 1 updated game files" in result.stdout
+    assert "secured 1 changed mod settings" in result.stdout
+    assert "snapshot:" not in result.stdout
+
+
 # --- install: BadParameter guards -------------------------------------------
 
 

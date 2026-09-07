@@ -275,6 +275,8 @@ class SnapshotResult(CoreModel):
     commit: str
     message: str
     files: list[Path] = []
+    game_files: list[Path] = []
+    mod_settings: list[Path] = []
 
 
 class ImportEntry(CoreModel):

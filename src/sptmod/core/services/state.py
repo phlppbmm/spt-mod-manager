@@ -7,7 +7,7 @@ status. The guard :func:`ensure_installable` and the lock-free
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Final
@@ -83,11 +83,19 @@ class StatusReport:
 
 @dataclass(frozen=True)
 class SnapshotResult:
-    """Outcome of :func:`snapshot`."""
+    """Outcome of :func:`snapshot`.
+
+    ``commit`` and ``files`` describe the snapshot of the profiles and
+    configs; both stay empty when only game files or mod settings had to be
+    secured. ``game_files`` and ``mod_settings`` hold the files of the two
+    commits taken before it.
+    """
 
     commit: str
     message: str
     files: list[Path] = field(default_factory=list[Path])
+    game_files: list[Path] = field(default_factory=list[Path])
+    mod_settings: list[Path] = field(default_factory=list[Path])
 
 
 def list_mods(path: Path, include_all: bool = False) -> list[ModInfo]:
@@ -223,35 +231,59 @@ def status(path: Path) -> StatusReport:
 
 
 def snapshot(path: Path, message: str | None = None) -> SnapshotResult:
-    """Commit the profile and config changes of the game directory at ``path``.
+    """Secure what the game directory at ``path`` changed on its own.
 
-    Stages only the changed files below the profile directory and
-    ``BepInEx/config/`` and commits them as ``snapshot: <message>``, defaulting
-    to a timestamp, without any ``Mod:`` trailer. Changes to tracked mod files
-    stay uncommitted.
+    Game files an SPT update rewrote and settings an active mod rewrote inside
+    its own directory are secured first, exactly as before a mod operation;
+    then the changed files below the profile directory and ``BepInEx/config/``
+    are committed as ``snapshot: <message>``, defaulting to a timestamp,
+    without any ``Mod:`` trailer. Changed mod files no active mod owns stay
+    uncommitted.
 
     Raises:
         NotAGameDirError: ``path`` is no SPT game directory.
-        GitError: neither profiles nor configs changed, or git failed.
+        GitError: nothing snapshotable changed, or git failed.
     """
     with game_lock(path, "securing your profile"):
         return take_snapshot(path, message)
 
 
 def take_snapshot(path: Path, message: str | None) -> SnapshotResult:
-    """Commit profile and config changes without taking the lock."""
+    """Secure game files, mod settings and profile changes without the lock."""
     repo = Repo(path)
     text = message or datetime.now().strftime(_SNAPSHOT_TIME_FORMAT)
     report = status(path)
+    secure_updated_files(repo, report)
     paths = [*report.modified_profiles, *report.modified_configs]
-    if not paths:
-        raise GitError(f"{path} has no profile or config changes to snapshot")
-    commit_hash = repo.commit(f"{SNAPSHOT_PREFIX}{text}", paths=paths)
-    return SnapshotResult(
-        commit=commit_hash,
+    if not (paths or report.game_files_changed or report.modified_mod_settings):
+        raise GitError(f"{path} has no changes to snapshot")
+    result = SnapshotResult(
+        commit="",
         message=text,
+        game_files=report.game_files_changed,
+        mod_settings=report.modified_mod_settings,
+    )
+    if not paths:
+        return result
+    commit_hash = repo.commit(f"{SNAPSHOT_PREFIX}{text}", paths=paths)
+    return replace(
+        result,
+        commit=commit_hash,
         files=[mod_file.path for mod_file in repo.show_files(commit_hash)],
     )
+
+
+def secure_updated_files(repo: Repo, report: StatusReport) -> None:
+    """Commit the game files an SPT update rewrote and the settings mods changed.
+
+    Game files come first and the SPT version is read again and stored right
+    after them, because an update usually raises it.
+    """
+    if report.game_files_changed:
+        repo.commit(_GAME_FILES_MESSAGE, paths=report.game_files_changed)
+        _store_detected_version(repo)
+    if report.modified_mod_settings:
+        repo.commit(_MOD_SETTINGS_MESSAGE, paths=report.modified_mod_settings)
 
 
 def ensure_installable(repo: Repo) -> None:
@@ -275,11 +307,7 @@ def ensure_installable(repo: Repo) -> None:
         return
     report = status(repo.path)
     _reject_unmanaged(report)
-    if report.game_files_changed:
-        repo.commit(_GAME_FILES_MESSAGE, paths=report.game_files_changed)
-        _store_detected_version(repo)
-    if report.modified_mod_settings:
-        repo.commit(_MOD_SETTINGS_MESSAGE, paths=report.modified_mod_settings)
+    secure_updated_files(repo, report)
     if report.modified_profiles or report.modified_configs:
         take_snapshot(repo.path, "automatic snapshot before changing mods")
 

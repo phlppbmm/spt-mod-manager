@@ -1954,6 +1954,16 @@ export interface components {
              * @default []
              */
             files: string[];
+            /**
+             * Game Files
+             * @default []
+             */
+            game_files: string[];
+            /**
+             * Mod Settings
+             * @default []
+             */
+            mod_settings: string[];
         };
         /**
          * StatusReport

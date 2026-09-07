@@ -3,10 +3,12 @@
 Covers the toggle lifecycle (disable/enable roundtrip, no-op notices, unknown
 mod errors), ``adopt_mod`` (folder/DLL adoption, dirty-tree tolerance, and its
 typed errors), ``init_game_dir``'s auto-adopt wiring through ``adopt_mod``, and
-``snapshot`` (profile/config-only commits, mod files left untouched). CLI
-cases exercise the same paths through Typer's ``CliRunner``.
+``snapshot`` (securing updated game files and changed mod settings before the
+profile/config commit, mod files left untouched). CLI cases exercise the same
+paths through Typer's ``CliRunner``.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ from sptmod.core.errors import (
     ModNotFoundError,
     NotAGameDirError,
 )
+from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
@@ -540,6 +543,131 @@ def test_snapshot_commit_subject_and_no_mod_trailer(clean_repo: Repo) -> None:
     commit = next(c for c in clean_repo.log() if c.hash == result.commit)
     assert commit.subject == "snapshot: manual test"
     assert "Mod" not in commit.trailers
+
+
+def _seed_game_file(repo: Repo, relpath: str) -> Path:
+    """Commit ``relpath`` as part of the game baseline and return its full path.
+
+    Mimics a file the SPT installer shipped and the baseline commit recorded:
+    tracked, but carrying no ``Mod:`` trailer, so a later change to it is
+    reported as a game file no mod accounts for.
+    """
+    full = repo.path / relpath
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(b"4.1.0-build")
+    repo.commit("chore: seed SPT client files", paths=[Path(relpath)])
+    return full
+
+
+def test_snapshot_secures_updated_game_files_without_a_profile_commit(clean_repo: Repo) -> None:
+    """snapshot commits game files an SPT update changed even when no profile changed.
+
+    BepInEx/plugins/spt/spt-common.dll belongs to the game baseline and is then overwritten,
+    as an SPT update or downgrade does; snapshot() must write exactly one
+    'snapshot: game files updated' commit, report the file under game_files, leave commit
+    empty (nothing else changed) and leave the tree clean. This is the bug where status
+    announced 1130 changed game files and snapshot left every one of them uncommitted.
+    """
+    spt_dll = _seed_game_file(clean_repo, "BepInEx/plugins/spt/spt-common.dll")
+    spt_dll.write_bytes(b"4.0.0-build")
+    commits_before = len(clean_repo.log())
+
+    result = services.snapshot(clean_repo.path, "after the downgrade")
+
+    subjects = [commit.subject for commit in clean_repo.log()]
+    assert len(subjects) == commits_before + 1
+    assert subjects[0] == "snapshot: game files updated"
+    assert result.commit == ""
+    assert not result.files
+    assert result.game_files == [Path("BepInEx/plugins/spt/spt-common.dll")]
+    assert clean_repo.is_clean()
+
+
+def test_snapshot_stores_the_spt_version_the_updated_game_files_report(clean_repo: Repo) -> None:
+    """After securing changed game files, snapshot stores the newly detected SPT version.
+
+    The stored version says 4.1.0 while core.json now says 4.0.0, as after an SPT downgrade;
+    snapshotting must leave both sptmod.sptversion and status().spt_version at 4.0.0. This is
+    the bug where the stored version stayed empty after a downgrade was snapshotted.
+    """
+    services.set_spt_version(clean_repo.path, "4.1.0")
+    core_config = clean_repo.path / "SPT/SPT_Data/configs/core.json"
+    core_config.write_text(json.dumps({"sptVersion": "4.0.0"}), encoding="utf-8")
+
+    services.snapshot(clean_repo.path, "after the downgrade")
+
+    assert clean_repo.config_get(SPT_VERSION_CONFIG_KEY) == "4.0.0"
+    assert services.status(clean_repo.path).spt_version == "4.0.0"
+
+
+def test_snapshot_secures_changed_mod_settings_without_a_profile_commit(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
+    """snapshot commits settings a mod rewrote in its own directory, without a profile change.
+
+    ClientMod rewrites BepInEx/plugins/ClientMod/config.json while the game runs; snapshot()
+    must write exactly one 'snapshot: mod settings changed' commit, report the file under
+    mod_settings, leave commit empty and leave the tree clean, so the user's own snapshot
+    never leaves that change behind.
+    """
+    install_commit(
+        clean_repo,
+        "ClientMod",
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
+    )
+    (clean_repo.path / "BepInEx/plugins/ClientMod/config.json").write_text('{"v": 2}', encoding="utf-8")
+    commits_before = len(clean_repo.log())
+
+    result = services.snapshot(clean_repo.path, "after a raid")
+
+    subjects = [commit.subject for commit in clean_repo.log()]
+    assert len(subjects) == commits_before + 1
+    assert subjects[0] == "snapshot: mod settings changed"
+    assert result.commit == ""
+    assert result.mod_settings == [Path("BepInEx/plugins/ClientMod/config.json")]
+    assert clean_repo.is_clean()
+
+
+def test_snapshot_secures_game_files_mod_settings_and_profiles_in_that_order(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
+    """All three kinds of change are secured in one snapshot call, oldest class first.
+
+    A changed game file, a mod setting rewritten by an active mod and a changed profile are
+    all present; snapshot() must write 'snapshot: game files updated', then
+    'snapshot: mod settings changed', then the user's own 'snapshot: <message>', report each
+    class in its own result field and leave the tree clean. The order matters because the SPT
+    version is re-read right after the game files are committed.
+    """
+    install_commit(
+        clean_repo,
+        "ClientMod",
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
+    )
+    spt_dll = _seed_game_file(clean_repo, "BepInEx/plugins/spt/spt-common.dll")
+    spt_dll.write_bytes(b"4.0.0-build")
+    (clean_repo.path / "BepInEx/plugins/ClientMod/config.json").write_text('{"v": 2}', encoding="utf-8")
+    (clean_repo.path / "SPT/user/profiles/abc.json").write_text('{"changed": true}', encoding="utf-8")
+
+    result = services.snapshot(clean_repo.path, "after a raid")
+
+    subjects = [commit.subject for commit in clean_repo.log()][:3]
+    assert subjects == [
+        "snapshot: after a raid",
+        "snapshot: mod settings changed",
+        "snapshot: game files updated",
+    ]
+    assert result.commit != ""
+    assert result.files == [Path("SPT/user/profiles/abc.json")]
+    assert result.game_files == [Path("BepInEx/plugins/spt/spt-common.dll")]
+    assert result.mod_settings == [Path("BepInEx/plugins/ClientMod/config.json")]
+    assert clean_repo.is_clean()
 
 
 def test_snapshot_raises_git_error_when_nothing_changed(clean_repo: Repo) -> None:

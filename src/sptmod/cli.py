@@ -679,14 +679,25 @@ def snapshot(
         typer.Option("--message", "-m", help="Snapshot message (default: timestamp)."),
     ] = None,
 ) -> None:
-    """Commit the current profiles and BepInEx configs."""
+    """Secure updated game files, changed mod settings, profiles and configs."""
     with _handled():
         result = services.snapshot(Path.cwd(), message)
-        console.print(
-            f"snapshot: {result.message} ({len(result.files)} files) "
-            f"as {result.commit[:_SHORT_HASH_LENGTH]}",
-            markup=False,
-        )
+        if result.game_files:
+            console.print(
+                f"secured {len(result.game_files)} updated game files",
+                markup=False,
+            )
+        if result.mod_settings:
+            console.print(
+                f"secured {len(result.mod_settings)} changed mod settings",
+                markup=False,
+            )
+        if result.commit:
+            console.print(
+                f"snapshot: {result.message} ({len(result.files)} files) "
+                f"as {result.commit[:_SHORT_HASH_LENGTH]}",
+                markup=False,
+            )
 
 
 @app.command()

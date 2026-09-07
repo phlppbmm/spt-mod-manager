@@ -24,13 +24,21 @@ def gitignore_whitelist(runtime_dir_name: str) -> str:
     # matching every file basename at any depth. The "!dir/**" and
     # "!dir/*.json" lines re-include the contents that have to stay trackable.
     # "BepInEx/patchers/" goes beyond §5 as well: mods such as WTT-CommonLib
-    # ship patcher DLLs that must be tracked like plugins.
+    # ship patcher DLLs that must be tracked like plugins. The SPT program set
+    # is tracked too, so an SPT update is one commit and a downgrade one
+    # revert: "!<runtime>/*" covers the executables, DLLs and JSON files
+    # directly in the runtime directory, "!<runtime>/SPT_Data/**" the static
+    # data of the release. Re-including a directory entry alone tracks
+    # nothing, so "user/" and any future subdirectory stay invisible until a
+    # line re-includes their files.
     return f"""\
 *
 !.gitignore
 !{runtime_dir_name}/
-{runtime_dir_name}/*
-!{runtime_dir_name}/user/
+!{runtime_dir_name}/*
+!{runtime_dir_name}/SPT_Data/**
+{runtime_dir_name}/SPT_Data/**/cache/
+{runtime_dir_name}/SPT_Data/**/logs/
 {runtime_dir_name}/user/*
 !{runtime_dir_name}/user/mods/
 !{runtime_dir_name}/user/mods/**
@@ -149,7 +157,7 @@ class Repo:
         return repo
 
     def configure(self, layout: "GameLayout") -> None:
-        """Write the whitelist ``.gitignore`` if absent and set the identity.
+        """Write the whitelist ``.gitignore`` and set the identity.
 
         The local committer identity keeps operations independent of the global
         git config. Safe to call on a repository that is already configured,
@@ -158,13 +166,23 @@ class Repo:
         Raises:
             GitError: git failed.
         """
-        gitignore = self.path / ".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text(
-                gitignore_whitelist(layout.runtime_dir_name), encoding="utf-8"
-            )
+        self.write_whitelist(layout)
         self._git("config", "user.name", COMMITTER_NAME)
         self._git("config", "user.email", COMMITTER_EMAIL)
+
+    def write_whitelist(self, layout: "GameLayout") -> None:
+        """Write the whitelist ``.gitignore`` unless it already holds that text.
+
+        A repository initialized by an older version carries an older
+        whitelist; rewriting it is how the paths that whitelist did not cover
+        yet become visible. The rewritten file is a normal working-tree change
+        the next commit takes along.
+        """
+        gitignore = self.path / ".gitignore"
+        wanted = gitignore_whitelist(layout.runtime_dir_name)
+        if gitignore.exists() and gitignore.read_bytes() == wanted.encode("utf-8"):
+            return
+        gitignore.write_text(wanted, encoding="utf-8")
 
     def commit(
         self,

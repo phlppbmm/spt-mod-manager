@@ -1007,6 +1007,48 @@ def clean_repo_at(path: Path) -> Repo:
     return repo
 
 
+# The whitelist sptmod generated before it tracked the SPT program set: it
+# covered the mods, the profiles and BepInEx only, so an installation created
+# with it has neither the runtime directory's files nor SPT_Data committed.
+_LEGACY_WHITELIST = """\
+*
+!.gitignore
+!{runtime}/
+{runtime}/*
+!{runtime}/user/
+{runtime}/user/*
+!{runtime}/user/mods/
+!{runtime}/user/mods/**
+!{runtime}/user/profiles/
+!{runtime}/user/profiles/*.json
+{runtime}/user/profiles/backups/
+!BepInEx/
+BepInEx/*
+!BepInEx/plugins/
+!BepInEx/plugins/**
+!BepInEx/config/
+!BepInEx/config/**
+!BepInEx/patchers/
+!BepInEx/patchers/**
+"""
+
+
+def legacy_whitelist_repo(path: Path) -> Repo:
+    """Initialise the game directory at ``path`` the way an older sptmod did.
+
+    Writes the whitelist that did not cover the SPT program set yet and commits
+    the baseline with it, so every program file below the runtime directory
+    stays untracked and ignored. This is the state an installation set up
+    before that whitelist change is migrated from.
+    """
+    layout = detect_layout(path)
+    repo = Repo.init(layout)
+    whitelist = _LEGACY_WHITELIST.format(runtime=layout.runtime_dir_name)
+    (path / ".gitignore").write_text(whitelist, encoding="utf-8")
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
+    return repo
+
+
 def forge_trailers(mod_id: str, version_id: str | None = None) -> JsonDict:
     """Forge id trailers for ``install_commit``, for ``**``-unpacking.
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import clean_repo_at
+from conftest import clean_repo_at, legacy_whitelist_repo
 from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import game_dir, services, workspace
 from sptmod.core.errors import (
@@ -658,6 +658,33 @@ def test_install_secures_changed_game_files_before_the_mod_commit(
     assert subjects[1] == "snapshot: game files updated"
     assert not services.status(clean_repo.path).game_files_changed
     assert clean_repo.is_clean()
+
+
+def test_install_secures_the_program_files_an_older_repo_never_tracked(
+    fake_game_dir: Path, make_archive: MakeArchive
+) -> None:
+    """Untracked SPT program files never block an install; they are secured first.
+
+    A repository created before the whitelist covered the program set has the
+    server executable and the SPT_Data tree untracked; installing a mod must
+    sweep them into a 'snapshot: game files updated' commit instead of
+    rejecting them as files sptmod does not manage.
+    """
+    program_files = {Path("SPT/SPT.Server.exe"), Path("SPT/SPT_Data/database/locales/en.json")}
+    for relative in program_files:
+        (fake_game_dir / relative).parent.mkdir(parents=True, exist_ok=True)
+        (fake_game_dir / relative).write_bytes(b"4.1.0-build")
+    repo = legacy_whitelist_repo(fake_game_dir)
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    result = services.install_from_archive(fake_game_dir, archive)
+
+    assert result.mod.name == "CoolPlugin"
+    history = services.history(fake_game_dir)
+    assert history[0].subject.startswith("mod: CoolPlugin")
+    assert history[1].subject == "snapshot: game files updated"
+    assert program_files <= {mod_file.path for mod_file in repo.show_files(history[1].hash)}
+    assert repo.is_clean()
 
 
 def test_install_stores_the_spt_version_the_updated_game_files_report(

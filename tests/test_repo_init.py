@@ -160,17 +160,19 @@ def test_init_raises_not_a_game_dir_error_when_layout_root_is_missing(
         Repo.init(layout)
 
 
-def test_configure_called_again_does_not_overwrite_an_existing_gitignore(
+def test_configure_called_again_restores_the_current_whitelist(
     fake_game_dir: Path,
 ) -> None:
-    """Resuming a half-finished init must not clobber a manually edited
-    ``.gitignore`` (or one this same init already wrote)."""
+    """Resuming an init restores the whitelist the current version generates.
+
+    A ``.gitignore`` that differs -- an older whitelist, or a hand-edited one --
+    is replaced, because every path sptmod tracks depends on it.
+    """
     layout = detect_layout(fake_game_dir)
     repo = Repo.init(layout)
-    sentinel = "# sentinel: hand-edited whitelist, must survive\n"
-    (repo.path / ".gitignore").write_text(sentinel, encoding="utf-8")
+    (repo.path / ".gitignore").write_text("# stale whitelist\n", encoding="utf-8")
 
     repo.configure(layout)
 
-    assert (repo.path / ".gitignore").read_text(encoding="utf-8") == sentinel
+    assert (repo.path / ".gitignore").read_text(encoding="utf-8") == gitignore_whitelist("SPT")
     assert _git(repo.path, "config", "--local", "--get", "user.name") == COMMITTER_NAME

@@ -18,6 +18,7 @@ from sptmod.core.game_dir import (
     GameLayout,
     detect_layout,
     ensure_game_not_running,
+    is_game_program_path,
     resolve_spt_version,
     store_spt_version,
 )
@@ -151,7 +152,9 @@ def status(path: Path) -> StatusReport:
     file below an active mod's directory is that mod's own doing and is
     reported under ``modified_mod_settings``; one no mod commit accounts for
     at all belongs to SPT, not to a mod -- an SPT update rewrote it -- and is
-    reported under ``game_files_changed``. Untracked files below the mod
+    reported under ``game_files_changed``, and so is an untracked file of the
+    SPT program set, which a repository initialized before the whitelist
+    covered those files has never committed. Untracked files below the mod
     paths are grouped per mod folder as manual installs a caller can offer to
     :func:`adopt_mod`; all other untracked files are reported as they are. Untracked files below the
     profile and config paths join the modified ones there, because a
@@ -165,6 +168,7 @@ def status(path: Path) -> StatusReport:
     """
     layout = detect_layout(path)
     repo = Repo(path)
+    repo.write_whitelist(layout)
     raw = repo.status()
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
@@ -196,6 +200,9 @@ def status(path: Path) -> StatusReport:
         if prefix is not None:
             top = prefix / entry.relative_to(prefix).parts[0]
             manual_files.setdefault(top, []).append(entry)
+            continue
+        if is_game_program_path(entry, layout):
+            game_files_changed.append(entry)
             continue
         _group_snapshot_path(
             entry, layout, modified_profiles, modified_configs, other_untracked
@@ -255,12 +262,15 @@ def ensure_installable(repo: Repo) -> None:
     never has to know about the underlying version control. Settings an active
     mod rewrote inside its own directory are secured the same way, and so are
     game files an SPT update rewrote or deleted; after the latter the SPT
-    version is read again and stored, because an update usually raises it.
+    version is read again and stored, because an update usually raises it. The
+    whitelist is refreshed first, so a repository from an older version brings
+    the program files it never tracked into that same commit.
     Only untracked files the manager cannot account for (manually copied mods)
     and changed mod files no active mod owns stop the operation, in plain
     language.
     """
     ensure_game_not_running()
+    repo.write_whitelist(detect_layout(repo.path))
     if repo.is_clean():
         return
     report = status(repo.path)

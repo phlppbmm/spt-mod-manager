@@ -21,12 +21,33 @@ from sptmod.core.game_dir import detect_layout
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
+# Paths the whitelist must keep out of every commit: the logs, caches and
+# backups the game writes next to the files sptmod tracks.
+_IGNORED_DUMMIES = {
+    Path("SPT/user/logs/x.log"),
+    Path("SPT/user/cache/entry.bin"),
+    Path("SPT/user/certs/cert.pem"),
+    Path("SPT/SPT_Data/cache/entry.bin"),
+    Path("SPT/SPT_Data/database/logs/server.log"),
+    Path("BepInEx/cache/chainloader.dat"),
+    Path("Logs/launcher.log"),
+    Path("EscapeFromTarkov_Data/foo"),
+    Path("SPT/user/profiles/backups/old.json"),
+}
 
-def test_init_commits_whitelist_and_tracked_profile_only(fake_game_dir: Path) -> None:
-    """init_game_dir creates a repository with only .gitignore and SPT/user/profiles/abc.json.
 
-    The initial commit includes exactly these two files and no ignored dummies
-    or other tracked content.
+def _write_file(path: Path) -> None:
+    """Create ``path`` with placeholder content, including its parent directories."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"content")
+
+
+def test_init_commits_whitelist_profile_and_program_files_only(fake_game_dir: Path) -> None:
+    """init_game_dir commits .gitignore, the profile and the SPT program files.
+
+    The initial commit includes exactly these files -- ``fake_game_dir``'s only
+    program file is SPT/SPT_Data/configs/core.json -- and no ignored dummies or
+    other tracked content.
     """
     result = services.init_game_dir(fake_game_dir)
 
@@ -34,25 +55,50 @@ def test_init_commits_whitelist_and_tracked_profile_only(fake_game_dir: Path) ->
     assert committed == {
         Path(".gitignore"),
         Path("SPT/user/profiles/abc.json"),
+        Path("SPT/SPT_Data/configs/core.json"),
     }
+
+
+def test_init_commits_the_spt_program_set(fake_game_dir: Path) -> None:
+    """init_game_dir puts the SPT program set into the baseline commit.
+
+    The executables, libraries and JSON files directly in the runtime directory
+    and the whole SPT_Data tree are written before init and must all appear in
+    the initial commit, so that a later SPT update is one commit and its
+    rollback one revert.
+    """
+    program_files = [
+        Path("SPT/SPT.Server.exe"),
+        Path("SPT/SPT.Server.Linux"),
+        Path("SPT/SPTarkov.Server.Core.dll"),
+        Path("SPT/libargon2_sharp_core.so"),
+        Path("SPT/sptLogger.json"),
+        Path("SPT/SPTarkov.Common.xml"),
+        Path("SPT/SPT_Data/checks.dat"),
+        Path("SPT/SPT_Data/database/locales/en.json"),
+    ]
+    for relative in program_files:
+        _write_file(fake_game_dir / relative)
+
+    result = services.init_game_dir(fake_game_dir)
+
+    committed = {f.path for f in Repo(fake_game_dir).show_files(result.commit)}
+    assert set(program_files) <= committed
 
 
 def test_init_ignored_dummies_are_absent_from_the_commit(fake_game_dir: Path) -> None:
     """init_game_dir excludes ignored paths from the initial commit.
 
-    Files like SPT/user/logs/x.log, EscapeFromTarkov_Data/foo, and
-    SPT/SPT_Data/configs/core.json do not appear in the commit.
+    Logs, profile backups, game client data and the caches next to the program
+    files do not appear in the commit.
     """
+    for relative in _IGNORED_DUMMIES:
+        _write_file(fake_game_dir / relative)
+
     result = services.init_game_dir(fake_game_dir)
 
     committed = {f.path for f in Repo(fake_game_dir).show_files(result.commit)}
-    ignored = {
-        Path("SPT/user/logs/x.log"),
-        Path("EscapeFromTarkov_Data/foo"),
-        Path("SPT/user/profiles/backups/old.json"),
-        Path("SPT/SPT_Data/configs/core.json"),
-    }
-    assert committed.isdisjoint(ignored)
+    assert committed.isdisjoint(_IGNORED_DUMMIES)
 
 
 def test_init_reports_the_spt_version_read_from_core_json(fake_game_dir: Path) -> None:

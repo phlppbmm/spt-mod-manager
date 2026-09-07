@@ -163,6 +163,25 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   (`!dir/` re-includes only the directory entry). `repo.gitignore_whitelist`
   generates per-layout patterns with `**` re-inclusions, including
   `BepInEx/patchers/**`.
+- The whitelist tracks the SPT program set too, so an SPT update is one commit
+  and a downgrade one revert: `!<runtime>/*` covers every file directly in the
+  runtime directory (executables, `.dll`, `.so`, `.json`, `.xml`) and
+  `!<runtime>/SPT_Data/**` the static release data (including the ~670 MB
+  `database/`), while `<runtime>/SPT_Data/**/cache|logs/` and the unchanged
+  `<runtime>/user/*` re-ignore keep caches, logs, certificates, profile
+  backups and `.sptmod-*` out. Re-including a directory entry alone tracks
+  nothing, so subdirectories no line re-includes stay invisible.
+- Migration of an existing repository: `Repo.write_whitelist` rewrites
+  `.gitignore` whenever it differs from `gitignore_whitelist(...)`, and both
+  `status()` and `ensure_installable` call it before they look at the tree
+  (`ensure_installable` before its `is_clean()` fast path, which would
+  otherwise never see the newly visible files). The program files then surface
+  as untracked; `status` classifies them via `game_dir.is_game_program_path`
+  under `game_files_changed` — never as `other_untracked`, never as a
+  `ManualMod` adopt hint — so the next mod operation sweeps them, together
+  with the rewritten `.gitignore`, into the `snapshot: game files updated`
+  commit instead of blocking. Untracked files below mod prefixes keep their
+  adopt behaviour.
 - Trailers are written via `git interpret-trailers` and read via
   `git log --format=%(trailers:...)`; never regex over the body. Trailer
   values reject `\n`/`\r` (injection guard). Keys per HANDOFF §5 plus

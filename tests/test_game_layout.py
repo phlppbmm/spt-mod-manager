@@ -819,10 +819,15 @@ def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(
 # ============================================================================
 
 
-def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
+def test_init_on_runtime_layout_tracks_the_whitelist_profile_and_program_files(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Init on SPT_Runtime layout commits only .gitignore and profile to whitelist."""
+    """Init on the SPT_Runtime layout commits .gitignore, the profile and the program files.
+
+    The server executable and SPT_Data/configs/core.json belong to the SPT
+    program set, so the whitelist of the 4.1+ layout must track them the same
+    way the SPT layout does.
+    """
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
@@ -832,13 +837,15 @@ def test_init_on_runtime_layout_tracks_only_the_whitelist_and_runtime_profile(
     assert committed == {
         Path(".gitignore"),
         Path("SPT_Runtime/user/profiles/abc.json"),
+        Path("SPT_Runtime/SPT.Server.exe"),
+        Path("SPT_Runtime/SPT_Data/configs/core.json"),
     }
 
 
 def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
     fake_game_dir_runtime: Path,
 ) -> None:
-    """Ignored paths (logs, core.json, backups, game data) are not committed."""
+    """Ignored paths (logs, backups, game data) are not committed."""
     write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
 
     result = services.init_game_dir(fake_game_dir_runtime)
@@ -848,7 +855,6 @@ def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
         Path("SPT_Runtime/user/logs/x.log"),
         Path("EscapeFromTarkov_Data/foo"),
         Path("SPT_Runtime/user/profiles/backups/old.json"),
-        Path("SPT_Runtime/SPT_Data/configs/core.json"),
     }
     assert committed.isdisjoint(ignored)
 

@@ -24,7 +24,8 @@ CLIENT_EXE_NAME: Final = "EscapeFromTarkov.exe"
 
 # Directories a flat SPT 3.x installation keeps in the game root; 4.x moved
 # them below the runtime directory.
-LEGACY_FLAT_DIR_NAMES: Final[tuple[str, ...]] = ("SPT_Data", "user")
+SPT_DATA_DIR_NAME: Final = "SPT_Data"
+LEGACY_FLAT_DIR_NAMES: Final[tuple[str, ...]] = (SPT_DATA_DIR_NAME, "user")
 
 # Client files SPT itself ships below BepInEx; they are part of the
 # installation, never mods, and must survive every mod operation.
@@ -110,9 +111,14 @@ class GameLayout:
         return self.profiles_dir / "backups"
 
     @property
+    def spt_data_dir(self) -> Path:
+        """The directory holding the static data of the SPT release."""
+        return self.runtime_dir / SPT_DATA_DIR_NAME
+
+    @property
     def core_config_file(self) -> Path:
         """The core server configuration file."""
-        return self.runtime_dir / "SPT_Data" / "configs" / "core.json"
+        return self.spt_data_dir / "configs" / "core.json"
 
     @property
     def server_exe(self) -> Path:
@@ -134,7 +140,7 @@ class GameLayout:
     @property
     def http_config_file(self) -> Path:
         """The server configuration file naming its address and port."""
-        return self.runtime_dir / "SPT_Data" / "configs" / "http.json"
+        return self.spt_data_dir / "configs" / "http.json"
 
     @property
     def launcher_settings_file(self) -> Path:
@@ -202,6 +208,19 @@ def is_spt_own_path(entry: Path) -> bool:
     return any(
         lowered == own or lowered.startswith(f"{own}/")
         for own in (path.as_posix().casefold() for path in SPT_OWN_CLIENT_PATHS)
+    )
+
+
+def is_game_program_path(entry: Path, layout: GameLayout) -> bool:
+    """Return whether ``entry`` belongs to the SPT program set of ``layout``.
+
+    ``entry`` is relative to the game directory. The program set is what an SPT
+    release ships below its runtime directory: the executables, libraries and
+    JSON files directly in it, plus the whole ``SPT_Data`` tree. Those paths
+    belong to the installation, never to a mod.
+    """
+    return entry.parent == layout.runtime_dir or entry.is_relative_to(
+        layout.spt_data_dir
     )
 
 

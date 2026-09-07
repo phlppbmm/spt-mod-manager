@@ -19,7 +19,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from conftest import clean_repo_at
+from conftest import clean_repo_at, legacy_whitelist_repo
 from fixture_types import InstallCommit, MakeArchive
 from forge_json import mod_json_full, owner_json, page_envelope, version_json
 from sptmod.cli import app
@@ -27,7 +27,7 @@ from sptmod.core import services
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.modmeta import InvalidMetadataError
-from sptmod.core.repo import Repo
+from sptmod.core.repo import Repo, gitignore_whitelist
 
 pytestmark = pytest.mark.usefixtures("not_running")
 
@@ -219,6 +219,74 @@ def test_status_reports_a_changed_file_of_an_active_mod_as_mod_settings(
     assert report.modified_mod_settings == [Path("SPT/user/mods/ModA/config/config.json")]
     assert not report.other_modified
     assert not report.game_files_changed
+
+
+_MIGRATED_PROGRAM_FILES = (
+    "SPT.Server.exe",
+    "SPTarkov.Server.Core.dll",
+    "sptLogger.json",
+    "SPT_Data/checks.dat",
+    "SPT_Data/database/locales/en.json",
+)
+
+
+@pytest.mark.parametrize(
+    ("game_dir_fixture", "runtime"),
+    [
+        pytest.param("fake_game_dir", "SPT", id="spt-4.0-layout"),
+        pytest.param("fake_game_dir_runtime", "SPT_Runtime", id="spt-4.1-layout"),
+    ],
+)
+def test_status_reports_untracked_program_files_as_game_files(
+    game_dir_fixture: str, runtime: str, request: pytest.FixtureRequest
+) -> None:
+    """status reports the program files of an older repository under game_files_changed.
+
+    A repository set up before the whitelist covered the SPT program set has
+    none of those files committed; once the whitelist makes them visible they
+    are the installation's own files, so status() must report them as game
+    files and never as unmanaged files or as a manual mod to adopt -- the
+    latter would make every mod operation block.
+    """
+    game_dir: Path = request.getfixturevalue(game_dir_fixture)
+    expected = {Path(runtime) / relative for relative in _MIGRATED_PROGRAM_FILES}
+    for path in expected:
+        (game_dir / path).parent.mkdir(parents=True, exist_ok=True)
+        (game_dir / path).write_bytes(b"4.1.0-build")
+    legacy_whitelist_repo(game_dir)
+
+    report = services.status(game_dir)
+
+    assert expected <= set(report.game_files_changed)
+    assert not report.manual_mods
+    assert not report.other_untracked
+    assert not report.other_modified
+
+
+@pytest.mark.parametrize(
+    ("game_dir_fixture", "runtime"),
+    [
+        pytest.param("fake_game_dir", "SPT", id="spt-4.0-layout"),
+        pytest.param("fake_game_dir_runtime", "SPT_Runtime", id="spt-4.1-layout"),
+    ],
+)
+def test_status_refreshes_a_stale_whitelist_and_reports_it_as_a_game_file(
+    game_dir_fixture: str, runtime: str, request: pytest.FixtureRequest
+) -> None:
+    """status rewrites an outdated .gitignore and reports it under game_files_changed.
+
+    This is how the widened whitelist reaches a repository created by an older
+    version: the file is brought up to date on the next look at the game
+    directory, and the change rides along in the game-files snapshot the next
+    mod operation writes.
+    """
+    game_dir: Path = request.getfixturevalue(game_dir_fixture)
+    legacy_whitelist_repo(game_dir)
+
+    report = services.status(game_dir)
+
+    assert (game_dir / ".gitignore").read_text(encoding="utf-8") == gitignore_whitelist(runtime)
+    assert Path(".gitignore") in report.game_files_changed
 
 
 # --- export ------------------------------------------------------------------

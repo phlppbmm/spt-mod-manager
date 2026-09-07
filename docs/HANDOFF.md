@@ -205,8 +205,10 @@ doesn't create/switch them), automatic profile cleanup (detection only, see
 *
 !.gitignore
 !<runtime_dir>/
-<runtime_dir>/*
-!<runtime_dir>/user/
+!<runtime_dir>/*
+!<runtime_dir>/SPT_Data/**
+<runtime_dir>/SPT_Data/**/cache/
+<runtime_dir>/SPT_Data/**/logs/
 <runtime_dir>/user/*
 !<runtime_dir>/user/mods/
 !<runtime_dir>/user/mods/**
@@ -224,9 +226,14 @@ BepInEx/*
 ```
 
 Where `<runtime_dir>` = `SPT_Runtime` (4.1+) or `SPT` (4.0.x). The `**` form
-works correctly with real git (reinclusion inside ignored dirs). Verify that
-`<runtime_dir>/user/logs/`, `<runtime_dir>/user/cache/`, game binaries, and
-all non-profile user data remain untracked.
+works correctly with real git (reinclusion inside ignored dirs). The SPT
+program set is tracked as well — every file directly in `<runtime_dir>/`
+(server and launcher executables, `.dll`, `.so`, `.json`, `.xml`) and the whole
+`<runtime_dir>/SPT_Data/` tree — so an SPT update is one commit and a downgrade
+one revert. Verify that `<runtime_dir>/user/logs/`,
+`<runtime_dir>/user/cache/`, `<runtime_dir>/user/certs/`, cache and log
+directories below `SPT_Data/`, `BepInEx/cache/`, `Logs/`, `.sptmod-*` and the
+game client files remain untracked.
 
 **Commit format:**
 
@@ -503,4 +510,8 @@ progress feedback. **Favorites** (`favorites.json` in config dir, survives
 (in catalog SQLite) stores HTML-stripped text with timestamps for server-side
 dedup. **Profile residue detection** categorizes custom items, traders, quests
 per mod; removal without `--force` aborts if residue found; optional cleanup
-planned (separate team). **Inventory field fix:** `_tpl`, not `tpl`.
+planned (separate team). **Inventory field fix:** `_tpl`, not `tpl`. **SPT program files are
+tracked** — the whitelist covers `<runtime_dir>/*` and
+`<runtime_dir>/SPT_Data/**`; a repository created with the older whitelist gets
+its `.gitignore` rewritten on the next status and the newly visible files are
+reported as changed game files, which the next mod operation snapshots.

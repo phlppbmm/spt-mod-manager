@@ -262,7 +262,9 @@ class StatusReport(CoreModel):
     spt_version: str = ""
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
+    modified_mod_settings: list[Path] = []
     manual_mods: list[ManualMod] = []
+    game_files_changed: list[Path] = []
     other_modified: list[Path] = []
     other_untracked: list[Path] = []
 

@@ -311,15 +311,23 @@ class Repo:
                 f"{path.as_posix()} at {commit_hash} is not UTF-8 text"
             ) from error
 
+    def commits_touching(self, path: Path) -> list[CommitInfo]:
+        """Return the commits touching ``path``, newest first.
+
+        Raises:
+            GitError: git failed.
+        """
+        return self._parse_log(
+            self._git("log", f"--format={_LOG_FORMAT}", "--", path.as_posix())
+        )
+
     def last_touching(self, path: Path) -> CommitInfo | None:
         """Return the most recent commit touching ``path``, or ``None``.
 
         Raises:
             GitError: git failed.
         """
-        commits = self._parse_log(
-            self._git("log", "-1", f"--format={_LOG_FORMAT}", "--", path.as_posix())
-        )
+        commits = self.commits_touching(path)
         return commits[0] if commits else None
 
     def status(self) -> RepoStatus:

@@ -4039,12 +4039,30 @@
             "title": "Modified Configs",
             "type": "array"
           },
+          "modified_mod_settings": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Modified Mod Settings",
+            "type": "array"
+          },
           "manual_mods": {
             "default": [],
             "items": {
               "$ref": "#/components/schemas/ManualMod"
             },
             "title": "Manual Mods",
+            "type": "array"
+          },
+          "game_files_changed": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Game Files Changed",
             "type": "array"
           },
           "other_modified": {

@@ -229,13 +229,27 @@ def _print_status(report: services.StatusReport) -> None:
             f"with 'sptmod adopt {manual.path.as_posix()}'",
             markup=False,
         )
+    if report.modified_mod_settings:
+        console.print(
+            f"Mod settings changed since the last snapshot "
+            f"({len(report.modified_mod_settings)} files).",
+            markup=False,
+        )
+    if report.game_files_changed:
+        console.print(
+            f"Game files changed since the last snapshot "
+            f"({len(report.game_files_changed)} files), probably an SPT update.",
+            markup=False,
+        )
     _print_paths("other changes:", report.other_modified)
     _print_paths("other untracked files:", report.other_untracked)
     if not any(
         (
             report.modified_profiles,
             report.modified_configs,
+            report.modified_mod_settings,
             report.manual_mods,
+            report.game_files_changed,
             report.other_modified,
             report.other_untracked,
         )

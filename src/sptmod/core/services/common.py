@@ -84,6 +84,10 @@ DEPENDENCY_KINDS: Final[tuple[ConflictKind, ...]] = (
 
 UNSET_DATE: Final = datetime.min
 
+# Snapshot commits secure profiles, mod settings and updated game files; they
+# carry no trailers and must not take a path's owner away from it.
+SNAPSHOT_PREFIX: Final = "snapshot: "
+
 
 def current_mods(repo: Repo) -> list[ModInfo]:
     """Return one entry per mod, newest first.
@@ -166,9 +170,18 @@ def install_commit(repo: Repo, name: str) -> str:
 
 
 def last_touching_mod(repo: Repo, path: Path) -> str:
-    """Return the mod name of the youngest commit touching ``path``, or ``""``."""
-    commit = repo.last_touching(path)
-    return commit.trailers.get(TRAILER_MOD, "") if commit is not None else ""
+    """Return the mod name of the youngest mod commit touching ``path``, or ``""``.
+
+    Snapshot commits are skipped, because securing a profile, a mod's own
+    settings or an updated game file must not take a path's owner away from
+    it. A path only snapshots ever touched stays without an owner, and so does
+    one whose youngest other commit carries no ``Mod`` trailer.
+    """
+    for commit in repo.commits_touching(path):
+        if commit.subject.startswith(SNAPSHOT_PREFIX):
+            continue
+        return commit.trailers.get(TRAILER_MOD, "")
+    return ""
 
 
 def mod_prefixes(layout: GameLayout) -> tuple[Path, ...]:

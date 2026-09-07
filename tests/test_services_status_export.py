@@ -1,7 +1,8 @@
 """Tests for ``sptmod.core.services`` status/export/import and CLI wiring.
 
 Covers ``status()`` grouping (modified profile, modified config, modified
-mod file, untracked mod folder/loose plugin as manual mods), ``export_mods``
+mod file, changed or deleted SPT game file, untracked mod folder/loose
+plugin as manual mods), ``export_mods``
 (text/json rendering, ``--client-only`` filtering, catalog link lookup) and
 ``import_list`` (diff against a deviating install state, format detection by
 content; the ``--apply`` Forge install path itself is covered in
@@ -161,6 +162,63 @@ def test_status_groups_a_loose_untracked_dll_as_a_manual_mod_by_itself(
     manual = report.manual_mods[0]
     assert manual.path == Path("BepInEx/plugins/Loose.dll")
     assert manual.files == [Path("BepInEx/plugins/Loose.dll")]
+
+
+@pytest.mark.parametrize(
+    "delete",
+    [pytest.param(False, id="modified"), pytest.param(True, id="deleted")],
+)
+def test_status_reports_a_changed_spt_file_as_a_game_file_change(clean_repo: Repo, delete: bool) -> None:
+    """status reports a tracked file no mod owns under game_files_changed, not other_modified.
+
+    BepInEx/plugins/spt/spt-common.dll is committed as part of the game baseline (no Mod
+    trailer) and then overwritten or deleted, the way an SPT update rewrites its own client
+    files; status() must list it under game_files_changed and leave other_modified and
+    manual_mods empty. This guards the classification that keeps an SPT update from being
+    reported as files sptmod does not manage.
+    """
+    spt_dll = clean_repo.path / "BepInEx/plugins/spt/spt-common.dll"
+    spt_dll.parent.mkdir(parents=True)
+    spt_dll.write_bytes(b"4.1.0-build")
+    clean_repo.commit("chore: seed SPT client files", paths=[Path("BepInEx/plugins/spt/spt-common.dll")])
+    if delete:
+        spt_dll.unlink()
+    else:
+        spt_dll.write_bytes(b"4.2.0-build")
+
+    report = services.status(clean_repo.path)
+
+    assert report.game_files_changed == [Path("BepInEx/plugins/spt/spt-common.dll")]
+    assert not report.other_modified
+    assert not report.manual_mods
+
+
+@pytest.mark.parametrize(
+    "delete",
+    [pytest.param(False, id="modified"), pytest.param(True, id="deleted")],
+)
+def test_status_reports_a_changed_file_of_an_active_mod_as_mod_settings(
+    clean_repo: Repo, install_commit: InstallCommit, delete: bool
+) -> None:
+    """status reports a changed file below an active mod's directory under modified_mod_settings.
+
+    ModA is installed with SPT/user/mods/ModA/config/config.json, which is then rewritten or
+    deleted the way the mod itself does while the game runs; status() must list it under
+    modified_mod_settings and leave other_modified and game_files_changed empty. This guards
+    the classification that keeps a mod's own settings from being called unmanaged.
+    """
+    install_commit(clean_repo, "ModA", files={"SPT/user/mods/ModA/config/config.json": '{"v": 1}'})
+    config = clean_repo.path / "SPT/user/mods/ModA/config/config.json"
+    if delete:
+        config.unlink()
+    else:
+        config.write_text('{"v": 2}', encoding="utf-8")
+
+    report = services.status(clean_repo.path)
+
+    assert report.modified_mod_settings == [Path("SPT/user/mods/ModA/config/config.json")]
+    assert not report.other_modified
+    assert not report.game_files_changed
 
 
 # --- export ------------------------------------------------------------------
@@ -579,6 +637,60 @@ def test_cli_status_shows_adopt_hint_for_a_manual_mod(fake_game_dir: Path, monke
     assert result.exit_code == 0
     assert "adopt" in result.stdout
     assert "SPT/user/mods/NewMod" in result.stdout
+
+
+def test_cli_status_reports_changed_mod_settings_of_an_active_mod(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
+) -> None:
+    """CLI 'sptmod status' summarises changed files of an active mod as changed mod settings.
+
+    After installing ClientMod, rewriting its BepInEx/plugins/ClientMod/config.json and
+    running 'sptmod status' from the game dir, result.exit_code == 0 and the output names the
+    file count under changed mod settings, without the adopt hint. This keeps the CLI from
+    presenting a mod's own settings as unmanaged files.
+    """
+    repo = clean_repo_at(fake_game_dir)
+    install_commit(
+        repo,
+        "ClientMod",
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
+    )
+    (fake_game_dir / "BepInEx/plugins/ClientMod/config.json").write_text('{"v": 2}', encoding="utf-8")
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Mod settings changed since the last snapshot (1 files)." in result.stdout
+    assert "adopt" not in result.stdout
+
+
+def test_cli_status_reports_changed_game_files_as_a_probable_spt_update(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI 'sptmod status' summarises changed game files as a probable SPT update.
+
+    After committing BepInEx/plugins/spt/spt-common.dll as part of the baseline, overwriting
+    it and running 'sptmod status' from the game dir, result.exit_code == 0 and the output
+    names the file count and 'probably an SPT update', without the adopt hint. This keeps the
+    CLI from presenting an SPT update as unmanaged files.
+    """
+    repo = clean_repo_at(fake_game_dir)
+    spt_dll = fake_game_dir / "BepInEx/plugins/spt/spt-common.dll"
+    spt_dll.parent.mkdir(parents=True)
+    spt_dll.write_bytes(b"4.1.0-build")
+    repo.commit("chore: seed SPT client files", paths=[Path("BepInEx/plugins/spt/spt-common.dll")])
+    spt_dll.write_bytes(b"4.2.0-build")
+    monkeypatch.chdir(fake_game_dir)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "(1 files), probably an SPT update." in result.stdout
+    assert "adopt" not in result.stdout
 
 
 def test_cli_export_json_happy_path(

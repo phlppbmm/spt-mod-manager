@@ -1976,10 +1976,20 @@ export interface components {
              */
             modified_configs: string[];
             /**
+             * Modified Mod Settings
+             * @default []
+             */
+            modified_mod_settings: string[];
+            /**
              * Manual Mods
              * @default []
              */
             manual_mods: components["schemas"]["ManualMod"][];
+            /**
+             * Game Files Changed
+             * @default []
+             */
+            game_files_changed: string[];
             /**
              * Other Modified
              * @default []

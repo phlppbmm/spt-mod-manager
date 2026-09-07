@@ -7,8 +7,8 @@ wrote while the game ran. Those files are "runtime data": ``status()`` leaves
 them out of the report entirely, they never block install/remove/disable/
 enable, are never snapshotted, and are deleted together with the mod on
 ``remove_mod``/``disable_mod``. A directory no active mod owns is still a
-manual-mod blocker; a modified *tracked* file inside an owned directory still
-blocks.
+manual-mod blocker; a modified *tracked* file inside an owned directory is
+the mod's own settings change and is snapshotted instead of blocking.
 """
 
 import os
@@ -193,26 +193,104 @@ def test_install_with_profile_changes_and_runtime_data_snapshots_exactly_once(
     assert runtime_file.read_text(encoding="utf-8") == "generated while playing"
 
 
-def test_install_still_blocks_on_a_modified_tracked_file_inside_an_owned_dir(
-    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive
+@pytest.mark.parametrize(
+    "delete",
+    [pytest.param(False, id="modified"), pytest.param(True, id="deleted")],
+)
+def test_install_snapshots_a_modified_tracked_file_inside_an_owned_dir(
+    clean_repo: Repo, install_commit: InstallCommit, make_archive: MakeArchive, delete: bool
 ) -> None:
-    """install_from_archive blocks on modified tracked files even in owned mod directories.
+    """install_from_archive secures modified tracked files of an active mod instead of blocking.
 
-    Modifying BepInEx/plugins/ClientMod/ClientMod.dll (tracked in an earlier commit)
-    causes DirtyTreeError even though the mod directory is owned by the active mod.
+    BepInEx/plugins/ClientMod/config.json is rewritten or deleted the way a mod changes its
+    own settings while the game runs; install_from_archive must succeed, record the change as
+    'snapshot: mod settings changed' before the new mod commit and leave the tree clean. Mods
+    writing into their own directory are normal operation, not files sptmod cannot account
+    for.
     """
     install_commit(
         clean_repo,
         "ClientMod",
-        files={"BepInEx/plugins/ClientMod/ClientMod.dll": "v1"},
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
     )
-    (clean_repo.path / "BepInEx/plugins/ClientMod/ClientMod.dll").write_text("tampered", encoding="utf-8")
+    config = clean_repo.path / "BepInEx/plugins/ClientMod/config.json"
+    if delete:
+        config.unlink()
+    else:
+        config.write_text('{"v": 2}', encoding="utf-8")
     archive = make_archive({"BepInEx/plugins/NewMod.dll": b"dll-bytes"}, "zip")
 
-    with pytest.raises(DirtyTreeError) as excinfo:
-        services.install_from_archive(clean_repo.path, archive)
+    result = services.install_from_archive(clean_repo.path, archive)
 
-    assert "BepInEx/plugins/ClientMod/ClientMod.dll" in str(excinfo.value)
+    assert result.mod.name == "NewMod"
+    subjects = [commit.subject for commit in services.history(clean_repo.path)]
+    assert subjects[0].startswith("mod: NewMod")
+    assert subjects[1] == "snapshot: mod settings changed"
+    assert not services.status(clean_repo.path).modified_mod_settings
+    assert clean_repo.is_clean()
+
+
+@pytest.mark.parametrize(
+    ("dirtied", "snapshot_subject"),
+    [
+        pytest.param(
+            "SPT/user/profiles/abc.json",
+            "snapshot: automatic snapshot before changing mods",
+            id="after-profile-snapshot",
+        ),
+        pytest.param(
+            "BepInEx/plugins/ClientMod/config.json",
+            "snapshot: mod settings changed",
+            id="after-mod-settings-snapshot",
+        ),
+        pytest.param(
+            "BepInEx/plugins/spt/spt-common.dll",
+            "snapshot: game files updated",
+            id="after-game-files-snapshot",
+        ),
+    ],
+)
+def test_runtime_data_stays_owned_after_a_snapshot_commit(
+    clean_repo: Repo,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
+    dirtied: str,
+    snapshot_subject: str,
+) -> None:
+    """A snapshot commit does not take an active mod's directory away from it.
+
+    One install secures a changed profile, mod setting or game file in a trailer-less
+    snapshot commit; a runtime file the mod writes afterwards must still count as its data,
+    so status() stays empty and the next install is not blocked. This is the regression where
+    a snapshot touching a mod's directory made its own runtime data look foreign.
+    """
+    install_commit(
+        clean_repo,
+        "ClientMod",
+        files={
+            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
+            "BepInEx/plugins/ClientMod/config.json": '{"v": 1}',
+        },
+    )
+    spt_dll = clean_repo.path / "BepInEx/plugins/spt/spt-common.dll"
+    spt_dll.parent.mkdir(parents=True)
+    spt_dll.write_bytes(b"4.1.0-build")
+    clean_repo.commit("chore: seed SPT client files", paths=[Path("BepInEx/plugins/spt/spt-common.dll")])
+    (clean_repo.path / dirtied).write_text("changed while playing", encoding="utf-8")
+    services.install_from_archive(clean_repo.path, make_archive({"BepInEx/plugins/First.dll": b"dll"}, "zip"))
+    runtime_file = clean_repo.path / "BepInEx/plugins/ClientMod/prices-regular.json"
+    runtime_file.write_text("{}", encoding="utf-8")
+
+    report = services.status(clean_repo.path)
+
+    assert [commit.subject for commit in services.history(clean_repo.path)][1] == snapshot_subject
+    assert not report.manual_mods
+    assert not report.other_untracked
+    second_archive = make_archive({"BepInEx/plugins/Second.dll": b"dll"}, "zip")
+    assert services.install_from_archive(clean_repo.path, second_archive).mod.name == "Second"
 
 
 # --- remove/disable: runtime data is deleted with the mod --------------------

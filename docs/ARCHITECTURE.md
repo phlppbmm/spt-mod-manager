@@ -180,12 +180,24 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 
 Before any mod operation: game-running check, then — if the tree is dirty —
 changed profiles/configs are secured in an AUTOMATIC snapshot commit and the
-operation proceeds (that state is the normal aftermath of playing). Only
-unmanaged files (manual mod copies, tampered tracked files) block, with a
+operation proceeds (that state is the normal aftermath of playing). Two more
+kinds of tracked change are secured the same way instead of blocking, each
+with its own `StatusReport` field and its own snapshot subject:
+`modified_mod_settings` (changed or deleted tracked files below an ACTIVE
+mod's directory — the mod rewrote its own config while the game ran) becomes
+`snapshot: mod settings changed`, and `game_files_changed` (changed or
+deleted tracked files no mod commit accounts for, e.g. `BepInEx/plugins/spt/`
+after an SPT update) becomes `snapshot: game files updated`, after which the
+SPT version is resolved again and stored in `sptmod.sptversion`. What is left
+in `other_modified` — a tampered tracked file no active mod owns, such as a
+loose plugin DLL — and untracked manual mod copies still block, with a
 plain-language message suggesting adopt. `ensure_installable` in services/state.py.
 Untracked files an active mod writes inside its own directory (settings a mod
 generates while playing) are runtime data: `status` leaves them out of the
-report, so they never block and are never snapshotted. `remove` and `disable`
+report, so they never block and are never snapshotted. Ownership of a path is
+the youngest NON-snapshot commit touching it (`last_touching_mod`), so
+securing a mod's settings or a game file never takes a directory's owner
+away from it. `remove` and `disable`
 delete them together with the mod, because a leftover file would otherwise
 keep the directory alive and resurface as a foreign manual install.
 

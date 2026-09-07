@@ -3,8 +3,9 @@
 Covers server-only, client-only and hybrid installs (canonical file
 placement, complete and correct commit trailers, the returned ``ModInfo``),
 name/version overrides, rejecting a dirty tree or a running game before any
-change is made, the ordering and monotonicity of the progress callback, and
-temp-directory cleanup on both success and failure.
+change is made, securing game files an SPT update changed, the ordering and
+monotonicity of the progress callback, and temp-directory cleanup on both
+success and failure.
 """
 
 import json
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import game_dir, services, workspace
 from sptmod.core.errors import (
@@ -21,7 +23,7 @@ from sptmod.core.errors import (
     GameRunningError,
     GitError,
 )
-from sptmod.core.game_dir import detect_layout
+from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY, detect_layout
 from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
@@ -612,3 +614,113 @@ def test_install_blocks_on_unmanaged_changes_in_plain_language(
     message = str(excinfo.value)
     assert "does not manage" in message
     assert "uncommitted" not in message
+
+
+def _seed_game_file(repo: Repo, relpath: str) -> Path:
+    """Commit ``relpath`` as part of the game baseline and return its full path.
+
+    Mimics a file the SPT installer shipped and the init commit (or a later
+    game-files snapshot) recorded: tracked, but carrying no ``Mod:`` trailer.
+    """
+    full = repo.path / relpath
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(b"4.1.0-build")
+    repo.commit("chore: seed SPT client files", paths=[Path(relpath)])
+    return full
+
+
+@pytest.mark.parametrize(
+    "delete",
+    [pytest.param(False, id="modified"), pytest.param(True, id="deleted")],
+)
+def test_install_secures_changed_game_files_before_the_mod_commit(
+    clean_repo: Repo, make_archive: MakeArchive, delete: bool
+) -> None:
+    """An SPT update to a tracked game file never blocks an install; it is secured first.
+
+    BepInEx/plugins/spt/spt-common.dll is part of the game baseline and is then overwritten
+    or deleted; install_from_archive must succeed, put a 'snapshot: game files updated'
+    commit right before the mod commit in history() and leave the tree clean. This is the
+    bug where an SPT update made every install and update fail as unmanaged files.
+    """
+    spt_dll = _seed_game_file(clean_repo, "BepInEx/plugins/spt/spt-common.dll")
+    if delete:
+        spt_dll.unlink()
+    else:
+        spt_dll.write_bytes(b"4.2.0-build")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    result = services.install_from_archive(clean_repo.path, archive)
+
+    assert result.mod.name == "CoolPlugin"
+    subjects = [commit.subject for commit in services.history(clean_repo.path)]
+    assert subjects[0].startswith("mod: CoolPlugin")
+    assert subjects[1] == "snapshot: game files updated"
+    assert not services.status(clean_repo.path).game_files_changed
+    assert clean_repo.is_clean()
+
+
+def test_install_stores_the_spt_version_the_updated_game_files_report(
+    clean_repo: Repo, make_archive: MakeArchive
+) -> None:
+    """After securing changed game files, install stores the newly detected SPT version.
+
+    The stored version says 4.1.0 while core.json now says 4.2.0, as after an SPT update;
+    installing a mod on top of a changed game file must leave both the stored version and
+    status().spt_version at 4.2.0. This keeps Forge queries from asking for the version the
+    installation had before the update.
+    """
+    services.set_spt_version(clean_repo.path, "4.1.0")
+    core_config = clean_repo.path / "SPT/SPT_Data/configs/core.json"
+    core_config.write_text(json.dumps({"sptVersion": "4.2.0"}), encoding="utf-8")
+    _seed_game_file(clean_repo, "BepInEx/plugins/spt/spt-common.dll").write_bytes(b"4.2.0-build")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    services.install_from_archive(clean_repo.path, archive)
+
+    assert clean_repo.config_get(SPT_VERSION_CONFIG_KEY) == "4.2.0"
+    assert services.status(clean_repo.path).spt_version == "4.2.0"
+
+
+def test_install_leaves_the_spt_version_unset_when_the_game_dir_reports_none(
+    fake_game_dir_runtime: Path, make_archive: MakeArchive
+) -> None:
+    """Securing changed game files stores no version when none can be detected.
+
+    fake_game_dir_runtime has neither a sptVersion in core.json nor a SPT.Server.exe nor a
+    stored version, so nothing resolves; installing on top of a changed game file must still
+    succeed and leave the stored version unset instead of writing an empty value.
+    """
+    repo = clean_repo_at(fake_game_dir_runtime)
+    _seed_game_file(repo, "BepInEx/plugins/spt/spt-common.dll").write_bytes(b"newer-build")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    result = services.install_from_archive(repo.path, archive)
+
+    assert result.mod.name == "CoolPlugin"
+    assert repo.config_get(SPT_VERSION_CONFIG_KEY) is None
+
+
+def test_install_blocks_on_untracked_files_without_naming_changed_game_files(
+    clean_repo: Repo, make_archive: MakeArchive
+) -> None:
+    """A hand-copied mod still blocks, and the message names only the untracked files.
+
+    A changed game file and an untracked SPT/user/mods/HandCopied folder exist at the same
+    time; install_from_archive must raise DirtyTreeError naming the hand-copied folder and
+    the adopt hint, while the changed game file appears nowhere in the message. This keeps
+    the plain-language error truthful: only untracked files are unmanaged.
+    """
+    _seed_game_file(clean_repo, "BepInEx/plugins/spt/spt-common.dll").write_bytes(b"4.2.0-build")
+    manual = clean_repo.path / "SPT/user/mods/HandCopied"
+    manual.mkdir(parents=True)
+    (manual / "package.json").write_text('{"name": "HandCopied", "version": "1.0.0"}', encoding="utf-8")
+    archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
+
+    with pytest.raises(DirtyTreeError) as excinfo:
+        services.install_from_archive(clean_repo.path, archive)
+
+    message = str(excinfo.value)
+    assert "SPT/user/mods/HandCopied" in message
+    assert "adopt" in message
+    assert "spt-common.dll" not in message

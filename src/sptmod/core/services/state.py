@@ -19,6 +19,7 @@ from sptmod.core.game_dir import (
     detect_layout,
     ensure_game_not_running,
     resolve_spt_version,
+    store_spt_version,
 )
 from sptmod.core.models import (
     ACTIVE_STATES,
@@ -29,6 +30,7 @@ from sptmod.core.models import (
 )
 from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
+    SNAPSHOT_PREFIX,
     current_mods,
     last_touching_mod,
     mod_prefix_of,
@@ -38,6 +40,8 @@ from sptmod.core.services.common import (
 from sptmod.core.workspace import game_lock
 
 _SNAPSHOT_TIME_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
+_GAME_FILES_MESSAGE: Final = f"{SNAPSHOT_PREFIX}game files updated"
+_MOD_SETTINGS_MESSAGE: Final = f"{SNAPSHOT_PREFIX}mod settings changed"
 
 
 @dataclass(frozen=True)
@@ -57,15 +61,21 @@ class ManualMod:
 class StatusReport:
     """The interpreted working-tree status of a game directory.
 
-    ``other_modified`` and ``other_untracked`` hold everything that is neither
-    a profile, a BepInEx config nor an untracked file below a mod path.
-    ``spt_version`` is the locally resolved SPT version, empty when unknown.
+    ``modified_mod_settings`` holds the tracked files an active mod rewrote
+    inside its own directory; ``game_files_changed`` holds the changed and
+    deleted files of the SPT installation itself, which no mod is responsible
+    for. ``other_modified`` and ``other_untracked`` hold everything that is
+    neither a profile, a BepInEx config, a mod setting, a game file nor an
+    untracked file below a mod path. ``spt_version`` is the locally resolved
+    SPT version, empty when unknown.
     """
 
     spt_version: str = ""
     modified_profiles: list[Path] = field(default_factory=list[Path])
     modified_configs: list[Path] = field(default_factory=list[Path])
+    modified_mod_settings: list[Path] = field(default_factory=list[Path])
     manual_mods: list[ManualMod] = field(default_factory=list[ManualMod])
+    game_files_changed: list[Path] = field(default_factory=list[Path])
     other_modified: list[Path] = field(default_factory=list[Path])
     other_untracked: list[Path] = field(default_factory=list[Path])
 
@@ -135,10 +145,15 @@ def status(path: Path) -> StatusReport:
     """Interpret the working-tree status of the game directory at ``path``.
 
     Sorts the modified files into player profiles, which change normally
-    while playing and belong into a :func:`snapshot`, BepInEx configs and
-    everything else. Untracked files below the mod paths are grouped per mod
-    folder as manual installs a caller can offer to :func:`adopt_mod`; all
-    other untracked files are reported as they are. Untracked files below the
+    while playing and belong into a :func:`snapshot`, BepInEx configs,
+    settings an active mod rewrote inside its own directory, files of the SPT
+    installation itself and everything else. A changed or deleted tracked
+    file below an active mod's directory is that mod's own doing and is
+    reported under ``modified_mod_settings``; one no mod commit accounts for
+    at all belongs to SPT, not to a mod -- an SPT update rewrote it -- and is
+    reported under ``game_files_changed``. Untracked files below the mod
+    paths are grouped per mod folder as manual installs a caller can offer to
+    :func:`adopt_mod`; all other untracked files are reported as they are. Untracked files below the
     profile and config paths join the modified ones there, because a
     :func:`snapshot` commits them together. Untracked files an active mod
     writes inside its own directory are runtime data and are left out of the
@@ -153,14 +168,25 @@ def status(path: Path) -> StatusReport:
     raw = repo.status()
     modified_profiles: list[Path] = []
     modified_configs: list[Path] = []
+    changed_rest: list[Path] = []
+    modified_mod_settings: list[Path] = []
+    game_files_changed: list[Path] = []
     other_modified: list[Path] = []
     other_untracked: list[Path] = []
     manual_files: dict[Path, list[Path]] = {}
 
     for entry in raw.modified:
         _group_snapshot_path(
-            entry, layout, modified_profiles, modified_configs, other_modified
+            entry, layout, modified_profiles, modified_configs, changed_rest
         )
+    changed_in = _active_mod_dirs(repo, changed_rest, layout)
+    for entry in changed_rest:
+        if owning_mod_dir(entry, layout) in changed_in:
+            modified_mod_settings.append(entry)
+        elif last_touching_mod(repo, entry):
+            other_modified.append(entry)
+        else:
+            game_files_changed.append(entry)
 
     owned = _active_mod_dirs(repo, raw.untracked, layout)
     for entry in raw.untracked:
@@ -179,9 +205,11 @@ def status(path: Path) -> StatusReport:
         spt_version=resolve_spt_version(layout, repo) or "",
         modified_profiles=modified_profiles,
         modified_configs=modified_configs,
+        modified_mod_settings=modified_mod_settings,
         manual_mods=[
             ManualMod(path=top, files=files) for top, files in manual_files.items()
         ],
+        game_files_changed=game_files_changed,
         other_modified=other_modified,
         other_untracked=other_untracked,
     )
@@ -211,7 +239,7 @@ def take_snapshot(path: Path, message: str | None) -> SnapshotResult:
     paths = [*report.modified_profiles, *report.modified_configs]
     if not paths:
         raise GitError(f"{path} has no profile or config changes to snapshot")
-    commit_hash = repo.commit(f"snapshot: {text}", paths=paths)
+    commit_hash = repo.commit(f"{SNAPSHOT_PREFIX}{text}", paths=paths)
     return SnapshotResult(
         commit=commit_hash,
         message=text,
@@ -224,18 +252,33 @@ def ensure_installable(repo: Repo) -> None:
 
     Changed profiles and BepInEx configs are the normal aftermath of playing
     and are silently secured in an automatic snapshot commit, so the user
-    never has to know about the underlying version control. Only files the
-    manager cannot account for (manually copied mods or unexpected changes)
-    stop the operation, in plain language.
+    never has to know about the underlying version control. Settings an active
+    mod rewrote inside its own directory are secured the same way, and so are
+    game files an SPT update rewrote or deleted; after the latter the SPT
+    version is read again and stored, because an update usually raises it.
+    Only untracked files the manager cannot account for (manually copied mods)
+    and changed mod files no active mod owns stop the operation, in plain
+    language.
     """
     ensure_game_not_running()
     if repo.is_clean():
         return
     report = status(repo.path)
     _reject_unmanaged(report)
-    if not (report.modified_profiles or report.modified_configs):
-        return
-    take_snapshot(repo.path, "automatic snapshot before changing mods")
+    if report.game_files_changed:
+        repo.commit(_GAME_FILES_MESSAGE, paths=report.game_files_changed)
+        _store_detected_version(repo)
+    if report.modified_mod_settings:
+        repo.commit(_MOD_SETTINGS_MESSAGE, paths=report.modified_mod_settings)
+    if report.modified_profiles or report.modified_configs:
+        take_snapshot(repo.path, "automatic snapshot before changing mods")
+
+
+def _store_detected_version(repo: Repo) -> None:
+    """Store the SPT version the game directory now reports, if it reports one."""
+    version = resolve_spt_version(detect_layout(repo.path), repo)
+    if version is not None:
+        store_spt_version(repo, version)
 
 
 def _reject_unmanaged(report: StatusReport) -> None:

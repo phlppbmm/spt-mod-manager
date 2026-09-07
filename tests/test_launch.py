@@ -773,7 +773,7 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
     ]
     assert client_dump["cwd"] == str(d.root)
     env = client_dump["env"]
-    assert env["WINEPREFIX"] == str(d.root / "prefix" / "pfx")
+    assert env["WINEPREFIX"] == str(d.root / "prefix")
     assert env["PROTONPATH"] == "GE-Proton11-5"
     assert env["__NV_DISABLE_EXPLICIT_SYNC"] == "1"
     assert env["WINEDLLOVERRIDES"] == "winhttp=n,b"
@@ -1038,7 +1038,7 @@ def test_launch_profile_logs_the_game_settings_without_their_values(
         launch_profile(d.root, d.profile_id)
 
     log = _log_text(d.root)
-    assert f"WINEPREFIX={d.root / 'prefix' / 'pfx'}" in log
+    assert f"WINEPREFIX={d.root / 'prefix'}" in log
     assert "PROTONPATH=GE-Proton11-5" in log
     assert "__NV_DISABLE_EXPLICIT_SYNC=<hidden>" in log
     assert "WINEDLLOVERRIDES=<hidden>" in log

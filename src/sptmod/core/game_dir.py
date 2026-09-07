@@ -3,6 +3,7 @@
 import json
 import struct
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Final, Literal
@@ -36,6 +37,13 @@ SPT_VERSION_FIELD: Final = "sptVersion"
 SPT_VERSION_CONFIG_KEY: Final = "sptmod.sptversion"
 
 GAME_PROCESS_NAMES: Final[tuple[str, ...]] = ("SPT.Server", "EscapeFromTarkov")
+
+# Fragments that make a process worth naming in a launch log even when it is
+# not recognised as the server or the game.
+_SPT_PROCESS_MARKERS: Final[tuple[str, ...]] = ("tarko", "spt.server")
+
+# Linux reports process names truncated to this many characters.
+_COMM_LENGTH: Final = 15
 
 type GameProcessKind = Literal["server", "client"]
 
@@ -524,11 +532,25 @@ def game_process_kind(name: str) -> GameProcessKind | None:
     """
     lowered = name.lower()
     for candidate, kind in _PROCESS_KINDS:
-        # Linux reports process names truncated to 15 characters, so a Proton
-        # client shows up as ``EscapeFromTarko``.
-        if candidate in lowered or (len(lowered) == 15 and candidate.startswith(lowered)):
+        # Linux reports process names truncated to _COMM_LENGTH characters, so a
+        # Proton client shows up as ``EscapeFromTarko``.
+        if candidate in lowered or (len(lowered) == _COMM_LENGTH and candidate.startswith(lowered)):
             return kind
     return None
+
+
+def _command_kind(cmdline: Sequence[str]) -> GameProcessKind | None:
+    """Return which half of the installation a command line belongs to.
+
+    Only the program of the command line decides, taken as everything behind
+    the last separator of either kind: the Proton client is started with a
+    Windows path such as ``X:\\Games\\SPT\\EscapeFromTarkov.exe``, which
+    ``os.path.basename`` does not split. ``None`` means the command line
+    belongs to neither half.
+    """
+    if not cmdline:
+        return None
+    return game_process_kind(cmdline[0].replace("\\", "/").rsplit("/", 1)[-1])
 
 
 def is_game_process_name(name: str) -> bool:
@@ -536,17 +558,29 @@ def is_game_process_name(name: str) -> bool:
     return game_process_kind(name) is not None
 
 
+@dataclass(frozen=True)
+class ProcessSighting:
+    """A process that mentions SPT, as a launch log names it."""
+
+    pid: int
+    name: str
+    command: str
+
+
 def game_processes() -> list[GameProcess]:
     """Return the running SPT server and client processes.
 
-    The only place that scans the process table (via ``psutil``); tests replace
-    this function instead of touching real processes.
+    The only place that scans the process table for the server and the game
+    (via ``psutil``); tests replace this function instead of touching real
+    processes. A process counts when its name matches, when its name is the
+    truncated form Linux reports, or when the program of its command line
+    matches: the Proton client passes none of those checks but the last.
     """
     found: list[GameProcess] = []
     for process in psutil.process_iter():
         try:
             name = process.name()
-            kind = game_process_kind(name)
+            kind = game_process_kind(name) or _command_kind(process.cmdline())
             if kind is None:
                 continue
             found.append(
@@ -559,6 +593,30 @@ def game_processes() -> list[GameProcess]:
             )
         except psutil.Error:
             continue
+    return found
+
+
+def spt_process_sightings() -> list[ProcessSighting]:
+    """Return every process whose name or command line mentions SPT.
+
+    Deliberately vaguer than :func:`game_processes`: it answers "what did the
+    process table really hold" for a launch that found no game, including the
+    processes the classification did not recognise.
+    """
+    found: list[ProcessSighting] = []
+    for process in psutil.process_iter():
+        try:
+            name = process.name()
+            cmdline = list(process.cmdline())
+        except psutil.Error:
+            continue
+        haystack = " ".join([name, *cmdline]).lower()
+        if any(marker in haystack for marker in _SPT_PROCESS_MARKERS):
+            found.append(
+                ProcessSighting(
+                    pid=process.pid, name=name, command=cmdline[0] if cmdline else ""
+                )
+            )
     return found
 
 

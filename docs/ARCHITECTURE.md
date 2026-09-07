@@ -456,19 +456,37 @@ is the source of truth. Located in the game directory because every short-lived
 process involved (launch call, status call, watcher) learns about the game
 directory alone.
 
+**Launch log:** `<game dir>/.sptmod-launch.log`, appended per launch and per
+watcher decision, in plain language. It holds the server command and working
+directory, the readiness poll summary (checks, seconds waited, last answer),
+the login result, the client command with the `-token=` value replaced by
+`<hidden>`, the environment keys sptmod set (values only for `WINEPREFIX` and
+`PROTONPATH`) and the watcher's decisions; when the watcher gives up it also
+appends the `game_processes()` snapshot and the wider
+`game_dir.spt_process_sightings()` list (every process whose name or command
+line mentions `tarko`/`spt.server`, with its first command-line token). The
+client's stderr is redirected into this file, so a wrapper that refuses to
+start says why. Every write is wrapped so `OSError` can never fail a launch,
+and the file is trimmed to 200 KB from the front, dropping whole lines. A
+client wrapper that exits within `CLIENT_EXIT_GRACE_SECONDS` (0.5 s) with a
+non-zero code raises `LaunchError` naming the log file.
+
 **Watcher:** Started as `python -m sptmod.watch <game directory>` (detached,
 never awaited), it lives as long as the game does. Uses `sys.executable` so no
 PATH or environment lookup is needed. Polls every 3 seconds and counts the game
 as running when either the recorded client `(pid, started_at)` is alive (fast
-path) or `game_dir.game_processes()` reports a process of kind `client` — the
-same rule `launch_status` uses, through the shared `_running_pid` helper. This
+path) or `game_dir.game_processes()` reports a process of kind `client`. This
 matters on Linux, where the spawned pid is the umu/Proton wrapper that may exit
-or be replaced while `EscapeFromTarkov.exe` keeps running under Wine.
+or be replaced while `EscapeFromTarkov.exe` keeps running under Wine. The
+spawned-pid check is deliberately weaker than the one `launch_status` and
+`stop_game` use: a live pid counts even when the recorded start time does not
+compare equal, because stopping the server under a player in a raid is the far
+worse error than a watcher that waits too long.
 
 After the launch the watcher waits up to a 120-second grace period for a game
 process to appear (both grace period and poll interval are injectable). If the
-grace period elapses with no game and the spawned pid is gone too, the launch
-counts as failed: the server is closed under the usual rules and `failure` is
+grace period elapses with no game and the spawned pid is gone as well, the
+launch counts as failed: the server is closed under the usual rules and `failure` is
 written to the state file (the file is kept, not cleared). If the spawned pid is
 still alive it *is* the game or its wrapper, so the watcher keeps waiting on it
 regardless of the grace period. Once a game has been seen, the watcher waits for
@@ -491,11 +509,16 @@ The profile ID is the profile file's stem (== `info.id` in the profile JSON); th
 login username is read from `info.username`; the display name for progress is
 `characters.pmc.Info.Nickname`.
 
-**Linux spawn:** via umu with environment variables from `LauncherSettings.json`
+**Linux spawn:** via umu, with the absolute path of `EscapeFromTarkov.exe` as
+umu's first argument (as the official launcher passes it), and environment
+variables from `LauncherSettings.json`
 (`WINEPREFIX`, `PROTONPATH`, env vars from `LaunchSettings` tokens and
 `DefaultEnv`, plus `__NV_DISABLE_EXPLICIT_SYNC=1` which the official launcher
-sets process-wide). The working directory is the game root; client exe is always
-`EscapeFromTarkov.exe`. If `LauncherSettings.json` is missing or unusable on
+sets process-wide). `tokenize_launch_settings` mirrors the launcher's
+`TokenizeLaunchSettings`: both quote characters open a run, `\"`/`\'` are
+literal quotes, an unterminated run reaches the end, an empty run still yields
+a token; a `DefaultEnv` value keeps its surrounding quotes stripped (either
+kind). The working directory is the game root. If `LauncherSettings.json` is missing or unusable on
 Linux, `LauncherSettingsError` is raised (Windows has no equivalent check).
 
 **Windows spawn:** plain `EscapeFromTarkov.exe` with the working directory as the
@@ -509,14 +532,15 @@ in its own session; on Windows, the flags above have the same effect. This means
 the game survives the exit of the short-lived RPC process and never receives
 signals bound to that process group.
 
-**Known limitation:** Detecting the running game on Wine/Proton relies on a
-process named `EscapeFromTarkov.exe` in the process table (matched
-case-insensitively as a substring by `game_dir.game_process_kind`). The official
-launcher's own code comments "TODO: this might not work for linux" for its own
-detection. Since the spawned pid is only the wrapper there, the name scan is not
-a fallback but the second half of the detection: if Wine ever hides the name,
-the watcher falls back to the wrapper pid and, when that is gone too, reports
-the launch as failed after the grace period instead of waiting forever.
+**Detecting the running game:** `game_dir.game_processes()` classifies a
+process three ways, in order: its name contains a known name (substring,
+case-insensitive), its name equals the first 15 characters of one (Linux
+truncates `comm`, so the Proton client shows up as `EscapeFromTarko`), or the
+program of its command line matches after splitting on both `/` and `\` —
+the Proton client's `argv[0]` is `X:\Games\SPT\EscapeFromTarkov.exe`, which
+`os.path.basename` does not split. A process whose command line cannot be read
+is skipped. Since the spawned pid is only the wrapper on Linux, this scan is
+not a fallback but the second half of the detection.
 `stop_game` closes every scanned game process, not only the first, because a
 Wine-hosted game appears next to the program that started it.
 
@@ -804,8 +828,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   with the db file collection or be unrelated id references (skill names,
   locale keys, mod paths).
 - Game launch on Windows is untested (Linux build verified; the Proton client
-  process name detection fallback is unverified and flagged as "TODO" by the
-  official launcher as well — primary detection uses the recorded `(pid,
-  started_at)` of the spawned process).
+  is detected by truncated name and by the program of its command line, both
+  verified against a live Proton launch).
 - Pre-launch cleanup and patching (which the official launcher does) are out of
   scope; sptmod starts the game as-is.

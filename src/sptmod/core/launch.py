@@ -10,6 +10,10 @@ next to the apply lock, because every short-lived process involved — the call
 that starts the game, the calls that report its state, and the separate watcher
 that notices the game closing — only knows the game directory. The file is a
 hint: the process table decides what is really running.
+
+What happened during a launch is appended to ``.sptmod-launch.log`` beside it,
+because the game and the server are started with all their streams closed: the
+log is the only trace a launch that went wrong leaves behind.
 """
 
 import json
@@ -21,9 +25,10 @@ import time
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Final
+from typing import IO, Final
 
 import psutil
 
@@ -40,6 +45,8 @@ from sptmod.core.models import Json, Progress
 
 LAUNCH_STATE_FILE_NAME: Final = ".sptmod-launch.json"
 LAUNCH_LOCK_FILE_NAME: Final = ".sptmod-launch.lock"
+LAUNCH_LOG_FILE_NAME: Final = ".sptmod-launch.log"
+LAUNCH_LOG_MAX_BYTES: Final = 200 * 1024
 READY_TIMEOUT: Final = 300.0
 POLL_SECONDS: Final = 1.0
 WATCH_POLL_SECONDS: Final = 3.0
@@ -47,6 +54,7 @@ WATCH_GRACE_SECONDS: Final = 120.0
 CLIENT_NEVER_STARTED: Final = "The game did not start."
 TERMINATE_TIMEOUT: Final = 10.0
 CLIENT_ARGS_HEAD: Final[tuple[str, ...]] = ("-force-gfx-jobs", "native")
+CLIENT_EXIT_GRACE_SECONDS: Final = 0.5
 
 _TEMP_PREFIX: Final = ".sptmod-launch-"
 _WAIT_PERCENT_START: Final = 10
@@ -55,6 +63,12 @@ _GAMEMODE_COMMAND: Final = "gamemoderun"
 # The official launcher sets this for the whole process on Linux and the game
 # inherits it, so a launch from sptmod runs in the same environment.
 _NVIDIA_SYNC_ENV: Final = "__NV_DISABLE_EXPLICIT_SYNC"
+_TOKEN_ARGUMENT: Final = "-token="
+_HIDDEN: Final = "<hidden>"
+# The two settings a player has to check when the game starts into nothing;
+# every other value sptmod passes on may name a personal path.
+_SHOWN_ENV_KEYS: Final[tuple[str, ...]] = ("WINEPREFIX", "PROTONPATH")
+_QUOTES: Final[tuple[str, str]] = ('"', "'")
 
 
 class LaunchStep(StrEnum):
@@ -221,6 +235,8 @@ def _launch(
     running = game_dir.game_processes()
     _refuse_running_client(running)
     username, nickname = _profile_login(layout, profile_id)
+    # The profile id is the login token, so only the player name is logged.
+    _log(path, f"Starting the game for {nickname}.")
 
     base_url = sptserver.server_base_url(layout)
     answer = sptserver.probe(base_url, request_timeout)
@@ -233,6 +249,7 @@ def _launch(
         _report(progress, LaunchStep.SERVER, 5, "Starting the server")
         server = _spawn_server(layout)
         _wait_for_server(
+            path,
             base_url,
             server,
             progress,
@@ -243,15 +260,18 @@ def _launch(
             clock=clock,
         )
     else:
+        _log(path, "The SPT server was already answering, so it is reused.")
         server = _running_ref(running, "server")
 
     _report(progress, LaunchStep.LOGIN, 80, f"Signing in as {nickname}")
     if not sptserver.login(base_url, username, request_timeout):
+        _log(path, f"The SPT server refused to sign {nickname} in.")
         raise LoginFailedError(
             f"The SPT server does not know the profile {nickname}. "
             f"Start the official SPT launcher once to create it."
         )
 
+    _log(path, f"The SPT server signed {nickname} in.")
     _report(progress, LaunchStep.CLIENT, 95, "Starting the game")
     client = _spawn_client(layout, profile_id, base_url)
 
@@ -337,12 +357,14 @@ def watch_game(
     Runs in its own process for as long as the game does. The game is looked
     for by process name as well as by the process the launch started, because
     on Linux that process only wraps the game and may be gone or replaced
-    while the game keeps running. When no game shows up within
-    ``grace_seconds`` and the started process is gone too, the launch failed:
-    the server is closed as it would be after a game, and the reason is
-    written to the state file. Otherwise the server is closed once the last
-    game process is gone, if the launch asked for it and sptmod started that
-    server; the remembered state is dropped either way.
+    while the game keeps running. As long as that started process lives the
+    game counts as running, whatever the process table shows. Only when it is
+    gone as well and no game shows up within ``grace_seconds`` did the launch
+    fail: the server is closed as it would be after a game, and the reason is
+    written to the state file. Otherwise the server is closed once both the
+    started process and every game process are gone, if the launch asked for
+    it and sptmod started that server; the remembered state is dropped either
+    way.
 
     Args:
         path: The game directory.
@@ -361,13 +383,21 @@ def watch_game(
         sleep=sleep,
         clock=clock,
     ):
-        _stop_watched_server(state)
+        _log(
+            path,
+            f"{CLIENT_NEVER_STARTED} The process the launch started is gone "
+            f"and no game appeared within {int(grace_seconds)} seconds.",
+        )
+        _log_process_table(path)
+        _stop_watched_server(path, state)
         with suppress(OSError):
             _write_state(path, replace(state, failure=CLIENT_NEVER_STARTED))
         return
+    _log(path, "The game is running.")
     while _client_running(state.client):
         sleep(poll_seconds)
-    _stop_watched_server(state)
+    _log(path, "The game and the process the launch started are both gone.")
+    _stop_watched_server(path, state)
     _clear_state(path)
 
 
@@ -388,12 +418,31 @@ def _await_client(
     return True
 
 
-def _client_running(client: _ProcessRef | None) -> bool:
+def _client_running(client: _ProcessRef) -> bool:
     """Return whether a game is running, remembered or found by name."""
-    return _running_pid(client, game_dir.game_processes(), "client") != 0
+    if _spawned_alive(client):
+        return True
+    return _running_ref(game_dir.game_processes(), "client") is not None
 
 
-def _stop_watched_server(state: _LaunchState) -> None:
+def _spawned_alive(client: _ProcessRef) -> bool:
+    """Return whether the process the launch started for the game still runs.
+
+    Deliberately weaker than :func:`_live_ref`: the bare process number counts
+    as well, even when the start time noted at spawn time does not compare
+    equal to the one the operating system reports now. That start time is read
+    a moment after the process was created and is ``0.0`` when it could not be
+    read at all, so a mismatch says far more often "the note is imprecise" than
+    "this number belongs to a stranger now". Being wrong here costs a watcher
+    that waits longer than it had to; being wrong the other way closes the SPT
+    server under a player who is in a raid, which is what this guard exists for.
+    """
+    return game_dir.process_alive(client.pid, client.started_at) or psutil.pid_exists(
+        client.pid
+    )
+
+
+def _stop_watched_server(path: Path, state: _LaunchState) -> None:
     """Close the server of one launch when that launch asked for it."""
     if (
         state.stop_server_on_exit
@@ -401,31 +450,61 @@ def _stop_watched_server(state: _LaunchState) -> None:
         and state.server is not None
     ):
         _terminate(state.server)
+        _log(path, "The SPT server was closed.")
+        return
+    _log(path, "The SPT server was left running.")
+
+
+def _log_process_table(path: Path) -> None:
+    """Note what the process table held when no game could be found."""
+    games = ", ".join(
+        f"{process.name} ({process.kind}, process {process.pid})"
+        for process in game_dir.game_processes()
+    )
+    _log(path, f"SPT processes seen: {games or 'none'}.")
+    sightings = ", ".join(
+        f"{sighting.name} ({sighting.command}, process {sighting.pid})"
+        for sighting in game_dir.spt_process_sightings()
+    )
+    _log(path, f"Processes mentioning SPT: {sightings or 'none'}.")
 
 
 def tokenize_launch_settings(text: str) -> list[str]:
     """Split launch settings into tokens the way the official launcher does.
 
-    Whitespace separates tokens outside quotes; a double quote toggles quoting
-    and is dropped; a quote that is never closed ends its token at the end of
-    the text.
+    Whitespace separates tokens outside quotes. Both quote characters open a
+    run that ends at the same character and is dropped, so a value may carry
+    spaces; a backslash before a quote character keeps that character as text.
+    A quote that is never closed ends its token at the end of the text, and a
+    quoted run that holds nothing still yields an empty token.
     """
     tokens: list[str] = []
     current: list[str] = []
-    quoted = False
+    quote = ""
     started = False
-    for character in text:
-        if character == '"':
-            quoted = not quoted
-            started = True
-        elif character.isspace() and not quoted:
+    escaped = False
+    for index, character in enumerate(text):
+        if escaped:
+            current.append(character)
+            escaped = False
+        elif character == "\\" and text[index + 1 : index + 2] in _QUOTES:
+            escaped = True
+        elif quote:
+            if character == quote:
+                quote = ""
+            else:
+                current.append(character)
+        elif character in _QUOTES:
+            quote = character
+        elif character.isspace():
             if started:
                 tokens.append("".join(current))
                 current.clear()
                 started = False
+            continue
         else:
             current.append(character)
-            started = True
+        started = True
     if started:
         tokens.append("".join(current))
     return tokens
@@ -470,6 +549,7 @@ def _nickname(payload: Json, fallback: str) -> str:
 
 
 def _wait_for_server(
+    path: Path,
     base_url: str,
     server: _ProcessRef,
     progress: Progress | None,
@@ -482,20 +562,26 @@ def _wait_for_server(
 ) -> None:
     """Ask the freshly started server until it answers, or give up."""
     started = clock()
+    polls = 0
     _report(progress, LaunchStep.WAITING, _WAIT_PERCENT_START, "Waiting for the server")
     while True:
         answer = sptserver.probe(base_url, request_timeout)
+        polls += 1
+        if answer != "free":
+            _log_readiness(path, polls, clock() - started, answer)
         if answer == "spt":
             return
         if answer == "foreign":
             raise ServerPortBusyError(_port_busy_message(base_url))
         if not game_dir.process_alive(server.pid, server.started_at):
+            _log_readiness(path, polls, clock() - started, "nothing, the server had stopped")
             raise LaunchError(
                 "The SPT server stopped right after it was started. "
                 "Start it once yourself to see what it reports."
             )
         elapsed = clock() - started
         if elapsed >= ready_timeout:
+            _log_readiness(path, polls, elapsed, "nothing at all")
             raise LaunchError(
                 f"The SPT server did not answer within {int(ready_timeout)} "
                 f"seconds. Start it once yourself to see what it reports."
@@ -505,6 +591,15 @@ def _wait_for_server(
         )
         _report(progress, LaunchStep.WAITING, percent, "Waiting for the server")
         sleep(poll_seconds)
+
+
+def _log_readiness(path: Path, polls: int, seconds: float, answer: str) -> None:
+    """Note how often and how long the SPT server was asked, and what it said."""
+    _log(
+        path,
+        f"Checks for the SPT server: {polls}, seconds waited: {seconds:.0f}, "
+        f"last answer: {answer}.",
+    )
 
 
 def _port_busy_message(base_url: str) -> str:
@@ -520,9 +615,12 @@ def _spawn_server(layout: GameLayout) -> _ProcessRef:
     binary = layout.root / layout.server_binary
     if not binary.is_file():
         raise LaunchError(f"The SPT server program {binary} is missing.")
-    return _spawn_detached(
-        [str(binary)], layout.root / layout.runtime_dir, dict(os.environ)
+    working_dir = layout.root / layout.runtime_dir
+    _log(
+        layout.root,
+        f"Starting the SPT server: {binary} (working directory {working_dir}).",
     )
+    return _process_ref(_spawn_detached([str(binary)], working_dir, dict(os.environ)))
 
 
 def _spawn_client(layout: GameLayout, profile_id: str, base_url: str) -> _ProcessRef:
@@ -537,15 +635,18 @@ def _spawn_client(layout: GameLayout, profile_id: str, base_url: str) -> _Proces
         f"'Version':'live','MatchingVersion':'live'}}",
     ]
     if sys.platform == "win32":
-        return _spawn_detached(
-            [str(executable), *arguments], layout.root, dict(os.environ)
+        windows_argv = [str(executable), *arguments]
+        _log(layout.root, f"Starting the game: {_redacted_command(windows_argv)}.")
+        return _process_ref(
+            _spawn_detached(windows_argv, layout.root, dict(os.environ))
         )
     settings = _linux_settings(layout)
-    environment = dict(os.environ)
     # The official launcher points Wine at the ``pfx`` directory inside the prefix folder.
-    environment["WINEPREFIX"] = str(Path(settings.prefix_path) / "pfx")
-    environment["PROTONPATH"] = settings.proton_version
-    environment[_NVIDIA_SYNC_ENV] = "1"
+    assigned = {
+        "WINEPREFIX": str(Path(settings.prefix_path) / "pfx"),
+        "PROTONPATH": settings.proton_version,
+        _NVIDIA_SYNC_ENV: "1",
+    }
     extra: list[str] = []
     tokens = [settings.default_env] if settings.default_env else []
     tokens += tokenize_launch_settings(settings.launch_settings)
@@ -554,11 +655,69 @@ def _spawn_client(layout: GameLayout, profile_id: str, base_url: str) -> _Proces
         if token.startswith("-") or separator <= 0:
             extra.append(token)
         else:
-            environment[token[:separator]] = token[separator + 1 :].strip('"')
-    argv = [settings.umu_path, game_dir.CLIENT_EXE_NAME, *arguments, *extra]
+            assigned[token[:separator]] = _unquoted(token[separator + 1 :])
+    # The official launcher hands umu the full path of the executable.
+    argv = [settings.umu_path, str(executable), *arguments, *extra]
     if settings.game_mode:
         argv.insert(0, _GAMEMODE_COMMAND)
-    return _spawn_detached(argv, layout.root, environment)
+    _log(layout.root, f"Starting the game: {_redacted_command(argv)}.")
+    _log(
+        layout.root,
+        f"Settings sptmod passed to the game: {_environment_summary(assigned)}.",
+    )
+    with _log_stream(layout.root) as stderr:
+        process = _spawn_detached(
+            argv, layout.root, dict(os.environ) | assigned, stderr=stderr
+        )
+    _refuse_failed_client(process, layout.root)
+    return _process_ref(process)
+
+
+def _refuse_failed_client(process: subprocess.Popen[bytes], path: Path) -> None:
+    """Refuse a launch whose game program stopped again right away.
+
+    A wrapper that exits within :data:`CLIENT_EXIT_GRACE_SECONDS` never got as
+    far as the game, and its own complaint is already in the launch log,
+    because that is where its error output went.
+    """
+    try:
+        code = process.wait(timeout=CLIENT_EXIT_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        return
+    _log(path, f"The game program stopped right away with exit code {code}.")
+    if code != 0:
+        raise LaunchError(
+            f"The game program could not be started. See "
+            f"{path / LAUNCH_LOG_FILE_NAME} for what it reported."
+        )
+
+
+def _unquoted(value: str) -> str:
+    """Return a settings value without the pair of quotes around it."""
+    for quote in _QUOTES:
+        if len(value) > 1 and value.startswith(quote) and value.endswith(quote):
+            return value[1:-1]
+    return value
+
+
+def _redacted_command(argv: Sequence[str]) -> str:
+    """Render a command line with the profile token hidden."""
+    return " ".join(
+        _TOKEN_ARGUMENT + _HIDDEN if part.startswith(_TOKEN_ARGUMENT) else part
+        for part in argv
+    )
+
+
+def _environment_summary(assigned: dict[str, str]) -> str:
+    """Render what sptmod put into the game's environment, hiding the values.
+
+    Only the two settings a player has to check when the game starts into
+    nothing are shown; everything else is named without its value.
+    """
+    return " ".join(
+        f"{key}={value if key in _SHOWN_ENV_KEYS else _HIDDEN}"
+        for key, value in assigned.items()
+    )
 
 
 def _linux_settings(layout: GameLayout) -> _LinuxSettings:
@@ -604,20 +763,26 @@ def _setting(linux: dict[str, Json], key: str) -> str:
 
 def _spawn_watcher(path: Path) -> _ProcessRef:
     """Start the process that waits for the game to close."""
-    return _spawn_detached(
-        [sys.executable, "-m", "sptmod.watch", str(path)], path, dict(os.environ)
+    return _process_ref(
+        _spawn_detached(
+            [sys.executable, "-m", "sptmod.watch", str(path)], path, dict(os.environ)
+        )
     )
 
 
 def _open_detached(
-    argv: Sequence[str], cwd: Path, environment: dict[str, str]
+    argv: Sequence[str],
+    cwd: Path,
+    environment: dict[str, str],
+    stderr: IO[bytes] | int,
 ) -> subprocess.Popen[bytes]:
     """Start ``argv`` detached from this process and return the raw handle.
 
     The child gets its own session (or, on Windows, its own process group and
     no console), so it neither receives the signals of the caller nor leaves a
-    window behind, and all three of its streams are closed. The handle is
-    deliberately not closed: the process must outlive this one.
+    window behind, and it reads and writes nothing except what ``stderr``
+    names. The handle is deliberately not closed: the process must outlive
+    this one.
     """
     if sys.platform == "win32":
         return subprocess.Popen(
@@ -626,7 +791,7 @@ def _open_detached(
             env=environment,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr,
             creationflags=subprocess.DETACHED_PROCESS
             | subprocess.CREATE_NEW_PROCESS_GROUP
             | subprocess.CREATE_NO_WINDOW,
@@ -637,19 +802,27 @@ def _open_detached(
         env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr,
         start_new_session=True,
     )
 
 
 def _spawn_detached(
-    argv: Sequence[str], cwd: Path, environment: dict[str, str]
-) -> _ProcessRef:
+    argv: Sequence[str],
+    cwd: Path,
+    environment: dict[str, str],
+    *,
+    stderr: IO[bytes] | int = subprocess.DEVNULL,
+) -> subprocess.Popen[bytes]:
     """Start ``argv`` so it keeps running after this process is gone."""
     try:
-        process = _open_detached(argv, cwd, environment)
+        return _open_detached(argv, cwd, environment, stderr)
     except OSError as error:
         raise LaunchError(f"{argv[0]} could not be started: {error}") from error
+
+
+def _process_ref(process: subprocess.Popen[bytes]) -> _ProcessRef:
+    """Remember a freshly started process by number and start time."""
     return _ProcessRef(pid=process.pid, started_at=_started_at(process.pid))
 
 
@@ -839,6 +1012,46 @@ def _reference_payload(reference: _ProcessRef | None) -> dict[str, object] | Non
     if reference is None:
         return None
     return {"pid": reference.pid, "started_at": reference.started_at}
+
+
+def _log(path: Path, message: str) -> None:
+    """Append one line to the launch log of ``path``.
+
+    A launch must not fail because its log cannot be written, so every failure
+    of the file system is swallowed here.
+    """
+    log_file = path / LAUNCH_LOG_FILE_NAME
+    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    with suppress(OSError):
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} {message}\n")
+        _trim_log(log_file)
+
+
+@contextmanager
+def _log_stream(path: Path) -> Generator[IO[bytes] | int]:
+    """Hand the error output of the game to the launch log of ``path``.
+
+    Falls back to dropping that output when the log cannot be opened, because
+    a launch must not fail over its own bookkeeping.
+    """
+    try:
+        handle = (path / LAUNCH_LOG_FILE_NAME).open("ab")
+    except OSError:
+        yield subprocess.DEVNULL
+        return
+    try:
+        yield handle
+    finally:
+        handle.close()
+
+
+def _trim_log(log_file: Path) -> None:
+    """Drop the oldest whole lines until the log fits its size limit."""
+    if log_file.stat().st_size <= LAUNCH_LOG_MAX_BYTES:
+        return
+    _, _, kept = log_file.read_bytes()[-LAUNCH_LOG_MAX_BYTES:].partition(b"\n")
+    log_file.write_bytes(kept)
 
 
 def _clear_state(path: Path) -> None:

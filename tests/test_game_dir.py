@@ -10,6 +10,7 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 """
 
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 import psutil
@@ -19,6 +20,8 @@ from fixture_types import SpawnProcess
 from sptmod.core.errors import GameRunningError, NotAGameDirError
 from sptmod.core.game_dir import (
     GameProcess,
+    GameProcessKind,
+    ProcessSighting,
     ensure_game_not_running,
     game_process_kind,
     game_processes,
@@ -26,6 +29,7 @@ from sptmod.core.game_dir import (
     is_game_process_name,
     process_alive,
     running_game_processes,
+    spt_process_sightings,
     validate_game_dir,
 )
 
@@ -197,9 +201,37 @@ def test_running_game_processes_scans_the_real_process_table_without_crashing() 
 class _VanishedProcess:
     """A stand-in for a real ``psutil.Process`` that died mid-scan."""
 
+    pid = 999999
+
     def name(self) -> str:
         """Simulate process death by raising NoSuchProcess."""
         raise psutil.NoSuchProcess(pid=999999)
+
+    def cmdline(self) -> list[str]:
+        """Simulate process death by raising NoSuchProcess."""
+        raise psutil.NoSuchProcess(pid=999999)
+
+
+class _SecretiveProcess:
+    """A process whose name reads but whose command line stays unreadable.
+
+    The operating system refuses the command line of processes owned by other
+    users, which is a genuine ``psutil.Error`` the scan has to live with.
+    """
+
+    pid = 999998
+
+    def __init__(self, name: str) -> None:
+        """Remember the name this process reports."""
+        self._name = name
+
+    def name(self) -> str:
+        """Return the configured process name."""
+        return self._name
+
+    def cmdline(self) -> list[str]:
+        """Refuse the command line the way the operating system does."""
+        raise psutil.AccessDenied(pid=999998)
 
 
 def test_running_game_processes_skips_a_process_that_vanishes_mid_scan(
@@ -299,15 +331,20 @@ def test_game_process_kind_returns_none_for_unrelated_processes(name: str) -> No
 class _FakeProcess:
     """A mock psutil.Process for testing process discovery and filtering."""
 
-    def __init__(self, pid: int, name: str, created: float) -> None:
-        """Initialize with pid, process name, and creation timestamp."""
+    def __init__(self, pid: int, name: str, created: float, cmdline: Sequence[str] = ()) -> None:
+        """Initialize with pid, process name, creation timestamp and command line."""
         self.pid = pid
         self._name = name
         self._created = created
+        self._cmdline = list(cmdline)
 
     def name(self) -> str:
         """Return the configured process name."""
         return self._name
+
+    def cmdline(self) -> list[str]:
+        """Return the configured command line."""
+        return list(self._cmdline)
 
     def create_time(self) -> float:
         """Return the configured creation timestamp."""
@@ -360,6 +397,170 @@ def test_running_game_processes_is_the_name_projection_of_game_processes(
     )
 
     assert running_game_processes() == ["SPT.Server.Linux", "EscapeFromTarkov.exe"]
+
+
+@pytest.mark.parametrize(
+    "name,cmdline,kind",
+    [
+        pytest.param(
+            "EscapeFromTarko",
+            ["X:\\Games\\SPT\\EscapeFromTarkov.exe", "-force-gfx-jobs", "native", "-token=abc"],
+            "client",
+            id="proton-client-truncated-name-and-backslash-command-line",
+        ),
+        pytest.param(
+            "wine64-preloader",
+            ["Z:\\Games\\SPT\\EscapeFromTarkov.exe"],
+            "client",
+            id="client-recognisable-only-by-its-command-line",
+        ),
+        pytest.param(
+            "python3",
+            ["/home/player/SPT/EscapeFromTarkov"],
+            "client",
+            id="client-command-line-without-the-exe-suffix",
+        ),
+        pytest.param(
+            "SPT.Server.Linux",
+            ["/home/player/SPT/SPT_Runtime/SPT.Server.Linux"],
+            "server",
+            id="linux-server-by-name",
+        ),
+        pytest.param(
+            "node",
+            ["C:\\SPT\\SPT_Runtime\\SPT.Server.exe"],
+            "server",
+            id="windows-server-by-command-line",
+        ),
+        pytest.param(
+            "umu-run",
+            ["/usr/bin/umu-run", "EscapeFromTarkov.exe", "-token=abc"],
+            None,
+            id="wrapper-naming-the-game-only-in-a-later-argument",
+        ),
+        pytest.param(
+            "EscapeFromTark",
+            ["/opt/EscapeFromTark"],
+            None,
+            id="fourteen-character-prefix-of-the-game-name",
+        ),
+        pytest.param(
+            "EscapeFrom",
+            ["/opt/EscapeFrom"],
+            None,
+            id="short-prefix-of-the-game-name",
+        ),
+        pytest.param("bash", [], None, id="process-without-a-command-line"),
+    ],
+)
+def test_game_processes_classifies_by_name_and_by_command_line(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    cmdline: list[str],
+    kind: GameProcessKind | None,
+) -> None:
+    """game_processes() classifies a process by its name or by its command line.
+
+    Each case feeds one fake process into the process table. A Proton-hosted
+    client reports the 15-character comm ``EscapeFromTarko`` and a Windows
+    command line, which no name substring and no POSIX basename match; the
+    command line therefore has to be split on both separators. Names that only
+    share a shorter prefix, a wrapper that merely mentions the game in a later
+    argument and a process without a command line must stay unclassified, so
+    the scan does not report strangers as the game.
+    """
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_FakeProcess(4242, name, 7.5, cmdline)]),
+    )
+
+    expected = [] if kind is None else [GameProcess(pid=4242, name=name, kind=kind, started_at=7.5)]
+    assert game_processes() == expected
+
+
+def test_game_processes_skips_a_process_whose_command_line_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """game_processes() skips a process whose command line the system withholds.
+
+    The fake process reports a name that classifies as neither half and then
+    refuses its command line with psutil.AccessDenied, which is what a process
+    of another user does. The scan must swallow that and report nothing rather
+    than propagate the error.
+    """
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_SecretiveProcess("wineserver")]),
+    )
+
+    assert not game_processes()
+
+
+# --- spt_process_sightings -----------------------------------------------------
+
+
+def test_spt_process_sightings_reports_processes_mentioning_spt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spt_process_sightings() reports name and program of every SPT mention.
+
+    The fake table holds a wrapper that names the game only in a later
+    argument, a server, a truncated client without any command line and an
+    unrelated process. The first three are reported with their first command
+    line token (empty when there is none) because a failed launch has to show
+    what the process table really held; the unrelated one is left out.
+    """
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter(
+            [
+                _FakeProcess(1, "umu-run", 1.0, ["/usr/bin/umu-run", "EscapeFromTarkov.exe"]),
+                _FakeProcess(2, "SPT.Server.Linux", 2.0, ["./SPT.Server.Linux"]),
+                _FakeProcess(3, "EscapeFromTarko", 3.0, []),
+                _FakeProcess(4, "firefox", 4.0, ["/usr/bin/firefox"]),
+            ]
+        ),
+    )
+
+    assert spt_process_sightings() == [
+        ProcessSighting(pid=1, name="umu-run", command="/usr/bin/umu-run"),
+        ProcessSighting(pid=2, name="SPT.Server.Linux", command="./SPT.Server.Linux"),
+        ProcessSighting(pid=3, name="EscapeFromTarko", command=""),
+    ]
+
+
+def test_spt_process_sightings_skips_processes_it_cannot_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spt_process_sightings() skips processes that vanish or withhold their data.
+
+    One fake process dies before its name is read, the other refuses its
+    command line. Both raise a genuine psutil.Error, which the diagnostic scan
+    must swallow: a launch log is never worth an exception.
+    """
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_VanishedProcess(), _SecretiveProcess("EscapeFromTarko")]),
+    )
+
+    assert not spt_process_sightings()
+
+
+def test_spt_process_sightings_scans_the_real_process_table_without_crashing() -> None:
+    """spt_process_sightings() runs against the real, unpatched process table.
+
+    Exercises the real psutil scan the way the launch log calls it, on a
+    machine whose process table the test does not control. The scan must walk
+    it end to end without raising and hand back readable entries, whatever it
+    finds.
+    """
+    sightings = spt_process_sightings()
+
+    assert isinstance(sightings, list)
+    for sighting in sightings:
+        assert sighting.pid > 0
+        assert isinstance(sighting.name, str)
+        assert isinstance(sighting.command, str)
 
 
 # --- process_alive -------------------------------------------------------------

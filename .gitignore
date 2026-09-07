@@ -18,6 +18,11 @@ dist/
 target/
 src-tauri/gen/
 
+# launch bookkeeping written into a game directory
+.sptmod-launch.json
+.sptmod-launch.lock
+.sptmod-launch.log
+
 # coverage artifacts
 .coverage
 frontend/coverage/

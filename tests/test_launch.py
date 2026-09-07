@@ -721,7 +721,7 @@ def test_launch_profile_full_happy_path(fake_launchable_dir: LaunchableGameDir) 
     ]
     assert client_dump["cwd"] == str(d.root)
     env = client_dump["env"]
-    assert env["WINEPREFIX"] == str(d.root / "prefix")
+    assert env["WINEPREFIX"] == str(d.root / "prefix" / "pfx")
     assert env["PROTONPATH"] == "GE-Proton11-5"
     assert env["__NV_DISABLE_EXPLICIT_SYNC"] == "1"
     assert env["WINEDLLOVERRIDES"] == "winhttp=n,b"

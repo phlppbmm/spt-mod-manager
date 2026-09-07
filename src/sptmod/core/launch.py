@@ -542,7 +542,8 @@ def _spawn_client(layout: GameLayout, profile_id: str, base_url: str) -> _Proces
         )
     settings = _linux_settings(layout)
     environment = dict(os.environ)
-    environment["WINEPREFIX"] = settings.prefix_path
+    # The official launcher points Wine at the ``pfx`` directory inside the prefix folder.
+    environment["WINEPREFIX"] = str(Path(settings.prefix_path) / "pfx")
     environment["PROTONPATH"] = settings.proton_version
     environment[_NVIDIA_SYNC_ENV] = "1"
     extra: list[str] = []

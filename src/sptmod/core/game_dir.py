@@ -524,7 +524,9 @@ def game_process_kind(name: str) -> GameProcessKind | None:
     """
     lowered = name.lower()
     for candidate, kind in _PROCESS_KINDS:
-        if candidate in lowered:
+        # Linux reports process names truncated to 15 characters, so a Proton
+        # client shows up as ``EscapeFromTarko``.
+        if candidate in lowered or (len(lowered) == 15 and candidate.startswith(lowered)):
             return kind
     return None
 

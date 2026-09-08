@@ -68,7 +68,7 @@ allow-any-import-level = ["libarchive"]
 [tool.pylint.design]
 max-args = 11                # services.install_from_archive: its keyword list is
                              # the InstallFromArchiveRequest schema
-max-positional-arguments = 9 # test_profile: nine fixtures in one test signature
+max-positional-arguments = 9 # test_profile_categories: nine fixtures in one test signature
 max-locals = 27              # services._apply_update
 max-attributes = 27          # forge.models.ForgeMod: one attribute per API field
 max-returns = 9              # modmeta._token_matches
@@ -82,7 +82,7 @@ min-similarity-lines = 24
 
 [tool.pylint.format]
 max-line-length = 119
-max-module-lines = 1891      # tests/test_profile.py, the longest module in the tree
+max-module-lines = 1869      # tests/test_launch.py, the longest module in the tree
 
 [dependency-groups]
 build = ["pyinstaller>=6"]

@@ -35,15 +35,16 @@ src/sptmod/
     models.py           shared dataclasses, trailer key constants, Progress protocol
     game_dir.py         GameLayout detection, SPT version chain, process check
     launch.py           server/client process start, state file, game watcher
-    sptserver.py        local SPT server's launcher API (address, ping, login)
+    sptserver.py        SPT launcher API of this machine or a Fika host (address, ping, profiles, login)
     repo.py             THE git layer; the ONLY module allowed to use subprocess
     archive.py          extraction (.7z/.zip/.rar), traversal guard, anchor search
     modmeta.py          package.json parsing, trailer mapping, npm-style semver
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
     profile.py          profile residue detection from install commits (§7)
     modsets.py          mod set store: one JSON document per user, keyed by game directory
+    fika.py             Fika role store (tolerant), canonical host address
     services/           all user-facing operations as pure functions
-      __init__.py       facade: the 43 service functions and their result types
+      __init__.py       facade: the 47 service functions and their result types
       common.py         shared constants, repo mod lookups, layout path translation
       state.py          status, history, snapshot, installability guard
       gamedir.py        directory browsing/locating, init, SPT version, launch
@@ -55,6 +56,7 @@ src/sptmod/
       catalog.py        catalog sync/search/browse, mod details, favorites
       transfer.py       export and import of mod lists
       modsets.py        mod set CRUD, sharing, profile binding, plan and apply
+      fika.py           Fika role of a game folder, profiles of its host
     workspace.py        staging dir for downloads/extraction, apply lock
     favorites.py        list and persist per-user favorited mod IDs
     forge/
@@ -81,7 +83,7 @@ src-tauri/              Tauri v2 desktop app
   tests/
     rpc_driver_tests.rs   with mocked subprocess
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
-tests/                  Python test suite (1756 tests)
+tests/                  Python test suite
   conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
   fixture_types.py      fixture Protocols for typing
   forge_json.py         Forge API mock payload builders
@@ -105,6 +107,7 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/modfilter.ts       filter and sort predicates; schema for chips, categories
   src/lib/filterstate.ts     module-scope filter state (survives route nav, not restart)
   src/lib/modsets.ts         mod set rows, options, plan summary, missing-mod install targets
+  src/lib/fika.ts            role options, canonical host address, host label, address error
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog, ModSetEditor, ModSetDialog
   src/routes/+layout.svelte  app shell: top bar, nav tabs, window controls
   src/routes/                / (setup or mods), /history, /profile, /settings
@@ -121,8 +124,8 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   waited) and `core/launch.py` (detached game/server processes that outlive the
   call) — one module per concern.
 - `httpx` only in `core/forge/client.py` (read-only Forge API with throttling)
-  and `core/sptserver.py` (local SPT server, loopback, self-signed cert, zlib) —
-  one module per remote service.
+  and `core/sptserver.py` (an SPT server — this machine's or a Fika host's —
+  with a self-signed cert and zlib bodies) — one module per remote service.
 - Core raises typed exceptions only; no print/logging outside cli.py/server/.
 - One API contract, four transports: service function ↔ `sptmod rpc <name>`
   ↔ Tauri `#[tauri::command] rpc()` ↔ camelCase wrapper in client.ts. Guarded
@@ -600,6 +603,160 @@ a picked file path or a pasted code — a pasted code wins over the file path, a
 `MOD_SET_EXISTS` asks for another name. `ModSetDialog` is the "Mods are missing"
 dialog with "Install the missing mods" and "Play without them".
 
+## Fika co-op
+
+Fika lets several players share one SPT server: one machine runs it, the others
+point their game at that machine. Which of the two a game folder is — `none`,
+`host` or `client` — is a setting of that folder. A `host` folder is an ordinary
+installation and launches through the local-server path; hosting means only that
+the other players connect to the server it starts. A `client` folder starts no
+server: the profile it plays, the sign-in and the mods all live on the host.
+
+**Storage.** `platformdirs.user_config_path("sptmod", appauthor=False) /
+"fika.json"` (`core/fika.py`), one document for the user, keyed by
+`str(game_dir.resolve())` — the key the mod sets use (`modsets.store_key`), so
+several game folders keep their own role. It is a file of its own rather than a
+section of `modsets.json` because the two stores answer damage differently: a
+mod set decides which mods a player runs, so an unreadable store fails loudly,
+while an unreadable Fika store reads as "this folder plays alone" (the tolerant
+`favorites.py` pattern) — a damaged setting must never stand between a player
+and their game. It is deliberately not a file in the game repository, for the
+same reasons as the mod sets: it would need whitelist changes, would surface in
+the `game_files_changed` bucket with its SPT-version side effect, and would
+compete with git as the source of truth about the installation. The price of the
+tolerant read is the failure mode: a lost role degrades to a local launch, which
+the player sees at once (the game plays alone) and repairs in the settings.
+Writes rewrite the whole document through mkstemp + `os.replace`, keeping every
+other game folder's entry, so a crash mid-write leaves the previous document
+intact. Every service function takes a keyword-only `fika_path` seam, so no test
+writes the real file.
+
+On-disk shape:
+
+```json
+{"version": 1, "games": {"/home/user/Games/SPT": {"role": "client", "host_address": "192.168.1.20"}}}
+```
+
+Only the typed address is stored. `FikaSettings.base_url` — the address the game
+is pointed at — is derived on every read, so an address that stopped being usable
+keeps its text and loses its base URL, and the launch says what is wrong instead
+of silently playing solo. A role the file does not name, or names unknown, reads
+as `none`.
+
+**The canonical address.** `canonical_base_url` (`core/fika.py`) and
+`canonicalBaseUrl` (`frontend/src/lib/fika.ts`) implement one rule against the
+same example table in both test suites: whitespace around the address is
+dropped; an empty address stays empty (that is what "no host" looks like); a
+scheme is kept when it is `http` or `https` in any casing and assumed `https`
+otherwise; the address is refused when the host is empty, when user info is
+present, when a `?` or a `#` appears anywhere (including a trailing one that
+would open an empty query or fragment), when brackets hold anything but an IPv6
+literal, when the path is anything but `""` or `/`, when the port is outside
+1–65535, or when there is whitespace inside; the result is
+`scheme://host:port` with a lower-cased host, the brackets of an IPv6 address
+kept, and port `6969` when none was given.
+
+| Typed | Base URL |
+|---|---|
+| *(empty)* | *(empty)* — no host set |
+| `192.168.1.20` | `https://192.168.1.20:6969` |
+| `192.168.1.20:7000` | `https://192.168.1.20:7000` |
+| `http://pc.local` | `http://pc.local:6969` |
+| `https://[fe80::1]:6969/` | `https://[fe80::1]:6969` |
+| `ftp://pc.local`, `a b`, `:6969`, `pc.local:0` | refused |
+| `pc.local?`, `pc.local#`, `[abc]`, `[1.2.3.4]:7000` | refused |
+
+Python raises `InvalidMetadataError` for a refused address, the TypeScript twin
+returns `null`; an empty address is `""` on both sides.
+
+**The host's profiles.** `sptserver.host_profiles(base_url)` reads GET
+`/launcher/v2/profiles` and maps the `Response` list into `RemoteProfile`
+(`profileId`, `username`, `nickname` falling back to the username, `currlvl`,
+`side`, `hasPassword`); an entry that is not an object or carries no profile id
+is left out, and `httpx.HTTPError` becomes `LaunchError`. A client machine has
+no profile files of its own — the `-token=` id belongs to the host's server — so
+the list a player picks from has to come over the network. Certificate
+validation stays off, exactly as for the local server: every SPT installation
+generates its own self-signed certificate, the host's as much as the local one,
+and the address is one the player typed deliberately.
+
+**Service functions** (`services/fika.py`, all with keyword-only `fika_path`,
+except `plan_fika_install`, which lives in `services/install_forge.py` and takes
+`db_path`):
+
+| Function | Purpose | Errors |
+|---|---|---|
+| `get_fika_settings(path)` | role, typed address and derived base URL of the folder | — (reads only, never fails) |
+| `set_fika_settings(path, role="none", host_address="")` | store the role and the address, returning what was stored; role `none` stores an empty address without checking what was passed | `InvalidMetadataError` (address unusable, or `client` without one), `OSError` |
+| `list_host_profiles(path)` | the profiles of the host, in the order it sends them | `FikaHostUnreachableError` (no usable address stored, or the host does not answer) |
+| `plan_fika_install(path)` | the two Forge ids of Fika and one plan installing both | `NoCompatibleVersionError`, `UnresolvableDependencyError`, `NotAGameDirError`, `ForgeUnavailableError`, `ForgeApiError`, `GitError` |
+
+The address is checked in `set_fika_settings`, while the player is looking at the
+input, not when they want to play — except for the role `none`, which drops the
+address unchecked so a folder can always go back to playing alone. The role is validated by pydantic at the RPC
+boundary, so the service does not check it again.
+
+**Installing Fika.** Fika is published as two Forge mods and both are found by
+slug, never by a hardcoded id: `project-fika-server` ("Project Fika - Server",
+the server mod) and `project-fika` ("Project Fika", the client plugin).
+`catalog.find_by_slug` matches the slug casefolded — the slug is the stable name
+in a mod's Forge address where the display name is not. Each half is resolved on
+its own through the existing plan resolution (highest version compatible with the
+installation's SPT version, full dependency resolution), because the halves carry
+their own versions and their own dependencies; the two entry lists become one
+plan, the server half first, every mod id appearing once, under the server plan's
+`spt_version`. A slug the catalog does not know raises
+`NoCompatibleVersionError("<title> is not in the mod catalog. Sync the catalog
+and try again.")`. Installing is not a service of its own: the Settings page
+confirms the combined plan once and then calls `install_mod` twice, the server id
+first and the client id second, both under one `operation_id` so the progress
+line runs through.
+
+**Playing the host's mods.** The share code of a mod set carries no host address:
+a set describes mods, the address belongs to the joining machine, so one code
+serves every player and survives a host that moves. The joining player pastes the
+code (or picks the file) in Settings, which calls `import_mod_set` and then
+`apply_mod_set` on the imported name; `MOD_SET_EXISTS` asks for another name and
+`MOD_SET_INCOMPLETE` opens the existing `ModSetDialog`, whose answers install the
+missing mods by the Forge ids the set carries or apply the rest with
+`ignore_missing`.
+
+**Errors.** One new exception: `FikaHostUnreachableError`
+(`FIKA_HOST_UNREACHABLE`, no `ErrorDetails` field) for a host that does not
+answer as an SPT server and for a folder that joins a host without a usable
+address. The rest reuses what exists: `LoginFailedError` (the host refuses the
+profile — a password-protected profile cannot be played from another machine),
+`LaunchError` (the host offers no profile with that id; no usable address at
+launch time), `InvalidMetadataError` (the address is refused when it is saved),
+`NoCompatibleVersionError` (a Fika half is missing from the catalog),
+`ModSetExistsError` / `ModSetIncompleteError` (the shared set).
+
+**Frontend.** `src/lib/fika.ts` holds the pure part: the three role options with
+their labels and hints, `canonicalBaseUrl`, `hostLabel` (the host without the
+default port: `pc.local`, or `pc.local:7000`) and `addressError` (the line under
+the input, empty when the role can be saved). The Settings page has a "Fika"
+section between Launching and Mod sets: three radios (No Fika / I host / I join a
+host), the address input for `host` and `client` with its live error, Save, the
+"Install Fika (server mod + client plugin)" button with the plan dialog, and the
+"Apply the host's mod set" block (file path plus paste field, the pasted code
+wins). The Profiles page reads `get_fika_settings` on mount; in the `client` role
+it lists the host's profiles instead of the local ones — nickname, level, side,
+a `ModSetEditor` and a Connect button, whose label comes from `launchAction(…,
+hostLabel(base_url))` as `Connect to <host>` / "Connecting…". A password-locked
+profile disables that button and carries the note that it cannot be used from
+here as its hint. With a host label the stop hint becomes "Closes the game. The
+host's server keeps running.", and the closing dialog says the same instead of
+naming a server that is closed. Profile residues
+and cleanup are work on local profile files and stay hidden there; a failed
+profile list is one line with a "Try again" button. The `none` and `host` roles
+render the local profile panels. The Mods view is untouched, including its "Fika
+compatible" filter chip, which reports a mod's own compatibility flag and has
+nothing to do with this setting.
+
+**Unverified.** Client mode assumes the game needs nothing but the host's
+`BackendUrl` in its `-config=` argument, which is what the official launcher
+builds — this has not been checked against a live Fika session.
+
 ## Launching the game
 
 All three game-launch service functions (`launch_profile`, `launch_status`,
@@ -612,7 +769,7 @@ launcher's logic → spawn a detached watcher that polls the process table every
 3 seconds and closes the server when the game closes (if configured).
 
 **Mod set:** `launch_profile(path, profile_id, stop_server_on_exit=True,
-mod_set="apply", progress=None, *, store_path=None)`. The `mod_set` parameter
+mod_set="apply", progress=None, *, store_path=None, fika_path=None)`. The `mod_set` parameter
 decides what happens with the set the profile is bound to: `apply` refuses to
 launch when the set names mods the installation does not have, `ignore_missing`
 applies the rest of the set anyway, `skip` does not read the stored sets at all
@@ -631,10 +788,48 @@ with `ignore_missing`. A damaged mod set store fails every launch with
 `InvalidMetadataError` — only `mod_set="skip"` starts anyway. `LaunchStep` gained
 `MODSET = "modset"` as its first phase.
 
+**Fika client mode:** after the mod set step the service reads the Fika settings
+of the game folder. Role `client` hands the host's base URL to the core function
+as its keyword-only `fika_host`; role `client` without a usable address fails with
+`LaunchError("No usable address is set for the Fika host. Set it in the
+settings.")` before anything starts; the roles `none` and `host` pass an empty
+`fika_host` and take the local-server path above. With a `fika_host` the only
+thing that starts on this machine is the game:
+
+| Step | % | Message |
+|---|---|---|
+| `host` | 5 | `Contacting the host at <base URL>` |
+| `host` | 40 | `Reading the profiles on the host` |
+| `login` | 80 | `Signing in as <nickname>` |
+| `client` | 95 | `Starting the game` |
+| `done` | 100 | `The game is starting` |
+
+The host is probed first (`GET /launcher/v2/ping`); anything but an SPT answer
+raises `FikaHostUnreachableError` with the reason spelled out — nobody answering
+("Ask the host to start their server, then try again."), no answer in time, or
+something that is not an SPT server. Then the host's profile list is read and the
+entry whose id is the launched one supplies the username and the player name; no
+local profile file is opened, and an id the host does not offer is a `LaunchError`
+naming it. The sign-in goes to the host, and the game is spawned by the same code
+as a local launch with the host's URL as its `BackendUrl`, so argv, working
+directory and environment are identical. `LaunchStep` carries `HOST = "host"` for
+the two host phases; the result carries `server_pid=0` and
+`server_started=False`, within the existing `LaunchResult`. The launch log gets
+`Connecting to the host at <url>.` and `The host signed <nickname> in.`
+
 **State file:** `<game dir>/.sptmod-launch.json` holds the running process
 identities (server, client, watcher) along with `profile_id`,
-`stop_server_on_exit` and `failure` (empty unless the watcher gave up waiting
-for the game). It is read and written atomically (mkstemp + os.replace,
+`stop_server_on_exit`, `failure` (empty unless the watcher gave up waiting
+for the game) and `mode` (`client` when the game was started on another player's
+server, empty otherwise; a file without the key reads as empty, so a state file
+from an older run stays usable). `mode` is what keeps a client-mode stop off the
+host's server: `stop_game` looks for no server at all in that mode — neither the
+remembered one nor the process-table fallback — so `server_stopped` is always
+false while the game processes are closed the same way, and the watcher logs "The
+game was played on another player's server; nothing to close here." instead of
+closing anything. `launch_status` reads `mode` the same way: in client mode it
+reports no server at all, so a server running on the client machine for another
+reason does not look like the one the game plays on. The file is read and written atomically (mkstemp + os.replace,
 the `favorites.save_favorites` pattern) and is a hint only — the process table
 is the source of truth. Located in the game directory because every short-lived
 process involved (launch call, status call, watcher) learns about the game
@@ -741,7 +936,8 @@ profile file unusable), `ServerPortBusyError` (`SERVER_PORT_BUSY`, port held by
 a non-SPT program), `LoginFailedError` (`LOGIN_FAILED`, server does not know the
 profile), `LauncherSettingsError` (`LAUNCHER_SETTINGS_MISSING`, launcher settings
 missing or unreadable, Linux only). "Game already running" reuses the existing
-`GameRunningError` (`GAME_RUNNING`).
+`GameRunningError` (`GAME_RUNNING`). A launch on a Fika host adds
+`FikaHostUnreachableError` (`FIKA_HOST_UNREACHABLE`), see "Fika co-op".
 
 **Frontend:** Three new routes in the Profiles tab (Launch/Stop buttons per
 readable profile with phase-progress display) and the Mods view (running-game
@@ -765,8 +961,8 @@ default true, passed as a parameter to each launch call).
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 43 service functions (declared as `FUNCTIONS: [&str; 43]` in
-  rpc.rs); the frontend client.ts has 41 camelCase wrappers (`adopt_mod` and
+- RPC functions: 47 service functions (declared as `FUNCTIONS: [&str; 47]` in
+  rpc.rs); the frontend client.ts has 45 camelCase wrappers (`adopt_mod` and
   `install_from_archive` are RPC-exposed but have no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
@@ -791,7 +987,7 @@ default true, passed as a parameter to each launch call).
   compatibility (compatible/incompatible shown as tags).
 - Mods view shows a result count line ("N mods") above the table.
 - Settings page: sections Game directory, Appearance (theme select: system,
-  light, dark), Launching, Mod sets, Export the mod list, Import a mod list,
+  light, dark), Launching, Fika, Mod sets, Export the mod list, Import a mod list,
   Catalog cache (two actions: clear cache alone, or clear cache + remove
   downloaded mod files). A left sub-nav links the sections by hash; the active entry follows
   `page.url.hash`.
@@ -921,23 +1117,26 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (1756 collected: 1755 passed, 1 skipped)
+uv run pytest                        # Python suite (1769 passed, 1 skipped; see below)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (294 tests; 100% coverage)
+cd frontend && pnpm vitest run --coverage  # frontend (553 tests; 100% coverage)
 cargo build && cargo test            # Rust (13 driver + 2 ignored e2e)
 cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 ```
 
 ### Suite sizes and coverage
 
-- **Python:** 1755 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 1769 passed, 1 skipped with `tests/test_launch.py`,
+  `tests/test_launch_watch.py`, `tests/test_rpc_launch.py` and
+  `tests/test_rpc_subprocess.py` excluded (the full-suite number is pending).
+  `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 488 vitest tests in 16 files; strict 100% statements/branches/functions/lines on
+- **Frontend:** 553 vitest tests in 17 files; strict 100% statements/branches/functions/lines on
   `src/lib/**/*.ts` (minus `*.test.ts` and generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
   reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume
@@ -957,7 +1156,8 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   settings + profile with login credentials), `launchable_repo`
   (`fake_launchable_dir` initialized as a clean repository, for mod set launch
   tests), `mod_set_store` (a `modsets.json` path below `tmp_path`, passed as
-  `store_path` so no test writes the real one), `clean_repo`, `install_commit`,
+  `store_path` so no test writes the real one), `fika_store` (the same for
+  `fika.json`, passed as `fika_path`), `clean_repo`, `install_commit`,
   `make_archive` (zip/7z; rar cannot be created — real samples in `tests/data/`,
   plus an encrypted zip). Shared builders: `tests/forge_json.py` (Forge API mock
   payloads), `tests/pe_builder.py` (PE file assembly). Fixture types: `tests/fixture_types.py`
@@ -983,6 +1183,13 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   (export content, share code, import sources), `tests/test_launch_modset.py`
   (the bound set in a launch), `tests/test_rpc_modsets.py` (one round-trip per
   function and the three error envelopes). Frontend: `src/lib/modsets.test.ts`.
+- Fika tests: `tests/test_fika_store.py` (the store file and the address rule),
+  `tests/test_services_fika.py` (the three settings services against a respx
+  host), `tests/test_services_fika_install.py` (the two slugs, the merged plan),
+  `tests/test_launch_fika.py` (client-mode launch, progress, state file,
+  `stop_game`), `tests/test_rpc_fika.py` (one round-trip per function plus the
+  `FIKA_HOST_UNREACHABLE` and `INVALID_METADATA` envelopes). Frontend:
+  `src/lib/fika.test.ts`.
 - RPC tests: `tests/test_rpc_contract.py` (route-per-function, schema-parity,
   error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
@@ -1027,3 +1234,9 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   verified against a live Proton launch).
 - Pre-launch cleanup and patching (which the official launcher does) are out of
   scope; sptmod starts the game as-is.
+- `stop_game` closes a local SPT server it finds in the process table even when
+  no state file names one (bead spt-mod-manager-6jk); a server started outside
+  sptmod is therefore closed too. Client mode is exempt: the `mode` guard stops
+  the fallback from running at all.
+- Fika client mode assumes the game needs nothing but the host's `BackendUrl`;
+  not verified against a live Fika session.

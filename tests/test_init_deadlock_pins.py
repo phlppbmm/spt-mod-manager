@@ -25,8 +25,6 @@ from sptmod.core.errors import GitError, SptVersionUnknownError
 from sptmod.core.game_dir import read_pe_file_version
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

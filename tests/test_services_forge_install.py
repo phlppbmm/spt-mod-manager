@@ -40,8 +40,6 @@ from sptmod.core.models import PlanEntry
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import download_cache_dir, staging_dir
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 SPT_VERSION = "4.1.0"
 SPT_CONSTRAINT = "^4.0.0"
 

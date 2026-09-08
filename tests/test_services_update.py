@@ -31,8 +31,6 @@ from sptmod.core.errors import (
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 SPT_VERSION = "4.1.0"
 
 cli_runner = CliRunner()

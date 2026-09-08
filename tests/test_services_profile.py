@@ -18,8 +18,6 @@ from sptmod.core import services
 from sptmod.core.errors import ProfileResidueError
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

@@ -13,8 +13,6 @@ from sptmod.core import game_dir
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

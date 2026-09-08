@@ -50,6 +50,8 @@ function status(overrides: Partial<LaunchStatus> = {}): LaunchStatus {
 		server_pid: 0,
 		client_pid: 0,
 		profile_id: '',
+		server_stoppable: false,
+		client_stoppable: false,
 		...overrides
 	};
 }
@@ -176,7 +178,7 @@ describe('launchAction', () => {
 				label: 'Stop',
 				disabled: false,
 				mode: 'stop',
-				hint: 'Closes the game and the SPT server.'
+				hint: 'Closes the game, and the SPT server if sptmod started it.'
 			}
 		},
 		{
@@ -188,7 +190,7 @@ describe('launchAction', () => {
 				label: 'Stop',
 				disabled: true,
 				mode: 'stop',
-				hint: 'Closes the game and the SPT server.'
+				hint: 'Closes the game, and the SPT server if sptmod started it.'
 			}
 		},
 		{

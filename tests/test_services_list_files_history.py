@@ -16,8 +16,6 @@ from sptmod.core.errors import AmbiguousModError, ModNotFoundError
 from sptmod.core.models import ACTIVE_STATES
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 
 def test_list_mods_on_a_fresh_repo_returns_no_mods(clean_repo: Repo) -> None:
     """list_mods on a repository with only the baseline commit returns an empty list.

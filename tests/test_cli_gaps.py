@@ -33,9 +33,6 @@ from forge_json import (
 from sptmod.cli import app, main
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
-
 runner = CliRunner()
 
 SPT_VERSION = "4.1.0"

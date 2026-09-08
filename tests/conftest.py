@@ -35,7 +35,7 @@ from sptmod.cli import app
 from sptmod.core import game_dir, services
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
-from sptmod.core.game_dir import detect_layout
+from sptmod.core.game_dir import GameProcess, ProcessSighting, detect_layout
 from sptmod.core.launch import LAUNCH_STATE_FILE_NAME
 from sptmod.core.models import Json
 from sptmod.core.repo import Repo
@@ -1080,18 +1080,98 @@ def invoke_rpc(name: str, request: JsonDict) -> tuple[int, list[JsonDict]]:
     return result.exit_code, lines
 
 
-@pytest.fixture
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Report no running SPT process, whatever runs on the test host.
+# The real scans, bound before the autouse fixture below replaces the module
+# attributes. ``own_processes_only`` needs the genuine scans; reading
+# ``game_dir.game_processes`` inside that fixture would pick up the empty stub
+# and silently turn the fixture into a no-op.
+_real_game_processes = game_dir.game_processes
+_real_running_game_processes = game_dir.running_game_processes
+_real_spt_process_sightings = game_dir.spt_process_sightings
 
-    Requested through a module-level ``pytest.mark.usefixtures`` by every
-    suite whose service calls would otherwise raise ``GameRunningError``
-    when the developer happens to play while the tests run.
+
+@pytest.fixture(autouse=True)
+def no_process_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test away from the SPT processes of the machine it runs on.
+
+    Replaces the three scanning functions of ``sptmod.core.game_dir`` with
+    empty ones and switches the scan off through ``SPTMOD_PROCESS_SCAN``. The
+    replacements cover every in-process caller, because production code reaches
+    the scan through the module attribute; the environment variable covers the
+    watcher process a launch starts, which inherits the environment and scans
+    on its own where no monkeypatch can reach. Without both halves a test run
+    can find, and act on, the game a developer is playing.
+
+    Tests that need a genuine scan request :func:`real_process_scan` or
+    :func:`own_processes_only`, which undo this in a narrow, guarded way.
     """
-    def no_running_processes() -> list[str]:
+
+    def no_game_processes() -> list[GameProcess]:
         return []
 
-    monkeypatch.setattr(game_dir, "running_game_processes", no_running_processes)
+    def no_process_names() -> list[str]:
+        return []
+
+    def no_sightings() -> list[ProcessSighting]:
+        return []
+
+    monkeypatch.setattr(game_dir, "game_processes", no_game_processes)
+    monkeypatch.setattr(game_dir, "running_game_processes", no_process_names)
+    monkeypatch.setattr(game_dir, "spt_process_sightings", no_sightings)
+    monkeypatch.setenv(game_dir.PROCESS_SCAN_ENV, "off")
+
+
+@pytest.fixture
+def real_process_scan(no_process_scan: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let one test reach the genuine process table again.
+
+    Undoes both halves of :func:`no_process_scan`: the environment switch and
+    the three module attributes. Requested by the unit test of the scan itself,
+    which has to see the real implementation and only ever reads what it finds.
+    Tests that act on what the scan reports request :func:`own_processes_only`
+    instead, which narrows the result to their own processes and refuses to run
+    while this machine really plays SPT.
+    """
+    del no_process_scan
+    monkeypatch.delenv(game_dir.PROCESS_SCAN_ENV, raising=False)
+    monkeypatch.setattr(game_dir, "game_processes", _real_game_processes)
+    monkeypatch.setattr(game_dir, "running_game_processes", _real_running_game_processes)
+    monkeypatch.setattr(game_dir, "spt_process_sightings", _real_spt_process_sightings)
+
+
+@pytest.fixture
+def own_processes_only(real_process_scan: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Narrow the real process scans to the processes this test started.
+
+    Requested by the tests that drive the watcher and the launch state against
+    a genuine process table. The real scans do the real classification, but
+    only descendants of the test process can show up in their results, and the
+    SPT a developer plays is never a descendant of pytest.
+
+    Refuses to run the test at all while this machine really has an SPT server
+    or game running. These are the only tests that act on what a real scan
+    reports, so this is the one place where refusing is the right answer: one
+    of them closing a running raid is what the whole seam exists to prevent.
+    """
+    del real_process_scan
+    if game_dir.game_processes():
+        pytest.fail(
+            "An SPT server or game is running on this machine. This test must "
+            "not stop it; close the game before running the launch tests."
+        )
+
+    def own_pids() -> set[int]:
+        return {child.pid for child in psutil.Process(os.getpid()).children(recursive=True)}
+
+    def own_processes() -> list[GameProcess]:
+        mine = own_pids()
+        return [process for process in _real_game_processes() if process.pid in mine]
+
+    def own_sightings() -> list[ProcessSighting]:
+        mine = own_pids()
+        return [sighting for sighting in _real_spt_process_sightings() if sighting.pid in mine]
+
+    monkeypatch.setattr(game_dir, "game_processes", own_processes)
+    monkeypatch.setattr(game_dir, "spt_process_sightings", own_sightings)
 
 
 @pytest.fixture

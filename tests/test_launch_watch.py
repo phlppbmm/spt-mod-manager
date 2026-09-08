@@ -8,7 +8,6 @@ cadence and the clock are always injected so no test waits on a real clock.
 """
 
 import json
-import os
 import runpy
 import shutil
 import subprocess
@@ -22,8 +21,7 @@ import pytest
 
 from conftest import process_ref, write_launch_state
 from fixture_types import SpawnProcess, SpawnSleeper
-from sptmod.core import game_dir
-from sptmod.core.game_dir import CLIENT_EXE_NAME, SERVER_LINUX_NAME, GameProcess
+from sptmod.core.game_dir import CLIENT_EXE_NAME, SERVER_LINUX_NAME
 from sptmod.core.launch import (
     CLIENT_NEVER_STARTED,
     LAUNCH_LOG_FILE_NAME,
@@ -34,26 +32,6 @@ from sptmod.core.launch import (
 from sptmod.watch import USAGE, main
 
 pytestmark = pytest.mark.timeout(5)
-
-
-@pytest.fixture(autouse=True)
-def own_processes_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Narrow the real process scan to the processes this test started.
-
-    These tests drive ``watch_game`` against the genuine process table, and a
-    developer machine may be running SPT for real while they run, which would
-    make every "no game is running" case describe that game instead of the
-    test. Every process a test here starts is a descendant of the test
-    process, so keeping only those leaves the real scan doing the real
-    classification while it can only see what the test put there.
-    """
-    scan = game_dir.game_processes
-
-    def own_processes() -> list[GameProcess]:
-        mine = {child.pid for child in psutil.Process(os.getpid()).children(recursive=True)}
-        return [process for process in scan() if process.pid in mine]
-
-    monkeypatch.setattr(game_dir, "game_processes", own_processes)
 
 
 def _live_ref(process: subprocess.Popen[bytes], *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
@@ -255,6 +233,7 @@ def test_watch_game_stops_the_server_when_it_started_it_and_was_asked_to(
     assert not _state_file(tmp_path).exists()
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -284,6 +263,7 @@ def test_watch_game_follows_the_game_by_name_when_the_recorded_pid_is_gone(
     assert not _state_file(tmp_path).exists()
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_waits_for_the_game_to_appear_before_watching_it(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -353,6 +333,7 @@ def test_watch_game_keeps_waiting_while_the_recorded_process_is_still_alive(
     assert not _state_file(tmp_path).exists()
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -379,6 +360,7 @@ def test_watch_game_leaves_the_server_when_stop_on_exit_is_false(
     assert not _state_file(tmp_path).exists()
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_leaves_a_server_it_did_not_start(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -499,6 +481,7 @@ def test_the_noted_failure_survives_reading_the_state_file_back(tmp_path: Path, 
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_writes_its_decisions_to_the_launch_log(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -531,6 +514,7 @@ def test_watch_game_writes_its_decisions_to_the_launch_log(
     assert "The SPT server was closed." in log
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_notes_the_server_it_left_running(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
@@ -557,6 +541,7 @@ def test_watch_game_notes_the_server_it_left_running(
     assert "The SPT server was left running." in _log_text(tmp_path)
 
 
+@pytest.mark.usefixtures("own_processes_only")
 def test_watch_game_logs_the_process_table_when_no_game_appeared(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,

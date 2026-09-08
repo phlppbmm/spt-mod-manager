@@ -9,6 +9,7 @@ port, and every ping/login answer is simulated through respx.
 import json
 import os
 import stat
+import subprocess
 import sys
 import time
 import zlib
@@ -32,7 +33,7 @@ from sptmod.core.errors import (
     NotAGameDirError,
     ServerPortBusyError,
 )
-from sptmod.core.game_dir import GameProcess, detect_layout
+from sptmod.core.game_dir import GameProcess, GameProcessKind, detect_layout
 from sptmod.core.launch import (
     LAUNCH_LOCK_FILE_NAME,
     LAUNCH_LOG_FILE_NAME,
@@ -52,11 +53,6 @@ from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
 pytestmark = pytest.mark.timeout(5)
 
 
-def _no_game_processes() -> list[GameProcess]:
-    """Stand in for ``game_dir.game_processes`` when nothing runs."""
-    return []
-
-
 def _process_alive(_pid: int, _started_at: float) -> bool:
     """Stand in for ``game_dir.process_alive`` reporting a running process."""
     return True
@@ -65,16 +61,6 @@ def _process_alive(_pid: int, _started_at: float) -> bool:
 def _process_gone(_pid: int, _started_at: float) -> bool:
     """Stand in for ``game_dir.process_alive`` reporting a finished process."""
     return False
-
-
-@pytest.fixture(autouse=True)
-def not_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate every test here from whatever this sandbox happens to run.
-
-    Individual tests override this again through the same ``monkeypatch``
-    fixture when they need a specific scan result.
-    """
-    monkeypatch.setattr(game_dir, "game_processes", _no_game_processes)
 
 
 def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
@@ -1237,7 +1223,9 @@ def test_launch_status_reports_nothing_with_no_state_and_no_processes(
     No state file and no game processes found by scan; launch_status returns
     LaunchStatus with all boolean flags false, pids 0, and empty profile_id.
     """
-    assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "")
+    assert launch_status(tmp_path) == LaunchStatus(
+        False, False, 0, 0, "", server_stoppable=False, client_stoppable=False
+    )
 
 
 def test_launch_status_reports_alive_processes_from_the_state_file(
@@ -1257,7 +1245,9 @@ def test_launch_status_reports_alive_processes_from_the_state_file(
         client=process_ref(222, 2.0),
     )
 
-    assert launch_status(tmp_path) == LaunchStatus(True, True, 111, 222, "profile-a")
+    assert launch_status(tmp_path) == LaunchStatus(
+        True, True, 111, 222, "profile-a", server_stoppable=True, client_stoppable=True
+    )
 
 
 def test_launch_status_falls_back_to_the_scanned_process_table(
@@ -1279,7 +1269,9 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
         ],
     )
 
-    assert launch_status(tmp_path) == LaunchStatus(True, True, 333, 444, "")
+    assert launch_status(tmp_path) == LaunchStatus(
+        True, True, 333, 444, "", server_stoppable=False, client_stoppable=False
+    )
 
 
 def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
@@ -1324,7 +1316,9 @@ def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
         client=process_ref(2, 2.0),
     )
 
-    assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "stale-profile")
+    assert launch_status(tmp_path) == LaunchStatus(
+        False, False, 0, 0, "stale-profile", server_stoppable=False, client_stoppable=False
+    )
 
 
 def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
@@ -1351,89 +1345,203 @@ def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
 # --------------------------------------------------------------------------
 
 
+NOTHING_STARTED = "sptmod did not start a game here, so there is nothing to close."
+NOTHING_LEFT = "Nothing sptmod started here is still running."
+SERVER_STAYS_UP = "The SPT server was already running before sptmod, so it stays up."
+STILL_PLAYING = "The game is still running; close it yourself."
+
+
+def _scanned(process: subprocess.Popen[bytes], name: str, kind: GameProcessKind) -> GameProcess:
+    """Describe a real throwaway process the way a process-table scan would."""
+    return GameProcess(
+        pid=process.pid,
+        name=name,
+        kind=kind,
+        started_at=psutil.Process(process.pid).create_time(),
+    )
+
+
 def test_stop_game_is_a_noop_without_a_state_file(tmp_path: Path) -> None:
-    """stop_game returns (False, False) when no state file exists.
+    """stop_game reports nothing to close when no launch was ever noted here.
 
-    Nothing to stop; no processes found by scan either.
+    No state file exists, so nothing was recorded. stop_game returns both flags
+    false and says so in plain words, because there is no process it may touch.
     """
-    assert stop_game(tmp_path) == StopResult(False, False)
+    assert stop_game(tmp_path) == StopResult(False, False, NOTHING_STARTED)
 
 
-def test_stop_game_falls_back_to_the_scanned_process_table(
+def test_stop_game_leaves_a_scanned_server_and_game_it_did_not_start_alone(
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """stop_game terminates scanned processes when no state file exists.
+    """stop_game never closes a process it only found in the process table.
 
-    No state file; game_processes scan returns real SPT.Server.Linux (pid server.pid)
-    and EscapeFromTarkov.exe (pid client.pid) with correct create_time values. Both
-    processes are terminated; result shows server_stopped=True, client_stopped=True.
+    Two real throwaway processes are presented to the scan as the SPT server
+    and the game while no state file exists, so nothing ties them to sptmod.
+    stop_game reports nothing closed, says the game found there is still
+    running, and both processes are alive afterwards: closing a server and a
+    raid that belong to somebody else is the regression this pins.
     """
-    # No state file at all -- exactly like launch_status, stop_game finds a
-    # server/client started outside sptmod (or by an untracked launch) via
-    # the scan, not just via the recorded state.
     server = spawn_sleeper()
     client = spawn_sleeper()
     monkeypatch.setattr(
         game_dir,
         "game_processes",
         lambda: [
-            GameProcess(
-                pid=server.pid,
-                name="SPT.Server.Linux",
-                kind="server",
-                started_at=psutil.Process(server.pid).create_time(),
-            ),
-            GameProcess(
-                pid=client.pid,
-                name="EscapeFromTarkov.exe",
-                kind="client",
-                started_at=psutil.Process(client.pid).create_time(),
-            ),
+            _scanned(server, "SPT.Server.Linux", "server"),
+            _scanned(client, "EscapeFromTarkov.exe", "client"),
         ],
     )
 
     result = stop_game(tmp_path)
 
-    assert result == StopResult(server_stopped=True, client_stopped=True)
-    server.wait(timeout=4)
+    assert result == StopResult(False, False, f"{NOTHING_STARTED} {STILL_PLAYING}")
+    assert server.poll() is None
+    assert client.poll() is None
+
+
+def test_stop_game_leaves_a_server_that_was_already_running_before_the_launch(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
+) -> None:
+    """stop_game closes the game but keeps a server the launch only adopted.
+
+    The state file records a running game and a running server marked as not
+    started by sptmod, the server that was already answering when the launch
+    began. stop_game closes the game, leaves that server running and says that
+    it stays up, because a server sptmod adopted may serve somebody else.
+    """
+    server = spawn_sleeper()
+    client = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        profile_id="p",
+        server=process_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=False),
+        client=process_ref(client.pid, psutil.Process(client.pid).create_time()),
+    )
+
+    result = stop_game(tmp_path)
+
+    assert result == StopResult(False, True, f"Closed the game. {SERVER_STAYS_UP}")
     client.wait(timeout=4)
+    assert server.poll() is None
 
 
-def test_stop_game_stops_every_scanned_game_process(
+def test_stop_game_reports_an_adopted_server_that_stays_up_when_nothing_was_closed(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
+) -> None:
+    """stop_game names the adopted server even when it closed nothing at all.
+
+    The state file records only a server that sptmod did not start, and the
+    game is already gone. Nothing is closed, and the answer still explains that
+    the server keeps running instead of leaving the player wondering.
+    """
+    server = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        profile_id="p",
+        server=process_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=False),
+    )
+
+    result = stop_game(tmp_path)
+
+    assert result == StopResult(False, False, f"{NOTHING_LEFT} {SERVER_STAYS_UP}")
+    assert server.poll() is None
+
+
+def test_stop_game_closes_a_server_it_started_without_a_game(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
+) -> None:
+    """stop_game closes a lone server that sptmod started itself.
+
+    The state file records a running server marked as started by sptmod and no
+    game. stop_game closes the server and names only it, so the answer never
+    claims a game was closed that never ran.
+    """
+    server = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        profile_id="p",
+        server=process_ref(server.pid, psutil.Process(server.pid).create_time(), started_by_sptmod=True),
+    )
+
+    result = stop_game(tmp_path)
+
+    assert result == StopResult(True, False, "Closed the SPT server.")
+    server.wait(timeout=4)
+
+
+@pytest.mark.parametrize(
+    ("server_started_by_sptmod", "expected_message"),
+    [
+        (True, f"Closed the game and the SPT server. {STILL_PLAYING}"),
+        (False, f"Closed the game. {SERVER_STAYS_UP} {STILL_PLAYING}"),
+    ],
+    ids=["server-sptmod-started", "server-adopted"],
+)
+def test_stop_game_says_a_game_left_in_the_process_table_is_still_running(
+    server_started_by_sptmod: bool,
+    expected_message: str,
     tmp_path: Path,
     spawn_sleeper: SpawnSleeper,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """stop_game terminates all instances of the game when multiple exist.
+    """stop_game adds the note about a surviving game to what it did close.
 
-    Wine-hosted game appears as two separate processes in scan (first, second).
-    Both are terminated; result.client_stopped is True after both pids exit.
+    The state file records a running server and a running game, and a third
+    throwaway process is presented to the scan as a game that outlives them.
+    stop_game closes what it noted, leaves the surviving game alone and asks
+    the player to close it: on Linux the game regularly outlives the program a
+    launch starts, and sptmod closes nothing it did not start itself.
     """
-    # A game hosted by Wine shows up more than once; leaving any of them
-    # running would keep the installation locked.
-    first = spawn_sleeper()
-    second = spawn_sleeper()
+    server = spawn_sleeper()
+    client = spawn_sleeper()
+    survivor = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        profile_id="p",
+        server=process_ref(
+            server.pid,
+            psutil.Process(server.pid).create_time(),
+            started_by_sptmod=server_started_by_sptmod,
+        ),
+        client=process_ref(client.pid, psutil.Process(client.pid).create_time()),
+    )
     monkeypatch.setattr(
-        game_dir,
-        "game_processes",
-        lambda: [
-            GameProcess(
-                pid=process.pid,
-                name="EscapeFromTarkov.exe",
-                kind="client",
-                started_at=psutil.Process(process.pid).create_time(),
-            )
-            for process in (first, second)
-        ],
+        game_dir, "game_processes", lambda: [_scanned(survivor, "EscapeFromTarkov.exe", "client")]
     )
 
     result = stop_game(tmp_path)
 
-    assert result.client_stopped is True
-    first.wait(timeout=4)
-    second.wait(timeout=4)
+    assert result == StopResult(server_started_by_sptmod, True, expected_message)
+    client.wait(timeout=4)
+    assert survivor.poll() is None
+
+
+def test_stop_game_and_launch_status_agree_about_a_game_that_only_awaits_reaping(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
+) -> None:
+    """A recorded game that has ended counts as gone for the status and the stop.
+
+    A real throwaway process is recorded as the game and then ended, but stays
+    in the process table as an entry with no life left in it. launch_status
+    must not offer to close it and stop_game must not claim to have closed it:
+    a stop button offered for something that cannot be closed would do nothing
+    when pressed.
+    """
+    process = spawn_sleeper()
+    started_at = psutil.Process(process.pid).create_time()
+    process.kill()
+    _wait_until(lambda: psutil.Process(process.pid).status() == psutil.STATUS_ZOMBIE)
+    write_launch_state(tmp_path, profile_id="p", client=process_ref(process.pid, started_at))
+
+    status = launch_status(tmp_path)
+    result = stop_game(tmp_path)
+
+    assert status == LaunchStatus(
+        False, False, 0, 0, "p", server_stoppable=False, client_stoppable=False
+    )
+    assert result == StopResult(False, False, NOTHING_LEFT)
 
 
 def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
@@ -1458,7 +1566,7 @@ def test_stop_game_stops_server_client_and_watcher_and_clears_the_state(
 
     result = stop_game(tmp_path)
 
-    assert result == StopResult(server_stopped=True, client_stopped=True)
+    assert result == StopResult(True, True, "Closed the game and the SPT server.")
     for process in (server, client, watcher):
         process.wait(timeout=4)
     assert not (tmp_path / LAUNCH_STATE_FILE_NAME).exists()
@@ -1508,7 +1616,7 @@ def test_stop_game_tolerates_an_already_gone_process(tmp_path: Path, spawn_sleep
 
     result = stop_game(tmp_path)
 
-    assert result == StopResult(server_stopped=False, client_stopped=False)
+    assert result == StopResult(False, False, NOTHING_LEFT)
     assert not (tmp_path / LAUNCH_STATE_FILE_NAME).exists()
 
 
@@ -1548,7 +1656,7 @@ def test_stop_game_tolerates_an_already_gone_watcher(tmp_path: Path, spawn_sleep
 
     result = stop_game(tmp_path)  # must not raise
 
-    assert result == StopResult(server_stopped=False, client_stopped=False)
+    assert result == StopResult(False, False, NOTHING_STARTED)
 
 
 def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
@@ -1648,7 +1756,9 @@ def test_launch_status_treats_a_non_object_state_file_as_nothing_running(
     """
     (tmp_path / LAUNCH_STATE_FILE_NAME).write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
-    assert launch_status(tmp_path) == LaunchStatus(False, False, 0, 0, "")
+    assert launch_status(tmp_path) == LaunchStatus(
+        False, False, 0, 0, "", server_stoppable=False, client_stoppable=False
+    )
 
 
 @pytest.mark.parametrize("bad_pid", ["111", -1, 0, True])

@@ -8,7 +8,6 @@ themselves is covered exhaustively in ``tests/test_launch.py``.
 
 import json
 from pathlib import Path
-from typing import Any
 
 import httpx
 import pytest
@@ -52,23 +51,11 @@ def _login(router: respx.MockRouter, ok: bool = True) -> None:
     router.put(LOGIN_PATH).respond(200, json={"Response": ok})
 
 
-def _not_running(monkeypatch: Any) -> None:
-    """Stub game_dir.game_processes() to return [] (no running processes).
-
-    Used to avoid interference from actual game processes during tests.
-    """
-    def no_game_processes() -> list[GameProcess]:
-        return []
-
-    monkeypatch.setattr(game_dir, "game_processes", no_game_processes)
-
-
 def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
-    fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
+    fake_launchable_dir: LaunchableGameDir,
 ) -> None:
     """launch_profile reports progress through server startup, client launch,
     and login phases before returning launch result."""
-    _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         _free_then_ready(router)
@@ -95,7 +82,7 @@ def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
 
 
 def test_launch_profile_rpc_maps_game_running_to_its_existing_code(
-    fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
+    fake_launchable_dir: LaunchableGameDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When EscapeFromTarkov.exe is running, launch_profile returns GAME_RUNNING error.
 
@@ -115,13 +102,12 @@ def test_launch_profile_rpc_maps_game_running_to_its_existing_code(
     assert lines[-1]["data"]["code"] == "GAME_RUNNING"
 
 
-def test_launch_profile_rpc_maps_server_port_busy(fake_launchable_dir: LaunchableGameDir, monkeypatch: Any) -> None:
+def test_launch_profile_rpc_maps_server_port_busy(fake_launchable_dir: LaunchableGameDir) -> None:
     """When PING_PATH answers with non-pong, launch_profile returns SERVER_PORT_BUSY.
 
     The detect detects a foreign service (not SPT) on the port; this error code
     prevents blindly killing an unrelated process.
     """
-    _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         router.get(PING_PATH).respond(200, json={"Response": "not-pong"})
@@ -132,12 +118,11 @@ def test_launch_profile_rpc_maps_server_port_busy(fake_launchable_dir: Launchabl
     assert lines[-1]["data"]["code"] == "SERVER_PORT_BUSY"
 
 
-def test_launch_profile_rpc_maps_login_failed(fake_launchable_dir: LaunchableGameDir, monkeypatch: Any) -> None:
+def test_launch_profile_rpc_maps_login_failed(fake_launchable_dir: LaunchableGameDir) -> None:
     """When _login mocks ok=False, launch_profile returns LOGIN_FAILED error.
 
     The server responds to the login request with {Response: false}.
     """
-    _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         _pong(router)
@@ -150,14 +135,13 @@ def test_launch_profile_rpc_maps_login_failed(fake_launchable_dir: LaunchableGam
 
 
 def test_launch_profile_rpc_maps_launcher_settings_missing(
-    fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
+    fake_launchable_dir: LaunchableGameDir,
 ) -> None:
     """When launcher settings file is deleted, launch_profile returns LAUNCHER_SETTINGS_MISSING.
 
     The client launcher needs settings from LauncherSettingsFile; its absence
     raises LauncherSettingsError before attempting to start the game.
     """
-    _not_running(monkeypatch)
     d = fake_launchable_dir
     d.launcher_settings_file.unlink()
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
@@ -170,13 +154,12 @@ def test_launch_profile_rpc_maps_launcher_settings_missing(
     assert lines[-1]["data"]["code"] == "LAUNCHER_SETTINGS_MISSING"
 
 
-def test_launch_profile_rpc_maps_launch_failed(fake_launchable_dir: LaunchableGameDir, monkeypatch: Any) -> None:
+def test_launch_profile_rpc_maps_launch_failed(fake_launchable_dir: LaunchableGameDir) -> None:
     """When profile_id=\"no-such-profile\" is passed, launch_profile returns LAUNCH_FAILED.
 
     The service finds no profile file and raises LaunchError before attempting
     subprocess spawn.
     """
-    _not_running(monkeypatch)
     d = fake_launchable_dir
 
     exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": "no-such-profile"})
@@ -186,14 +169,13 @@ def test_launch_profile_rpc_maps_launch_failed(fake_launchable_dir: LaunchableGa
 
 
 def test_launch_profile_rpc_forwards_stop_server_on_exit_false(
-    fake_launchable_dir: LaunchableGameDir, monkeypatch: Any
+    fake_launchable_dir: LaunchableGameDir,
 ) -> None:
     """launch_profile(stop_server_on_exit=False) writes false to .sptmod-launch.json.
 
     The state file persists the parameter for later use by watch_game to decide
     whether to stop the server when the game exits.
     """
-    _not_running(monkeypatch)
     d = fake_launchable_dir
     with respx.mock(base_url=d.base_url, assert_all_called=False) as router:
         _pong(router)
@@ -218,7 +200,8 @@ def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
 ) -> None:
     """launch_status on a fresh directory returns all running=False and pid=0.
 
-    No .sptmod-launch.json file exists and no game processes are running.
+    No .sptmod-launch.json file exists and no game processes are running, so
+    nothing is running and nothing is stoppable either.
     """
     exit_code, lines = invoke_rpc("launch_status", {"path": str(tmp_path)})
 
@@ -232,33 +215,30 @@ def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
                 "server_pid": 0,
                 "client_pid": 0,
                 "profile_id": "",
+                "server_stoppable": False,
+                "client_stoppable": False,
             },
         }
     ]
 
 
-def test_stop_game_rpc_is_a_noop_without_a_prior_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """stop_game on a fresh directory returns stopped=False for both server and client.
+def test_stop_game_rpc_is_a_noop_without_a_prior_launch(tmp_path: Path) -> None:
+    """stop_game on a fresh directory reports nothing stopped and says why.
 
-    No state file exists and the process table is replaced by an empty one, so
-    the operation completes without error but reports nothing was stopped. The
-    test refuses to run while a real SPT server or game is running: without the
-    empty table the stop would close them.
+    No state file exists, so sptmod noted no process for this directory. The
+    operation completes without error, reports both flags false and carries the
+    plain-language message the desktop app shows the player.
     """
-    if game_dir.game_processes():
-        pytest.fail(
-            "An SPT server or game is running on this machine. This test must not"
-            " stop it; close the game before running the launch tests."
-        )
-    monkeypatch.setattr(game_dir, "game_processes", lambda: [])
     exit_code, lines = invoke_rpc("stop_game", {"path": str(tmp_path)})
 
     assert exit_code == 0
     assert lines == [
         {
             "event": "result",
-            "data": {"server_stopped": False, "client_stopped": False},
+            "data": {
+                "server_stopped": False,
+                "client_stopped": False,
+                "message": "sptmod did not start a game here, so there is nothing to close.",
+            },
         }
     ]

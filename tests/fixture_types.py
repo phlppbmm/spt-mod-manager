@@ -52,6 +52,12 @@ class MakeArchive(Protocol):
     def __call__(self, files: Mapping[str, str | bytes], fmt: str) -> Path: ...
 
 
+class MakeSptRelease(Protocol):
+    """Signature of the ``make_spt_release`` fixture."""
+
+    def __call__(self, *, version: str = ..., client_build: str = ...) -> Path: ...
+
+
 class InstallCommit(Protocol):
     """Signature of the ``install_commit`` fixture."""
 

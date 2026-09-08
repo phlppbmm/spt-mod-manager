@@ -1601,6 +1601,82 @@ def test_stop_game_kills_the_client_process_tree_recursively(tmp_path: Path, spa
     parent.wait(timeout=4)
 
 
+def test_stop_game_kills_a_deep_client_process_tree_down_to_the_grandchild(
+    tmp_path: Path, spawn_process: SpawnProcess
+) -> None:
+    """stop_game closes a three-level process tree below the recorded process.
+
+    A wrapper process starts a middle process that starts a grandchild, the
+    shape a real launch has on Linux, where the game sits several levels below
+    the wrapper the launch recorded; only the wrapper is written to the state
+    file. stop_game must leave nothing of that tree running and report the game
+    as closed, because a grandchild that survives keeps the game up while
+    sptmod claims it closed it.
+    """
+    pid_file = tmp_path / "descendants.pid"
+    middle_script = (
+        "import os, subprocess, time\n"
+        "g = subprocess.Popen(['sleep', '30'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()) + ' ' + str(g.pid))\n"
+        "time.sleep(30)\n"
+    )
+    wrapper_script = (
+        f"import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', {middle_script!r}])\ntime.sleep(30)\n"
+    )
+    wrapper = spawn_process([sys.executable, "-c", wrapper_script])
+    _wait_until(lambda: pid_file.exists() and len(pid_file.read_text(encoding="utf-8").split()) == 2)
+    middle_pid, grandchild_pid = (int(part) for part in pid_file.read_text(encoding="utf-8").split())
+    write_launch_state(tmp_path, client=process_ref(wrapper.pid, psutil.Process(wrapper.pid).create_time()))
+
+    result = stop_game(tmp_path)
+
+    assert result.client_stopped is True
+    _wait_until(lambda: not psutil.pid_exists(grandchild_pid))
+    _wait_until(lambda: not psutil.pid_exists(middle_pid))
+    wrapper.wait(timeout=4)
+
+
+def test_stop_game_leaves_a_descendant_that_predates_the_recorded_process_alone(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """stop_game closes only descendants that began after the recorded process.
+
+    Two real throwaway processes are started, the older one appearing below the
+    younger, recorded one in the process tree. stop_game closes the recorded
+    process and reports the game as closed, but the older process keeps
+    running, because something the launch started cannot have begun before the
+    process that started it: such a descendant is a stranger that inherited a
+    process number, and closing it would close a program of the player's.
+    """
+    # A descendant older than its own parent only exists once a process number
+    # has been reused, which no test can bring about on demand. The tree is
+    # therefore faked for the recorded process alone, while both start times
+    # and both processes are real, so the assertions below still say what
+    # stop_game did rather than what this monkeypatch wrote.
+    stranger = spawn_sleeper()
+    stranger_started = psutil.Process(stranger.pid).create_time()
+    # Start times tick every hundredth of a second, so the recorded process is
+    # started a tick later to be strictly younger than the stranger.
+    time.sleep(0.05)
+    wrapper = spawn_sleeper()
+    assert psutil.Process(wrapper.pid).create_time() > stranger_started
+    write_launch_state(tmp_path, client=process_ref(wrapper.pid, psutil.Process(wrapper.pid).create_time()))
+    real_children = psutil.Process.children
+
+    def _children(self: psutil.Process, recursive: bool = False) -> list[psutil.Process]:
+        if self.pid == wrapper.pid:
+            return [psutil.Process(stranger.pid)]
+        return real_children(self, recursive=recursive)
+
+    with monkeypatch.context() as ctx:
+        ctx.setattr(psutil.Process, "children", _children)
+        result = stop_game(tmp_path)
+
+    assert result.client_stopped is True
+    wrapper.wait(timeout=4)
+    assert stranger.poll() is None
+
+
 def test_stop_game_tolerates_an_already_gone_process(tmp_path: Path, spawn_sleeper: SpawnSleeper) -> None:
     """stop_game handles gracefully when state records a pid that no longer exists.
 

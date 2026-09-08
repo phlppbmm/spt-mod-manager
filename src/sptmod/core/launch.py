@@ -1051,10 +1051,18 @@ def _terminate(reference: _ProcessRef, timeout: float = TERMINATE_TIMEOUT) -> bo
     is the one question :func:`_live_ref` answers, so what a status call calls
     stoppable is what this closes; a process that has ended and only waits to
     be reaped counts as gone for both.
+
+    Only descendants that began no earlier than the remembered process are
+    closed with it. Something the launch really started cannot predate the
+    process that started it, so an older one below it in the tree is a
+    stranger that inherited a process number, and it is left alone.
     """
     try:
         process = psutil.Process(reference.pid)
-        targets = [*process.children(recursive=True), process]
+        targets = [
+            *_descendants_since(process, reference.started_at),
+            process,
+        ]
     except psutil.Error:
         return False
     if _live_ref(reference) is None:
@@ -1067,6 +1075,14 @@ def _terminate(reference: _ProcessRef, timeout: float = TERMINATE_TIMEOUT) -> bo
         with suppress(psutil.Error):
             survivor.kill()
     return True
+
+
+def _descendants_since(
+    process: psutil.Process, started_at: float
+) -> list[psutil.Process]:
+    """Return the processes below ``process`` that began no earlier than ``started_at``."""
+    children = process.children(recursive=True)
+    return [child for child in children if _started_at(child.pid) >= started_at]
 
 
 def _live_ref(reference: _ProcessRef | None) -> _ProcessRef | None:

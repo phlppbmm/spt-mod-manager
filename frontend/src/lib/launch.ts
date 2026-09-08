@@ -31,23 +31,33 @@ export function bannerText(status: LaunchStatus | null): string {
 export function launchAction(
 	status: LaunchStatus | null,
 	profileId: string,
-	busy: boolean
+	busy: boolean,
+	hostLabel = ''
 ): LaunchAction {
 	if (status !== null && isGameUp(status) && status.profile_id === profileId) {
 		return {
 			label: 'Stop',
 			disabled: busy,
 			mode: 'stop',
-			hint: 'Closes the game and the SPT server.'
+			hint:
+				hostLabel === ''
+					? 'Closes the game and the SPT server.'
+					: "Closes the game. The host's server keeps running."
 		};
 	}
+	const label = hostLabel === '' ? 'Launch' : `Connect to ${hostLabel}`;
 	if (busy) {
-		return { label: 'Starting…', disabled: true, mode: 'launch', hint: 'A launch is running.' };
+		return {
+			label: hostLabel === '' ? 'Starting…' : 'Connecting…',
+			disabled: true,
+			mode: 'launch',
+			hint: 'A launch is running.'
+		};
 	}
 	if (isGameUp(status)) {
-		return { label: 'Launch', disabled: true, mode: 'launch', hint: 'The game is already running.' };
+		return { label, disabled: true, mode: 'launch', hint: 'The game is already running.' };
 	}
-	return { label: 'Launch', disabled: false, mode: 'launch', hint: '' };
+	return { label, disabled: false, mode: 'launch', hint: '' };
 }
 
 export function nextPollDelay(status: LaunchStatus | null): number {

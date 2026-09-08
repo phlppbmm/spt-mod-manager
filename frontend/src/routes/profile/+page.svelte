@@ -3,9 +3,11 @@
 	import {
 		checkProfiles,
 		cleanProfile,
+		getFikaSettings,
 		installMod,
 		launchProfile,
 		launchStatus,
+		listHostProfiles,
 		listMods,
 		listModSets,
 		listProfiles,
@@ -14,6 +16,8 @@
 		stopGame,
 		type CheckResult,
 		type CleanupPlan,
+		type FikaSettings,
+		type HostProfile,
 		type LaunchStatus,
 		type ModInfo,
 		type ModSetMode,
@@ -21,6 +25,7 @@
 		type ProfileSummary
 	} from '$lib/api/client';
 	import { subscribe, type ProgressEvent } from '$lib/api/transport';
+	import { hostLabel } from '$lib/fika';
 	import { launchAction, loadStopServerOnExit } from '$lib/launch';
 	import { boundSetName, findSet, installTargets, missingFromError } from '$lib/modsets';
 	import Dialog from '$lib/components/Dialog.svelte';
@@ -64,6 +69,13 @@
 	let cleaning = $state(false);
 
 	let activeProfile = $state('');
+	let fika = $state<FikaSettings | null>(null);
+	let hostProfiles: HostProfile[] = $state([]);
+	let hostError = $state('');
+	let hostLoading = $state(false);
+
+	let isClient = $derived(fika?.role === 'client');
+	let connectLabel = $derived(fika === null ? '' : hostLabel(fika.base_url));
 
 	let groups = $derived.by(() => groupResiduesByProfile(summaries, result?.residues ?? {}));
 	let subNavActive = $derived(
@@ -97,10 +109,12 @@
 
 	$effect(() => {
 		setSubNav(
-			groups.map((group) => ({
-				id: group.profile.profile_id,
-				label: profileLabel(group.profile)
-			})),
+			isClient
+				? []
+				: groups.map((group) => ({
+						id: group.profile.profile_id,
+						label: profileLabel(group.profile)
+					})),
 			subNavActive
 		);
 	});
@@ -219,6 +233,7 @@
 		const checkView = cached(gameDir, 'check_profiles', [], () => checkProfiles(gameDir));
 		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
 		const setsView = cached(gameDir, 'list_mod_sets', [], () => listModSets(gameDir));
+		const fikaView = cached(gameDir, 'get_fika_settings', [], () => getFikaSettings(gameDir));
 		const listHit = listView.value;
 		const checkHit = checkView.value;
 		if (listHit !== undefined && checkHit !== undefined) {
@@ -230,20 +245,45 @@
 		}
 		error = '';
 		try {
-			const [listed, checked, installed, sets] = await Promise.all([
+			const [listed, checked, installed, sets, settings] = await Promise.all([
 				listView.refresh(),
 				checkView.refresh(),
 				modsView.refresh(),
-				setsView.refresh()
+				setsView.refresh(),
+				fikaView.refresh()
 			]);
 			summaries = listed;
 			result = checked;
 			mods = installed;
 			modSets = sets;
+			fika = settings;
+			if (settings.role === 'client') {
+				await loadHostProfiles(gameDir);
+			}
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function retryHostProfiles(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		await loadHostProfiles(path);
+	}
+
+	async function loadHostProfiles(gameDir: string): Promise<void> {
+		hostLoading = true;
+		hostError = '';
+		try {
+			hostProfiles = await listHostProfiles(gameDir);
+		} catch (cause) {
+			hostProfiles = [];
+			hostError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			hostLoading = false;
 		}
 	}
 
@@ -337,103 +377,172 @@
 			<p class="note">{launchNote}</p>
 		{/if}
 
-		{#each groups as group (group.profile.file)}
-			{@const action = launchAction(gameStatus, group.profile.profile_id, launching !== '')}
-			<article
-				class="panel profile"
-				class:is-active={group.profile.profile_id === subNavActive}
-				id="profile-{group.profile.profile_id}"
-			>
-				<div class="header">
-					<div class="identity">
-						<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
-						<p class="meta">
-							{#if group.profile.level > 0}<span>Level {group.profile.level}</span>{/if}
-							{#if group.profile.side !== ''}<span>{group.profile.side}</span>{/if}
-							<span>{group.profile.file}</span>
-							{#if group.profile.modified !== ''}
-								<span>Last changed {lastChanged(group.profile.modified)}</span>
-							{/if}
-						</p>
-						{#if !group.profile.readable}
-							<p class="error-text">{group.profile.error}</p>
-						{/if}
-					</div>
+		{#if isClient}
+			{#if hostError !== ''}
+				<p class="error-text">
+					{hostError}
+					<button type="button" onclick={() => void retryHostProfiles()}>Try again</button>
+				</p>
+			{/if}
 
-					{#if group.profile.readable}
+			{#each hostProfiles as profile (profile.profile_id)}
+				{@const action = launchAction(
+					gameStatus,
+					profile.profile_id,
+					launching !== '',
+					connectLabel
+				)}
+				{@const lockNote = profile.has_password
+					? 'Locked with a password; it cannot be used from here.'
+					: ''}
+				<article class="panel profile">
+					<div class="header">
+						<div class="identity">
+							<h2>{profile.nickname === '' ? profile.username : profile.nickname}</h2>
+							<p class="meta">
+								{#if profile.level > 0}<span>Level {profile.level}</span>{/if}
+								{#if profile.side !== ''}<span>{profile.side}</span>{/if}
+							</p>
+						</div>
+
 						<div class="launch">
 							<button
 								type="button"
 								class={action.mode === 'stop' ? '' : 'btn-primary'}
-								disabled={action.disabled}
+								disabled={action.disabled || lockNote !== ''}
 								onclick={() =>
 									action.mode === 'stop'
-										? (stopTarget = group.profile.profile_id)
-										: void play(group.profile.profile_id)}
+										? (stopTarget = profile.profile_id)
+										: void play(profile.profile_id)}
 							>
 								{action.label}
 							</button>
-							{#if launching === group.profile.profile_id && launchProgress !== null}
+							{#if launching === profile.profile_id && launchProgress !== null}
 								<span class="note">{launchProgress.message}</span>
-							{:else if action.hint !== ''}
-								<span class="note">{action.hint}</span>
+							{:else if lockNote !== '' || action.hint !== ''}
+								<span class="note">{lockNote === '' ? action.hint : lockNote}</span>
 							{/if}
 						</div>
-					{/if}
-				</div>
+					</div>
 
-				{#if group.profile.readable}
 					<div class="body">
 						<ModSetEditor
 							{path}
-							profileId={group.profile.profile_id}
+							profileId={profile.profile_id}
 							sets={modSets}
 							{mods}
 							onchange={() => void refreshSets()}
 						/>
 					</div>
-					<div class="body">
-						{#if group.mods.length === 0}
-							<p class="note">No traces left by mods.</p>
-						{:else}
-							{#each group.mods as entry (entry.mod)}
-								<div class="mod">
-									<h3>{entry.mod}</h3>
-									<button
-										type="button"
-										class="btn-sm"
-										disabled={planning !== '' || cleaning}
-										onclick={() => void preview(group.profile.profile_id, entry.mod)}
-									>
-										{planning === busyKey(group.profile.profile_id, entry.mod)
-											? 'Loading…'
-											: 'Preview cleanup'}
-									</button>
-								</div>
-								<ul class="residues">
-									{#each entry.residues as residue, index (index)}
-										<li class="panel-row">
-											<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
-											<span class="count">{characterLabel(residue.character)}</span>
-											<span class="count">
-												{residue.count}
-												{residue.count === 1 ? 'reference' : 'references'}
-											</span>
-											<code>{residue.ids.join(', ')}</code>
-										</li>
-									{/each}
-								</ul>
-							{/each}
+				</article>
+			{/each}
+
+			{#if hostProfiles.length === 0 && hostError === ''}
+				<p class="note">
+					{hostLoading
+						? 'Reading the profiles on the host…'
+						: 'The host has no profiles to play.'}
+				</p>
+			{/if}
+		{:else}
+			{#each groups as group (group.profile.file)}
+				{@const action = launchAction(gameStatus, group.profile.profile_id, launching !== '')}
+				<article
+					class="panel profile"
+					class:is-active={group.profile.profile_id === subNavActive}
+					id="profile-{group.profile.profile_id}"
+				>
+					<div class="header">
+						<div class="identity">
+							<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
+							<p class="meta">
+								{#if group.profile.level > 0}<span>Level {group.profile.level}</span>{/if}
+								{#if group.profile.side !== ''}<span>{group.profile.side}</span>{/if}
+								<span>{group.profile.file}</span>
+								{#if group.profile.modified !== ''}
+									<span>Last changed {lastChanged(group.profile.modified)}</span>
+								{/if}
+							</p>
+							{#if !group.profile.readable}
+								<p class="error-text">{group.profile.error}</p>
+							{/if}
+						</div>
+
+						{#if group.profile.readable}
+							<div class="launch">
+								<button
+									type="button"
+									class={action.mode === 'stop' ? '' : 'btn-primary'}
+									disabled={action.disabled}
+									onclick={() =>
+										action.mode === 'stop'
+											? (stopTarget = group.profile.profile_id)
+											: void play(group.profile.profile_id)}
+								>
+									{action.label}
+								</button>
+								{#if launching === group.profile.profile_id && launchProgress !== null}
+									<span class="note">{launchProgress.message}</span>
+								{:else if action.hint !== ''}
+									<span class="note">{action.hint}</span>
+								{/if}
+							</div>
 						{/if}
 					</div>
-				{/if}
-			</article>
-		{/each}
 
-		{#if groups.length === 0}
-			<p class="note">
-				{loading ? 'Loading profiles…' : 'No player profiles found in this installation.'}
-			</p>
+					{#if group.profile.readable}
+						<div class="body">
+							<ModSetEditor
+								{path}
+								profileId={group.profile.profile_id}
+								sets={modSets}
+								{mods}
+								onchange={() => void refreshSets()}
+							/>
+						</div>
+						<div class="body">
+							{#if group.mods.length === 0}
+								<p class="note">No traces left by mods.</p>
+							{:else}
+								{#each group.mods as entry (entry.mod)}
+									<div class="mod">
+										<h3>{entry.mod}</h3>
+										<button
+											type="button"
+											class="btn-sm"
+											disabled={planning !== '' || cleaning}
+											onclick={() => void preview(group.profile.profile_id, entry.mod)}
+										>
+											{planning === busyKey(group.profile.profile_id, entry.mod)
+												? 'Loading…'
+												: 'Preview cleanup'}
+										</button>
+									</div>
+									<ul class="residues">
+										{#each entry.residues as residue, index (index)}
+											<li class="panel-row">
+												<span class="badge badge-warn">{categoryLabel(residue.category)}</span>
+												<span class="count">{characterLabel(residue.character)}</span>
+												<span class="count">
+													{residue.count}
+													{residue.count === 1 ? 'reference' : 'references'}
+												</span>
+												<code>{residue.ids.join(', ')}</code>
+											</li>
+										{/each}
+									</ul>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				</article>
+			{/each}
+
+			{#if groups.length === 0}
+				<p class="note">
+					{loading ? 'Loading profiles…' : 'No player profiles found in this installation.'}
+				</p>
+			{/if}
 		{/if}
 	{/if}
 </section>
@@ -465,7 +574,9 @@
 {#if stopTarget !== ''}
 	<Dialog title="Close the game" onclose={() => (stopTarget = '')}>
 		<p>This closes the game immediately. Progress since the last save is lost.</p>
-		<p class="note">The SPT server is closed with it.</p>
+		<p class="note">
+			{isClient ? "The host's server keeps running." : 'The SPT server is closed with it.'}
+		</p>
 
 		{#snippet actions()}
 			<button type="button" class="btn-primary" disabled={stopping} onclick={() => void stop()}>

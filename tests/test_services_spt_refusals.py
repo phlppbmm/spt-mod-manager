@@ -1,0 +1,412 @@
+"""Behaviour of ``apply_spt_release`` when it refuses, and of a copy that fails mid-write.
+
+Covers the refusals -- an unknown version, a release without a download, a
+release of another series, a build mismatch, an unreadable build, a running
+game, an unmanaged file, a download that does not arrive whole and a
+directory that is no game directory -- and the state a copy failing mid-write
+leaves behind for the next change.
+"""
+
+import json
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+
+from fixture_types import InstallCommit, MakeArchive, MakeSptRelease
+from fixtures_spt import (
+    BUILD,
+    INSTALLED,
+    NEW,
+    NEWEST,
+    OTHER_BUILD,
+    OTHER_SERIES,
+    SPT_OWN_PLUGIN,
+    SptReleaseSource,
+    offer,
+    release_subjects,
+    spt_release_members,
+)
+from sptmod.core import game_dir, services
+from sptmod.core.errors import (
+    ArchiveError,
+    ClientBuildMismatchError,
+    DirtyTreeError,
+    GameRunningError,
+    NotAGameDirError,
+    SptReleaseUnavailableError,
+    SptReleaseWriteError,
+)
+from sptmod.core.repo import Repo
+
+# A release member a custom archive drops to make the installed copy stale.
+STALE_MEMBER = "SPT_Runtime/SPT_Data/database/x.json"
+
+
+# --- apply_spt_release, the refusals -------------------------------------
+
+
+def test_apply_refuses_a_version_the_source_does_not_publish(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() raises SptReleaseUnavailableError for an unknown version."""
+    offer(spt_release_source, make_spt_release, NEW)
+
+    with pytest.raises(
+        SptReleaseUnavailableError, match="There is no published SPT 4.1.9."
+    ):
+        services.apply_spt_release(spt_game_dir, "4.1.9")
+
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_refuses_a_release_without_a_download_and_names_the_installer(
+    spt_game_dir: Path, spt_release_source: SptReleaseSource
+) -> None:
+    """apply_spt_release() sends the user to the official installer.
+
+    A release whose archive was withdrawn cannot be fetched, and the message
+    says where it can be had instead.
+    """
+    spt_release_source.announce(NEW)
+
+    with pytest.raises(SptReleaseUnavailableError) as error:
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert str(error.value) == (
+        f"SPT {NEW} publishes no download. Install it with the official SPT "
+        f"installer from https://sp-mod.com/installer."
+    )
+
+
+def test_apply_refuses_a_release_of_another_series(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() refuses to leave the installed SPT series.
+
+    Only the official installer changes the series, and the message names
+    both versions and where to get it.
+    """
+    offer(spt_release_source, make_spt_release, OTHER_SERIES)
+
+    with pytest.raises(SptReleaseUnavailableError) as error:
+        services.apply_spt_release(spt_game_dir, OTHER_SERIES)
+
+    assert str(error.value) == (
+        f"SPT {OTHER_SERIES} is not part of the same SPT series as your "
+        f"installed SPT {INSTALLED}. Changing between series needs the "
+        f"official SPT installer from https://sp-mod.com/installer."
+    )
+
+
+def test_apply_refuses_a_release_needing_another_game_build(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() raises ClientBuildMismatchError naming both builds.
+
+    Only the official installer changes Escape from Tarkov itself, so a
+    release for another build is refused before anything is written.
+    """
+    offer(spt_release_source, make_spt_release, NEW, client_build=OTHER_BUILD)
+
+    with pytest.raises(ClientBuildMismatchError) as error:
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert str(error.value) == (
+        f"SPT {NEW} needs Escape from Tarkov build {OTHER_BUILD}, but your game "
+        f"is build {BUILD}. Change the game version with the official SPT "
+        f"installer from https://sp-mod.com/installer first, then try again."
+    )
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def _remove_client_exe(exe: Path) -> None:
+    """Take the game client out of the installation."""
+    exe.unlink()
+
+
+def _corrupt_client_exe(exe: Path) -> None:
+    """Leave a game client behind that carries no version resource."""
+    exe.write_bytes(b"not a PE image")
+
+
+@pytest.mark.parametrize(
+    "break_client",
+    [_remove_client_exe, _corrupt_client_exe],
+    ids=["client-missing", "client-unreadable"],
+)
+def test_apply_refuses_when_the_installed_game_build_cannot_be_read(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    break_client: Callable[[Path], None],
+) -> None:
+    """apply_spt_release() refuses while it cannot read the build of the game.
+
+    An unreadable build is not a match; guessing would write a release the
+    installed game cannot run.
+    """
+    break_client(spt_game_dir / "EscapeFromTarkov.exe")
+    offer(spt_release_source, make_spt_release, NEW)
+
+    with pytest.raises(ClientBuildMismatchError) as error:
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert str(error.value) == (
+        f"SPT {NEW} needs Escape from Tarkov build {BUILD}, but the build of "
+        f"your game could not be read. Change the game version with the "
+        f"official SPT installer from https://sp-mod.com/installer first, then try "
+        f"again."
+    )
+
+
+def test_apply_skips_the_build_check_when_no_build_is_known_anywhere(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() writes a release that names no build at all.
+
+    Neither the release title nor the core configuration of the archive names
+    a build, so there is nothing to compare the installed one against and the
+    change goes through.
+    """
+    offer(spt_release_source, make_spt_release, NEW, client_build="")
+
+    result = services.apply_spt_release(spt_game_dir, NEW)
+
+    assert result.version == NEW
+    assert result.commit != ""
+
+
+def test_apply_refuses_while_the_game_is_running(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """apply_spt_release() raises GameRunningError and writes nothing.
+
+    Replacing the program set under a running server or client would break
+    the running game.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.setattr(
+        game_dir, "running_game_processes", lambda: ["EscapeFromTarkov.exe"]
+    )
+
+    with pytest.raises(GameRunningError, match="close it first"):
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert not (spt_game_dir / "winhttp.dll").exists()
+
+
+def test_apply_refuses_a_game_folder_holding_files_it_does_not_manage(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() raises DirtyTreeError for a manually installed mod.
+
+    Such files cannot be secured in a snapshot, so the version change would
+    not be undoable; the message points at adopting them.
+    """
+    manual = spt_game_dir / "BepInEx/plugins/ManualMod/manual.dll"
+    manual.parent.mkdir(parents=True)
+    manual.write_text("manual", encoding="utf-8")
+    offer(spt_release_source, make_spt_release, NEW)
+
+    with pytest.raises(DirtyTreeError, match="BepInEx/plugins/ManualMod"):
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_refuses_a_download_that_does_not_arrive_whole(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() raises ArchiveError when the archive size differs.
+
+    The release announces more bytes than arrive, so the download is not the
+    published archive and nothing of it is written.
+    """
+    offer(spt_release_source, make_spt_release, NEW, size=999_999)
+
+    with pytest.raises(ArchiveError, match="expected 999999"):
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_rejects_a_directory_that_is_no_game_directory(tmp_path: Path) -> None:
+    """apply_spt_release() raises NotAGameDirError before it reads any release."""
+    with pytest.raises(NotAGameDirError, match="not an SPT game directory"):
+        services.apply_spt_release(tmp_path, NEW)
+
+
+
+def test_a_release_that_could_not_be_written_is_finished_by_the_next_change(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    make_archive: MakeArchive,
+    install_commit: InstallCommit,
+) -> None:
+    """A version change that breaks mid-copy leaves a state the next one secures.
+
+    The first release is in place; the second drops one file and cannot write
+    the last one, because the installed copy is read-only. The half-written
+    state is reported as changed game files and no commit is made; once the
+    obstacle is gone, applying that release again secures what was already
+    written and finishes the change, with the installed mod untouched.
+    """
+    install_commit(
+        Repo(spt_game_dir), "ModA", files={"BepInEx/plugins/ModA.dll": "mod"}
+    )
+    offer(spt_release_source, make_spt_release, NEW)
+    spt_release_source.offer(
+        make_archive(
+            {
+                name: content
+                for name, content in spt_release_members(NEWEST, BUILD).items()
+                if name != STALE_MEMBER
+            },
+            "zip",
+        ),
+        version=NEWEST,
+        client_build=BUILD,
+    )
+    services.apply_spt_release(spt_game_dir, NEW)
+    loader = spt_game_dir / "winhttp.dll"
+    loader.chmod(0o444)
+
+    with pytest.raises(SptReleaseWriteError):
+        services.apply_spt_release(spt_game_dir, NEWEST)
+
+    assert release_subjects(spt_game_dir) == [
+        f"spt: {NEW}",
+        "mod: ModA 1.0.0",
+        "chore: clean SPT 4.1.0",
+    ]
+    assert services.status(spt_game_dir).game_files_changed == [
+        Path("BepInEx/core/BepInEx.dll"),
+        Path("BepInEx/patchers/spt-prepatch.dll"),
+        Path(SPT_OWN_PLUGIN),
+        Path("LICENSE-BepInEx.txt"),
+        Path("SPT_Runtime/SPT.Server.exe"),
+        Path(STALE_MEMBER),
+        Path("doorstop_config.ini"),
+    ]
+
+    loader.chmod(0o644)
+    result = services.apply_spt_release(spt_game_dir, NEWEST)
+
+    assert result.version == NEWEST
+    assert release_subjects(spt_game_dir) == [
+        f"spt: {NEWEST}",
+        "snapshot: game files updated",
+        f"spt: {NEW}",
+        "mod: ModA 1.0.0",
+        "chore: clean SPT 4.1.0",
+    ]
+    assert loader.read_text(encoding="utf-8") == f"doorstop of {NEWEST}"
+    assert not (spt_game_dir / STALE_MEMBER).exists()
+    assert [mod.name for mod in services.list_mods(spt_game_dir)] == ["ModA"]
+    assert (spt_game_dir / "BepInEx/plugins/ModA.dll").read_text(
+        encoding="utf-8"
+    ) == "mod"
+
+
+@pytest.mark.parametrize(
+    ("obstacle", "blocked_mode", "restored_mode", "expected_file"),
+    [
+        pytest.param(
+            "SPT_Runtime/SPT_Data/configs/core.json",
+            0o444,
+            0o644,
+            "SPT_Runtime/SPT_Data/configs/core.json",
+            id="an installed file that cannot be overwritten",
+        ),
+        pytest.param(
+            "BepInEx/plugins",
+            0o555,
+            0o755,
+            SPT_OWN_PLUGIN,
+            id="a folder that cannot take a new file",
+        ),
+    ],
+)
+def test_apply_says_which_file_it_could_not_write_and_where_the_previous_ones_are(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    obstacle: str,
+    blocked_mode: int,
+    restored_mode: int,
+    expected_file: str,
+) -> None:
+    """apply_spt_release() turns a refused write into a plain SptReleaseWriteError.
+
+    The game directory is made unwritable at one place -- a file of the
+    program set that may not be overwritten and a folder that may not take a
+    new file -- so writing the release stops there. The message has to name
+    that file, what the system said and where the previous files are, instead
+    of letting the raw operating system error reach the caller, and nothing
+    may be committed.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    blocked = spt_game_dir / obstacle
+    blocked.chmod(blocked_mode)
+
+    try:
+        with pytest.raises(SptReleaseWriteError) as failure:
+            services.apply_spt_release(spt_game_dir, NEW)
+    finally:
+        blocked.chmod(restored_mode)
+
+    assert str(failure.value) == (
+        "The game files could not be written: Permission denied. The update "
+        f"stopped at {expected_file}; your previous files are one snapshot back."
+    )
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_the_release_before_a_refused_write_is_one_snapshot_back(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """What the message promises holds: one snapshot back stands the previous release.
+
+    The first release is in place when the second cannot write its loader.
+    Securing the half-written state and undoing that one snapshot puts the
+    files and the version of the first release back, so the promise the
+    message makes is the state the game directory really reaches.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    offer(spt_release_source, make_spt_release, NEWEST)
+    services.apply_spt_release(spt_game_dir, NEW)
+    loader = spt_game_dir / "winhttp.dll"
+    loader.chmod(0o444)
+
+    try:
+        with pytest.raises(SptReleaseWriteError):
+            services.apply_spt_release(spt_game_dir, NEWEST)
+    finally:
+        loader.chmod(0o644)
+    services.snapshot(spt_game_dir, "the half-written update")
+    result = services.revert_spt_update(spt_game_dir)
+
+    assert result.version == NEW
+    assert loader.read_text(encoding="utf-8") == f"doorstop of {NEW}"
+    assert (spt_game_dir / STALE_MEMBER).read_text(encoding="utf-8") == json.dumps(
+        {"release": NEW}
+    )

@@ -1,0 +1,366 @@
+"""Contract models mirroring the core dataclasses of mods, profiles and the catalog."""
+
+from datetime import datetime
+from pathlib import Path
+
+from sptmod.core.forge.catalog import CatalogState
+from sptmod.core.forge.client import FikaCompatibility
+from sptmod.core.models import (
+    ConflictKind,
+    ConflictSeverity,
+    FileChange,
+    ModState,
+    ModType,
+    ResidueCategory,
+)
+
+from .base import CoreModel
+
+
+class ModInfo(CoreModel):
+    """A mod as described by the trailers of its most recent commit."""
+
+    name: str
+    version: str
+    mod_type: ModType
+    author: str
+    spt_range: str
+    state: ModState
+    commit: str
+    date: datetime
+    forge_id: str
+    forge_version_id: str
+    guid: str
+    source: str
+
+
+class ModFile(CoreModel):
+    """A file touched by a commit, relative to the game directory."""
+
+    path: Path
+    change: FileChange
+
+
+class CommitInfo(CoreModel):
+    """A commit with its parsed trailers."""
+
+    hash: str
+    subject: str
+    date: datetime
+    trailers: dict[str, str] = {}
+
+
+class Conflict(CoreModel):
+    """A finding of the pre-install conflict and dependency checks."""
+
+    kind: ConflictKind
+    severity: ConflictSeverity
+    message: str
+    path: Path | None = None
+    mod: str = ""
+
+
+class ProfileSummary(CoreModel):
+    """One player profile file of the installation, as it presents itself."""
+
+    file: str
+    profile_id: str
+    nickname: str = ""
+    level: int = 0
+    side: str = ""
+    modified: str = ""
+    readable: bool = True
+    error: str = ""
+
+
+class ProfileResidue(CoreModel):
+    """IDs of one mod that one player profile still references."""
+
+    profile: str
+    category: ResidueCategory
+    ids: list[str]
+    count: int
+    character: str = ""
+    path: str = ""
+
+
+class CheckResult(CoreModel):
+    """What a residue check over all mods and all profiles found."""
+
+    residues: dict[str, list[ProfileResidue]] = {}
+    warnings: list[str] = []
+
+
+class UntouchedResidue(CoreModel):
+    """Residue a profile cleanup leaves in place, and why it does."""
+
+    residue: ProfileResidue
+    reason: str
+
+
+class CleanupPlan(CoreModel):
+    """What cleaning the profiles of one mod would remove."""
+
+    mod: str
+    profiles: list[str] = []
+    removals: list[ProfileResidue] = []
+    untouched: list[UntouchedResidue] = []
+    warnings: list[str] = []
+
+
+class CleanupResult(CoreModel):
+    """Outcome of ``clean_profile``."""
+
+    mod: str
+    profiles: list[str] = []
+    backups: list[Path] = []
+    removed: list[ProfileResidue] = []
+    untouched: list[UntouchedResidue] = []
+    snapshot: str = ""
+    warnings: list[str] = []
+
+
+class CatalogMod(CoreModel):
+    """A mod as cached in the local Forge catalog."""
+
+    id: int
+    hub_id: int | None
+    guid: str | None
+    name: str
+    slug: str
+    teaser: str | None
+    thumbnail: str | None
+    author: str
+    downloads: int
+    detail_url: str
+    published_at: str | None
+    created_at: str | None
+    updated_at: str | None
+    favourites_count: int = 0
+    endorsements_count: int = 0
+    fika_compatibility: bool | None = None
+    featured: bool = False
+    contains_ads: bool = False
+    contains_ai_content: bool = False
+    category: str | None = None
+    license_name: str | None = None
+    license_link: str | None = None
+    source_links: list["CatalogSourceLink"] = []
+    first_seen_at: str | None = None
+
+
+class CatalogSourceLink(CoreModel):
+    """A labeled source-code link of a catalog mod."""
+
+    url: str
+    label: str
+
+
+class CatalogVersion(CoreModel):
+    """A mod version as cached in the local Forge catalog."""
+
+    id: int
+    mod_id: int
+    version: str
+    link: str | None
+    content_length: int | None
+    spt_version_constraint: str
+    downloads: int
+    published_at: str | None
+    updated_at: str | None
+    fika_compatibility: FikaCompatibility | None = None
+
+
+class CatalogEntry(CoreModel):
+    """A cached mod joined with the installed state of the game repository."""
+
+    mod: CatalogMod
+    state: CatalogState
+    installed_version: str | None
+    latest_version: CatalogVersion | None
+
+
+class SyncResult(CoreModel):
+    """Counts of what a catalog sync run changed."""
+
+    new_mods: int
+    updated_mods: int
+    new_versions: int
+    updated_versions: int
+    pages: int
+    full: bool
+
+
+class InitResult(CoreModel):
+    """Outcome of ``init_game_dir``."""
+
+    game_dir: Path
+    commit: str
+    spt_version: str
+    warnings: list[str] = []
+    pre_existing_mods: list[Path] = []
+    adopted: list[ModInfo] = []
+
+
+class InstallResult(CoreModel):
+    """Outcome of ``install_from_archive``."""
+
+    mod: ModInfo
+    files: list[Path] = []
+    warnings: list[Conflict] = []
+
+
+class RemoveResult(CoreModel):
+    """Outcome of ``remove_mod``."""
+
+    name: str
+    commit: str
+    files: list[Path] = []
+    warnings: list[str] = []
+    cleanup: CleanupResult | None = None
+
+
+class ToggleResult(CoreModel):
+    """Outcome of ``disable_mod`` and ``enable_mod``."""
+
+    name: str
+    state: ModState
+    commit: str = ""
+    files: list[Path] = []
+    notice: str = ""
+
+
+class AdoptResult(CoreModel):
+    """Outcome of ``adopt_mod``."""
+
+    mod: ModInfo
+    files: list[Path] = []
+
+
+class ManualMod(CoreModel):
+    """Untracked files below a mod path, grouped by their mod folder."""
+
+    path: Path
+    files: list[Path] = []
+
+
+class StatusReport(CoreModel):
+    """The interpreted working-tree status of a game directory."""
+
+    spt_version: str = ""
+    modified_profiles: list[Path] = []
+    modified_configs: list[Path] = []
+    modified_mod_settings: list[Path] = []
+    manual_mods: list[ManualMod] = []
+    game_files_changed: list[Path] = []
+    other_modified: list[Path] = []
+    other_untracked: list[Path] = []
+
+
+class SnapshotResult(CoreModel):
+    """Outcome of ``snapshot``."""
+
+    commit: str
+    message: str
+    files: list[Path] = []
+    game_files: list[Path] = []
+    mod_settings: list[Path] = []
+
+
+class ImportEntry(CoreModel):
+    """One mod an imported list and the installed mods disagree about."""
+
+    name: str
+    wanted_version: str = ""
+    installed_version: str = ""
+    link: str = ""
+
+
+class PlanEntry(CoreModel):
+    """One mod to install as part of an ``InstallPlan``."""
+
+    mod_id: int
+    name: str
+    guid: str | None
+    version: str
+    version_id: int
+    link: str | None
+    content_length: int | None
+    is_dependency: bool
+
+
+class InstallPlan(CoreModel):
+    """What an install would download and install, in install order."""
+
+    spt_version: str
+    entries: list[PlanEntry] = []
+
+
+class InstallModResult(CoreModel):
+    """Outcome of ``install_mod``."""
+
+    plan: InstallPlan
+    installed: list[InstallResult] = []
+
+
+class ImportDiff(CoreModel):
+    """The difference between an imported mod list and the installed mods."""
+
+    missing: list[ImportEntry] = []
+    different: list[ImportEntry] = []
+    extra: list[ImportEntry] = []
+    installed: list[InstallModResult] = []
+
+
+class UpdateCandidate(CoreModel):
+    """An installed mod Forge recommends a newer version for."""
+
+    name: str
+    installed_version: str
+    new_version: str
+    version_id: int
+    link: str = ""
+    content_length: int | None = None
+    reason: str = ""
+
+
+class BlockedUpdate(CoreModel):
+    """An installed mod whose newer version other installed mods block."""
+
+    name: str
+    installed_version: str
+    new_version: str
+    reason: str = ""
+    blocking_mods: list[str] = []
+
+
+class IncompatibleMod(CoreModel):
+    """An installed mod without any version for the queried SPT release."""
+
+    name: str
+    installed_version: str
+    reason: str = ""
+    latest_compatible_version: str = ""
+
+
+class UpdatesReport(CoreModel):
+    """What ``check_updates`` found for the installed mods."""
+
+    spt_version: str
+    available: list[UpdateCandidate] = []
+    blocked: list[BlockedUpdate] = []
+    up_to_date: list[str] = []
+    incompatible: list[IncompatibleMod] = []
+    skipped: list[str] = []
+
+
+class UpdateResult(CoreModel):
+    """Outcome of ``update_mod``."""
+
+    name: str
+    previous_version: str
+    version: str = ""
+    commit: str = ""
+    files: list[ModFile] = []
+    warnings: list[Conflict] = []
+    notice: str = ""

@@ -28,3 +28,9 @@ packaging/build/
 # coverage artifacts
 .coverage
 frontend/coverage/
+
+# real-mod corpus used for manual verification
+_data/
+
+# editor
+.vscode/

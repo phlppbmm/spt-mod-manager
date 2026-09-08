@@ -15,6 +15,7 @@ from conftest import clean_repo_at
 from fixture_types import JsonDict, MakeArchive, MakeSptRelease
 from github_json import asset_json, release_json, release_without_asset_json
 from pe_builder import build_synthetic_exe, write_server_exe
+from sptmod.core import services
 
 # The mocked release source; every SPT-release test points the client at it
 # through SPTMOD_SPT_RELEASE_URL, so the real GitHub host is never reached.
@@ -24,6 +25,18 @@ SPT_RELEASE_DOWNLOAD_URL = "https://spt-releases.invalid/download"
 CLIENT_EXE = "EscapeFromTarkov.exe"
 DEFAULT_CLIENT_BUILD = "40743"
 DEFAULT_RELEASE_DATE = "2025-01-02T03:04:05Z"
+
+INSTALLED = "4.1.0"
+NEW = "4.1.1"
+NEWEST = "4.1.2"
+OLDER = "4.0.9"
+OTHER_SERIES = "4.2.0"
+BUILD = "40743"
+OTHER_BUILD = "40999"
+
+# A file of the program set that lies below a mod path too, so a force-install
+# can write over it.
+SPT_OWN_PLUGIN = "BepInEx/plugins/spt/spt-core.dll"
 
 
 def spt_release_members(version: str, client_build: str) -> dict[str, str | bytes]:
@@ -204,3 +217,39 @@ def spt_game_dir(fake_game_dir_runtime: Path) -> Path:
     write_client_exe(fake_game_dir_runtime)
     clean_repo_at(fake_game_dir_runtime)
     return fake_game_dir_runtime
+
+
+def offer(
+    source: SptReleaseSource,
+    make_release: MakeSptRelease,
+    version: str,
+    *,
+    client_build: str = BUILD,
+    published_at: str = DEFAULT_RELEASE_DATE,
+    size: int | None = None,
+) -> respx.Route:
+    """Publish ``version`` with a matching archive and return its download route."""
+    return source.offer(
+        make_release(version=version, client_build=client_build),
+        version=version,
+        client_build=client_build,
+        published_at=published_at,
+        size=size,
+    )
+
+
+def unversioned_game_dir(root: Path) -> Path:
+    """Turn ``root`` into a tracked game directory whose SPT version is unreadable.
+
+    The 4.1 layout keeps its version in ``SPT.Server.exe`` only, so a game
+    directory without that executable and without a stored version genuinely
+    has none.
+    """
+    write_client_exe(root)
+    clean_repo_at(root)
+    return root
+
+
+def release_subjects(path: Path) -> list[str]:
+    """Return the commit subjects of the game repository at ``path``, newest first."""
+    return [commit.subject for commit in services.history(path)]

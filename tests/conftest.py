@@ -25,6 +25,7 @@ pytest_plugins = [
     "fixtures_forge",
     "fixtures_launch",
     "fixtures_profile",
+    "fixtures_rpc",
     "fixtures_spt",
 ]
 

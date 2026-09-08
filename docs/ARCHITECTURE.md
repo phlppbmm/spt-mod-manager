@@ -34,7 +34,14 @@ src/sptmod/
     errors.py           typed exception hierarchy (single source of failures)
     models.py           shared dataclasses, trailer key constants, Progress protocol
     game_dir.py         GameLayout detection, SPT version chain, process check
-    launch.py           server/client process start, state file, game watcher
+    launch/
+      __init__.py       facade: the launch names the rest of the tree uses
+      launcher.py       one launch: the server, the sign-in, the game client
+      spawn.py          starting server/client/watcher in the official launcher's environment
+      watch.py          waiting for the game to close, cleanup afterwards
+      state.py          the launch state file and the launch log of a game directory
+      status.py         what of an installation runs, and closing it again
+      process.py        starting, finding and closing the processes of a launch
     sptserver.py        SPT launcher API of this machine or a Fika host (address, ping, profiles, login)
     repo.py             THE git layer; the ONLY module allowed to use subprocess
     archive.py          extraction (.7z/.zip/.rar), traversal guard, anchor search
@@ -85,7 +92,13 @@ src/sptmod/
   server/
     __init__.py         RPC and OpenAPI dispatch package
     rpc.py              hidden CLI command `sptmod rpc <name>` (RPC stdin/stdout)
-    schemas.py          Pydantic mirror of the core dataclasses (THE contract)
+    schemas/            Pydantic mirror of the core dataclasses (THE contract)
+      __init__.py       facade: the 119 contract names, re-exported unchanged
+      base.py           the base model every contract model derives from
+      mods.py           models mirroring mods, profiles and the catalog
+      requests.py       request/response models of the mod, profile and catalog functions
+      modsets.py        mod set models and the models of their service functions
+      runtime.py        Fika, game launch and SPT release models
     errors.py           RPC error mapping and exit codes
     dump_openapi.py     python -m sptmod.server.dump_openapi openapi.json
 src-tauri/              Tauri v2 desktop app
@@ -105,19 +118,23 @@ packaging/              freezing the Python core for the desktop bundle
 .github/workflows/
   ci.yml                Python/frontend/Rust gates plus sidecar and app matrices
   release.yml           v* tag -> signed bundles in a draft release
-tests/                  Python test suite (2142 tests)
+tests/                  Python test suite (2158 tests)
   conftest.py           git isolation, process-scan guard, game dirs, repos
   fixture_types.py      fixture Protocols for typing
   fixtures_forge.py     Forge client/catalog fixtures (pytest_plugins)
   fixtures_launch.py    launch stubs and process helpers (pytest_plugins)
   fixtures_profile.py   profile document builders (pytest_plugins)
+  fixtures_rpc.py       `sptmod rpc` round-trip fixtures (pytest_plugins)
   fixtures_spt.py       SPT release source and archives (pytest_plugins)
+  forge_install_env.py  seeded catalogs, dependency nodes and download mocks
   forge_json.py         Forge API mock payload builders
   github_json.py        SPT release source mock payload builders
+  launch_helpers.py     launch respx routes, progress capture, poll-until helper
   pe_builder.py         PE file assembly helpers
+  profile_cleanup_corpus.py  content IDs and profiles of the cleanup tests
   data/bcj2-*.7z        committed BCJ2 7z samples (py7zr cannot read them)
   test_sptrelease_client.py  release source parsing and failures
-  test_services_spt.py  list/apply/undo of an SPT release
+  test_services_spt_*.py  releases, apply, refusals and revert of an SPT release
   test_cli_spt.py       `sptmod spt list|update|downgrade`
   test_version_agreement.py  the version single-source rule
   test_*.py             individual test modules
@@ -148,6 +165,7 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog, ModSetEditor, ModSetDialog
   src/routes/+layout.svelte  app shell: top bar, nav tabs, window controls
   src/routes/                / (setup or mods), /history, /profile, /settings
+  tests/                     component and route tests (own vitest config, happy-dom)
 docs/HANDOFF.md         product specification (English; History lists changes)
 docs/FORGE_API.md       verified API reference (canonical host sp-mod.com)
 docs/design/            UI redesign brief, Stripe reference, README of omissions
@@ -158,8 +176,8 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 ## Hard invariants (enforced by review and tests)
 
 - `subprocess` only in `core/repo.py` (git operations, always captured and
-  waited) and `core/launch.py` (detached game/server processes that outlive the
-  call) — one module per concern.
+  waited) and `core/launch/` (detached game/server processes that outlive the
+  call) — one area per concern.
 - `httpx` only in `core/forge/client.py` (read-only Forge API with throttling),
   `core/sptserver.py` (an SPT server — this machine's or a Fika host's — with a
   self-signed cert and zlib bodies) and `core/sptrelease/client.py` (the SPT
@@ -824,7 +842,7 @@ builds — this has not been checked against a live Fika session.
 ## Launching the game
 
 All three game-launch service functions (`launch_profile`, `launch_status`,
-`stop_game`) delegate to `core/launch.py` and `core/sptserver.py`. The sequence
+`stop_game`) delegate to `core/launch/` and `core/sptserver.py`. The sequence
 is: apply the mod set the profile is bound to → port probe via GET
 `/launcher/v2/ping` → start `SPT.Server.*` if the port is free → poll readiness every 1 second with a 120-second bound → PUT
 `/launcher/v2/login` (zlib-compressed body, `responsecompressed: 0` header) →
@@ -1240,7 +1258,8 @@ download the new version from the releases page."
 
 `.github/workflows/ci.yml` runs on push and pull request with six jobs: `python`
 (pytest --cov, ruff, mypy, pyright, pylint), `frontend` (check, vitest with
-coverage, build), `sidecar` (matrix Linux/Windows: build the frozen CLI, then
+coverage, the component suite with coverage, build), `sidecar` (matrix
+Linux/Windows: build the frozen CLI, then
 smoke-test `sptmod version`, `rpc list_directories` and an offline
 `rpc search_catalog` against a scaffolded game directory, upload as artifact),
 `rust` (needs the Linux sidecar artifact, `cargo build` + `cargo test`), `app`
@@ -1424,34 +1443,45 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (2142 collected: 2141 passed, 1 skipped)
+uv run pytest                        # Python suite (2158 collected: 2157 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (798 tests; 100% coverage)
+cd frontend && pnpm vitest run --coverage  # src/lib (798 tests; 100% coverage)
+cd frontend && pnpm test:components --coverage  # components (264 tests; coverage floor)
 cargo build && cargo test            # Rust (17 driver + 2 ignored e2e)
 cd src-tauri && cargo llvm-cov       # Rust coverage
 ```
 
 ### Suite sizes and coverage
 
-- **Python:** 2141 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 2157 passed, 1 skipped; `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 798 vitest tests in 26 files; strict 100%
+- **Frontend (`src/lib`):** 798 vitest tests in 26 files, run by `pnpm test` in a
+  `node` environment (`vite.config.ts`); strict 100%
   statements/branches/functions/lines on `src/lib/**/*.ts` (minus `*.test.ts` and
   generated `api/types.ts`; v8 provider).
+- **Frontend (components):** 264 vitest tests in 10 files under `frontend/tests/`,
+  run by `pnpm test:components` against `vitest.components.config.ts` (happy-dom,
+  `@testing-library/svelte`). Its thresholds over `src/routes/**/*.svelte` and
+  `src/lib/components/**/*.svelte` are the measured floor of what these tests
+  reach — statements 94.19, branches 76.68, functions 93.91, lines 93.17 — not a
+  100% gate: raise them together with new tests, never round them up.
 - **Rust (Tauri):** 17 driver tests + 2 ignored e2e tests. rpc.rs's
   `#[tauri::command] rpc()` glue is covered only by the `#[ignore]` e2e test,
   which needs Wry display; the rest of the uncovered lines in `cargo llvm-cov`
   are async resume points it cannot attribute plus the error path in
   `child.wait()`.
-- Svelte components and routes have no tests (file-based, not unit-testable
-  without environment setup). To add: `@testing-library/svelte` or
-  vitest-browser-svelte + jsdom/happy-dom/Playwright in vite.config.ts + Tauri
-  `invoke`/`listen` mock layer — out of scope for now.
+- The component suite mocks `src/lib/api/transport.ts` and nothing else, so the
+  real client layer runs and every test pins the RPC name and payload the
+  component actually sends. happy-dom rather than jsdom, because jsdom provides
+  neither `matchMedia` nor `scrollIntoView`, both of which shipped components
+  call. Known gap: `<select bind:value>` cannot be driven under happy-dom (Svelte
+  reads the selection via `querySelector(':checked')`, which happy-dom answers
+  with null), so the JSON branch of the settings export stays untested.
 
 ### Test details and fixtures
 
@@ -1466,18 +1496,26 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   below `tmp_path`, passed as `store_path` so no test writes the real one),
   `fika_store` (the same for `fika.json`, passed as `fika_path`).
 - Fixtures in `tests/fixtures_profile.py`: `make_profile` (a realistic profile
-  document covering every residue category). Shared builders: `tests/forge_json.py`
-  (Forge API mock payloads), `tests/pe_builder.py` (PE file assembly), and the
-  area fixture modules `tests/fixtures_forge.py`, `tests/fixtures_launch.py`,
-  `tests/fixtures_profile.py`, `tests/fixtures_spt.py`, which `tests/conftest.py`
-  registers through `pytest_plugins`. Fixture types: `tests/fixture_types.py`
-  (Protocols for typed fixtures).
+  document covering every residue category). Shared builders, imported directly:
+  `tests/forge_json.py` (Forge API mock payloads), `tests/github_json.py` (SPT
+  release payloads), `tests/pe_builder.py` (PE file assembly),
+  `tests/launch_helpers.py` (the respx routes, progress capture and poll helper of
+  the launch modules), `tests/forge_install_env.py` (seeded catalogs, dependency
+  nodes and download mocks of the Forge install modules) and
+  `tests/profile_cleanup_corpus.py` (the content IDs and profile documents of the
+  cleanup modules). The area fixture modules `tests/fixtures_forge.py`,
+  `tests/fixtures_launch.py`, `tests/fixtures_profile.py`, `tests/fixtures_rpc.py`,
+  `tests/fixtures_spt.py` are registered by `tests/conftest.py` through
+  `pytest_plugins`. Fixture types: `tests/fixture_types.py` (Protocols for typed
+  fixtures).
 - Every test module, class, and function has a docstring stating setup, assertion,
   and reason. Tests are fully typed via fixture Protocols; NO suppression pragmas
   in src or tests (`type: ignore`, `noqa`, `pylint: disable`, `pragma: no cover`).
   Lint findings are resolved by refactoring; the only configured knobs are pylint
-  design limits set to the exact observed maxima, `min-similarity-lines = 24`
-  for the CatalogMod dataclass/schema mirror, and
+  design limits set to the exact observed maxima — among them
+  `max-module-lines = 1000`, which `src/sptmod/cli.py` hits exactly, so the next
+  line added there has to come with a split (spt-mod-manager-vra) —
+  `min-similarity-lines = 24` for the CatalogMod dataclass/schema mirror, and
   `[tool.pylint.imports] allow-any-import-level = ["libarchive"]`, because
   importing the bindings loads `libarchive.so` and the import therefore has to
   stay inside the 7z fallback.
@@ -1486,8 +1524,12 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   sp-mod.com (full pipeline verified 2026-09-02: sync 1862 mods, SAIN install
   with dependency commits, update flow).
 - Launch tests: `tests/test_sptserver.py` (respx mocks: probe states, login
-  true/false, zlib decode fallback), `tests/test_launch.py` (black-box: exact
-  client argv/cwd/env, readiness poll, server reuse, profile credentials),
+  true/false, zlib decode fallback), `tests/test_launch.py` (everything
+  `launch_profile` refuses before starting anything, plus
+  `tokenize_launch_settings`), `tests/test_launch_client.py` (black-box: the happy
+  path, exact client argv/cwd/env, state file, launch log, launch lock),
+  `tests/test_launch_status.py` (remembered state against the process table),
+  `tests/test_launch_stop.py` (what `stop_game` closes and what it leaves alone),
   `tests/test_launch_watch.py` (watcher: client pid poll, server lifecycle,
   `started_by_sptmod` flag).
 - Mod set tests: `tests/test_modsets_store.py` (the store file itself),
@@ -1504,14 +1546,18 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   `FIKA_HOST_UNREACHABLE` and `INVALID_METADATA` envelopes). Frontend:
   `src/lib/fika.test.ts`.
 - RPC tests: `tests/test_rpc_contract.py` (route-per-function, schema-parity,
-  error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
+  error-mapping), `tests/test_dump_openapi.py` (contract drift detection),
+  `tests/test_rpc.py` (the NDJSON envelope and the error mapping) with the route
+  round-trips in `tests/test_rpc_lifecycle.py`, `tests/test_rpc_catalog.py` and
+  `tests/test_rpc_forge.py`.
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
   `src-tauri/tests/rpc_e2e_ignored.rs` (real CLI, `#[ignore]`).
 - SPT release tests: `tests/test_sptrelease_client.py` (respx mocks shaped by
   `tests/github_json.py`: assets present/absent, `v`-prefixed tags, names without a
-  build, error statuses, malformed bodies), `tests/test_services_spt.py`
-  (list/apply/undo, include and exclude set, stale deletion, build check,
-  re-apply without a commit) and `tests/test_cli_spt.py` (`sptmod spt
+  build, error statuses, malformed bodies), `tests/test_services_spt_releases.py`,
+  `_apply.py`, `_refusals.py` and `_revert.py` (list/apply/undo, include and
+  exclude set, stale deletion, build check, re-apply without a commit) and
+  `tests/test_cli_spt.py` (`sptmod spt
   list|update|downgrade`, confirmation, direction refusal, exit codes). The BCJ2
   fallback runs against the committed `tests/data/bcj2-mod.7z` and
   `tests/data/bcj2-traversal.7z` — no Python writer can produce that filter.

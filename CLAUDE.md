@@ -76,14 +76,16 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (2142 collected: 2141 passed, 1 skipped)
+uv run pytest                        # full suite (2158 collected: 2157 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
-cd frontend && pnpm vitest run --coverage  # frontend coverage (v8, 100%)
+cd frontend && pnpm vitest run --coverage  # src/lib coverage (v8, 100%; 26 files, 798 tests)
+cd frontend && pnpm test:components        # Svelte components/routes (10 files, 264 tests)
+cd frontend && pnpm test:components --coverage  # its own thresholds: a measured floor, not 100%
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
 cd src-tauri && cargo llvm-cov       # Rust coverage (70.54% lines)
 
@@ -101,7 +103,7 @@ cargo tauri dev                      # hot reload during development
 
 - `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
   progress callbacks; it knows neither CLI nor HTTP.
-- `subprocess` ONLY in `core/repo.py` and `core/launch.py`; `httpx` ONLY in `core/forge/client.py` (Forge),
+- `subprocess` ONLY in `core/repo.py` and `core/launch/`; `httpx` ONLY in `core/forge/client.py` (Forge),
   `core/sptserver.py` (local server) and `core/sptrelease/client.py` (SPT release source) — one per remote service.
 - One contract, four transports: service function ↔ `sptmod rpc <name>` ↔
   Tauri `#[tauri::command] rpc()` ↔ client.ts wrapper — guarded by
@@ -130,21 +132,32 @@ cargo tauri dev                      # hot reload during development
 - Only mocked boundaries: HTTP (respx), subprocess (stub binary), environment
   (PATH, HOME, XDG_*), filesystem conditions. Public keyword-only seams for
   testability: `locate_directory(roots=)`, `game_lock(timeout=, poll_interval=)`.
+- Two frontend suites with different standards: `pnpm test` gates `src/lib` at
+  100%, `pnpm test:components` runs `frontend/tests/**` under happy-dom against a
+  measured coverage floor. Component tests mock `src/lib/api/transport.ts` and
+  nothing else, so they pin the real RPC names and payloads; happy-dom over jsdom
+  because shipped components call `matchMedia` and `scrollIntoView`.
 - Sibling cases parametrized with descriptive ids; coverage exclusions only via
   the two `exclude_also` patterns in pyproject (sys.platform, TYPE_CHECKING).
   NO suppression pragmas of any kind in src or tests (`type: ignore`, `noqa`,
   `pylint: disable`, `pragma: no cover`) — lint findings are resolved by
   refactoring; the only configured knobs are pylint design limits set to the
-  exact observed maxima, `min-similarity-lines = 24` for the CatalogMod
-  dataclass/schema mirror, and `[tool.pylint.imports]
+  exact observed maxima — among them `max-module-lines = 1000`, which
+  `src/sptmod/cli.py` hits exactly, so the next line added there has to come
+  with a split (spt-mod-manager-vra) — plus `min-similarity-lines = 24` for the
+  CatalogMod dataclass/schema mirror, and `[tool.pylint.imports]
   allow-any-import-level = ["libarchive"]`, because libarchive-c loads
   `libarchive.so` at import time, so archive.py imports it inside the 7z
   fallback and that knob is the pragma-free way to allow it.
 - Every test module, class, and function has a docstring stating setup,
   assertion, and reason. Tests are fully typed via fixture Protocols in
   `tests/fixture_types.py`; shared builders in `tests/conftest.py`,
-  `tests/forge_json.py`, `tests/github_json.py`, `tests/pe_builder.py`.
+  `tests/forge_json.py`, `tests/github_json.py`, `tests/pe_builder.py`,
+  `tests/launch_helpers.py`, `tests/forge_install_env.py` and
+  `tests/profile_cleanup_corpus.py`; apart from `conftest.py` those are plain
+  imports, not pytest plugins.
 - Area fixture modules `tests/fixtures_forge.py`, `tests/fixtures_launch.py`,
-  `tests/fixtures_profile.py` and `tests/fixtures_spt.py` are registered via
-  `pytest_plugins` in `tests/conftest.py`, so their fixtures are suite-wide.
+  `tests/fixtures_profile.py`, `tests/fixtures_rpc.py` and `tests/fixtures_spt.py`
+  are registered via `pytest_plugins` in `tests/conftest.py`, so their fixtures
+  are suite-wide.
 - A strict `xfail` may pin a known production bug only with a bead reference.

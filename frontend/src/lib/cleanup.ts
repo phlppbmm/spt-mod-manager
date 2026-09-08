@@ -34,6 +34,10 @@ export function categoryLabel(category: ResidueCategory): string {
 	return CATEGORY_LABELS[category];
 }
 
+export function profileLabel(profile: ProfileSummary): string {
+	return profile.nickname === '' ? profile.file : profile.nickname;
+}
+
 export function characterLabel(character: string): string {
 	if (character === 'pmc') {
 		return 'PMC';

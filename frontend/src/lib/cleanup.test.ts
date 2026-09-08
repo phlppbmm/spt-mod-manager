@@ -4,7 +4,8 @@ import {
 	characterLabel,
 	formatProfileList,
 	groupRemovalsByProfile,
-	groupResiduesByProfile
+	groupResiduesByProfile,
+	profileLabel
 } from './cleanup';
 import type { ProfileResidue, ProfileSummary } from './api/client';
 
@@ -138,6 +139,16 @@ function makeSummary(overrides: Partial<ProfileSummary> = {}): ProfileSummary {
 		...overrides
 	};
 }
+
+describe('profileLabel', () => {
+	it('returns the nickname when one is set', () => {
+		expect(profileLabel(makeSummary({ nickname: 'Bob', file: 'bob.json' }))).toBe('Bob');
+	});
+
+	it('falls back to the file name when the nickname is empty', () => {
+		expect(profileLabel(makeSummary({ nickname: '', file: 'bob.json' }))).toBe('bob.json');
+	});
+});
 
 describe('groupResiduesByProfile', () => {
 	it('returns one group per profile, in the order the profiles come in', () => {

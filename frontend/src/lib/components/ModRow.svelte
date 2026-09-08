@@ -24,6 +24,7 @@
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { groupRemovalsByProfile } from '$lib/cleanup';
 	import type { RowState } from '$lib/modfilter';
+	import { rowKey } from '$lib/rownav';
 
 	interface Props {
 		path: string;
@@ -34,6 +35,10 @@
 		locked: boolean;
 		favorite: boolean;
 		selected: boolean;
+		ids: readonly number[];
+		focusedId: number | null;
+		tabStopId: number | null;
+		onfocusrow: (modId: number | null) => void;
 		onselect: () => void;
 		onchanged: () => void;
 		onfavorite: (modIds: number[]) => void;
@@ -49,6 +54,10 @@
 		locked,
 		favorite,
 		selected,
+		ids,
+		focusedId,
+		tabStopId,
+		onfocusrow,
 		onselect,
 		onchanged,
 		onfavorite,
@@ -224,6 +233,31 @@
 		}
 	}
 
+	let tabStop = $derived(tabStopId === entry.mod.id);
+
+	function onRowKeydown(event: KeyboardEvent & { currentTarget: HTMLDivElement }): void {
+		if (event.target !== event.currentTarget) {
+			return;
+		}
+		const result = rowKey(event.key, { ids, focusId: focusedId });
+		if (!result.handled) {
+			return;
+		}
+		if (result.preventDefault) {
+			event.preventDefault();
+		}
+		onfocusrow(result.focusId);
+		if (result.action === 'open') {
+			void showDetails();
+		} else if (result.action === 'toggle-select') {
+			onselect();
+		} else if (result.action === 'toggle-favorite') {
+			void toggleFavorite();
+		} else if (result.action === 'blur') {
+			event.currentTarget.blur();
+		}
+	}
+
 	function size(bytes: number | null): string {
 		if (bytes === null) {
 			return 'unknown size';
@@ -232,7 +266,15 @@
 	}
 </script>
 
-<div class="row panel-row" class:busy>
+<div
+	class="row panel-row"
+	class:busy
+	id="modrow-{entry.mod.id}"
+	role="row"
+	tabindex={tabStop ? 0 : -1}
+	onfocus={() => onfocusrow(entry.mod.id)}
+	onkeydown={onRowKeydown}
+>
 	<div class="pick">
 		<input
 			type="checkbox"
@@ -653,6 +695,12 @@
 
 	.row.busy {
 		opacity: 0.6;
+	}
+
+	/* The global ring only covers :focus-visible, which a revealed row is not. */
+	.row:focus {
+		outline: none;
+		box-shadow: inset 0 0 0 2px var(--focus-ring);
 	}
 
 	@container mods (max-width: 1060px) {

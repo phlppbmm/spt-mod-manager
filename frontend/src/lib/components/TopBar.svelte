@@ -3,12 +3,8 @@
 	import GameDirMenu from '$lib/components/GameDirMenu.svelte';
 	import { getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
 	import { loadGameDir } from '$lib/gamedir';
-	import {
-		requestSync,
-		setGameDir,
-		subscribeGameDir,
-		subscribeSearchEnabled
-	} from '$lib/shellstate';
+	import { requestIntent } from '$lib/intents';
+	import { setGameDir, subscribeGameDir, subscribeSearchEnabled } from '$lib/shellstate';
 	import type { ResolvedTheme } from '$lib/theme';
 	import { closeWindow, minimizeWindow } from '$lib/window';
 
@@ -124,7 +120,7 @@
 		disabled={!searchEnabled}
 		aria-label={searchEnabled ? 'Sync catalog' : 'Sync catalog (open Mods first)'}
 		title={searchEnabled ? 'Sync catalog' : 'Sync catalog (open Mods first)'}
-		onclick={requestSync}
+		onclick={() => requestIntent({ kind: 'sync' })}
 	>
 		<svg
 			width="16"

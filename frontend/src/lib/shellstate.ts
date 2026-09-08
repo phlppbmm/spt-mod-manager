@@ -1,3 +1,5 @@
+import type { CommandMod } from './commands';
+
 export interface SubNavItem {
 	id: string;
 	label: string;
@@ -60,9 +62,8 @@ function signal<A extends unknown[]>(): Signal<A> {
 const subNav = store<SubNavState>({ items: [], active: null });
 const searchEnabled = store(false);
 const gameDir = store<string | null>(null);
+const commandMods = store<readonly CommandMod[]>([]);
 const subNavSelect = signal<[string]>();
-const syncRequest = signal<[]>();
-const changeFolder = signal<[]>();
 
 function copySubNav(value: SubNavState): SubNavState {
 	return { items: [...value.items], active: value.active };
@@ -88,14 +89,6 @@ export function onSubNavSelect(fn: (id: string) => void): () => void {
 	return subNavSelect.on(fn);
 }
 
-export function requestSync(): void {
-	syncRequest.emit();
-}
-
-export function onSyncRequest(fn: () => void): () => void {
-	return syncRequest.on(fn);
-}
-
 export function setSearchEnabled(on: boolean): void {
 	searchEnabled.set(on);
 }
@@ -112,10 +105,10 @@ export function subscribeGameDir(fn: (path: string | null) => void): () => void 
 	return gameDir.subscribe(fn);
 }
 
-export function requestChangeFolder(): void {
-	changeFolder.emit();
+export function setCommandMods(mods: readonly CommandMod[]): void {
+	commandMods.set([...mods]);
 }
 
-export function onChangeFolder(fn: () => void): () => void {
-	return changeFolder.on(fn);
+export function subscribeCommandMods(fn: (mods: readonly CommandMod[]) => void): () => void {
+	return commandMods.subscribe(fn);
 }

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import SubNav from '$lib/components/SubNav.svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import { subscribeSubNav, type SubNavState } from '$lib/shellstate';
@@ -105,6 +106,8 @@
 		<main class="content">{@render children()}</main>
 	</div>
 </div>
+
+<CommandPalette pathname={page.url.pathname} {theme} onToggleTheme={toggleTheme} />
 
 <style>
 	.shell {

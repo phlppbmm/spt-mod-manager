@@ -23,9 +23,11 @@
 		characterLabel,
 		formatProfileList,
 		groupResiduesByProfile,
-		groupRemovalsByProfile
+		groupRemovalsByProfile,
+		profileLabel
 	} from '$lib/cleanup';
 	import { loadGameDir } from '$lib/gamedir';
+	import { onIntents, takeIntents } from '$lib/intents';
 	import { cached, invalidate } from '$lib/viewcache';
 	import { onSubNavSelect, setSearchEnabled, setSubNav } from '$lib/shellstate';
 
@@ -75,11 +77,24 @@
 			void check(stored);
 			void refreshGameStatus(stored);
 		}
+		runIntents();
+		const unsubscribeIntents = onIntents(runIntents);
 		return () => {
 			unsubscribe();
+			unsubscribeIntents();
 			setSubNav([], null);
 		};
 	});
+
+	function runIntents(): void {
+		for (const intent of takeIntents(['snapshot', 'launch'])) {
+			if (intent.kind === 'snapshot') {
+				void takeSnapshot();
+			} else {
+				void play(intent.profileId);
+			}
+		}
+	}
 
 	$effect(() => {
 		setSubNav(
@@ -90,10 +105,6 @@
 			subNavActive
 		);
 	});
-
-	function profileLabel(profile: ProfileSummary): string {
-		return profile.nickname === '' ? profile.file : profile.nickname;
-	}
 
 	function showProfile(profileId: string): void {
 		activeProfile = profileId;
@@ -282,7 +293,7 @@
 			>
 				<div class="header">
 					<div class="identity">
-						<h2>{group.profile.nickname === '' ? group.profile.file : group.profile.nickname}</h2>
+						<h2>{profileLabel(group.profile)}</h2>
 						<p class="meta">
 							{#if group.profile.level > 0}<span>Level {group.profile.level}</span>{/if}
 							{#if group.profile.side !== ''}<span>{group.profile.side}</span>{/if}

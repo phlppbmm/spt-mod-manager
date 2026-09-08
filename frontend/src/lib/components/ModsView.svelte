@@ -41,7 +41,12 @@
 		type BulkActionId,
 		type BulkProgress
 	} from '$lib/selection';
-	import { onSubNavSelect, setSearchEnabled, setSubNav } from '$lib/shellstate';
+	import {
+		onSubNavSelect,
+		setCommandMods,
+		setSearchEnabled,
+		setSubNav
+	} from '$lib/shellstate';
 	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
 	import { cached, invalidate } from '$lib/viewcache';
 
@@ -140,6 +145,7 @@
 		return () => {
 			setSearchEnabled(false);
 			setSubNav([], null);
+			setCommandMods([]);
 			unsubscribeFilter();
 			unsubscribeSubNav();
 		};
@@ -147,6 +153,16 @@
 
 	$effect(() => {
 		setSubNav(SUB_NAV, activeQuickTab(filter));
+	});
+
+	$effect(() => {
+		setCommandMods(
+			rows.map((entry) => ({
+				id: entry.mod.id,
+				name: entry.mod.name,
+				author: entry.mod.author
+			}))
+		);
 	});
 
 	$effect(() => {

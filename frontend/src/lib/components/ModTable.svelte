@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { onMount, untrack } from 'svelte';
 	import ModRow from './ModRow.svelte';
 	import type { CatalogEntry, ModInfo } from '$lib/api/client';
+	import { onIntents, takeIntents } from '$lib/intents';
 	import { rowState, type ModSort, type SortKey } from '$lib/modfilter';
+	import { focusAfterRows } from '$lib/rownav';
 	import { headerCheckbox, toggleAll, toggleSelection } from '$lib/selection';
 
 	interface Props {
@@ -42,6 +45,34 @@
 
 	let ids = $derived(rows.map((entry) => entry.mod.id));
 	let header = $derived(headerCheckbox(selected, ids));
+	let focusedId: number | null = $state(null);
+	// One row is always the tab stop, so Tab reaches the table even before a
+	// row was focused; the ring follows the real DOM focus.
+	let tabStopId = $derived(focusedId ?? (ids.length > 0 ? ids[0] : null));
+
+	onMount(() => {
+		reveal();
+		return onIntents(reveal);
+	});
+
+	$effect(() => {
+		focusedId = focusAfterRows(ids, untrack(() => focusedId));
+	});
+
+	$effect(() => {
+		if (focusedId === null) {
+			return;
+		}
+		const row = document.getElementById(`modrow-${focusedId}`);
+		row?.focus();
+		row?.scrollIntoView({ block: 'nearest' });
+	});
+
+	function reveal(): void {
+		for (const intent of takeIntents(['reveal-mod'])) {
+			focusedId = intent.modId;
+		}
+	}
 
 	function sortMark(key: SortKey): string {
 		if (sort?.key !== key) {
@@ -52,9 +83,9 @@
 </script>
 
 <div class="table">
-	<div class="panel list">
-		<div class="panel-head head">
-			<div class="pick">
+	<div class="panel list" role="grid" aria-label="Mods">
+		<div class="panel-head head" role="row">
+			<div class="pick" role="columnheader">
 				<input
 					type="checkbox"
 					aria-label="Select all mods"
@@ -63,20 +94,28 @@
 					onchange={() => onselect(toggleAll(selected, ids))}
 				/>
 			</div>
-			<div class="index">#</div>
-			<button class="sort" onclick={() => onsort('name')}>Mod{sortMark('name')}</button>
-			<button class="sort" onclick={() => onsort('installed')}>
-				Installed{sortMark('installed')}
-			</button>
-			<button class="sort" onclick={() => onsort('latest')}>Latest{sortMark('latest')}</button>
-			<button class="sort" onclick={() => onsort('spt')}>SPT{sortMark('spt')}</button>
-			<button class="sort" onclick={() => onsort('downloads')}>
-				Downloads{sortMark('downloads')}
-			</button>
-			<button class="sort" onclick={() => onsort('updated')}>Updated{sortMark('updated')}</button>
-			<div>Type</div>
-			<div>State</div>
-			<div></div>
+			<div class="index" role="columnheader">#</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('name')}>Mod{sortMark('name')}</button>
+			</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('installed')}>Installed{sortMark('installed')}</button>
+			</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('latest')}>Latest{sortMark('latest')}</button>
+			</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('spt')}>SPT{sortMark('spt')}</button>
+			</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('downloads')}>Downloads{sortMark('downloads')}</button>
+			</div>
+			<div role="columnheader">
+				<button class="sort" onclick={() => onsort('updated')}>Updated{sortMark('updated')}</button>
+			</div>
+			<div role="columnheader">Type</div>
+			<div role="columnheader">State</div>
+			<div role="columnheader"></div>
 		</div>
 		{#each rows as entry, position (entry.mod.id)}
 			<ModRow
@@ -90,6 +129,10 @@
 				{locked}
 				favorite={favoriteIds.has(entry.mod.id)}
 				selected={selected.has(entry.mod.id)}
+				{ids}
+				{focusedId}
+				{tabStopId}
+				onfocusrow={(id) => (focusedId = id)}
 				onselect={() => onselect(toggleSelection(selected, entry.mod.id))}
 				{onfavorite}
 				{onchanged}

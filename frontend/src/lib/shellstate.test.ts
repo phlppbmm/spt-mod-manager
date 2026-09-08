@@ -1,25 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	getSubNav,
-	onChangeFolder,
 	onSubNavSelect,
-	onSyncRequest,
-	requestChangeFolder,
-	requestSync,
 	selectSubNav,
+	setCommandMods,
 	setGameDir,
 	setSearchEnabled,
 	setSubNav,
+	subscribeCommandMods,
 	subscribeGameDir,
 	subscribeSearchEnabled,
 	subscribeSubNav
 } from './shellstate';
 import type { SubNavItem } from './shellstate';
+import type { CommandMod } from './commands';
 
 beforeEach(() => {
 	setSubNav([], null);
 	setSearchEnabled(false);
 	setGameDir(null);
+	setCommandMods([]);
 });
 
 describe('subNav', () => {
@@ -197,6 +197,56 @@ describe('gameDir', () => {
 	});
 });
 
+describe('commandMods', () => {
+	function makeMod(overrides: Partial<CommandMod> = {}): CommandMod {
+		return { id: 1, name: 'Alpha', author: 'Someone', ...overrides };
+	}
+
+	it('subscribeCommandMods calls the listener immediately with the current value', () => {
+		setCommandMods([makeMod()]);
+		const listener = vi.fn();
+
+		subscribeCommandMods(listener);
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(listener).toHaveBeenCalledWith([makeMod()]);
+	});
+
+	it('setCommandMods notifies subscribers of the new list', () => {
+		const listener = vi.fn();
+		subscribeCommandMods(listener);
+		listener.mockClear();
+
+		setCommandMods([makeMod({ id: 2, name: 'Beta' })]);
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(listener).toHaveBeenCalledWith([makeMod({ id: 2, name: 'Beta' })]);
+	});
+
+	it('mutating the array passed to setCommandMods afterwards does not affect the stored state', () => {
+		const mods: CommandMod[] = [makeMod()];
+		const listener = vi.fn();
+		subscribeCommandMods(listener);
+		listener.mockClear();
+
+		setCommandMods(mods);
+		mods.push(makeMod({ id: 2, name: 'Beta' }));
+
+		expect(listener).toHaveBeenCalledWith([makeMod()]);
+	});
+
+	it('stops delivering notifications to a subscriber after unsubscribe', () => {
+		const listener = vi.fn();
+		const unsubscribe = subscribeCommandMods(listener);
+		listener.mockClear();
+
+		unsubscribe();
+		setCommandMods([makeMod()]);
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+});
+
 describe('subNav selection signal', () => {
 	it('does not notify a listener before selectSubNav is called', () => {
 		const listener = vi.fn();
@@ -234,64 +284,6 @@ describe('subNav selection signal', () => {
 
 		unsubscribe();
 		selectSubNav('mods');
-
-		expect(listener).not.toHaveBeenCalled();
-	});
-});
-
-describe('sync request signal', () => {
-	it('does not notify a listener before requestSync is called', () => {
-		const listener = vi.fn();
-
-		onSyncRequest(listener);
-
-		expect(listener).not.toHaveBeenCalled();
-	});
-
-	it('onSyncRequest is called when requestSync is invoked', () => {
-		const listener = vi.fn();
-		onSyncRequest(listener);
-
-		requestSync();
-
-		expect(listener).toHaveBeenCalledTimes(1);
-	});
-
-	it('stops notifying a listener after it unsubscribes', () => {
-		const listener = vi.fn();
-		const unsubscribe = onSyncRequest(listener);
-
-		unsubscribe();
-		requestSync();
-
-		expect(listener).not.toHaveBeenCalled();
-	});
-});
-
-describe('change folder signal', () => {
-	it('does not notify a listener before requestChangeFolder is called', () => {
-		const listener = vi.fn();
-
-		onChangeFolder(listener);
-
-		expect(listener).not.toHaveBeenCalled();
-	});
-
-	it('onChangeFolder is called when requestChangeFolder is invoked', () => {
-		const listener = vi.fn();
-		onChangeFolder(listener);
-
-		requestChangeFolder();
-
-		expect(listener).toHaveBeenCalledTimes(1);
-	});
-
-	it('stops notifying a listener after it unsubscribes', () => {
-		const listener = vi.fn();
-		const unsubscribe = onChangeFolder(listener);
-
-		unsubscribe();
-		requestChangeFolder();
 
 		expect(listener).not.toHaveBeenCalled();
 	});

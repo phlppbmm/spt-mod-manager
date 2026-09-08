@@ -24,8 +24,11 @@ Implemented in stage 1 (see "Frontend design system" in `../ARCHITECTURE.md`):
 - Status badges with an icon per state.
 - Light theme as the default, dark derived from it; both set `color-scheme`,
   so native controls follow.
-- Keyboard: `/` focuses the search field, Escape closes a popover or leaves
-  the search field, Tab and Shift+Tab cycle inside an open popover.
+- Keyboard: `/` focuses the search field, Ctrl+K (Cmd+K) opens the command
+  palette, Escape closes the palette, a popover or leaves the search field, Tab
+  and Shift+Tab cycle inside an open popover. In the mod table the arrow keys
+  move between rows, Enter opens the details, Space picks a row, `f` toggles
+  the favorite star and Escape leaves the table.
 - Design tokens (`frontend/src/lib/styles/tokens.css`), the base stylesheet
   (`base.css`) and the restyled Mods, Profiles, History, Settings, Setup and
   dialog screens.
@@ -34,8 +37,6 @@ Still not implemented:
 
 - shadcn-svelte / Tailwind / TanStack Table — no new dependencies; the app is
   a handful of components over a hand-written CSS token layer.
-- Command palette (Ctrl+K).
-- Arrow-key navigation between table rows.
 - Loading skeletons — an empty table shows a short loading line instead.
 - Detail side panel — a detail dialog already exists (click a mod name).
 - Pagination — the catalog is one scrolling list.

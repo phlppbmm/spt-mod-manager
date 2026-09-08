@@ -30,6 +30,7 @@ from sptmod.core.game_dir import (
 from sptmod.core.launch import (
     LaunchResult,
     LaunchStatus,
+    LaunchStep,
     StopResult,
 )
 from sptmod.core.launch import launch_profile as _launch_profile
@@ -45,6 +46,15 @@ from sptmod.core.services.common import (
 )
 from sptmod.core.services.lifecycle import (
     adopt_mod_at,
+)
+from sptmod.core.services.modsets import (
+    ModSetMode,
+    ModSetStep,
+    apply_mod_set,
+    list_mod_sets,
+)
+from sptmod.core.services.profiles import (
+    list_profiles,
 )
 from sptmod.core.workspace import (
     game_lock,
@@ -75,6 +85,11 @@ _LOCATE_MAX_RESULTS: Final = 10
 
 
 _LOCATE_TIME_BUDGET: Final = 5.0
+
+
+# The percentages a launch reserves for applying the mod set, before the
+# server phase starts at five.
+_MODSET_PERCENT_SPAN: Final = 4
 
 
 @dataclass(frozen=True)
@@ -403,26 +418,42 @@ def launch_profile(
     path: Path,
     profile_id: str,
     stop_server_on_exit: bool = True,
+    mod_set: ModSetMode = "apply",
     progress: Progress | None = None,
+    *,
+    store_path: Path | None = None,
 ) -> LaunchResult:
     """Start the SPT server and the game at ``path`` for one player profile.
 
-    Reuses a server that is already answering and starts one otherwise, waits
-    until it is ready, signs the profile in and starts the game. The started
-    programs outlive this call.
+    Applies the mod set the profile is bound to, then reuses a server that is
+    already answering or starts one, waits until it is ready, signs the profile
+    in and starts the game. The started programs outlive this call.
+
+    A profile without a bound set is played with the mods as they are.
+    ``mod_set`` decides what happens with a bound set: ``apply`` refuses to
+    launch when the set names mods the installation does not have,
+    ``ignore_missing`` applies the rest of the set anyway, and ``skip`` leaves
+    the mods untouched. Nothing is started before the mods are the set's.
 
     Args:
         path: The tracked game directory.
         profile_id: The profile to play, named by its file name without the
             extension.
         stop_server_on_exit: Close the server when the game closes.
+        mod_set: How the mod set bound to the profile is handled.
         progress: Optional callback for the phases of the launch.
+        store_path: Mod set file; defaults to :func:`default_modsets_path`.
 
     Returns:
         The profile, its player name and the started processes.
 
     Raises:
         NotAGameDirError: ``path`` is no SPT game directory.
+        InvalidMetadataError: The stored mod sets are unreadable, so the set a
+            profile is bound to cannot be determined; nothing was started.
+            ``mod_set="skip"`` does not read the stored sets and starts anyway.
+        ModSetIncompleteError: The bound set names mods the installation does
+            not have; nothing was started.
         GameRunningError: The game is already running.
         ServerPortBusyError: Another program holds the server's address.
         LoginFailedError: The server does not know the profile.
@@ -431,7 +462,63 @@ def launch_profile(
         LaunchError: A program is missing, could not be started, or the server
             did not answer in time.
     """
+    bound = None if mod_set == "skip" else _bound_set(path, profile_id, store_path)
+    if bound is not None:
+        _report_mod_set(path, profile_id, progress)
+        apply_mod_set(
+            path,
+            bound,
+            mod_set == "ignore_missing",
+            _mod_set_progress(progress),
+            store_path=store_path,
+        )
     return _launch_profile(path, profile_id, stop_server_on_exit, progress)
+
+
+def _bound_set(path: Path, profile_id: str, store_path: Path | None) -> str | None:
+    """Return the name of the mod set ``profile_id`` is played with."""
+    overview = list_mod_sets(path, store_path=store_path)
+    for binding in overview.bindings:
+        if binding.profile_id == profile_id:
+            return binding.set_name
+    return None
+
+
+def _report_mod_set(path: Path, profile_id: str, progress: Progress | None) -> None:
+    """Announce the mod set phase of a launch by the player name of the profile."""
+    if progress is None:
+        return
+    nickname = next(
+        (
+            summary.nickname
+            for summary in list_profiles(path)
+            if summary.profile_id == profile_id and summary.nickname
+        ),
+        profile_id,
+    )
+    progress(
+        step=LaunchStep.MODSET,
+        percent=0,
+        message=f"Applying the mod set for {nickname}",
+    )
+
+
+def _mod_set_progress(progress: Progress | None) -> Progress | None:
+    """Report the steps of applying a mod set as the launch's own phase.
+
+    The mod set is the first slice of the launch, so its own progress is
+    scaled into the percentages before the server starts. Its closing step is
+    left out: it carries the same name as the closing step of the launch and
+    would look like a game that is ready to play.
+    """
+    if progress is None:
+        return None
+
+    def report(step: str, percent: int, message: str) -> None:
+        if step != ModSetStep.DONE:
+            progress(LaunchStep.MODSET, percent * _MODSET_PERCENT_SPAN // 100, message)
+
+    return report
 
 
 def launch_status(path: Path) -> LaunchStatus:

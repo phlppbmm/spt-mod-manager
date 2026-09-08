@@ -1212,6 +1212,348 @@
         }
       }
     },
+    "/api/list_mod_sets": {
+      "post": {
+        "summary": "List Mod Sets",
+        "operationId": "list_mod_sets_api_list_mod_sets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListModSetsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSetOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/save_mod_set": {
+      "post": {
+        "summary": "Save Mod Set",
+        "operationId": "save_mod_set_api_save_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delete_mod_set": {
+      "post": {
+        "summary": "Delete Mod Set",
+        "operationId": "delete_mod_set_api_delete_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSetOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rename_mod_set": {
+      "post": {
+        "summary": "Rename Mod Set",
+        "operationId": "rename_mod_set_api_rename_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export_mod_set": {
+      "post": {
+        "summary": "Export Mod Set",
+        "operationId": "export_mod_set_api_export_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSetExport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/import_mod_set": {
+      "post": {
+        "summary": "Import Mod Set",
+        "operationId": "import_mod_set_api_import_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bind_profile_set": {
+      "post": {
+        "summary": "Bind Profile Set",
+        "operationId": "bind_profile_set_api_bind_profile_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindProfileSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSetOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan_mod_set": {
+      "post": {
+        "summary": "Plan Mod Set",
+        "operationId": "plan_mod_set_api_plan_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModSetPlan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply_mod_set": {
+      "post": {
+        "summary": "Apply Mod Set",
+        "operationId": "apply_mod_set_api_apply_mod_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyModSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyModSetResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/launch_profile": {
       "post": {
         "summary": "Launch Profile",
@@ -1392,6 +1734,148 @@
           "mod"
         ],
         "title": "AdoptResult",
+        "type": "object"
+      },
+      "ApplyModSetRequest": {
+        "description": "Parameters of ``apply_mod_set``.\n\n``operation_id`` names the progress stream of this change; a generated one\nis used and echoed back when the caller sends none.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ignore_missing": {
+            "default": false,
+            "title": "Ignore Missing",
+            "type": "boolean"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "ApplyModSetRequest",
+        "type": "object"
+      },
+      "ApplyModSetResponse": {
+        "description": "Outcome of ``apply_mod_set`` plus its progress operation ID.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "enabled": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          },
+          "disabled": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Disabled",
+            "type": "array"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "notices": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "operation_id"
+        ],
+        "title": "ApplyModSetResponse",
+        "type": "object"
+      },
+      "BindProfileSetRequest": {
+        "description": "Parameters of ``bind_profile_set``.\n\nWithout ``set_name`` the profile is unbound.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "set_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Name"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "profile_id"
+        ],
+        "title": "BindProfileSetRequest",
         "type": "object"
       },
       "BlockedUpdate": {
@@ -2218,6 +2702,38 @@
         ],
         "type": "string"
       },
+      "DeleteModSetRequest": {
+        "description": "Parameters of ``delete_mod_set``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "DeleteModSetRequest",
+        "type": "object"
+      },
       "DirectoryEntry": {
         "description": "One subdirectory of a browsed directory.",
         "properties": {
@@ -2386,6 +2902,14 @@
             "default": 0,
             "title": "Api Status",
             "type": "integer"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
           }
         },
         "title": "ErrorDetails",
@@ -2419,6 +2943,38 @@
           "json"
         ],
         "type": "string"
+      },
+      "ExportModSetRequest": {
+        "description": "Parameters of ``export_mod_set``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "ExportModSetRequest",
+        "type": "object"
       },
       "ExportModsRequest": {
         "description": "Parameters of ``export_mods``.",
@@ -2674,6 +3230,67 @@
           "path"
         ],
         "title": "ImportListRequest",
+        "type": "object"
+      },
+      "ImportModSetRequest": {
+        "description": "Parameters of ``import_mod_set``.\n\nExactly one of ``set_file`` and ``content`` carries the mod set.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "set_file": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set File"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ImportModSetRequest",
         "type": "object"
       },
       "IncompatibleMod": {
@@ -3090,6 +3707,22 @@
             "title": "Stop Server On Exit",
             "type": "boolean"
           },
+          "mod_set": {
+            "$ref": "#/components/schemas/ModSetMode",
+            "default": "apply"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          },
           "operation_id": {
             "anyOf": [
               {
@@ -3233,6 +3866,33 @@
           }
         },
         "title": "ListFavoritesRequest",
+        "type": "object"
+      },
+      "ListModSetsRequest": {
+        "description": "Parameters of ``list_mod_sets``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ListModSetsRequest",
         "type": "object"
       },
       "ListModsRequest": {
@@ -3476,6 +4136,200 @@
         "title": "ModInfo",
         "type": "object"
       },
+      "ModSet": {
+        "description": "A named list of mods with the state each of them should have.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "entries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSetEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "created_at"
+        ],
+        "title": "ModSet",
+        "type": "object"
+      },
+      "ModSetChange": {
+        "description": "One mod a set would turn on or off, or names in another version.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "installed_version": {
+            "default": "",
+            "title": "Installed Version",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "ModSetChange",
+        "type": "object"
+      },
+      "ModSetEntry": {
+        "description": "One mod of a mod set and the state the set gives it.",
+        "properties": {
+          "forge_id": {
+            "title": "Forge Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "forge_id",
+          "name",
+          "version",
+          "enabled"
+        ],
+        "title": "ModSetEntry",
+        "type": "object"
+      },
+      "ModSetExport": {
+        "description": "A mod set rendered for sharing, as file content and as a share code.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content",
+          "code"
+        ],
+        "title": "ModSetExport",
+        "type": "object"
+      },
+      "ModSetMode": {
+        "enum": [
+          "apply",
+          "ignore_missing",
+          "skip"
+        ],
+        "type": "string"
+      },
+      "ModSetOverview": {
+        "description": "The mod sets of one game directory and the profiles bound to them.",
+        "properties": {
+          "sets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSet"
+            },
+            "title": "Sets",
+            "type": "array"
+          },
+          "bindings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProfileBinding"
+            },
+            "title": "Bindings",
+            "type": "array"
+          }
+        },
+        "title": "ModSetOverview",
+        "type": "object"
+      },
+      "ModSetPlan": {
+        "description": "What applying a mod set would change.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "enable": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSetChange"
+            },
+            "title": "Enable",
+            "type": "array"
+          },
+          "disable": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSetChange"
+            },
+            "title": "Disable",
+            "type": "array"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSetEntry"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "different": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModSetChange"
+            },
+            "title": "Different",
+            "type": "array"
+          },
+          "unchanged": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unchanged",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ModSetPlan",
+        "type": "object"
+      },
       "ModState": {
         "description": "The lifecycle state a mod's youngest commit puts it in.",
         "enum": [
@@ -3618,6 +4472,38 @@
         "title": "PlanModInstallRequest",
         "type": "object"
       },
+      "PlanModSetRequest": {
+        "description": "Parameters of ``plan_mod_set``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "PlanModSetRequest",
+        "type": "object"
+      },
       "PlanProfileCleanupRequest": {
         "description": "Parameters of ``plan_profile_cleanup``.",
         "properties": {
@@ -3636,6 +4522,25 @@
           "mod_name"
         ],
         "title": "PlanProfileCleanupRequest",
+        "type": "object"
+      },
+      "ProfileBinding": {
+        "description": "The mod set one player profile is played with.",
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "set_name": {
+            "title": "Set Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "set_name"
+        ],
+        "title": "ProfileBinding",
         "type": "object"
       },
       "ProfileResidue": {
@@ -3833,6 +4738,43 @@
         "title": "RemoveResult",
         "type": "object"
       },
+      "RenameModSetRequest": {
+        "description": "Parameters of ``rename_mod_set``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "new_name"
+        ],
+        "title": "RenameModSetRequest",
+        "type": "object"
+      },
       "ResidueCategory": {
         "description": "Which part of a player profile a mod's IDs were found in.",
         "enum": [
@@ -3856,6 +4798,52 @@
         ],
         "title": "ResidueCategory",
         "type": "string"
+      },
+      "SaveModSetRequest": {
+        "description": "Parameters of ``save_mod_set``.\n\nWithout ``entries`` the set is taken from the installed mods.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "entries": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ModSetEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entries"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "SaveModSetRequest",
+        "type": "object"
       },
       "SearchCatalogRequest": {
         "description": "Parameters of ``search_catalog``.",

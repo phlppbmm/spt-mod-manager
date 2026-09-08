@@ -209,6 +209,52 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.FavoritesResponse,
         wrap="mod_ids",
     ),
+    "list_mod_sets": RpcSpec(
+        services.list_mod_sets,
+        schemas.ListModSetsRequest,
+        schemas.ModSetOverview,
+    ),
+    "save_mod_set": RpcSpec(
+        services.save_mod_set,
+        schemas.SaveModSetRequest,
+        schemas.ModSet,
+    ),
+    "delete_mod_set": RpcSpec(
+        services.delete_mod_set,
+        schemas.DeleteModSetRequest,
+        schemas.ModSetOverview,
+    ),
+    "rename_mod_set": RpcSpec(
+        services.rename_mod_set,
+        schemas.RenameModSetRequest,
+        schemas.ModSet,
+    ),
+    "export_mod_set": RpcSpec(
+        services.export_mod_set,
+        schemas.ExportModSetRequest,
+        schemas.ModSetExport,
+    ),
+    "import_mod_set": RpcSpec(
+        services.import_mod_set,
+        schemas.ImportModSetRequest,
+        schemas.ModSet,
+    ),
+    "bind_profile_set": RpcSpec(
+        services.bind_profile_set,
+        schemas.BindProfileSetRequest,
+        schemas.ModSetOverview,
+    ),
+    "plan_mod_set": RpcSpec(
+        services.plan_mod_set,
+        schemas.PlanModSetRequest,
+        schemas.ModSetPlan,
+    ),
+    "apply_mod_set": RpcSpec(
+        services.apply_mod_set,
+        schemas.ApplyModSetRequest,
+        schemas.ApplyModSetResponse,
+        operation_id=True,
+    ),
     "launch_profile": RpcSpec(
         services.launch_profile,
         schemas.LaunchProfileRequest,
@@ -283,7 +329,7 @@ def _call(spec: RpcSpec, request: schemas.CoreModel, operation_id: str) -> JsonV
     Any failure of the service function is the caller's error response, so the
     traceback goes to stderr here and the exception is re-raised wrapped.
     """
-    kwargs = request.model_dump(exclude={"operation_id"})
+    kwargs = request.service_kwargs()
     if "progress" in inspect.signature(spec.function).parameters:
         kwargs["progress"] = _progress(operation_id)
     try:

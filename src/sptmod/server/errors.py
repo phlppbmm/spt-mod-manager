@@ -23,6 +23,9 @@ from sptmod.core.errors import (
     LauncherSettingsError,
     LoginFailedError,
     ModNotFoundError,
+    ModSetExistsError,
+    ModSetIncompleteError,
+    ModSetNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
     OperationInProgressError,
@@ -50,6 +53,9 @@ class ErrorCode(StrEnum):
     UNSUPPORTED_RANGE = "UNSUPPORTED_RANGE"
     SPT_VERSION_UNKNOWN = "SPT_VERSION_UNKNOWN"
     MOD_NOT_FOUND = "MOD_NOT_FOUND"
+    MOD_SET_NOT_FOUND = "MOD_SET_NOT_FOUND"
+    MOD_SET_EXISTS = "MOD_SET_EXISTS"
+    MOD_SET_INCOMPLETE = "MOD_SET_INCOMPLETE"
     NO_COMPATIBLE_VERSION = "NO_COMPATIBLE_VERSION"
     AMBIGUOUS_MOD = "AMBIGUOUS_MOD"
     DIRTY_TREE = "DIRTY_TREE"
@@ -83,6 +89,9 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     UnsupportedRangeError: ErrorCode.UNSUPPORTED_RANGE,
     SptVersionUnknownError: ErrorCode.SPT_VERSION_UNKNOWN,
     ModNotFoundError: ErrorCode.MOD_NOT_FOUND,
+    ModSetNotFoundError: ErrorCode.MOD_SET_NOT_FOUND,
+    ModSetExistsError: ErrorCode.MOD_SET_EXISTS,
+    ModSetIncompleteError: ErrorCode.MOD_SET_INCOMPLETE,
     NoCompatibleVersionError: ErrorCode.NO_COMPATIBLE_VERSION,
     AmbiguousModError: ErrorCode.AMBIGUOUS_MOD,
     DirtyTreeError: ErrorCode.DIRTY_TREE,
@@ -140,6 +149,8 @@ def error_details(error: Exception) -> schemas.ErrorDetails:
         )
     if isinstance(error, GitError):
         return schemas.ErrorDetails(conflicting_paths=error.conflicting_paths)
+    if isinstance(error, ModSetIncompleteError):
+        return schemas.ErrorDetails(name=error.name, missing=error.missing)
     if isinstance(error, AmbiguousModError):
         return schemas.ErrorDetails(name=error.name, candidates=error.candidates)
     if isinstance(error, ForgeApiError):

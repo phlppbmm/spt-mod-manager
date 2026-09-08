@@ -54,13 +54,13 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_thirtyfour_entries() -> None:
-    """len(RPC_FUNCTIONS) == 34; pins the endpoint count against regressions.
+def test_rpc_functions_has_exactly_fortythree_entries() -> None:
+    """len(RPC_FUNCTIONS) == 43; pins the endpoint count against regressions.
 
     Adding or removing an endpoint must update this assertion to keep the
     contract explicit.
     """
-    assert len(RPC_FUNCTIONS) == 34
+    assert len(RPC_FUNCTIONS) == 43
 
 
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
@@ -140,6 +140,14 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (services.CleanupPlan, schemas.CleanupPlan),
     (services.CleanupResult, schemas.CleanupResult),
     (services.UntouchedResidue, schemas.UntouchedResidue),
+    (services.ModSetEntry, schemas.ModSetEntry),
+    (services.ModSet, schemas.ModSet),
+    (services.ProfileBinding, schemas.ProfileBinding),
+    (services.ModSetOverview, schemas.ModSetOverview),
+    (services.ModSetChange, schemas.ModSetChange),
+    (services.ModSetPlan, schemas.ModSetPlan),
+    (services.ModSetApplyResult, schemas.ModSetApplyResult),
+    (services.ModSetExport, schemas.ModSetExport),
     (LaunchResult, schemas.LaunchResult),
     (LaunchStatus, schemas.LaunchStatus),
     (StopResult, schemas.StopResult),
@@ -180,15 +188,15 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
 CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
-def test_there_are_twentyfive_concrete_core_error_classes() -> None:
-    """len(CONCRETE_CORE_ERROR_CLASSES) == 25 to pin corpus against regressions.
+def test_there_are_twentyeight_concrete_core_error_classes() -> None:
+    """len(CONCRETE_CORE_ERROR_CLASSES) == 28 to pin corpus against regressions.
 
     Adding a new exception class to core.errors requires updating this count
     so the change is caught by parametrized error tests.
     """
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
-    assert len(CONCRETE_CORE_ERROR_CLASSES) == 25
+    assert len(CONCRETE_CORE_ERROR_CLASSES) == 28
 
 
 @pytest.mark.parametrize(
@@ -223,8 +231,9 @@ def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
 def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -> None:
     """Specs with operation_id=True have operation_id field; unmarked specs do not.
 
-    The five marked specs (install_from_archive, sync_catalog, install_mod,
-    update_mod, launch_profile) are the only ones with long-running operations.
+    The six marked specs (install_from_archive, sync_catalog, install_mod,
+    update_mod, apply_mod_set, launch_profile) are the only ones with
+    long-running operations.
     """
     declares_operation_id = {
         name
@@ -241,6 +250,7 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
         "sync_catalog",
         "install_mod",
         "update_mod",
+        "apply_mod_set",
         "launch_profile",
     }
 

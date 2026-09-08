@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::driver;
 
-pub const FUNCTIONS: [&str; 34] = [
+pub const FUNCTIONS: [&str; 43] = [
     "list_directories",
     "locate_directory",
     "init_game_dir",
@@ -36,6 +36,15 @@ pub const FUNCTIONS: [&str; 34] = [
     "update_mod",
     "list_favorites",
     "set_favorite",
+    "list_mod_sets",
+    "save_mod_set",
+    "delete_mod_set",
+    "rename_mod_set",
+    "export_mod_set",
+    "import_mod_set",
+    "bind_profile_set",
+    "plan_mod_set",
+    "apply_mod_set",
     "launch_profile",
     "launch_status",
     "stop_game",

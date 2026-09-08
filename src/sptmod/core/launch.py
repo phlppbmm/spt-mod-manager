@@ -74,6 +74,7 @@ _QUOTES: Final[tuple[str, str]] = ('"', "'")
 class LaunchStep(StrEnum):
     """The phases a launch reports progress for."""
 
+    MODSET = "modset"
     SERVER = "server"
     WAITING = "waiting"
     LOGIN = "login"

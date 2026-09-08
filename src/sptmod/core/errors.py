@@ -178,6 +178,32 @@ class AmbiguousModError(SptmodError):
         self.candidates: list[str] = list(candidates)
 
 
+class ModSetNotFoundError(SptmodError):
+    """The game directory has no mod set with the requested name."""
+
+
+class ModSetExistsError(SptmodError):
+    """The game directory already has a mod set with the requested name."""
+
+
+class ModSetIncompleteError(SptmodError):
+    """A mod set names mods the game directory does not have.
+
+    Attributes:
+        name: The name of the mod set.
+        missing: The names of the mods the set needs and the installation
+            does not have.
+    """
+
+    def __init__(self, name: str, missing: Sequence[str]) -> None:
+        super().__init__(
+            f"the mod set {name!r} needs mods that are not installed: "
+            f"{', '.join(missing)}"
+        )
+        self.name = name
+        self.missing: list[str] = list(missing)
+
+
 class NotImplementedYetError(SptmodError):
     """The requested operation is wired but has no implementation yet."""
 

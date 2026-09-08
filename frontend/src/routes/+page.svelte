@@ -3,7 +3,7 @@
 </script>
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import ModsView from '$lib/components/ModsView.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
@@ -18,8 +18,9 @@
 	} from '$lib/api/client';
 	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { forgetGameDir, loadGameDir, saveGameDir } from '$lib/gamedir';
+	import { onIntents, takeIntents } from '$lib/intents';
 	import { bannerText, isGameUp, nextPollDelay } from '$lib/launch';
-	import { onChangeFolder, onSyncRequest, setGameDir } from '$lib/shellstate';
+	import { setGameDir } from '$lib/shellstate';
 	import { runUpdates, summarize, type UpdateTarget } from '$lib/updateall';
 	import { cached } from '$lib/viewcache';
 
@@ -47,22 +48,50 @@
 
 	onMount(() => {
 		void detect();
-		const unsubscribeSync = onSyncRequest(() => void sync());
-		const unsubscribeFolder = onChangeFolder(() => {
-			clearTimeout(pollTimer);
-			forgetGameDir();
-			phase = 'setup';
+		const unsubscribe = onIntents(() => {
+			if (phase === 'ready') {
+				runIntents(updatesChecked);
+			}
 		});
 		return () => {
 			clearTimeout(pollTimer);
-			unsubscribeSync();
-			unsubscribeFolder();
+			unsubscribe();
 		};
 	});
 
 	$effect(() => {
 		setGameDir(phase === 'ready' ? path : null);
 	});
+
+	// Requests made from another page arrive before the game directory is
+	// known, and "Update all" before the rows reported what is updatable, so
+	// they wait until this page can carry them out.
+	$effect(() => {
+		const ready = phase === 'ready';
+		const checked = updatesChecked;
+		if (ready) {
+			untrack(() => runIntents(checked));
+		}
+	});
+
+	function runIntents(withUpdates: boolean): void {
+		const intents = withUpdates
+			? takeIntents(['sync', 'update-all', 'change-folder'])
+			: takeIntents(['sync', 'change-folder']);
+		for (const intent of intents) {
+			if (intent.kind === 'sync') {
+				void sync();
+			} else if (intent.kind === 'update-all') {
+				if (candidates.length > 0) {
+					void updateAll();
+				}
+			} else {
+				clearTimeout(pollTimer);
+				forgetGameDir();
+				phase = 'setup';
+			}
+		}
+	}
 
 	async function pollGameStatus(gameDir: string): Promise<void> {
 		try {

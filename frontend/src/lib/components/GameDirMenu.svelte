@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { forgetGameDir } from '$lib/gamedir';
-	import { requestChangeFolder } from '$lib/shellstate';
+	import { requestIntent } from '$lib/intents';
 
 	interface Props {
 		path: string | null;
@@ -45,14 +44,12 @@
 		trigger?.focus();
 	}
 
-	function changeFolder(): void {
+	async function changeFolder(): Promise<void> {
 		close();
-		if (page.url.pathname === '/') {
-			requestChangeFolder();
-			return;
+		if (page.url.pathname !== '/') {
+			await goto('/');
 		}
-		forgetGameDir();
-		void goto('/');
+		requestIntent({ kind: 'change-folder' });
 	}
 </script>
 
@@ -85,7 +82,9 @@
 	{#if open}
 		<div class="popover" role="dialog" aria-label="Game folder">
 			<div class="path">{path ?? 'No game folder selected'}</div>
-			<button class="btn-ghost btn-sm" type="button" onclick={changeFolder}>Change folder</button>
+			<button class="btn-ghost btn-sm" type="button" onclick={() => void changeFolder()}>
+				Change folder
+			</button>
 		</div>
 	{/if}
 </div>

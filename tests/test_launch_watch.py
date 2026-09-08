@@ -19,8 +19,8 @@ from typing import Any
 import psutil
 import pytest
 
-from conftest import process_ref, write_launch_state
 from fixture_types import SpawnProcess, SpawnSleeper
+from fixtures_launch import process_ref, write_launch_state
 from sptmod.core.game_dir import CLIENT_EXE_NAME, SERVER_LINUX_NAME
 from sptmod.core.launch import (
     CLIENT_NEVER_STARTED,

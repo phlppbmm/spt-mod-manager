@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import empty_pmc_profile
 from fixture_types import InstallCommit, JsonDict
+from fixtures_profile import empty_pmc_profile
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
     AmbiguousModError,

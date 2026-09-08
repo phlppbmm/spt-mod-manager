@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from conftest import recorded_requests
 from fixture_types import ClientFactory
+from fixtures_forge import recorded_requests
 from forge_json import make_mod_info, mod_json_full, owner_json, page_envelope, version_json
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.catalog import Catalog

@@ -6,8 +6,8 @@ import httpx
 import pytest
 import respx
 
-from conftest import FakeClock, RecordingSleep
 from fixture_types import ClientFactory
+from fixtures_forge import FakeClock, RecordingSleep
 from forge_json import page_envelope
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.forge.client import BACKOFF_BASE_SECONDS

@@ -21,7 +21,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from conftest import SptReleaseSource, clean_repo_at, invoke_rpc
+from conftest import clean_repo_at, invoke_rpc
 from fixture_types import (
     InstallCommit,
     JsonDict,
@@ -29,6 +29,7 @@ from fixture_types import (
     MakeSptRelease,
     TrailerInstallCommit,
 )
+from fixtures_spt import SptReleaseSource
 from forge_json import mod_json_full, mod_json_minimal, owner_json, page_envelope, version_json
 from sptmod.cli import app
 from sptmod.core import services

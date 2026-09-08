@@ -16,7 +16,7 @@ import httpx
 import pytest
 import respx
 
-from conftest import recorded_requests
+from fixtures_forge import recorded_requests
 from github_json import asset_json, release_json, release_without_asset_json
 from sptmod.core.errors import SptReleaseUnavailableError
 from sptmod.core.sptrelease.client import (

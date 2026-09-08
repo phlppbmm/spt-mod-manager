@@ -16,8 +16,8 @@ import httpx
 import pytest
 import respx
 
-from conftest import LaunchableGameDir
 from fixture_types import InstallCommit
+from fixtures_launch import LaunchableGameDir
 from sptmod.core import game_dir, services
 from sptmod.core.errors import ModSetIncompleteError
 from sptmod.core.game_dir import GameProcess

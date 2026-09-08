@@ -17,14 +17,8 @@ import psutil
 import pytest
 import respx
 
-from conftest import (
-    LaunchableGameDir,
-    kill_launchable_processes,
-    process_ref,
-    stub_dump,
-    write_launch_state,
-)
 from fixture_types import SpawnSleeper
+from fixtures_launch import LaunchableGameDir, kill_launchable_processes, process_ref, stub_dump, write_launch_state
 from sptmod.core import game_dir, services
 from sptmod.core.errors import FikaHostUnreachableError, LaunchError, LoginFailedError
 from sptmod.core.fika import FikaSettings, save_settings

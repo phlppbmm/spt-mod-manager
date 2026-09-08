@@ -15,7 +15,8 @@ import httpx
 import pytest
 import respx
 
-from conftest import LaunchableGameDir, invoke_rpc, kill_launchable_processes
+from conftest import invoke_rpc
+from fixtures_launch import LaunchableGameDir, kill_launchable_processes
 from forge_json import mod_json_full, owner_json, page_envelope, version_json
 from sptmod.core import game_dir
 from sptmod.core.forge.catalog import Catalog

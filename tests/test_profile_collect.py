@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import empty_pmc_profile
 from fixture_types import InstallCommit
+from fixtures_profile import empty_pmc_profile
 from sptmod.core.errors import GitError
 from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.models import ProfileResidue, ResidueCategory

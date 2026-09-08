@@ -13,8 +13,9 @@ from pathlib import Path
 import pytest
 import respx
 
-from conftest import LaunchableGameDir, invoke_rpc
+from conftest import invoke_rpc
 from fixture_types import InstallCommit
+from fixtures_launch import LaunchableGameDir
 from sptmod.core import game_dir, services
 from sptmod.core.game_dir import GameProcess
 from sptmod.core.repo import Repo

@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from conftest import clean_repo_at, profile_with_item
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, JsonDict
+from fixtures_profile import profile_with_item
 from sptmod.cli import app
 from sptmod.core import services
 from sptmod.core.errors import ProfileResidueError

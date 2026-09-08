@@ -22,8 +22,8 @@ import psutil
 import pytest
 import respx
 
-from conftest import LaunchableGameDir, kill_launchable_processes, process_ref, stub_dump, write_launch_state
 from fixture_types import SpawnProcess, SpawnSleeper
+from fixtures_launch import LaunchableGameDir, kill_launchable_processes, process_ref, stub_dump, write_launch_state
 from sptmod.core import game_dir
 from sptmod.core.errors import (
     GameRunningError,

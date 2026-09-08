@@ -128,4 +128,7 @@ cargo tauri dev                      # hot reload during development
   assertion, and reason. Tests are fully typed via fixture Protocols in
   `tests/fixture_types.py`; shared builders in `tests/conftest.py`,
   `tests/forge_json.py`, `tests/pe_builder.py`.
+- Area fixture modules `tests/fixtures_forge.py`, `tests/fixtures_launch.py`,
+  `tests/fixtures_profile.py` and `tests/fixtures_spt.py` are registered via
+  `pytest_plugins` in `tests/conftest.py`, so their fixtures are suite-wide.
 - A strict `xfail` may pin a known production bug only with a bead reference.

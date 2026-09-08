@@ -15,13 +15,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from conftest import (
-    SptReleaseSource,
-    clean_repo_at,
-    spt_release_members,
-    write_client_exe,
-)
+from conftest import clean_repo_at
 from fixture_types import MakeArchive, MakeSptRelease
+from fixtures_spt import SptReleaseSource, spt_release_members, write_client_exe
 from sptmod.cli import app
 from sptmod.core import services
 

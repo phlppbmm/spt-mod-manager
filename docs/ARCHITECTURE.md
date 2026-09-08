@@ -106,8 +106,12 @@ packaging/              freezing the Python core for the desktop bundle
   ci.yml                Python/frontend/Rust gates plus sidecar and app matrices
   release.yml           v* tag -> signed bundles in a draft release
 tests/                  Python test suite (2142 tests)
-  conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
+  conftest.py           git isolation, process-scan guard, game dirs, repos
   fixture_types.py      fixture Protocols for typing
+  fixtures_forge.py     Forge client/catalog fixtures (pytest_plugins)
+  fixtures_launch.py    launch stubs and process helpers (pytest_plugins)
+  fixtures_profile.py   profile document builders (pytest_plugins)
+  fixtures_spt.py       SPT release source and archives (pytest_plugins)
   forge_json.py         Forge API mock payload builders
   github_json.py        SPT release source mock payload builders
   pe_builder.py         PE file assembly helpers
@@ -1452,16 +1456,21 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
 ### Test details and fixtures
 
 - Fixtures in `tests/conftest.py`: `fake_game_dir` (4.0 `SPT/` layout — the
-  bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
-  `fake_launchable_dir` (4.1 layout + server/client stub scripts + launcher
-  settings + profile with login credentials), `launchable_repo`
-  (`fake_launchable_dir` initialized as a clean repository, for mod set launch
-  tests), `mod_set_store` (a `modsets.json` path below `tmp_path`, passed as
-  `store_path` so no test writes the real one), `fika_store` (the same for
-  `fika.json`, passed as `fika_path`), `clean_repo`, `install_commit`,
-  `make_archive` (zip/7z; rar cannot be created — real samples in `tests/data/`,
-  plus an encrypted zip). Shared builders: `tests/forge_json.py` (Forge API mock
-  payloads), `tests/pe_builder.py` (PE file assembly). Fixture types: `tests/fixture_types.py`
+  bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`), `clean_repo`,
+  `install_commit`, `make_archive` (zip/7z; rar cannot be created — real samples
+  in `tests/data/`, plus an encrypted zip).
+- Fixtures in `tests/fixtures_launch.py`: `fake_launchable_dir` (4.1 layout +
+  server/client stub scripts + launcher settings + profile with login
+  credentials), `launchable_repo` (`fake_launchable_dir` initialized as a clean
+  repository, for mod set launch tests), `mod_set_store` (a `modsets.json` path
+  below `tmp_path`, passed as `store_path` so no test writes the real one),
+  `fika_store` (the same for `fika.json`, passed as `fika_path`).
+- Fixtures in `tests/fixtures_profile.py`: `make_profile` (a realistic profile
+  document covering every residue category). Shared builders: `tests/forge_json.py`
+  (Forge API mock payloads), `tests/pe_builder.py` (PE file assembly), and the
+  area fixture modules `tests/fixtures_forge.py`, `tests/fixtures_launch.py`,
+  `tests/fixtures_profile.py`, `tests/fixtures_spt.py`, which `tests/conftest.py`
+  registers through `pytest_plugins`. Fixture types: `tests/fixture_types.py`
   (Protocols for typed fixtures).
 - Every test module, class, and function has a docstring stating setup, assertion,
   and reason. Tests are fully typed via fixture Protocols; NO suppression pragmas

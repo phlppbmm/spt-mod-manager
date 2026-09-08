@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import empty_pmc_profile
 from fixture_types import JsonDict, MakeProfile
+from fixtures_profile import empty_pmc_profile
 from sptmod.core.models import ProfileResidue, ResidueCategory
 from sptmod.core.profile import ModIds, find_residues
 

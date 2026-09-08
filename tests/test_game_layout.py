@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from conftest import profile_with_item
 from fixture_types import InstallCommit, MakeArchive
+from fixtures_profile import profile_with_item
 from pe_builder import (
     DATA_ENTRY_FILE_OFFSET,
     LEVEL1_FILE_OFFSET,

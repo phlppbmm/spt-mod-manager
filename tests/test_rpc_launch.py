@@ -14,7 +14,8 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from conftest import LaunchableGameDir, invoke_rpc
+from conftest import invoke_rpc
+from fixtures_launch import LaunchableGameDir
 from sptmod.core import game_dir
 from sptmod.core.game_dir import GameProcess
 from sptmod.core.sptserver import LOGIN_PATH, PING_PATH

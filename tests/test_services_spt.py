@@ -25,14 +25,9 @@ from pathlib import Path
 import pytest
 import respx
 
-from conftest import (
-    DEFAULT_RELEASE_DATE,
-    SptReleaseSource,
-    clean_repo_at,
-    spt_release_members,
-    write_client_exe,
-)
+from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive, MakeSptRelease
+from fixtures_spt import DEFAULT_RELEASE_DATE, SptReleaseSource, spt_release_members, write_client_exe
 from pe_builder import write_server_exe
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (

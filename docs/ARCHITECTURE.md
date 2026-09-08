@@ -41,8 +41,9 @@ src/sptmod/
     modmeta.py          package.json parsing, trailer mapping, npm-style semver
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
     profile.py          profile residue detection from install commits (§7)
+    modsets.py          mod set store: one JSON document per user, keyed by game directory
     services/           all user-facing operations as pure functions
-      __init__.py       facade: the 34 service functions and their result types
+      __init__.py       facade: the 43 service functions and their result types
       common.py         shared constants, repo mod lookups, layout path translation
       state.py          status, history, snapshot, installability guard
       gamedir.py        directory browsing/locating, init, SPT version, launch
@@ -53,6 +54,7 @@ src/sptmod/
       update.py         update discovery and application
       catalog.py        catalog sync/search/browse, mod details, favorites
       transfer.py       export and import of mod lists
+      modsets.py        mod set CRUD, sharing, profile binding, plan and apply
     workspace.py        staging dir for downloads/extraction, apply lock
     favorites.py        list and persist per-user favorited mod IDs
     forge/
@@ -79,7 +81,7 @@ src-tauri/              Tauri v2 desktop app
   tests/
     rpc_driver_tests.rs   with mocked subprocess
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
-tests/                  Python test suite (1522 tests)
+tests/                  Python test suite (1756 tests)
   conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
   fixture_types.py      fixture Protocols for typing
   forge_json.py         Forge API mock payload builders
@@ -102,7 +104,8 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/api/client.ts      typed wrappers per RPC function
   src/lib/modfilter.ts       filter and sort predicates; schema for chips, categories
   src/lib/filterstate.ts     module-scope filter state (survives route nav, not restart)
-  src/lib/components/        SetupScreen, ModsView, ModRow, Dialog
+  src/lib/modsets.ts         mod set rows, options, plan summary, missing-mod install targets
+  src/lib/components/        SetupScreen, ModsView, ModRow, Dialog, ModSetEditor, ModSetDialog
   src/routes/+layout.svelte  app shell: top bar, nav tabs, window controls
   src/routes/                / (setup or mods), /history, /profile, /settings
 docs/HANDOFF.md         product specification (English; History lists changes)
@@ -462,16 +465,171 @@ download cache.
   list. Frontend joins the favorites set with browse results by id, so a
   favorited-but-uncached mod displays as a favorite without a catalog entry.
 
+## Mod sets
+
+A mod set is a named list of mods with the state each of them should have. A
+player profile can be bound to one set; launching that profile makes the
+installation match the set first. Applying a set is AUTHORITATIVE: mods the set
+turns off and active mods the set does not name at all are turned off, so what
+runs afterwards is exactly the line-up the set describes. A set never installs,
+updates or downgrades anything.
+
+**Storage.** `platformdirs.user_config_path("sptmod", appauthor=False) /
+"modsets.json"` (`core/modsets.py`), one document for the user, its top level
+keyed by `str(game_dir.resolve())`. Deliberately NOT a file in the game
+repository: it would need whitelist changes, would surface in the
+`game_files_changed` bucket with its SPT-version side effect, and would compete
+with git as the source of truth about the installation. Keying by resolved game
+directory keeps the sets of several game folders side by side. Every service
+function takes a keyword-only `store_path` seam (tests never touch the real
+file). Writes rewrite the whole document (`save_sets`), so the entries of other
+game directories survive, through mkstemp + `os.replace` — a crash mid-write
+leaves the previous document intact, and the abandoned `.modsets-…` temp file
+is never read. Unlike `favorites.py`, an unreadable or malformed store raises
+`InvalidMetadataError` naming the file instead of reading as empty: a set
+decides which mods a player runs, and silently losing sets is worse than a loud
+failure. Unknown keys of a well-formed document are ignored.
+
+On-disk shape:
+
+```json
+{"version": 1, "games": {"/home/user/Games/SPT": {
+  "sets": [{"name": "Fika night", "created_at": "2026-09-08T18:04:11Z",
+            "entries": [{"forge_id": "1234", "name": "SAIN", "version": "3.2.1", "enabled": true},
+                        {"forge_id": "", "name": "MyLocalMod", "version": "1.0", "enabled": false}]}],
+  "bindings": {"6712a9f0c1d2e3f4a5b6c7d8": "Fika night"}}}}
+```
+
+An entry's `name` is the install-commit `Mod:` trailer name, `forge_id` is empty
+for mods the Forge knows nothing about, `created_at` is UTC ISO-8601 Z.
+
+**Names.** Compared with `casefold()`, stored with the casing the user typed,
+surrounding whitespace stripped; a name that is empty afterwards raises
+`InvalidMetadataError`. Saving over an existing set keeps its `created_at`.
+
+**Interchange and share code.** `export_mod_set` renders a set as JSON with
+indent 2 and a trailing newline, wrapped under `"mod_set"` (never confused with
+`export_mods`' `{"mods": [...]}`); only `name` and `entries` travel, the
+importing installation stamps its own `created_at`. The same content is also
+returned as a share code: `SPTMODSET1-` + urlsafe base64 of `zlib.compress(...,
+9)`, `=` padding stripped. Decoding re-pads with `"=" * (-len(body) % 4)` and
+unpacks at most 4 MiB, so a short code cannot claim a large amount of memory;
+more content than that, or a damaged code, is an `InvalidMetadataError`.
+`import_mod_set` dispatches on the stripped text — `SPTMODSET1-` = code, `{` =
+JSON file content, anything else is refused — so file names carry no meaning. A
+file that is not UTF-8 is an `InvalidMetadataError` as well.
+
+**Service functions** (`services/modsets.py`, all with keyword-only
+`store_path`; `InvalidMetadataError` for an unreadable store is possible in
+every one of them and left out of the table):
+
+| Function | Purpose | Errors |
+|---|---|---|
+| `list_mod_sets(path)` | every stored set plus every profile binding | — |
+| `save_mod_set(path, name, entries=None)` | store a set, replacing one of that name | `InvalidMetadataError` (empty name), `GitError` |
+| `delete_mod_set(path, name)` | remove the set and unbind the profiles pointing at it | `ModSetNotFoundError` |
+| `rename_mod_set(path, name, new_name)` | rename, retargeting the bindings | `ModSetNotFoundError`, `ModSetExistsError` |
+| `export_mod_set(path, name)` | file content and share code of the set | `ModSetNotFoundError` |
+| `import_mod_set(path, set_file=None, content=None, name=None)` | store a set from a file or a code | `InvalidMetadataError`, `ModSetExistsError` |
+| `bind_profile_set(path, profile_id, set_name=None)` | play a profile with a set, or unbind it | `ModSetNotFoundError` |
+| `plan_mod_set(path, name)` | read-only report of what applying would change | `ModSetNotFoundError`, `GitError` |
+| `apply_mod_set(path, name, ignore_missing=False, progress=None)` | make the mods match the set | `ModSetNotFoundError`, `ModSetIncompleteError`, every error a mod change raises |
+
+Without `entries`, `save_mod_set` captures the installation as it is now: every
+mod except the removed ones, `enabled` = currently active, sorted by casefolded
+name. That is both "save the mods that are on now" and "save an edited set".
+Renaming a set to another spelling of its own name is allowed. `import_mod_set`
+takes exactly one of `set_file` and `content` and stores the set under `name`
+when the exported name is taken; `bind_profile_set` without `set_name` unbinds,
+and does not validate the profile id. There is no separate "get the binding of a
+profile" function — the bindings come with `list_mod_sets`. The feature has no
+CLI commands; it is reached through RPC and the desktop app.
+
+**Plan matching.** Against `list_mods(path, include_all=True)`, linked by
+non-empty `forge_id` first and by casefolded name otherwise:
+
+| Set entry | Installation | Plan |
+|---|---|---|
+| on | active | `unchanged`, plus `different` when the set names another version |
+| on | disabled | `enable` |
+| on | removed or not installed | `missing` |
+| off | active | `disable`, reason "the set turns this mod off" |
+| off | anything else | `unchanged` |
+| not named | active installed mod | `disable`, reason "the set does not include this mod" |
+
+`different` is report-only. The mods no entry names are appended to `disable`
+sorted by casefolded name.
+
+**Applying.** `apply_mod_set` raises `ModSetIncompleteError(name, missing)`
+before touching anything when the plan has missing mods and `ignore_missing` is
+not set; with the flag the rest of the set is applied and the missing names are
+reported in the result. It takes NO lock of its own: it calls the public
+`disable_mod` / `enable_mod`, each of which takes the apply lock and runs
+`ensure_installable` for itself. Nesting `game_lock` would self-deadlock, since
+each call opens the file freshly and `flock` is per open file description. All
+disables run before all enables. A mod that reported a no-op instead of changing
+contributes its `ToggleResult.notice` to `notices` and does not appear in
+`enabled`/`disabled`. Errors (`ConflictError`, `DirtyTreeError`,
+`GameRunningError`, `OperationInProgressError`, `GitError`) propagate at once —
+the changes made up to that point stay applied. Progress: `plan` at 0 "Working
+out what to change", then per change `int(100 * done / total)` with
+`Turning off <mod>` / `Turning on <mod>`, then `done` at 100 "The mod set is
+applied"; a set with nothing to change reports only `plan` and `done`.
+
+**Errors and RPC codes:** `ModSetNotFoundError` (`MOD_SET_NOT_FOUND`),
+`ModSetExistsError` (`MOD_SET_EXISTS`), `ModSetIncompleteError`
+(`MOD_SET_INCOMPLETE`, `details.name` and `details.missing`, the latter an
+additive `list[str]` field of `schemas.ErrorDetails`). Unreadable stores,
+unusable import sources and empty names reuse `InvalidMetadataError`.
+`SaveModSetRequest.service_kwargs()` overrides the `CoreModel` hook to hand the
+service its core `ModSetEntry` objects instead of the schema mirrors.
+
+**Frontend.** `src/lib/modsets.ts` holds the pure logic (entry rows with their
+`on|off|missing|version` status, forge-id-first matching, set options, plan
+summary, export file name sanitising, `missingFromError`, install targets that
+resolve a missing mod's Forge id from the bound set so the install call uses the
+id rather than the trailer name). `ModSetEditor` sits in every readable profile
+panel of the Profiles page: a native select of the sets plus "No set", the entry
+table with checkboxes and status badges, "Save" and "Save the installed mods as
+this set", and the line "Starting this profile: …" from `plan_mod_set`. The
+Mods view has a "Save current mods as set" button with a name prompt; a name
+that already exists is confirmed before the set is replaced. The Settings page
+has a "Mod sets" section listing the sets with Rename / Export (native save
+dialog) / Copy share code (clipboard) / Delete, and an "Add a set" block taking
+a picked file path or a pasted code — a pasted code wins over the file path, and
+`MOD_SET_EXISTS` asks for another name. `ModSetDialog` is the "Mods are missing"
+dialog with "Install the missing mods" and "Play without them".
+
 ## Launching the game
 
 All three game-launch service functions (`launch_profile`, `launch_status`,
 `stop_game`) delegate to `core/launch.py` and `core/sptserver.py`. The sequence
-is: port probe via GET `/launcher/v2/ping` → start `SPT.Server.*` if the port is
-free → poll readiness every 1 second with a 120-second bound → PUT
+is: apply the mod set the profile is bound to → port probe via GET
+`/launcher/v2/ping` → start `SPT.Server.*` if the port is free → poll readiness every 1 second with a 120-second bound → PUT
 `/launcher/v2/login` (zlib-compressed body, `responsecompressed: 0` header) →
 spawn the game client with the exact argv, cwd and environment from the official
 launcher's logic → spawn a detached watcher that polls the process table every
 3 seconds and closes the server when the game closes (if configured).
+
+**Mod set:** `launch_profile(path, profile_id, stop_server_on_exit=True,
+mod_set="apply", progress=None, *, store_path=None)`. The `mod_set` parameter
+decides what happens with the set the profile is bound to: `apply` refuses to
+launch when the set names mods the installation does not have, `ignore_missing`
+applies the rest of the set anyway, `skip` does not read the stored sets at all
+and leaves the mods untouched. A profile without a binding is played with the
+mods as they are and starts at the server phase. Otherwise nothing is started
+before the mods are the set's: progress reports `modset` at 0 % with
+`Applying the mod set for <nickname>` (the nickname from `list_profiles`,
+the profile id when it has none), then the apply's own steps forwarded as
+`modset` scaled into 0–4 % (`percent * 4 // 100`) so the server phase still
+begins at 5 %. The apply's closing step is dropped, because its name is the name
+of the launch's own final step and would look like a game that is ready to play.
+Missing mods fail the launch with `ModSetIncompleteError`
+(`MOD_SET_INCOMPLETE`, `details.name`, `details.missing`) before any process is
+started; the caller installs the mods through the usual Forge flow or relaunches
+with `ignore_missing`. A damaged mod set store fails every launch with
+`InvalidMetadataError` — only `mod_set="skip"` starts anyway. `LaunchStep` gained
+`MODSET = "modset"` as its first phase.
 
 **State file:** `<game dir>/.sptmod-launch.json` holds the running process
 identities (server, client, watcher) along with `profile_id`,
@@ -587,7 +745,9 @@ missing or unreadable, Linux only). "Game already running" reuses the existing
 
 **Frontend:** Three new routes in the Profiles tab (Launch/Stop buttons per
 readable profile with phase-progress display) and the Mods view (running-game
-banner, mod-row lock while game is up). Settings page gains a "Launching" section with
+banner, mod-row lock while game is up). A launch refused with
+`MOD_SET_INCOMPLETE` opens `ModSetDialog`, whose two answers install the named
+mods or relaunch with `mod_set: 'ignore_missing'`. Settings page gains a "Launching" section with
 one checkbox: "Stop the server when the game closes" (persisted in localStorage,
 default true, passed as a parameter to each launch call).
 
@@ -605,9 +765,9 @@ default true, passed as a parameter to each launch call).
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 34 service functions (declared as `FUNCTIONS: [&str; 34]` in
-  rpc.rs); the frontend client.ts has 31 camelCase wrappers (`adopt_mod` is
-  RPC-exposed but has no wrapper or frontend caller).
+- RPC functions: 43 service functions (declared as `FUNCTIONS: [&str; 43]` in
+  rpc.rs); the frontend client.ts has 41 camelCase wrappers (`adopt_mod` and
+  `install_from_archive` are RPC-exposed but have no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
 - Setup flow is ONE step (path — no login). Folder picking: native OS dialog
@@ -631,9 +791,9 @@ default true, passed as a parameter to each launch call).
   compatibility (compatible/incompatible shown as tags).
 - Mods view shows a result count line ("N mods") above the table.
 - Settings page: sections Game directory, Appearance (theme select: system,
-  light, dark), Launching, Export the mod list, Import a mod list, Catalog cache
-  (two actions: clear cache alone, or clear cache + remove downloaded mod
-  files). A left sub-nav links the sections by hash; the active entry follows
+  light, dark), Launching, Mod sets, Export the mod list, Import a mod list,
+  Catalog cache (two actions: clear cache alone, or clear cache + remove
+  downloaded mod files). A left sub-nav links the sections by hash; the active entry follows
   `page.url.hash`.
 
 ## Frontend design system
@@ -761,7 +921,7 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (1522 collected: 1521 passed, 1 skipped)
+uv run pytest                        # Python suite (1756 collected: 1755 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
@@ -773,11 +933,11 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 
 ### Suite sizes and coverage
 
-- **Python:** 1521 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 1755 passed, 1 skipped; `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 294 vitest tests in 11 files; strict 100% statements/branches/functions/lines on
+- **Frontend:** 488 vitest tests in 16 files; strict 100% statements/branches/functions/lines on
   `src/lib/**/*.ts` (minus `*.test.ts` and generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
   reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume
@@ -794,7 +954,10 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 - Fixtures in `tests/conftest.py`: `fake_game_dir` (4.0 `SPT/` layout — the
   bulk of the suite), `fake_game_dir_runtime` (4.1 `SPT_Runtime/`),
   `fake_launchable_dir` (4.1 layout + server/client stub scripts + launcher
-  settings + profile with login credentials), `clean_repo`, `install_commit`,
+  settings + profile with login credentials), `launchable_repo`
+  (`fake_launchable_dir` initialized as a clean repository, for mod set launch
+  tests), `mod_set_store` (a `modsets.json` path below `tmp_path`, passed as
+  `store_path` so no test writes the real one), `clean_repo`, `install_commit`,
   `make_archive` (zip/7z; rar cannot be created — real samples in `tests/data/`,
   plus an encrypted zip). Shared builders: `tests/forge_json.py` (Forge API mock
   payloads), `tests/pe_builder.py` (PE file assembly). Fixture types: `tests/fixture_types.py`
@@ -814,6 +977,12 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
   client argv/cwd/env, readiness poll, server reuse, profile credentials),
   `tests/test_launch_watch.py` (watcher: client pid poll, server lifecycle,
   `started_by_sptmod` flag).
+- Mod set tests: `tests/test_modsets_store.py` (the store file itself),
+  `tests/test_modsets_plan.py` (the matching table), `tests/test_modsets_apply.py`
+  (order, notices, propagated errors, progress), `tests/test_modsets_transfer.py`
+  (export content, share code, import sources), `tests/test_launch_modset.py`
+  (the bound set in a launch), `tests/test_rpc_modsets.py` (one round-trip per
+  function and the three error envelopes). Frontend: `src/lib/modsets.test.ts`.
 - RPC tests: `tests/test_rpc_contract.py` (route-per-function, schema-parity,
   error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),

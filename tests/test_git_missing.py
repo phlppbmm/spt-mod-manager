@@ -26,8 +26,6 @@ from sptmod.core.profile import CheckResult
 from sptmod.core.repo import Repo, ensure_git_available
 from sptmod.core.services import RemoveResult, ToggleResult
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 INSTALL_HINT = (

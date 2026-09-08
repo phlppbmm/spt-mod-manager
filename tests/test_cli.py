@@ -309,3 +309,30 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
     result = runner.invoke(app, argv)
 
     assert result.exit_code == expected_exit_code
+
+
+def test_install_into_a_read_only_mods_folder_exits_21_and_reports_on_stderr(
+    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
+) -> None:
+    """A refused mod file write exits with the code cli.EXIT_CODES maps it to.
+
+    The mods folder of the game directory is read-only, so the install cannot create the
+    mod directory; the CLI must report the plain message on stderr and exit 21 instead of
+    letting a traceback and the generic exit code 1 reach the user.
+    """
+    clean_repo_at(fake_game_dir)
+    archive = make_archive(
+        {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "1.0.0"})}, "zip"
+    )
+    monkeypatch.chdir(fake_game_dir)
+    obstacle = fake_game_dir / "SPT/user/mods"
+    obstacle.chmod(0o555)
+
+    try:
+        result = runner.invoke(app, ["install", "--file", str(archive)])
+    finally:
+        obstacle.chmod(0o755)
+
+    assert result.exit_code == 21
+    assert result.stderr.startswith("error: The mod files could not be written")
+    assert "SPT/user/mods/CoolMod/package.json" in result.stderr

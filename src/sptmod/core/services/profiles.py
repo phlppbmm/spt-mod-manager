@@ -12,7 +12,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-from sptmod.core.errors import InvalidPathError, ProfileResidueError, SptmodError
+from sptmod.core.errors import (
+    InvalidPathError,
+    ModFileWriteError,
+    ProfileResidueError,
+)
 from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.models import ModInfo, ProfileResidue, ProfileSummary
 from sptmod.core.profile import (
@@ -204,7 +208,7 @@ def clean_profile(
         DirtyTreeError: the game folder holds files sptmod does not manage.
         GameRunningError: the SPT server or client is running.
         OperationInProgressError: another operation holds the game directory.
-        SptmodError: a profile could not be backed up or written.
+        ModFileWriteError: a profile could not be backed up or written.
         GitError: git failed.
     """
     repo = Repo(path)
@@ -250,7 +254,9 @@ def clean_profiles_inline(
         except OSError as error:
             if changed:
                 take_snapshot(repo.path, snapshot_message)
-            raise SptmodError(_cleanup_failed(target, changed, error)) from error
+            raise ModFileWriteError(
+                _cleanup_failed(target, changed, error)
+            ) from error
         changed.append(target.stem)
         backups.append(backup.relative_to(layout.root))
         removed.extend(_found_in(cleaned.removed, target.stem))

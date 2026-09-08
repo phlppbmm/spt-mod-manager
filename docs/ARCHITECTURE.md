@@ -1075,7 +1075,9 @@ Both changing commands confirm first unless `--yes`/`-y` is given, and the confi
 `--yes` is required for non-interactive use. `update` refuses a version that is not newer and `downgrade` one that is
 not older (exit 2, typer's parameter error); when the installed version cannot be read there is nothing to compare
 against and the direction check is skipped. Exit codes: 18 `SptReleaseUnavailableError`,
-19 `ClientBuildMismatchError`, 20 `SptReleaseWriteError`, plus the inherited 3/4/5/10.
+19 `ClientBuildMismatchError`, 20 `SptReleaseWriteError`, plus the inherited 3/4/5/10. A refused write of mod
+files (install, update, profile cleanup) is `ModFileWriteError` (`MOD_FILE_WRITE_FAILED`, CLI exit 21), which
+names the file it stopped at, what the system said, and that the previous files are one snapshot back.
 
 **RPC:** `list_spt_releases`, `apply_spt_release` (declares `operation_id`, reports download/extract/copy progress via
 the existing `InstallStep` steps) and `revert_spt_update`. New error codes `SPT_RELEASE_UNAVAILABLE` (503 in prose)

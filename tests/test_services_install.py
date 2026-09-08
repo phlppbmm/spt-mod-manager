@@ -22,6 +22,7 @@ from sptmod.core.errors import (
     DirtyTreeError,
     GameRunningError,
     GitError,
+    ModFileWriteError,
 )
 from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY, detect_layout
 from sptmod.core.models import MOD_TRAILER_KEYS
@@ -749,3 +750,52 @@ def test_install_blocks_on_untracked_files_without_naming_changed_game_files(
     assert "SPT/user/mods/HandCopied" in message
     assert "adopt" in message
     assert "spt-common.dll" not in message
+
+
+@pytest.mark.parametrize(
+    ("blocked", "expected_file"),
+    [
+        pytest.param(
+            "SPT/user/mods",
+            "SPT/user/mods/CoolMod/package.json",
+            id="a mods folder that cannot take a new mod directory",
+        ),
+        pytest.param(
+            "BepInEx/plugins",
+            "BepInEx/plugins/CoolPlugin.dll",
+            id="a plugins folder that cannot take a new file",
+        ),
+    ],
+)
+def test_install_says_which_file_it_could_not_write_and_where_the_previous_ones_are(
+    clean_repo: Repo, make_archive: MakeArchive, blocked: str, expected_file: str
+) -> None:
+    """install_from_archive turns a refused write into a plain ModFileWriteError.
+
+    The game directory is made unwritable at one place -- the folder that has to take the
+    new mod directory and the folder that has to take a new plugin file -- so copying the
+    hybrid archive stops there. The message has to name that file and what the system said
+    instead of letting the raw operating system error reach the caller, and nothing may be
+    committed.
+    """
+    archive = make_archive(
+        {
+            "SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "1.2.3"}),
+            "BepInEx/plugins/CoolPlugin.dll": b"dll-bytes",
+        },
+        "zip",
+    )
+    obstacle = clean_repo.path / blocked
+    obstacle.chmod(0o555)
+
+    try:
+        with pytest.raises(ModFileWriteError) as failure:
+            services.install_from_archive(clean_repo.path, archive)
+    finally:
+        obstacle.chmod(0o755)
+
+    assert str(failure.value) == (
+        "The mod files could not be written: Permission denied. The change stopped at "
+        f"{expected_file}; your previous files are one snapshot back."
+    )
+    assert [commit.subject for commit in clean_repo.log()] == ["chore: clean SPT 4.1.0"]

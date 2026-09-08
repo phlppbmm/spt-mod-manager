@@ -23,6 +23,7 @@ from sptmod.core.errors import (
     GameRunningError,
     GitError,
     GitMissingError,
+    ModFileWriteError,
     ModNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
@@ -80,6 +81,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     SptReleaseUnavailableError: 18,
     ClientBuildMismatchError: 19,
     SptReleaseWriteError: 20,
+    ModFileWriteError: 21,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"

@@ -1574,6 +1574,34 @@ def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
     assert installed_mod["version"] == "2.0.0"
 
 
+def test_install_from_archive_reports_a_refused_write_with_its_own_code(
+    fake_game_dir: Path, make_archive: MakeArchive
+) -> None:
+    """install_from_archive answers MOD_FILE_WRITE_FAILED when a file cannot be written.
+
+    The mods folder of the game directory is read-only, so copying the mod stops there.
+    The caller must get the mapped error envelope with the plain message, not an
+    INTERNAL_ERROR from a raw operating system error.
+    """
+    request = _install_request(fake_game_dir, make_archive)
+    blocked = fake_game_dir / "SPT/user/mods"
+    blocked.chmod(0o555)
+
+    try:
+        exit_code, lines = invoke_rpc("install_from_archive", request)
+    finally:
+        blocked.chmod(0o755)
+
+    assert exit_code == 1
+    data = lines[-1]["data"]
+    assert data["code"] == "MOD_FILE_WRITE_FAILED"
+    assert data["error"] == (
+        "The mod files could not be written: Permission denied. The change "
+        "stopped at SPT/user/mods/CoolMod/package.json; your previous files "
+        "are one snapshot back."
+    )
+
+
 # --------------------------------------------------------------------------
 # SPT version change: apply_spt_release.
 # --------------------------------------------------------------------------

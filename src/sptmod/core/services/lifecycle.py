@@ -142,7 +142,7 @@ def remove_mod(
             neither ``force`` nor ``clean_profiles`` is set.
         DirtyTreeError: the working tree has uncommitted or untracked changes.
         GameRunningError: the SPT server or client is running.
-        SptmodError: a profile could not be backed up or written.
+        ModFileWriteError: a profile could not be backed up or written.
         ConflictError: the revert conflicted with a later mod; names all
             conflicting files and the mods providing them.
         GitError: git failed.

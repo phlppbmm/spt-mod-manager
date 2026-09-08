@@ -6,6 +6,7 @@ Nothing here is part of the public service surface; the package facade does not
 re-export it.
 """
 
+import shutil
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
@@ -22,6 +23,7 @@ from sptmod.core.archive import (
 from sptmod.core.errors import (
     AmbiguousModError,
     CatalogUnavailableError,
+    ModFileWriteError,
     ModNotFoundError,
     NotAGameDirError,
 )
@@ -233,6 +235,36 @@ def prune_empty(root: Path, directory: Path, boundary: tuple[Path, ...]) -> None
     ):
         current.rmdir()
         current = current.parent
+
+
+def write_mod_files(
+    root: Path, layout: ArchiveLayout, removed: Sequence[Path] = ()
+) -> None:
+    """Delete the ``removed`` files below ``root`` and copy ``layout`` in.
+
+    Raises:
+        ModFileWriteError: a file could not be deleted or written; the message
+            names the file it stopped at and what the system said.
+    """
+    reached = Path()
+    try:
+        for entry in removed:
+            reached = entry
+            (root / entry).unlink(missing_ok=True)
+        for mapping in layout.mappings:
+            for source in sorted(mapping.source.rglob("*")):
+                if not source.is_file():
+                    continue
+                reached = mapping.target / source.relative_to(mapping.source)
+                destination = root / reached
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+    except OSError as error:
+        raise ModFileWriteError(
+            f"The mod files could not be written: {error.strerror}. The change "
+            f"stopped at {reached.as_posix()}; your previous files are one "
+            f"snapshot back."
+        ) from error
 
 
 def for_game_layout(layout: ArchiveLayout, game_layout: GameLayout) -> ArchiveLayout:

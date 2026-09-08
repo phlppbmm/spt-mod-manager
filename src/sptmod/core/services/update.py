@@ -6,7 +6,6 @@ the Forge does not know, or that no longer fit the SPT version, are reported
 rather than touched.
 """
 
-import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -63,6 +62,7 @@ from sptmod.core.services.common import (
     report_step,
     required_spt_version,
     resolve_mod,
+    write_mod_files,
 )
 from sptmod.core.services.install_archive import (
     read_meta,
@@ -258,6 +258,8 @@ def update_mod(
             is not set.
         DependencyError: a dependency check blocks the update and ``force`` is
             not set.
+        ModFileWriteError: a file of the new version could not be written
+            into the game directory.
         ForgeUnavailableError: the Forge API or the download URL is
             unreachable.
         ForgeApiError: the Forge API answered with an error envelope.
@@ -420,12 +422,7 @@ def _apply_update(
             report_step(
                 reporter, InstallStep.COPY, f"copying {len(layout.files)} files"
             )
-            for file in removed:
-                (path / file).unlink(missing_ok=True)
-            for mapping in layout.mappings:
-                shutil.copytree(
-                    mapping.source, path / mapping.target, dirs_exist_ok=True
-                )
+            write_mod_files(path, layout, removed)
             for directory in sorted(
                 {(path / file).parent for file in removed}, reverse=True
             ):

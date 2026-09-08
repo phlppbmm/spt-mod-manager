@@ -26,6 +26,7 @@ from sptmod.core.errors import (
     ConflictError,
     DependencyError,
     DirtyTreeError,
+    ModFileWriteError,
     ModNotFoundError,
 )
 from sptmod.core.forge.client import ForgeClient
@@ -879,3 +880,60 @@ def test_cli_update_yes_flag_applies_without_prompting(
 
     assert result.exit_code == 0
     assert len(clean_repo.log()) == commits_before + 1
+
+
+def test_update_mod_says_which_file_it_could_not_replace_and_commits_nothing(
+    clean_repo: Repo,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    db_path: Path,
+    install_commit: InstallCommit,
+    make_archive: MakeArchive,
+) -> None:
+    """update_mod turns a refused write into a plain ModFileWriteError.
+
+    The folder of the installed mod is read-only, so the update cannot delete the file the
+    new version no longer ships. The message has to name that file and what the system said
+    instead of letting the raw operating system error reach the caller, and nothing may be
+    committed.
+    """
+    install_commit(
+        clean_repo,
+        "CoolMod",
+        "1.0.0",
+        mod_type="server",
+        files={
+            "SPT/user/mods/CoolMod/package.json": json.dumps(
+                {"name": "CoolMod", "version": "1.0.0", "author": "Acme"}
+            ),
+            "SPT/user/mods/CoolMod/old_only.txt": "old text",
+        },
+        **forge_trailers("10", "100"),
+    )
+    new_archive = make_archive(
+        {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "2.0.0", "author": "Acme"})},
+        "zip",
+    )
+    body = new_archive.read_bytes()
+    link = "https://dl.example/coolmod-2.0.0-readonly.zip"
+    _mock_updates(respx_router, _available_update_data(link, len(body)))
+    respx_router.get(link).mock(
+        return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
+    )
+    client = client_factory()
+    commits_before = len(clean_repo.log())
+    obstacle = clean_repo.path / "SPT/user/mods/CoolMod"
+    obstacle.chmod(0o555)
+
+    try:
+        with pytest.raises(ModFileWriteError) as failure:
+            services.update_mod(clean_repo.path, "CoolMod", db_path=db_path, client=client)
+    finally:
+        obstacle.chmod(0o755)
+
+    assert str(failure.value) == (
+        "The mod files could not be written: Permission denied. The change stopped at "
+        "SPT/user/mods/CoolMod/old_only.txt; your previous files are one snapshot back."
+    )
+    assert len(clean_repo.log()) == commits_before
+    assert (clean_repo.path / "SPT/user/mods/CoolMod/old_only.txt").read_text() == "old text"

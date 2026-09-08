@@ -24,6 +24,7 @@ from sptmod.core.errors import (
     AmbiguousModError,
     GameRunningError,
     InvalidPathError,
+    ModFileWriteError,
     ModNotFoundError,
     SptmodError,
 )
@@ -769,6 +770,31 @@ def test_clean_profile_write_failure_surfaces_as_sptmod_error(
 
     assert "abc.json" in str(exc_info.value)
     assert "Already cleaned" not in str(exc_info.value)
+    assert profile_path.read_bytes() == before_bytes
+
+
+def test_clean_profile_reports_a_backups_folder_that_refuses_a_copy(
+    clean_repo: Repo, install_commit: InstallCommit
+) -> None:
+    """clean_profile raises ModFileWriteError when the backup copy cannot be written.
+
+    The game's own backups folder is read-only, so the copy that has to be made before a
+    profile is written cannot be created. The failure must reach the caller as the typed
+    write error naming the profile, and the profile itself must stay byte-identical.
+    """
+    _install_mod(clean_repo, install_commit)
+    profile_path = _write_profile(clean_repo, "abc", _full_profile())
+    before_bytes = profile_path.read_bytes()
+    obstacle = clean_repo.path / "SPT/user/profiles/backups"
+    obstacle.chmod(0o555)
+
+    try:
+        with pytest.raises(ModFileWriteError) as exc_info:
+            services.clean_profile(clean_repo.path, MOD_NAME)
+    finally:
+        obstacle.chmod(0o755)
+
+    assert "abc.json" in str(exc_info.value)
     assert profile_path.read_bytes() == before_bytes
 
 

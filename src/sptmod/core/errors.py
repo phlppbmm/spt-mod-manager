@@ -171,6 +171,10 @@ class SptReleaseWriteError(SptmodError):
     """The files of an SPT release could not be written into the game directory."""
 
 
+class ModFileWriteError(SptmodError):
+    """The files of a mod could not be written into the game directory."""
+
+
 class ClientBuildMismatchError(SptmodError):
     """The installed Escape from Tarkov build does not match the SPT release."""
 

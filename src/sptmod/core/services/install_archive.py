@@ -5,7 +5,6 @@ are already installed and then committed in one go. Everything the manager
 learns about the mod -- name, version, type -- comes from the archive itself.
 """
 
-import shutil
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -61,6 +60,7 @@ from sptmod.core.services.common import (
     mod_prefixes,
     prune_empty,
     report_step,
+    write_mod_files,
 )
 from sptmod.core.services.state import (
     ensure_installable,
@@ -152,6 +152,8 @@ def install_from_archive(
             is not set.
         DependencyError: a required dependency is missing or has an
             incompatible version and ``force`` is not set.
+        ModFileWriteError: a file of the mod could not be written into the
+            game directory.
         GitError: git failed or metadata contains invalid trailer values.
     """
     game_layout = detect_layout(path)
@@ -187,10 +189,7 @@ def install_from_archive(
                 progress, InstallStep.COPY, f"copying {len(layout.files)} files"
             )
             added = [file for file in layout.files if not (path / file).exists()]
-            for mapping in layout.mappings:
-                shutil.copytree(
-                    mapping.source, path / mapping.target, dirs_exist_ok=True
-                )
+            write_mod_files(path, layout)
 
             report_step(
                 progress, InstallStep.COMMIT, f"committing {meta.name} {meta.version}"

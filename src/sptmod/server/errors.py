@@ -25,6 +25,7 @@ from sptmod.core.errors import (
     LaunchError,
     LauncherSettingsError,
     LoginFailedError,
+    ModFileWriteError,
     ModNotFoundError,
     ModSetExistsError,
     ModSetIncompleteError,
@@ -86,6 +87,7 @@ class ErrorCode(StrEnum):
     CATALOG_UNAVAILABLE = "CATALOG_UNAVAILABLE"
     SPT_RELEASE_UNAVAILABLE = "SPT_RELEASE_UNAVAILABLE"
     SPT_RELEASE_WRITE_FAILED = "SPT_RELEASE_WRITE_FAILED"
+    MOD_FILE_WRITE_FAILED = "MOD_FILE_WRITE_FAILED"
     CLIENT_BUILD_MISMATCH = "CLIENT_BUILD_MISMATCH"
 
 
@@ -128,6 +130,7 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     CatalogUnavailableError: ErrorCode.CATALOG_UNAVAILABLE,
     SptReleaseUnavailableError: ErrorCode.SPT_RELEASE_UNAVAILABLE,
     SptReleaseWriteError: ErrorCode.SPT_RELEASE_WRITE_FAILED,
+    ModFileWriteError: ErrorCode.MOD_FILE_WRITE_FAILED,
     ClientBuildMismatchError: ErrorCode.CLIENT_BUILD_MISMATCH,
 }
 

@@ -194,15 +194,15 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
 CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
-def test_there_are_thirtythree_concrete_core_error_classes() -> None:
-    """len(CONCRETE_CORE_ERROR_CLASSES) == 33 to pin corpus against regressions.
+def test_there_are_thirtyfour_concrete_core_error_classes() -> None:
+    """len(CONCRETE_CORE_ERROR_CLASSES) == 34 to pin corpus against regressions.
 
     Adding a new exception class to core.errors requires updating this count
     so the change is caught by parametrized error tests.
     """
     # Pins the corpus this test enumerates so a newly added exception class
     # is caught here rather than silently skipped by the parametrization.
-    assert len(CONCRETE_CORE_ERROR_CLASSES) == 33
+    assert len(CONCRETE_CORE_ERROR_CLASSES) == 34
 
 
 @pytest.mark.parametrize(

@@ -183,6 +183,8 @@ def install_mod(
             is not set.
         DependencyError: a dependency check blocks an install and ``force`` is
             not set.
+        ModFileWriteError: a file of a mod could not be written into the
+            game directory.
         ForgeUnavailableError: the Forge API or a download URL is unreachable.
         ForgeApiError: the Forge API answered with an error envelope.
         GitError: git failed.

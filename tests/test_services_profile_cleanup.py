@@ -763,7 +763,7 @@ def test_clean_profile_write_failure_surfaces_as_sptmod_error(
     def _raise_replace(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("sptmod.core.profile.os.replace", _raise_replace)
+    monkeypatch.setattr("sptmod.core.profile.files.os.replace", _raise_replace)
 
     with pytest.raises(SptmodError) as exc_info:
         services.clean_profile(clean_repo.path, MOD_NAME)
@@ -819,7 +819,7 @@ def test_clean_profile_partial_failure_snapshots_prior_successes_and_names_them(
             raise OSError("disk full")
         real_replace(source, target)
 
-    monkeypatch.setattr("sptmod.core.profile.os.replace", _selective_raise)
+    monkeypatch.setattr("sptmod.core.profile.files.os.replace", _selective_raise)
 
     with pytest.raises(SptmodError) as exc_info:
         services.clean_profile(clean_repo.path, MOD_NAME)

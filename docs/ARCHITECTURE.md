@@ -40,7 +40,13 @@ src/sptmod/
     archive.py          extraction (.7z/.zip/.rar), traversal guard, anchor search
     modmeta.py          package.json parsing, trailer mapping, npm-style semver
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
-    profile.py          profile residue detection from install commits (§7)
+    profile/
+      __init__.py       facade: the ten names the rest of the tree uses
+      nodes.py          JSON container primitives (lookup, hits, filtered removal)
+      ids.py            a mod's content IDs collected from its install commit (§7)
+      files.py          profile files: listing, parsing, summaries, atomic write
+      categories.py     the residue category table: finder/remover pair per container
+      scan.py           residue detection over mods and profiles, document cleanup
     modsets.py          mod set store: one JSON document per user, keyed by game directory
     fika.py             Fika role store (tolerant), canonical host address
     services/           all user-facing operations as pure functions

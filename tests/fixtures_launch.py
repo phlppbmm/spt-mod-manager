@@ -108,7 +108,7 @@ def kill_launchable_processes(root: Path) -> None:
     if state_file.is_file():
         with suppress(OSError, ValueError):
             state: Json = json.loads(state_file.read_text(encoding="utf-8"))
-            for key in ("server", "client", "watcher"):
+            for key in ("server", "client", "adopted_client", "watcher"):
                 entry = state.get(key) if isinstance(state, dict) else None
                 pid = entry.get("pid") if isinstance(entry, dict) else None
                 if isinstance(pid, int):
@@ -317,22 +317,26 @@ def write_launch_state(
     stop_server_on_exit: bool = True,
     server: dict[str, Any] | None = None,
     client: dict[str, Any] | None = None,
+    adopted_client: dict[str, Any] | None = None,
     watcher: dict[str, Any] | None = None,
     mode: str = "",
 ) -> None:
     """Write LAUNCH_STATE_FILE_NAME to the game directory with given process state.
 
     Creates the JSON state file recording the profile, process PIDs and start times
-    (server, client, watcher), the stop_server_on_exit flag and the launch mode
-    (empty for a launch on the local server, "client" for one on a Fika host).
-    Keyword args allow each process reference and the flag to be individually set;
-    defaults are empty profile and true for stop_server_on_exit.
+    (server, client, adopted_client, watcher), the stop_server_on_exit flag and the
+    launch mode (empty for a launch on the local server, "client" for one on a Fika
+    host). ``adopted_client`` is the game the watcher found running on its own after
+    the process the launch started went away. Keyword args allow each process
+    reference and the flag to be individually set; defaults are empty profile and
+    true for stop_server_on_exit.
     """
     payload = {
         "profile_id": profile_id,
         "stop_server_on_exit": stop_server_on_exit,
         "server": server,
         "client": client,
+        "adopted_client": adopted_client,
         "watcher": watcher,
         "mode": mode,
     }

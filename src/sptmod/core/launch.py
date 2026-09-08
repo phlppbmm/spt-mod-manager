@@ -145,6 +145,8 @@ class _LaunchState:
     ``failure`` names why the launch did not end up with a running game,
     empty while nothing went wrong. ``mode`` is :data:`CLIENT_MODE` when the
     game was started on another player's server and empty otherwise.
+    ``adopted_client`` is the game the watcher found running for this launch,
+    so it can still be closed when the process that started it is gone.
     """
 
     profile_id: str = ""
@@ -152,6 +154,7 @@ class _LaunchState:
     server: _ProcessRef | None = None
     server_started_by_sptmod: bool = False
     client: _ProcessRef | None = None
+    adopted_client: _ProcessRef | None = None
     watcher: _ProcessRef | None = None
     failure: str = ""
     mode: str = ""
@@ -455,7 +458,7 @@ def launch_status(path: Path) -> LaunchStatus:
         if state.mode == CLIENT_MODE
         else _running_pid(state.server, running, "server")
     )
-    client = _running_pid(state.client, running, "client")
+    client = _running_pid(_live_client(state), running, "client")
     return LaunchStatus(
         server_running=server != 0,
         client_running=client != 0,
@@ -464,7 +467,7 @@ def launch_status(path: Path) -> LaunchStatus:
         profile_id=state.profile_id,
         server_stoppable=state.server_started_by_sptmod
         and _live_ref(state.server) is not None,
-        client_stoppable=_live_ref(state.client) is not None,
+        client_stoppable=_live_client(state) is not None,
     )
 
 
@@ -484,7 +487,7 @@ def stop_game(path: Path) -> StopResult:
     state = _read_state(path)
     if state.watcher is not None:
         _terminate(state.watcher)
-    client_stopped = state.client is not None and _terminate(state.client)
+    client_stopped = _stop_client(state)
     server_stopped = (
         state.server is not None
         and state.server_started_by_sptmod
@@ -504,6 +507,23 @@ def stop_game(path: Path) -> StopResult:
             still_playing=still_playing,
         ),
     )
+
+
+def _stop_client(state: _LaunchState) -> bool:
+    """Close the game of one launch, whichever of its processes still runs.
+
+    Both the process the launch started and the game that was adopted from it
+    are asked to close, because the game can leave the tree of a wrapper that
+    is still alive; neither closes the other.
+    """
+    spawned = state.client is not None and _terminate(state.client)
+    adopted = state.adopted_client is not None and _terminate(state.adopted_client)
+    return spawned or adopted
+
+
+def _live_client(state: _LaunchState) -> _ProcessRef | None:
+    """Return the game process of one launch that is still running."""
+    return _live_ref(state.client) or _live_ref(state.adopted_client)
 
 
 def _stop_message(
@@ -576,10 +596,11 @@ def watch_game(
         clock: Monotonic clock, injected for testing.
     """
     state = _read_state(path)
-    if state.client is None:
+    client = state.client
+    if client is None:
         return
     if not _await_client(
-        state.client,
+        client,
         poll_seconds=poll_seconds,
         grace_seconds=grace_seconds,
         sleep=sleep,
@@ -596,7 +617,8 @@ def watch_game(
             _write_state(path, replace(state, failure=CLIENT_NEVER_STARTED))
         return
     _log(path, "The game is running.")
-    while _client_running(state.client):
+    while _client_running(client):
+        state = _adopt(path, state, client)
         sleep(poll_seconds)
     _log(path, "The game and the process the launch started are both gone.")
     _stop_watched_server(path, state)
@@ -642,6 +664,46 @@ def _spawned_alive(client: _ProcessRef) -> bool:
     return game_dir.process_alive(client.pid, client.started_at) or psutil.pid_exists(
         client.pid
     )
+
+
+def _adopt(path: Path, state: _LaunchState, client: _ProcessRef) -> _LaunchState:
+    """Note the game the watcher found running for this launch.
+
+    Happens at most once per launch, on any poll and while the process the
+    launch started may well still be alive -- that process often dies between
+    two polls. From then on the game is remembered under its own number, so it
+    can still be closed when the process that started it is gone and the game
+    hangs off nothing.
+    """
+    if state.adopted_client is not None:
+        return state
+    adopted = _adopted_client(client)
+    if adopted is None:
+        return state
+    _log(
+        path,
+        "The game now runs on its own and was noted, so it can still be closed.",
+    )
+    updated = replace(state, adopted_client=adopted)
+    with suppress(OSError):
+        _write_state(path, updated)
+    return updated
+
+
+def _adopted_client(recorded: _ProcessRef) -> _ProcessRef | None:
+    """Return the running game that belongs to the launch of ``recorded``.
+
+    Only a game that began no earlier than the process the launch started can
+    have come from it; an older one was there before and belongs to somebody
+    else. A start time of ``0.0`` could not be read at spawn time and orders
+    nothing, so nothing is adopted then.
+    """
+    if recorded.started_at <= 0.0:
+        return None
+    found = _running_ref(game_dir.game_processes(), "client")
+    if found is None or found.started_at < recorded.started_at:
+        return None
+    return found
 
 
 def _stop_watched_server(path: Path, state: _LaunchState) -> None:
@@ -1173,6 +1235,7 @@ def _read_state(path: Path) -> _LaunchState:
         server_started_by_sptmod=isinstance(server, dict)
         and server.get("started_by_sptmod") is True,
         client=_reference(payload.get("client")),
+        adopted_client=_reference(payload.get("adopted_client")),
         watcher=_reference(payload.get("watcher")),
         failure=failure if isinstance(failure, str) else "",
         mode=mode if isinstance(mode, str) else "",
@@ -1202,6 +1265,7 @@ def _write_state(path: Path, state: _LaunchState) -> None:
         "profile_id": state.profile_id,
         "stop_server_on_exit": state.stop_server_on_exit,
         "client": _reference_payload(state.client),
+        "adopted_client": _reference_payload(state.adopted_client),
         "watcher": _reference_payload(state.watcher),
         "failure": state.failure,
         "mode": state.mode,

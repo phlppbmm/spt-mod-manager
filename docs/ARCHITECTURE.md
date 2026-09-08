@@ -69,6 +69,8 @@ src/sptmod/
     forge/
       __init__.py       package docstring only
       client.py         the ONLY module allowed httpx for the Forge; Forge v0 client
+      models.py         the Forge API dataclasses (no httpx, pure data)
+      parse.py          tolerant JSON-to-dataclass coercion for Forge payloads
       catalog.py        SQLite cache (config dir), sync/search/classify
       cache.py          persistent archive cache (download resumption, LRU)
       download.py       streaming downloads, cache hit/resumption, size verification

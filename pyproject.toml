@@ -70,7 +70,7 @@ max-args = 11                # services.install_from_archive: its keyword list i
                              # the InstallFromArchiveRequest schema
 max-positional-arguments = 9 # test_profile: nine fixtures in one test signature
 max-locals = 27              # services._apply_update
-max-attributes = 27          # forge.client.ForgeMod: one attribute per API field
+max-attributes = 27          # forge.models.ForgeMod: one attribute per API field
 max-returns = 9              # modmeta._token_matches
 min-public-methods = 0       # frozen dataclasses and Protocols have none
 

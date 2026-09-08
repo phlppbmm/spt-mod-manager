@@ -4,14 +4,89 @@ import os
 import time
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final, Literal
+from typing import Final
 
 import httpx
 
 from sptmod.core.errors import ForgeApiError, ForgeUnavailableError
+from sptmod.core.forge.models import (
+    BlockedUpdate,
+    BlockingMod,
+    CompatibleVersion,
+    CurrentVersion,
+    DependencyNode,
+    DownloadStream,
+    FikaCompatibility,
+    ForgeCategory,
+    ForgeLicense,
+    ForgeMod,
+    ForgeUser,
+    ForgeVersion,
+    ForgeVersionDependency,
+    ForgeVersionSummary,
+    IncompatibleMod,
+    LatestVersion,
+    ModUpdate,
+    Page,
+    PageMeta,
+    RecommendedVersion,
+    SourceCodeLink,
+    UpdatesResult,
+    UpToDateMod,
+)
+from sptmod.core.forge.parse import (
+    flag,
+    mapping,
+    mappings,
+    parse_dependency_node,
+    parse_mod,
+    parse_page,
+    parse_updates,
+    parse_version,
+    text,
+)
 from sptmod.core.models import Json
+
+# The dataclasses live in forge.models and the coercion in forge.parse, but
+# forge.client stays the single import site for the whole Forge API surface.
+__all__ = [
+    "BACKOFF_BASE_SECONDS",
+    "BACKOFF_MAX_SECONDS",
+    "DEFAULT_BASE_URL",
+    "DEFAULT_CHUNK_SIZE",
+    "DEFAULT_MAX_RETRIES",
+    "DEFAULT_RATE_PER_MINUTE",
+    "DEFAULT_TIMEOUT",
+    "MAX_PER_PAGE",
+    "RANGE_NOT_SATISFIABLE",
+    "BlockedUpdate",
+    "BlockingMod",
+    "CompatibleVersion",
+    "CurrentVersion",
+    "DependencyNode",
+    "DownloadStream",
+    "FikaCompatibility",
+    "ForgeCategory",
+    "ForgeClient",
+    "ForgeEnv",
+    "ForgeLicense",
+    "ForgeMod",
+    "ForgeUser",
+    "ForgeVersion",
+    "ForgeVersionDependency",
+    "ForgeVersionSummary",
+    "IncompatibleMod",
+    "LatestVersion",
+    "ModUpdate",
+    "Page",
+    "PageMeta",
+    "RecommendedVersion",
+    "SourceCodeLink",
+    "UpToDateMod",
+    "UpdatesResult",
+    "forge_base_url",
+]
 
 DEFAULT_BASE_URL: Final = "https://sp-mod.com/api/v0"
 MAX_PER_PAGE: Final = 50
@@ -23,8 +98,6 @@ RANGE_NOT_SATISFIABLE: Final = 416
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_MAX_SECONDS: Final = 60.0
 
-type FikaCompatibility = Literal["compatible", "incompatible", "unknown"]
-
 
 class ForgeEnv(StrEnum):
     """Names of the environment variables the Forge client reads."""
@@ -35,635 +108,6 @@ class ForgeEnv(StrEnum):
 def forge_base_url() -> str:
     """Return the Forge base URL from the environment, or the default when unset or empty."""
     return os.environ.get(ForgeEnv.BASE_URL) or DEFAULT_BASE_URL
-
-
-@dataclass(frozen=True)
-class ForgeUser:
-    """A mod owner or additional author."""
-
-    id: int
-    name: str
-    profile_photo_url: str | None
-    cover_photo_url: str | None
-
-
-@dataclass(frozen=True)
-class SourceCodeLink:
-    """A source code link attached to a mod."""
-
-    url: str
-    label: str
-
-
-@dataclass(frozen=True)
-class ForgeVersionSummary:
-    """The reduced version shape delivered by ``include=versions`` on /mods."""
-
-    id: int
-    version: str
-    spt_version_constraint: str
-    downloads: int
-    published_at: str | None
-
-
-@dataclass(frozen=True)
-class ForgeLicense:
-    """The license shape delivered by ``include=license``."""
-
-    id: int
-    name: str
-    link: str
-
-
-@dataclass(frozen=True)
-class ForgeCategory:
-    """The category shape delivered by ``include=category``."""
-
-    id: int
-    title: str
-    slug: str
-
-
-@dataclass(frozen=True)
-class ForgeMod:
-    """A mod as returned by /mods and /mod/{modId}.
-
-    The detail endpoint adds description and custom_ai_disclosure fields,
-    which are None when fetched from the list endpoint.
-    """
-
-    id: int
-    hub_id: int | None
-    guid: str | None
-    name: str
-    slug: str
-    teaser: str | None
-    thumbnail: str | None
-    downloads: int
-    favourites_count: int
-    owner: ForgeUser | None
-    additional_authors: list[ForgeUser]
-    source_code_links: list[SourceCodeLink]
-    detail_url: str
-    fika_compatibility: bool | None
-    featured: bool
-    contains_ads: bool
-    contains_ai_content: bool
-    shows_profile_binding_notice: bool
-    published_at: str | None
-    created_at: str | None
-    updated_at: str | None
-    description: str | None = None
-    custom_ai_disclosure: str | None = None
-    endorsements_count: int = 0
-    license: ForgeLicense | None = None
-    category: ForgeCategory | None = None
-    versions: list[ForgeVersionSummary] = field(default_factory=list[ForgeVersionSummary])
-
-
-@dataclass(frozen=True)
-class ForgeVersionDependency:
-    """An immediate dependency embedded in a version via ``include=dependencies``."""
-
-    id: int
-    mod_id: int
-    mod_guid: str | None
-    mod_name: str
-    version_constraint: str
-    is_optional: bool
-
-
-@dataclass(frozen=True)
-class ForgeVersion:
-    """A mod version from /mod/{modId}/versions.
-
-    Note: content_length may be None for historical versions. link is the
-    download URL.
-    """
-
-    id: int
-    hub_id: int | None
-    version: str
-    description: str | None
-    link: str | None
-    content_length: int | None
-    spt_version_constraint: str
-    downloads: int
-    fika_compatibility: FikaCompatibility
-    published_at: str | None
-    created_at: str | None
-    updated_at: str | None
-    dependencies: list[ForgeVersionDependency] = field(default_factory=list[ForgeVersionDependency])
-    virus_total_links: list[str] = field(default_factory=list[str])
-
-
-@dataclass(frozen=True)
-class PageMeta:
-    """The ``meta`` block of a paginated response."""
-
-    current_page: int
-    last_page: int
-    per_page: int
-    total: int
-
-
-@dataclass(frozen=True)
-class Page[T]:
-    """One page of a paginated list response.
-
-    Attributes:
-        items: The items on this page.
-        meta: Pagination metadata (current_page, last_page, per_page, total).
-        next_url: The URL for the next page, or None if this is the last page.
-    """
-
-    items: list[T]
-    meta: PageMeta
-    next_url: str | None
-
-
-@dataclass(frozen=True)
-class CurrentVersion:
-    """The installed version an update entry refers to.
-
-    ``slug`` is only present in ``updates`` entries, not in ``blocked_updates``.
-    """
-
-    id: int
-    mod_id: int
-    guid: str | None
-    name: str
-    version: str
-    slug: str | None = None
-
-
-@dataclass(frozen=True)
-class RecommendedVersion:
-    """The version /mods/updates recommends installing."""
-
-    id: int
-    version: str
-    link: str | None
-    content_length: int | None
-    fika_compatibility: FikaCompatibility
-    spt_versions: list[str]
-
-
-@dataclass(frozen=True)
-class ModUpdate:
-    """An available update for an installed mod version."""
-
-    current_version: CurrentVersion
-    recommended_version: RecommendedVersion
-    update_reason: str
-
-
-@dataclass(frozen=True)
-class LatestVersion:
-    """The newest version of a mod whose update is blocked."""
-
-    id: int
-    version: str
-    spt_versions: list[str]
-
-
-@dataclass(frozen=True)
-class BlockingMod:
-    """An installed mod whose dependency constraint blocks an update."""
-
-    mod_id: int
-    mod_guid: str | None
-    mod_name: str
-    current_version: str
-    constraint: str
-    incompatible_with: str
-
-
-@dataclass(frozen=True)
-class BlockedUpdate:
-    """An update that exists but cannot be applied."""
-
-    current_version: CurrentVersion
-    latest_version: LatestVersion
-    block_reason: str
-    blocking_mods: list[BlockingMod] = field(default_factory=list[BlockingMod])
-
-
-@dataclass(frozen=True)
-class UpToDateMod:
-    """An installed mod version that is already current."""
-
-    id: int
-    mod_id: int
-    guid: str | None
-    name: str
-    version: str
-    spt_versions: list[str]
-
-
-@dataclass(frozen=True)
-class IncompatibleMod:
-    """An installed mod version without a version for the queried SPT release."""
-
-    id: int
-    mod_id: int
-    guid: str | None
-    name: str
-    version: str
-    reason: str
-    latest_compatible_version: str | None
-
-
-@dataclass(frozen=True)
-class UpdatesResult:
-    """The parsed response from /mods/updates for installed mod versions.
-
-    Attributes:
-        spt_version: The SPT version that was queried.
-        updates: Mods with available updates for the queried SPT version.
-        blocked_updates: Mods with newer versions available but blocked by
-            dependency constraints.
-        up_to_date: Mods already at the recommended version.
-        incompatible_with_spt: Mods without any version for the queried SPT release.
-    """
-
-    spt_version: str
-    updates: list[ModUpdate]
-    blocked_updates: list[BlockedUpdate]
-    up_to_date: list[UpToDateMod]
-    incompatible_with_spt: list[IncompatibleMod]
-
-
-@dataclass(frozen=True)
-class CompatibleVersion:
-    """The version chosen for a dependency node."""
-
-    id: int
-    version: str
-    link: str | None
-    content_length: int | None
-    fika_compatibility: FikaCompatibility
-
-
-@dataclass(frozen=True)
-class DependencyNode:
-    """A node in the recursive dependency tree from /mods/dependencies.
-
-    Attributes:
-        id: The mod ID.
-        guid: The mod GUID, or None if unknown.
-        name: The mod name.
-        slug: The mod slug.
-        latest_compatible_version: The version chosen for this node (the
-            latest one satisfying all constraints), or None if unavailable.
-        conflict: True if no single version of this mod satisfies all constraints
-            across the queried mods (version selection is global). Defaults to True
-            if missing (fail-safe).
-        dependencies: Direct dependencies of this node (recursive).
-    """
-
-    id: int
-    guid: str | None
-    name: str
-    slug: str
-    latest_compatible_version: CompatibleVersion | None
-    conflict: bool
-    dependencies: list["DependencyNode"]
-
-
-@dataclass(frozen=True)
-class DownloadStream:
-    """An open streaming response for an arbitrary download URL."""
-
-    status_code: int
-    headers: Mapping[str, str]
-    chunks: Iterator[bytes]
-
-
-def _mapping(value: Json) -> Mapping[str, Json]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _optional_mapping(value: Json) -> Mapping[str, Json] | None:
-    return value if isinstance(value, Mapping) else None
-
-
-def _elements(value: Json) -> list[Json]:
-    return list(value) if isinstance(value, list) else []
-
-
-def _mappings(value: Json) -> list[Mapping[str, Json]]:
-    return [_mapping(item) for item in _elements(value)]
-
-
-def _text(value: Json) -> str:
-    return value if isinstance(value, str) else ""
-
-
-def _optional_text(value: Json) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _texts(value: Json) -> list[str]:
-    return [item for item in _elements(value) if isinstance(item, str)]
-
-
-def _number(value: Json) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def _optional_number(value: Json) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _flag(value: Json) -> bool:
-    return value is True
-
-
-def _optional_flag(value: Json) -> bool | None:
-    return value if isinstance(value, bool) else None
-
-
-def _fika(value: Json) -> FikaCompatibility:
-    if value == "compatible":
-        return "compatible"
-    if value == "incompatible":
-        return "incompatible"
-    return "unknown"
-
-
-def _parse_user(data: Mapping[str, Json]) -> ForgeUser:
-    return ForgeUser(
-        id=_number(data.get("id")),
-        name=_text(data.get("name")),
-        profile_photo_url=_optional_text(data.get("profile_photo_url")),
-        cover_photo_url=_optional_text(data.get("cover_photo_url")),
-    )
-
-
-def _parse_source_code_link(data: Mapping[str, Json]) -> SourceCodeLink:
-    return SourceCodeLink(url=_text(data.get("url")), label=_text(data.get("label")))
-
-
-def _parse_version_summary(data: Mapping[str, Json]) -> ForgeVersionSummary:
-    return ForgeVersionSummary(
-        id=_number(data.get("id")),
-        version=_text(data.get("version")),
-        spt_version_constraint=_text(data.get("spt_version_constraint")),
-        downloads=_number(data.get("downloads")),
-        published_at=_optional_text(data.get("published_at")),
-    )
-
-
-def _parse_license(data: Mapping[str, Json] | None) -> ForgeLicense | None:
-    if data is None:
-        return None
-    return ForgeLicense(
-        id=_number(data.get("id")),
-        name=_text(data.get("name")),
-        link=_text(data.get("link")),
-    )
-
-
-def _parse_category(data: Mapping[str, Json] | None) -> ForgeCategory | None:
-    if data is None:
-        return None
-    return ForgeCategory(
-        id=_number(data.get("id")),
-        # The live API names the field "title"; older payloads used "name".
-        title=_text(data.get("title") or data.get("name")),
-        slug=_text(data.get("slug")),
-    )
-
-
-def _parse_mod(data: Mapping[str, Json]) -> ForgeMod:
-    owner = _optional_mapping(data.get("owner"))
-    return ForgeMod(
-        id=_number(data.get("id")),
-        hub_id=_optional_number(data.get("hub_id")),
-        guid=_optional_text(data.get("guid")),
-        name=_text(data.get("name")),
-        slug=_text(data.get("slug")),
-        teaser=_optional_text(data.get("teaser")),
-        thumbnail=_optional_text(data.get("thumbnail")),
-        downloads=_number(data.get("downloads")),
-        favourites_count=_number(data.get("favourites_count")),
-        endorsements_count=_number(data.get("endorsements_count")),
-        owner=None if owner is None else _parse_user(owner),
-        additional_authors=[
-            _parse_user(item) for item in _mappings(data.get("additional_authors"))
-        ],
-        source_code_links=[
-            _parse_source_code_link(item)
-            for item in _mappings(data.get("source_code_links"))
-        ],
-        detail_url=_text(data.get("detail_url")),
-        fika_compatibility=_optional_flag(data.get("fika_compatibility")),
-        featured=_flag(data.get("featured")),
-        contains_ads=_flag(data.get("contains_ads")),
-        contains_ai_content=_flag(data.get("contains_ai_content")),
-        shows_profile_binding_notice=_flag(data.get("shows_profile_binding_notice")),
-        published_at=_optional_text(data.get("published_at")),
-        created_at=_optional_text(data.get("created_at")),
-        updated_at=_optional_text(data.get("updated_at")),
-        description=_optional_text(data.get("description")),
-        custom_ai_disclosure=_optional_text(data.get("custom_ai_disclosure")),
-        license=_parse_license(_optional_mapping(data.get("license"))),
-        category=_parse_category(_optional_mapping(data.get("category"))),
-        versions=[
-            _parse_version_summary(item) for item in _mappings(data.get("versions"))
-        ],
-    )
-
-
-def _parse_version_dependency(data: Mapping[str, Json]) -> ForgeVersionDependency:
-    return ForgeVersionDependency(
-        id=_number(data.get("id")),
-        mod_id=_number(data.get("mod_id")),
-        mod_guid=_optional_text(data.get("mod_guid")),
-        mod_name=_text(data.get("mod_name")),
-        version_constraint=_text(data.get("version_constraint")),
-        is_optional=_flag(data.get("is_optional")),
-    )
-
-
-def _parse_version(data: Mapping[str, Json]) -> ForgeVersion:
-    return ForgeVersion(
-        id=_number(data.get("id")),
-        hub_id=_optional_number(data.get("hub_id")),
-        version=_text(data.get("version")),
-        description=_optional_text(data.get("description")),
-        link=_optional_text(data.get("link")),
-        content_length=_optional_number(data.get("content_length")),
-        spt_version_constraint=_text(data.get("spt_version_constraint")),
-        downloads=_number(data.get("downloads")),
-        fika_compatibility=_fika(data.get("fika_compatibility")),
-        published_at=_optional_text(data.get("published_at")),
-        created_at=_optional_text(data.get("created_at")),
-        updated_at=_optional_text(data.get("updated_at")),
-        dependencies=[
-            _parse_version_dependency(item)
-            for item in _mappings(data.get("dependencies"))
-        ],
-        virus_total_links=_texts(data.get("virus_total_links")),
-    )
-
-
-def _parse_page[T](
-    payload: Mapping[str, Json], parse: Callable[[Mapping[str, Json]], T]
-) -> Page[T]:
-    meta = _mapping(payload.get("meta"))
-    links = _mapping(payload.get("links"))
-    return Page(
-        items=[parse(item) for item in _mappings(payload.get("data"))],
-        meta=PageMeta(
-            current_page=_number(meta.get("current_page")),
-            last_page=_number(meta.get("last_page")),
-            per_page=_number(meta.get("per_page")),
-            total=_number(meta.get("total")),
-        ),
-        next_url=_optional_text(links.get("next")),
-    )
-
-
-def _parse_current_version(data: Mapping[str, Json]) -> CurrentVersion:
-    return CurrentVersion(
-        id=_number(data.get("id")),
-        mod_id=_number(data.get("mod_id")),
-        guid=_optional_text(data.get("guid")),
-        name=_text(data.get("name")),
-        version=_text(data.get("version")),
-        slug=_optional_text(data.get("slug")),
-    )
-
-
-def _parse_recommended_version(data: Mapping[str, Json]) -> RecommendedVersion:
-    return RecommendedVersion(
-        id=_number(data.get("id")),
-        version=_text(data.get("version")),
-        link=_optional_text(data.get("link")),
-        content_length=_optional_number(data.get("content_length")),
-        fika_compatibility=_fika(data.get("fika_compatibility")),
-        spt_versions=_texts(data.get("spt_versions")),
-    )
-
-
-def _parse_update(data: Mapping[str, Json]) -> ModUpdate:
-    return ModUpdate(
-        current_version=_parse_current_version(_mapping(data.get("current_version"))),
-        recommended_version=_parse_recommended_version(
-            _mapping(data.get("recommended_version"))
-        ),
-        update_reason=_text(data.get("update_reason")),
-    )
-
-
-def _parse_latest_version(data: Mapping[str, Json]) -> LatestVersion:
-    return LatestVersion(
-        id=_number(data.get("id")),
-        version=_text(data.get("version")),
-        spt_versions=_texts(data.get("spt_versions")),
-    )
-
-
-def _parse_blocking_mod(data: Mapping[str, Json]) -> BlockingMod:
-    return BlockingMod(
-        mod_id=_number(data.get("mod_id")),
-        mod_guid=_optional_text(data.get("mod_guid")),
-        mod_name=_text(data.get("mod_name")),
-        current_version=_text(data.get("current_version")),
-        constraint=_text(data.get("constraint")),
-        incompatible_with=_text(data.get("incompatible_with")),
-    )
-
-
-def _parse_blocked_update(data: Mapping[str, Json]) -> BlockedUpdate:
-    return BlockedUpdate(
-        current_version=_parse_current_version(_mapping(data.get("current_version"))),
-        latest_version=_parse_latest_version(_mapping(data.get("latest_version"))),
-        block_reason=_text(data.get("block_reason")),
-        blocking_mods=[
-            _parse_blocking_mod(item) for item in _mappings(data.get("blocking_mods"))
-        ],
-    )
-
-
-def _parse_up_to_date(data: Mapping[str, Json]) -> UpToDateMod:
-    return UpToDateMod(
-        id=_number(data.get("id")),
-        mod_id=_number(data.get("mod_id")),
-        guid=_optional_text(data.get("guid")),
-        name=_text(data.get("name")),
-        version=_text(data.get("version")),
-        spt_versions=_texts(data.get("spt_versions")),
-    )
-
-
-def _parse_incompatible(data: Mapping[str, Json]) -> IncompatibleMod:
-    return IncompatibleMod(
-        id=_number(data.get("id")),
-        mod_id=_number(data.get("mod_id")),
-        guid=_optional_text(data.get("guid")),
-        name=_text(data.get("name")),
-        version=_text(data.get("version")),
-        reason=_text(data.get("reason")),
-        latest_compatible_version=_optional_text(data.get("latest_compatible_version")),
-    )
-
-
-def _parse_updates(data: Mapping[str, Json]) -> UpdatesResult:
-    return UpdatesResult(
-        spt_version=_text(data.get("spt_version")),
-        updates=[_parse_update(item) for item in _mappings(data.get("updates"))],
-        blocked_updates=[
-            _parse_blocked_update(item)
-            for item in _mappings(data.get("blocked_updates"))
-        ],
-        up_to_date=[
-            _parse_up_to_date(item) for item in _mappings(data.get("up_to_date"))
-        ],
-        incompatible_with_spt=[
-            _parse_incompatible(item)
-            for item in _mappings(data.get("incompatible_with_spt"))
-        ],
-    )
-
-
-def _parse_compatible_version(
-    data: Mapping[str, Json] | None,
-) -> CompatibleVersion | None:
-    if data is None:
-        return None
-    return CompatibleVersion(
-        id=_number(data.get("id")),
-        version=_text(data.get("version")),
-        link=_optional_text(data.get("link")),
-        content_length=_optional_number(data.get("content_length")),
-        fika_compatibility=_fika(data.get("fika_compatibility")),
-    )
-
-
-def _parse_dependency_node(data: Mapping[str, Json]) -> DependencyNode:
-    """Parse a dependency tree node from the API response.
-
-    The conflict field treats anything not JSON false as True (fail-safe:
-    missing or null conflict becomes conflict=True, which is safer than
-    silently assuming no conflict).
-    """
-    return DependencyNode(
-        id=_number(data.get("id")),
-        guid=_optional_text(data.get("guid")),
-        name=_text(data.get("name")),
-        slug=_text(data.get("slug")),
-        latest_compatible_version=_parse_compatible_version(
-            _optional_mapping(data.get("latest_compatible_version"))
-        ),
-        # Anything not JSON false counts as a conflict (fail-safe).
-        conflict=data.get("conflict") is not False,
-        dependencies=[
-            _parse_dependency_node(item) for item in _mappings(data.get("dependencies"))
-        ],
-    )
 
 
 def _serialize_mods(mods: Sequence[tuple[str, str]]) -> str:
@@ -852,15 +296,15 @@ class ForgeClient:
         """
         response = self._send(url, params)
         try:
-            payload = _mapping(response.json())
+            payload = mapping(response.json())
         except ValueError as error:
             raise ForgeUnavailableError(
                 f"{url} answered with a non-JSON body: {error}"
             ) from error
-        if not _flag(payload.get("success")):
+        if not flag(payload.get("success")):
             raise ForgeApiError(
-                code=_text(payload.get("code")) or "UNKNOWN",
-                message=_text(payload.get("message")),
+                code=text(payload.get("code")) or "UNKNOWN",
+                message=text(payload.get("message")),
                 status=response.status_code,
             )
         return payload
@@ -891,7 +335,7 @@ class ForgeClient:
         fetched: set[str] = set()
         while next_url is not None and next_url not in fetched:
             fetched.add(next_url)
-            page = _parse_page(self._fetch(next_url, next_params), parse)
+            page = parse_page(self._fetch(next_url, next_params), parse)
             yield from page.items
             if page.meta.current_page >= page.meta.last_page:
                 return
@@ -968,7 +412,7 @@ class ForgeClient:
             page=page,
             per_page=per_page,
         )
-        return _parse_page(self._fetch("/mods", params), _parse_mod)
+        return parse_page(self._fetch("/mods", params), parse_mod)
 
     def iter_mods(
         self,
@@ -1007,7 +451,7 @@ class ForgeClient:
             page=1,
             per_page=per_page,
         )
-        return self._iter_pages("/mods", params, _parse_mod)
+        return self._iter_pages("/mods", params, parse_mod)
 
     def mod(
         self,
@@ -1034,7 +478,7 @@ class ForgeClient:
         """
         params = _build_params(include=include, fields=fields)
         payload = self._fetch(f"/mod/{mod_id}", params)
-        return _parse_mod(_mapping(payload.get("data")))
+        return parse_mod(mapping(payload.get("data")))
 
     def mod_versions(
         self,
@@ -1074,7 +518,7 @@ class ForgeClient:
             per_page=per_page,
         )
         payload = self._fetch(f"/mod/{mod_id}/versions", params)
-        return _parse_page(payload, _parse_version)
+        return parse_page(payload, parse_version)
 
     def iter_mod_versions(
         self,
@@ -1111,7 +555,7 @@ class ForgeClient:
             page=1,
             per_page=per_page,
         )
-        return self._iter_pages(f"/mod/{mod_id}/versions", params, _parse_version)
+        return self._iter_pages(f"/mod/{mod_id}/versions", params, parse_version)
 
     def updates(
         self, mods: Sequence[tuple[str, str]], spt_version: str
@@ -1134,7 +578,7 @@ class ForgeClient:
         """
         params = {"mods": _serialize_mods(mods), "spt_version": spt_version}
         payload = self._fetch("/mods/updates", params)
-        return _parse_updates(_mapping(payload.get("data")))
+        return parse_updates(mapping(payload.get("data")))
 
     def dependencies(
         self, mods: Sequence[tuple[str, str]], spt_version: str
@@ -1162,8 +606,8 @@ class ForgeClient:
         params = {"mods": _serialize_mods(mods), "spt_version": spt_version}
         payload = self._fetch("/mods/dependencies", params)
         return {
-            pair: [_parse_dependency_node(node) for node in _mappings(nodes)]
-            for pair, nodes in _mapping(payload.get("data")).items()
+            pair: [parse_dependency_node(node) for node in mappings(nodes)]
+            for pair, nodes in mapping(payload.get("data")).items()
         }
 
     @contextmanager

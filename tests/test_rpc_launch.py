@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
@@ -236,12 +237,22 @@ def test_launch_status_rpc_reports_nothing_running_for_an_untouched_directory(
     ]
 
 
-def test_stop_game_rpc_is_a_noop_without_a_prior_launch(tmp_path: Path) -> None:
+def test_stop_game_rpc_is_a_noop_without_a_prior_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """stop_game on a fresh directory returns stopped=False for both server and client.
 
-    No state file exists and no game processes are running, so the operation
-    completes without error but reports nothing was stopped.
+    No state file exists and the process table is replaced by an empty one, so
+    the operation completes without error but reports nothing was stopped. The
+    test refuses to run while a real SPT server or game is running: without the
+    empty table the stop would close them.
     """
+    if game_dir.game_processes():
+        pytest.fail(
+            "An SPT server or game is running on this machine. This test must not"
+            " stop it; close the game before running the launch tests."
+        )
+    monkeypatch.setattr(game_dir, "game_processes", lambda: [])
     exit_code, lines = invoke_rpc("stop_game", {"path": str(tmp_path)})
 
     assert exit_code == 0

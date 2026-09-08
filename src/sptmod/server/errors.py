@@ -18,6 +18,7 @@ from sptmod.core.errors import (
     ForgeUnavailableError,
     GameRunningError,
     GitError,
+    GitMissingError,
     InvalidPathError,
     LaunchError,
     LauncherSettingsError,
@@ -66,6 +67,7 @@ class ErrorCode(StrEnum):
     PARTIAL_INSTALL = "PARTIAL_INSTALL"
     ALREADY_INITIALIZED = "ALREADY_INITIALIZED"
     GIT_ERROR = "GIT_ERROR"
+    GIT_MISSING = "GIT_MISSING"
     SPTMOD_ERROR = "SPTMOD_ERROR"
     NOT_IMPLEMENTED_YET = "NOT_IMPLEMENTED_YET"
     FORGE_API_ERROR = "FORGE_API_ERROR"
@@ -99,6 +101,7 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     PartialInstallError: ErrorCode.PARTIAL_INSTALL,
     AlreadyInitializedError: ErrorCode.ALREADY_INITIALIZED,
     GitError: ErrorCode.GIT_ERROR,
+    GitMissingError: ErrorCode.GIT_MISSING,
     SptmodError: ErrorCode.SPTMOD_ERROR,
     NotImplementedYetError: ErrorCode.NOT_IMPLEMENTED_YET,
     NotImplementedError: ErrorCode.NOT_IMPLEMENTED_YET,

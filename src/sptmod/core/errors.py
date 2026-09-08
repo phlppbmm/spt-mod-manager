@@ -110,6 +110,15 @@ class ArchiveError(SptmodError):
     """A mod archive cannot be read, is unsafe or has an unknown structure."""
 
 
+class GitMissingError(SptmodError):
+    """The git binary is missing or cannot be executed.
+
+    Deliberately not a :class:`GitError`: the handlers that translate a failed
+    git call into an operation-specific message would hide the plain-language
+    installation hint this error carries.
+    """
+
+
 class GitError(SptmodError):
     """A git operation failed.
 

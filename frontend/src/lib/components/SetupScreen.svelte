@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { initGameDir, type InitResult } from '$lib/api/client';
 	import { ApiError } from '$lib/api/transport';
+	import { gitMissingHint, type GitMissingHint } from '$lib/githint';
 
 	interface Props {
 		initialPath: string;
@@ -16,6 +18,7 @@
 	let path = $state(untrack(() => initialPath));
 	let busy = $state(false);
 	let error = $state('');
+	let gitHint: GitMissingHint | null = $state(null);
 	let candidates: string[] = $state([]);
 	let adopted: string[] = $state([]);
 	let picking = $state(false);
@@ -24,7 +27,7 @@
 
 	async function pickFolder(): Promise<void> {
 		picking = true;
-		error = '';
+		clearError();
 		try {
 			const picked = await open({ directory: true, multiple: false });
 			if (picked === null) {
@@ -33,7 +36,7 @@
 			path = picked;
 			await validate();
 		} catch (cause) {
-			error = messageOf(cause);
+			report(cause);
 		} finally {
 			picking = false;
 		}
@@ -41,7 +44,7 @@
 
 	async function validate(): Promise<void> {
 		busy = true;
-		error = '';
+		clearError();
 		try {
 			const result: InitResult = await initGameDir(path.trim(), false, versionAnswer());
 			needsVersion = false;
@@ -60,7 +63,7 @@
 				needsVersion = true;
 				error = 'The SPT version cannot be detected. Enter it and continue.';
 			} else {
-				error = messageOf(cause);
+				report(cause);
 			}
 		} finally {
 			busy = false;
@@ -69,7 +72,7 @@
 
 	async function confirmAdoption(): Promise<void> {
 		busy = true;
-		error = '';
+		clearError();
 		try {
 			const result = await initGameDir(
 				path.trim(),
@@ -78,7 +81,7 @@
 			);
 			onready(result.game_dir);
 		} catch (cause) {
-			error = messageOf(cause);
+			report(cause);
 		} finally {
 			busy = false;
 		}
@@ -97,6 +100,16 @@
 			return cause.message;
 		}
 		return cause instanceof Error ? cause.message : String(cause);
+	}
+
+	function clearError(): void {
+		error = '';
+		gitHint = null;
+	}
+
+	function report(cause: unknown): void {
+		error = messageOf(cause);
+		gitHint = cause instanceof ApiError ? gitMissingHint(cause.code) : null;
 	}
 </script>
 
@@ -173,6 +186,14 @@
 
 	{#if error !== ''}
 		<p class="error-text">{error}</p>
+		{#if gitHint !== null}
+			{@const hint = gitHint}
+			<div class="row">
+				<button type="button" class="btn-primary" onclick={() => void openUrl(hint.url)}>
+					{hint.label}
+				</button>
+			</div>
+		{/if}
 	{/if}
 </section>
 

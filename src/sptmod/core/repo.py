@@ -1,12 +1,14 @@
 """The git layer: every raw git call of sptmod lives here."""
 
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from sptmod.core.errors import GitError, NotAGameDirError
+from sptmod.core.errors import GitError, GitMissingError, NotAGameDirError
 from sptmod.core.models import CommitInfo, FileChange, ModFile, RepoStatus
 
 if TYPE_CHECKING:
@@ -54,6 +56,41 @@ BepInEx/*
 !BepInEx/patchers/
 !BepInEx/patchers/**
 """
+
+
+GIT_MISSING_MESSAGE: Final = (
+    "sptmod needs Git to keep your mods safe, and it is not installed. "
+    "Install it from https://git-scm.com/downloads "
+    "(Windows: 'Git for Windows'; Linux: your package manager) "
+    "and start sptmod again."
+)
+
+
+def ensure_git_available(*, recheck: bool = False) -> None:
+    """Raise unless a git binary is installed and runs.
+
+    The answer is probed once per process; ``recheck`` discards the remembered
+    answer and probes again, which is how a changed ``PATH`` becomes visible.
+
+    Raises:
+        GitMissingError: no git binary is on ``PATH`` or it cannot be run.
+    """
+    if recheck:
+        _git_runs.cache_clear()
+    if not _git_runs():
+        raise GitMissingError(GIT_MISSING_MESSAGE)
+
+
+@lru_cache(maxsize=1)
+def _git_runs() -> bool:
+    """Return whether a git binary on ``PATH`` answers ``git --version``."""
+    if shutil.which("git") is None:
+        return False
+    try:
+        probe = subprocess.run(["git", "--version"], capture_output=True, check=False)
+    except OSError:
+        return False
+    return probe.returncode == 0
 
 
 COMMITTER_NAME: Final = "sptmod"
@@ -599,7 +636,11 @@ class Repo:
 
         Returns:
             The completed process result (does not raise on non-zero exit).
+
+        Raises:
+            GitMissingError: git is not installed.
         """
+        ensure_git_available()
         return subprocess.run(
             ["git", "-C", str(self.path), *args],
             input=stdin,

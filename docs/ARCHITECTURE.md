@@ -182,6 +182,14 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   with the rewritten `.gitignore`, into the `snapshot: game files updated`
   commit instead of blocking. Untracked files below mod prefixes keep their
   adopt behaviour.
+- Before any git call, `repo.ensure_git_available()` checks that git exists and
+  runs (`shutil.which` plus one `git --version` probe, remembered per process;
+  `recheck=True` probes again). Without it every entry point raises
+  `GitMissingError` (`GIT_MISSING`, CLI exit 17) carrying the install hint.
+  It is deliberately no `GitError` subclass, so the handlers that rewrite a
+  failed git call into an operation-specific message cannot swallow it; the
+  setup screen offers the download link through the opener plugin
+  (`frontend/src/lib/githint.ts`).
 - Trailers are written via `git interpret-trailers` and read via
   `git log --format=%(trailers:...)`; never regex over the body. Trailer
   values reject `\n`/`\r` (injection guard). Keys per HANDOFF §5 plus

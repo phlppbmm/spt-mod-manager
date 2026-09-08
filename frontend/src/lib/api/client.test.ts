@@ -1,17 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import {
+	applyModSet,
+	bindProfileSet,
 	browseCatalog,
 	checkProfiles,
 	checkUpdates,
 	cleanProfile,
 	clearCatalogCache,
+	deleteModSet,
 	disableMod,
 	enableMod,
 	exportMods,
+	exportModSet,
 	getModDetails,
 	history,
 	importList,
+	importModSet,
 	initGameDir,
 	installMod,
 	launchProfile,
@@ -19,12 +24,16 @@ import {
 	listDirectories,
 	listFavorites,
 	listMods,
+	listModSets,
 	listProfiles,
 	locateDirectory,
 	modFiles,
 	planModInstall,
+	planModSet,
 	planProfileCleanup,
 	removeMod,
+	renameModSet,
+	saveModSet,
 	searchCatalog,
 	setFavorite,
 	setSptVersion,
@@ -34,6 +43,7 @@ import {
 	syncCatalog,
 	updateMod
 } from './client';
+import type { ModSetEntry } from './client';
 
 vi.mock('@tauri-apps/api/core', () => ({
 	invoke: vi.fn()
@@ -103,6 +113,10 @@ describe('setFavorite', () => {
  * pass-through of the resolved value for all of them.
  */
 const SENTINEL = { marker: 'sentinel-response' };
+
+const SET_ENTRIES: ModSetEntry[] = [
+	{ forge_id: '47', name: 'SAIN', version: '3.1.0', enabled: true }
+];
 
 const wrapperCases: Array<{
 	id: string;
@@ -394,6 +408,7 @@ const wrapperCases: Array<{
 			path: '/game',
 			profile_id: 'profile-1',
 			stop_server_on_exit: true,
+			mod_set: 'apply',
 			operation_id: null
 		}
 	},
@@ -405,6 +420,7 @@ const wrapperCases: Array<{
 			path: '/game',
 			profile_id: 'profile-1',
 			stop_server_on_exit: false,
+			mod_set: 'apply',
 			operation_id: 'op-4'
 		}
 	},
@@ -419,6 +435,96 @@ const wrapperCases: Array<{
 		call: () => stopGame('/game'),
 		command: 'stop_game',
 		payload: { path: '/game' }
+	},
+	{
+		id: 'listModSets forwards path',
+		call: () => listModSets('/game'),
+		command: 'list_mod_sets',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'saveModSet sends a null entries list when none is given',
+		call: () => saveModSet('/game', 'Hardcore'),
+		command: 'save_mod_set',
+		payload: { path: '/game', name: 'Hardcore', entries: null }
+	},
+	{
+		id: 'saveModSet forwards an explicit entries list unchanged',
+		call: () => saveModSet('/game', 'Hardcore', SET_ENTRIES),
+		command: 'save_mod_set',
+		payload: { path: '/game', name: 'Hardcore', entries: SET_ENTRIES }
+	},
+	{
+		id: 'deleteModSet forwards path and name',
+		call: () => deleteModSet('/game', 'Hardcore'),
+		command: 'delete_mod_set',
+		payload: { path: '/game', name: 'Hardcore' }
+	},
+	{
+		id: 'renameModSet maps newName onto new_name',
+		call: () => renameModSet('/game', 'Hardcore', 'Ironman'),
+		command: 'rename_mod_set',
+		payload: { path: '/game', name: 'Hardcore', new_name: 'Ironman' }
+	},
+	{
+		id: 'exportModSet forwards path and name',
+		call: () => exportModSet('/game', 'Hardcore'),
+		command: 'export_mod_set',
+		payload: { path: '/game', name: 'Hardcore' }
+	},
+	{
+		id: 'importModSet maps an empty source and defaults the name to null',
+		call: () => importModSet('/game', {}),
+		command: 'import_mod_set',
+		payload: { path: '/game', set_file: null, content: null, name: null }
+	},
+	{
+		id: 'importModSet forwards setFile, content and an explicit name',
+		call: () => importModSet('/game', { setFile: 'set.json', content: 'data' }, 'Ironman'),
+		command: 'import_mod_set',
+		payload: { path: '/game', set_file: 'set.json', content: 'data', name: 'Ironman' }
+	},
+	{
+		id: 'bindProfileSet unbinds with a null set_name by default',
+		call: () => bindProfileSet('/game', 'profile-1'),
+		command: 'bind_profile_set',
+		payload: { path: '/game', profile_id: 'profile-1', set_name: null }
+	},
+	{
+		id: 'bindProfileSet forwards an explicit set name',
+		call: () => bindProfileSet('/game', 'profile-1', 'Hardcore'),
+		command: 'bind_profile_set',
+		payload: { path: '/game', profile_id: 'profile-1', set_name: 'Hardcore' }
+	},
+	{
+		id: 'planModSet forwards path and name',
+		call: () => planModSet('/game', 'Hardcore'),
+		command: 'plan_mod_set',
+		payload: { path: '/game', name: 'Hardcore' }
+	},
+	{
+		id: 'applyModSet defaults ignoreMissing to false and operationId to null',
+		call: () => applyModSet('/game', 'Hardcore'),
+		command: 'apply_mod_set',
+		payload: { path: '/game', name: 'Hardcore', ignore_missing: false, operation_id: null }
+	},
+	{
+		id: 'applyModSet forwards an explicit ignoreMissing and operationId',
+		call: () => applyModSet('/game', 'Hardcore', true, 'op-9'),
+		command: 'apply_mod_set',
+		payload: { path: '/game', name: 'Hardcore', ignore_missing: true, operation_id: 'op-9' }
+	},
+	{
+		id: 'launchProfile forwards an explicit mod-set mode',
+		call: () => launchProfile('/game', 'profile-1', true, 'op-7', 'skip'),
+		command: 'launch_profile',
+		payload: {
+			path: '/game',
+			profile_id: 'profile-1',
+			stop_server_on_exit: true,
+			mod_set: 'skip',
+			operation_id: 'op-7'
+		}
 	}
 ];
 

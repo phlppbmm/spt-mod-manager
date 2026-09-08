@@ -7,15 +7,24 @@
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 	import {
 		clearCatalogCache,
+		deleteModSet,
 		exportMods,
+		exportModSet,
 		importList,
+		importModSet,
+		listModSets,
+		renameModSet,
 		type ExportFormat,
 		type ImportDiff,
-		type ImportEntry
+		type ImportEntry,
+		type ModSet
 	} from '$lib/api/client';
+	import { ApiError } from '$lib/api/transport';
+	import Dialog from '$lib/components/Dialog.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
 	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
+	import { exportFileName } from '$lib/modsets';
 	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import {
 		applyTheme,
@@ -35,6 +44,7 @@
 		{ id: 'game-directory', label: 'Game directory' },
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'launching', label: 'Launching' },
+		{ id: 'mod-sets', label: 'Mod sets' },
 		{ id: 'export', label: 'Export the mod list' },
 		{ id: 'import', label: 'Import a mod list' },
 		{ id: 'catalog-cache', label: 'Catalog cache' }
@@ -50,6 +60,16 @@
 	let exportError = $state('');
 	let exporting = $state(false);
 	let copyNote = $state('');
+
+	let sets: ModSet[] = $state([]);
+	let setsError = $state('');
+	let setsNote = $state('');
+	let setsBusy = $state(false);
+	let setFile = $state('');
+	let setCode = $state('');
+	let prompt: 'rename' | 'import' | null = $state(null);
+	let promptTarget = $state('');
+	let promptName = $state('');
 
 	let listFile = $state('');
 	let listContent = $state('');
@@ -72,6 +92,7 @@
 		setSubNav([], null);
 		setSearchEnabled(false);
 		path = loadGameDir();
+		void loadSets();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
 		const observer = new MutationObserver(() => {
@@ -83,6 +104,156 @@
 			setSubNav([], null);
 		};
 	});
+
+	async function loadSets(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsError = '';
+		try {
+			sets = (await listModSets(path)).sets;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function removeSet(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			sets = (await deleteModSet(path, name)).sets;
+			setsNote = `"${name}" was deleted.`;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function saveSetFile(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const shared = await exportModSet(path, name);
+			const target = await save({ defaultPath: exportFileName(name) });
+			if (target !== null) {
+				await writeTextFile(target, shared.content);
+				setsNote = `Saved to ${target}.`;
+			}
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function copySetCode(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			await writeText((await exportModSet(path, name)).code);
+			setsNote = `The share code for "${name}" is in the clipboard.`;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function pickSetFile(): Promise<void> {
+		setsError = '';
+		try {
+			const picked = await open({
+				multiple: false,
+				filters: [{ name: 'Mod set', extensions: ['json'] }]
+			});
+			if (picked !== null) {
+				setFile = picked;
+			}
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function runImportSet(name: string | null): Promise<void> {
+		if (path === null || !hasSetSource()) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const imported = await importModSet(
+				path,
+				setCode.trim() === '' ? { setFile: setFile.trim() } : { content: setCode },
+				name
+			);
+			setFile = '';
+			setCode = '';
+			setsNote = `"${imported.name}" was added.`;
+			await loadSets();
+		} catch (cause) {
+			if (cause instanceof ApiError && cause.code === 'MOD_SET_EXISTS') {
+				promptName = '';
+				prompt = 'import';
+			} else {
+				setsError = cause instanceof Error ? cause.message : String(cause);
+			}
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function runRename(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const renamed = await renameModSet(path, promptTarget, promptName.trim());
+			prompt = null;
+			setsNote = `The set is now called "${renamed.name}".`;
+			await loadSets();
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	function askRename(name: string): void {
+		promptTarget = name;
+		promptName = name;
+		prompt = 'rename';
+	}
+
+	async function confirmPrompt(): Promise<void> {
+		if (prompt === 'rename') {
+			await runRename();
+			return;
+		}
+		const name = promptName.trim();
+		prompt = null;
+		await runImportSet(name);
+	}
+
+	function hasSetSource(): boolean {
+		return setFile.trim() !== '' || setCode.trim() !== '';
+	}
 
 	function changeStopServerOnExit(value: boolean): void {
 		stopServerOnExit = value;
@@ -295,6 +466,98 @@
 			</section>
 
 			<section class="section panel">
+				<h2 id="mod-sets">Mod sets</h2>
+				<p class="note">
+					A mod set holds a list of mods and whether each of them is on or off. A profile
+					started from the Profiles page uses the set it is set up with. Sets are saved from
+					the Mods page.
+				</p>
+				{#if sets.length === 0}
+					<p class="note">No sets yet.</p>
+				{:else}
+					<ul class="sets panel">
+						{#each sets as set (set.name)}
+							<li class="panel-row">
+								<span class="name">{set.name}</span>
+								<span class="versions">
+									{set.entries.length}
+									{set.entries.length === 1 ? 'mod' : 'mods'}
+								</span>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => askRename(set.name)}
+								>
+									Rename
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void saveSetFile(set.name)}
+								>
+									Export
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void copySetCode(set.name)}
+								>
+									Copy share code
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void removeSet(set.name)}
+								>
+									Delete
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				<h3>Add a set</h3>
+				<p class="note">
+					Either name a file someone shared or paste a share code. A pasted code wins over the
+					file path.
+				</p>
+				<div class="row">
+					<input
+						type="text"
+						placeholder="/path/to/mod-set.json"
+						aria-label="Mod set file"
+						bind:value={setFile}
+					/>
+					<button type="button" onclick={() => void pickSetFile()}>Choose file…</button>
+				</div>
+				<div class="row">
+					<textarea
+						rows="3"
+						placeholder="Paste a share code"
+						aria-label="Mod set share code"
+						bind:value={setCode}
+					></textarea>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || setsBusy || !hasSetSource()}
+						onclick={() => void runImportSet(null)}
+					>
+						Add the set
+					</button>
+				</div>
+				{#if setsError !== ''}
+					<p class="error-text">{setsError}</p>
+				{/if}
+				{#if setsNote !== ''}
+					<p class="note">{setsNote}</p>
+				{/if}
+			</section>
+
+			<section class="section panel">
 				<h2 id="export">Export the mod list</h2>
 				<div class="row">
 					<label>
@@ -434,6 +697,34 @@
 	</div>
 </div>
 
+{#if prompt !== null}
+	<Dialog
+		title={prompt === 'rename' ? 'Rename the set' : 'Choose another name'}
+		onclose={() => (prompt = null)}
+	>
+		<p>
+			{prompt === 'rename'
+				? `Give "${promptTarget}" a new name.`
+				: 'A set of that name already exists. Give the new set another name.'}
+		</p>
+		<label>
+			Name
+			<input type="text" aria-label="Set name" bind:value={promptName} />
+		</label>
+
+		{#snippet actions()}
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={setsBusy || promptName.trim() === ''}
+				onclick={() => void confirmPrompt()}
+			>
+				Save
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
 <style>
 	.page {
 		padding: var(--page-gutter, 32px);
@@ -533,14 +824,17 @@
 		text-transform: uppercase;
 	}
 
-	.diff {
+	.diff,
+	.sets {
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 
-	.diff li {
+	.diff li,
+	.sets li {
 		display: flex;
+		align-items: center;
 		gap: var(--space-3);
 		padding: var(--space-2) var(--space-3);
 	}

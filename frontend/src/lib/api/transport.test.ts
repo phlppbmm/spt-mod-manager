@@ -24,7 +24,8 @@ const sampleDetails: ErrorDetails = {
 	dependency: '',
 	reason: 'not compatible',
 	api_code: '',
-	api_status: 0
+	api_status: 0,
+	missing: []
 };
 
 describe('call', () => {

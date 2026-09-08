@@ -43,6 +43,15 @@ export type DirectoryListing = Schemas['DirectoryListing'];
 export type DirectoryEntry = Schemas['DirectoryEntry'];
 export type LocatedDirectory = Schemas['LocatedDirectory'];
 export type FavoritesResponse = Schemas['FavoritesResponse'];
+export type ModSet = Schemas['ModSet'];
+export type ModSetEntry = Schemas['ModSetEntry'];
+export type ModSetOverview = Schemas['ModSetOverview'];
+export type ModSetChange = Schemas['ModSetChange'];
+export type ModSetPlan = Schemas['ModSetPlan'];
+export type ModSetExport = Schemas['ModSetExport'];
+export type ModSetMode = Schemas['ModSetMode'];
+export type ProfileBinding = Schemas['ProfileBinding'];
+export type ApplyModSetResponse = Schemas['ApplyModSetResponse'];
 export type LaunchProfileResponse = Schemas['LaunchProfileResponse'];
 export type LaunchStatus = Schemas['LaunchStatus'];
 export type StopResult = Schemas['StopResult'];
@@ -294,16 +303,99 @@ export function importList(
 	} satisfies Schemas['ImportListRequest']);
 }
 
+export function listModSets(path: string): Promise<ModSetOverview> {
+	return call<ModSetOverview>('list_mod_sets', { path } satisfies Schemas['ListModSetsRequest']);
+}
+
+export function saveModSet(
+	path: string,
+	name: string,
+	entries: ModSetEntry[] | null = null
+): Promise<ModSet> {
+	return call<ModSet>('save_mod_set', {
+		path,
+		name,
+		entries
+	} satisfies Schemas['SaveModSetRequest']);
+}
+
+export function deleteModSet(path: string, name: string): Promise<ModSetOverview> {
+	return call<ModSetOverview>('delete_mod_set', {
+		path,
+		name
+	} satisfies Schemas['DeleteModSetRequest']);
+}
+
+export function renameModSet(path: string, name: string, newName: string): Promise<ModSet> {
+	return call<ModSet>('rename_mod_set', {
+		path,
+		name,
+		new_name: newName
+	} satisfies Schemas['RenameModSetRequest']);
+}
+
+export function exportModSet(path: string, name: string): Promise<ModSetExport> {
+	return call<ModSetExport>('export_mod_set', {
+		path,
+		name
+	} satisfies Schemas['ExportModSetRequest']);
+}
+
+export function importModSet(
+	path: string,
+	source: { setFile?: string; content?: string },
+	name: string | null = null
+): Promise<ModSet> {
+	return call<ModSet>('import_mod_set', {
+		path,
+		set_file: source.setFile ?? null,
+		content: source.content ?? null,
+		name
+	} satisfies Schemas['ImportModSetRequest']);
+}
+
+export function bindProfileSet(
+	path: string,
+	profileId: string,
+	setName: string | null = null
+): Promise<ModSetOverview> {
+	return call<ModSetOverview>('bind_profile_set', {
+		path,
+		profile_id: profileId,
+		set_name: setName
+	} satisfies Schemas['BindProfileSetRequest']);
+}
+
+export function planModSet(path: string, name: string): Promise<ModSetPlan> {
+	return call<ModSetPlan>('plan_mod_set', { path, name } satisfies Schemas['PlanModSetRequest']);
+}
+
+export function applyModSet(
+	path: string,
+	name: string,
+	ignoreMissing: boolean = false,
+	operationId: string | null = null
+): Promise<ApplyModSetResponse> {
+	return call<ApplyModSetResponse>('apply_mod_set', {
+		path,
+		name,
+		ignore_missing: ignoreMissing,
+		operation_id: operationId
+	} satisfies Schemas['ApplyModSetRequest']);
+}
+
 export function launchProfile(
 	path: string,
 	profileId: string,
 	stopServerOnExit: boolean = true,
-	operationId: string | null = null
+	operationId: string | null = null,
+	modSet: ModSetMode = 'apply'
 ): Promise<LaunchProfileResponse> {
 	return call<LaunchProfileResponse>('launch_profile', {
 		path,
 		profile_id: profileId,
 		stop_server_on_exit: stopServerOnExit,
+		mod_set: modSet,
 		operation_id: operationId
 	} satisfies Schemas['LaunchProfileRequest']);
 }

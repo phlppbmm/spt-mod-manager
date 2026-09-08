@@ -3,8 +3,11 @@
 	import {
 		checkProfiles,
 		cleanProfile,
+		installMod,
 		launchProfile,
 		launchStatus,
+		listMods,
+		listModSets,
 		listProfiles,
 		planProfileCleanup,
 		snapshot,
@@ -12,11 +15,17 @@
 		type CheckResult,
 		type CleanupPlan,
 		type LaunchStatus,
+		type ModInfo,
+		type ModSetMode,
+		type ModSetOverview,
 		type ProfileSummary
 	} from '$lib/api/client';
 	import { subscribe, type ProgressEvent } from '$lib/api/transport';
 	import { launchAction, loadStopServerOnExit } from '$lib/launch';
+	import { boundSetName, findSet, installTargets, missingFromError } from '$lib/modsets';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import ModSetDialog from '$lib/components/ModSetDialog.svelte';
+	import ModSetEditor from '$lib/components/ModSetEditor.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import {
 		categoryLabel,
@@ -32,6 +41,8 @@
 	let path: string | null = $state(null);
 	let summaries: ProfileSummary[] = $state([]);
 	let result: CheckResult | null = $state(null);
+	let modSets: ModSetOverview = $state({ sets: [], bindings: [] });
+	let mods: ModInfo[] = $state([]);
 	let loading = $state(true);
 	let error = $state('');
 	let message = $state('');
@@ -44,6 +55,9 @@
 	let launchNote = $state('');
 	let stopTarget = $state('');
 	let stopping = $state(false);
+	let missingProfile = $state('');
+	let missingMods: string[] = $state([]);
+	let installing = $state(false);
 	let plan: CleanupPlan | null = $state(null);
 	let planProfile = $state('');
 	let planning = $state('');
@@ -110,13 +124,14 @@
 		}
 	}
 
-	async function play(profileId: string): Promise<void> {
+	async function play(profileId: string, modSet: ModSetMode = 'apply'): Promise<void> {
 		if (path === null) {
 			return;
 		}
 		launching = profileId;
 		launchNote = '';
 		launchProgress = null;
+		missingMods = [];
 		const operationId = crypto.randomUUID();
 		const unsubscribe = await subscribe(operationId, (event) => {
 			launchProgress = event;
@@ -126,11 +141,18 @@
 				path,
 				profileId,
 				loadStopServerOnExit(),
-				operationId
+				operationId,
+				modSet
 			);
 			launchNote = `The game is starting for ${started.nickname}.`;
 		} catch (cause) {
-			launchNote = cause instanceof Error ? cause.message : String(cause);
+			const missing = missingFromError(cause);
+			if (missing.length > 0) {
+				missingProfile = profileId;
+				missingMods = missing;
+			} else {
+				launchNote = cause instanceof Error ? cause.message : String(cause);
+			}
 		} finally {
 			unsubscribe();
 			launchProgress = null;
@@ -138,6 +160,39 @@
 			invalidate(path);
 			await refreshGameStatus(path);
 		}
+	}
+
+	async function refreshSets(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		const gameDir = path;
+		modSets = await cached(gameDir, 'list_mod_sets', [], () => listModSets(gameDir)).refresh();
+	}
+
+	async function installMissing(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		installing = true;
+		launchNote = '';
+		const failed: string[] = [];
+		const bound = findSet(modSets, boundSetName(modSets, missingProfile) ?? '');
+		for (const { name, target } of installTargets(bound, missingMods)) {
+			try {
+				await installMod(path, target);
+			} catch (cause) {
+				failed.push(`${name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+			}
+		}
+		installing = false;
+		missingMods = [];
+		launchNote =
+			failed.length === 0
+				? 'The missing mods were installed. The profile can be started now.'
+				: `Some mods could not be installed. ${failed.join(' · ')}`;
+		invalidate(path);
+		await check(path);
 	}
 
 	async function stop(): Promise<void> {
@@ -162,6 +217,8 @@
 	async function check(gameDir: string): Promise<void> {
 		const listView = cached(gameDir, 'list_profiles', [], () => listProfiles(gameDir));
 		const checkView = cached(gameDir, 'check_profiles', [], () => checkProfiles(gameDir));
+		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
+		const setsView = cached(gameDir, 'list_mod_sets', [], () => listModSets(gameDir));
 		const listHit = listView.value;
 		const checkHit = checkView.value;
 		if (listHit !== undefined && checkHit !== undefined) {
@@ -173,9 +230,16 @@
 		}
 		error = '';
 		try {
-			const [listed, checked] = await Promise.all([listView.refresh(), checkView.refresh()]);
+			const [listed, checked, installed, sets] = await Promise.all([
+				listView.refresh(),
+				checkView.refresh(),
+				modsView.refresh(),
+				setsView.refresh()
+			]);
 			summaries = listed;
 			result = checked;
+			mods = installed;
+			modSets = sets;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -320,6 +384,15 @@
 
 				{#if group.profile.readable}
 					<div class="body">
+						<ModSetEditor
+							{path}
+							profileId={group.profile.profile_id}
+							sets={modSets}
+							{mods}
+							onchange={() => void refreshSets()}
+						/>
+					</div>
+					<div class="body">
 						{#if group.mods.length === 0}
 							<p class="note">No traces left by mods.</p>
 						{:else}
@@ -377,6 +450,17 @@
 		{saving ? 'Saving…' : 'Snapshot'}
 	</button>
 {/snippet}
+
+{#if missingMods.length > 0}
+	<ModSetDialog
+		title="Mods are missing"
+		missing={missingMods}
+		busy={installing}
+		onInstall={() => void installMissing()}
+		onIgnore={() => void play(missingProfile, 'ignore_missing')}
+		onclose={() => (missingMods = [])}
+	/>
+{/if}
 
 {#if stopTarget !== ''}
 	<Dialog title="Close the game" onclose={() => (stopTarget = '')}>
@@ -514,6 +598,10 @@
 
 	.body {
 		padding: var(--space-4);
+	}
+
+	.body + .body {
+		border-top: 1px solid var(--color-border);
 	}
 
 	.body > :global(p) {

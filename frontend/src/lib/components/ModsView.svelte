@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import Dialog from './Dialog.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import ModTable from './ModTable.svelte';
 	import QuickTabs from './QuickTabs.svelte';
@@ -10,6 +11,8 @@
 		enableMod,
 		listFavorites,
 		listMods,
+		listModSets,
+		saveModSet,
 		updateMod,
 		type CatalogEntry,
 		type ModInfo,
@@ -34,6 +37,7 @@
 		type QuickTabId
 	} from '$lib/filterpills';
 	import { filtersEqual, getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
+	import { findSet } from '$lib/modsets';
 	import {
 		bulkActions,
 		pruneSelection,
@@ -78,11 +82,20 @@
 	let bulkBusy = $state(false);
 	let bulkProgress: BulkProgress | null = $state(null);
 	let selected = $state(new Set<number>());
+	let setName = $state('');
+	let namingSet = $state(false);
+	let savingSet = $state(false);
+	let setNote = $state('');
+	let setError = $state('');
+	let replaceName = $state('');
 	let reload = $state(0);
 	let requestId = 0;
 	let seenMutations: string | null = null;
 	let now = $state(Date.now());
 
+	let replacePrompt = $derived(
+		replaceName !== '' && replaceName.toLowerCase() === setName.trim().toLowerCase()
+	);
 	let disabledNames = $derived(
 		new Set(
 			mods.filter((mod) => mod.state === 'disabled').map((mod) => mod.name.toLowerCase())
@@ -291,6 +304,31 @@
 		return updateMod(path, name);
 	}
 
+	async function saveAsSet(): Promise<void> {
+		const name = setName.trim();
+		if (name === '') {
+			return;
+		}
+		savingSet = true;
+		setNote = '';
+		setError = '';
+		try {
+			if (!replacePrompt && findSet(await listModSets(path), name) !== null) {
+				replaceName = name;
+				return;
+			}
+			const stored = await saveModSet(path, name);
+			namingSet = false;
+			setName = '';
+			replaceName = '';
+			setNote = `The mods that are on now are saved as "${stored.name}".`;
+		} catch (cause) {
+			setError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			savingSet = false;
+		}
+	}
+
 	async function runAction(id: BulkActionId): Promise<void> {
 		const action = actions.find((entry) => entry.id === id);
 		if (action === undefined) {
@@ -324,7 +362,17 @@
 			{counts}
 			onchange={setFilterAndState}
 		/>
+		<div class="sets">
+			<button type="button" class="btn-sm" onclick={() => (namingSet = true)}>
+				Save current mods as set
+			</button>
+			{#if setNote !== ''}<span class="note">{setNote}</span>{/if}
+		</div>
 	</div>
+
+	{#if setError !== ''}
+		<p class="error-text">{setError}</p>
+	{/if}
 
 	{#if error !== ''}
 		<p class="error-text">{error}</p>
@@ -364,11 +412,56 @@
 	/>
 </section>
 
+{#if namingSet}
+	<Dialog
+		title="Save the current mods as a set"
+		onclose={() => {
+			namingSet = false;
+			replaceName = '';
+		}}
+	>
+		<p>
+			The set holds every installed mod and whether it is on or off right now. A profile can
+			be started with it from the Profiles page.
+		</p>
+		<label>
+			Name
+			<input type="text" aria-label="Set name" bind:value={setName} />
+		</label>
+		{#if replacePrompt}
+			<p class="warn-text">A set named "{replaceName}" already exists. Replace its mods?</p>
+		{/if}
+
+		{#snippet actions()}
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={savingSet || setName.trim() === ''}
+				onclick={() => void saveAsSet()}
+			>
+				{savingSet ? 'Saving…' : replacePrompt ? 'Replace' : 'Save'}
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
 <style>
 	.controls {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-3);
 		margin-bottom: var(--space-4);
+	}
+
+	.sets {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 	}
 </style>

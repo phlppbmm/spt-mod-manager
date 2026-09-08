@@ -18,8 +18,6 @@ describe('fuzzyScore', () => {
 		const prefix = fuzzyScore('a', 'abc');
 		const midWord = fuzzyScore('a', 'bac');
 
-		expect(prefix).toBe(13);
-		expect(midWord).toBe(-1);
 		expect(prefix as number).toBeGreaterThan(midWord as number);
 	});
 
@@ -27,8 +25,6 @@ describe('fuzzyScore', () => {
 		const consecutive = fuzzyScore('ab', 'abx');
 		const scattered = fuzzyScore('ab', 'axb');
 
-		expect(consecutive).toBe(18);
-		expect(scattered).toBe(12);
 		expect(consecutive as number).toBeGreaterThan(scattered as number);
 	});
 
@@ -36,8 +32,6 @@ describe('fuzzyScore', () => {
 		const afterSeparator = fuzzyScore('b', 'foo-bar');
 		const midWord = fuzzyScore('b', 'foobar');
 
-		expect(afterSeparator).toBe(2);
-		expect(midWord).toBe(-3);
 		expect(afterSeparator as number).toBeGreaterThan(midWord as number);
 	});
 

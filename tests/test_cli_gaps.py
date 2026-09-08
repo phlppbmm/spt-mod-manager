@@ -1,14 +1,11 @@
-"""CLI coverage gaps identified by the group-4 audit (see project scratchpad).
+"""What ``sptmod`` prints and does on the command paths the other CLI modules leave out.
 
-Each test below pins one command or branch of ``cli.py`` that was reachable
-through the public CLI but had no test anywhere in the suite: ``main()``,
-``snapshot``, ``install``'s two ``BadParameter`` guards and its Forge-path
-decline/success prints, ``update``'s skipped/nothing-to-update/blocked/
-incompatible/up-to-date rows and its notice branch, ``disable``/``enable``'s
-notice branch, ``export``'s invalid-format guard, ``browse``'s
-``available``/default-filter branches, ``status``'s non-empty/nothing-changed
-branches, the nullable-``content_length`` size column, and ``init``'s
-interactive per-mod adopt loop.
+Covers the console-script entry point, ``snapshot``'s report of what it secured,
+``install``'s refusal of contradictory targets and its Forge plan/confirm/install output,
+``update``'s skipped, blocked, incompatible, up-to-date and already-current answers,
+``disable``/``enable`` on a mod that is already in the requested state, ``export``'s
+format validation, ``browse``'s filters, ``status``'s two summaries, ``check``'s warnings
+and ``init``'s per-mod adopt question.
 """
 
 import json
@@ -178,9 +175,13 @@ def _updates_payload(kind: str, *, mod_id: int, name: str, version: str) -> dict
 def test_main_runs_the_app_with_the_real_process_argv(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Exercises ``main()`` itself (not ``app`` via ``CliRunner``): if its
-    body is `pass`, this fails because ``app()`` (and its version banner)
-    never runs at all, so no ``SystemExit`` is raised either."""
+    """The installed ``sptmod`` command reads its arguments from the process itself.
+
+    Sets the process argument list to ``sptmod version`` and calls the console-script
+    entry point directly instead of going through ``CliRunner``; asserts it exits 0 and
+    prints the version banner. Reason: this is the entry point a user's shell invokes, so
+    it has to work without a test harness handing it an argument list.
+    """
     monkeypatch.setattr(sys, "argv", ["sptmod", "version"])
 
     with pytest.raises(SystemExit) as exit_info:
@@ -196,8 +197,12 @@ def test_main_runs_the_app_with_the_real_process_argv(
 def test_snapshot_commits_the_modified_profile_and_reports_it(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If ``snapshot``'s print line is removed, this fails: no ``snapshot:``
-    line appears even though the commit itself still happens."""
+    """``snapshot`` secures a changed player profile and names the snapshot it wrote.
+
+    Writes a profile file into a clean game directory and runs ``snapshot --message``;
+    asserts exit 0, a ``snapshot: after a raid`` line on stdout and exactly one new commit.
+    Reason: the user needs the confirmation to know their raid result is safe.
+    """
     repo = clean_repo_at(fake_game_dir)
     commits_before = len(repo.log())
     monkeypatch.chdir(fake_game_dir)
@@ -255,8 +260,12 @@ def test_snapshot_reports_the_secured_game_files_and_mod_settings(
 def test_install_rejects_both_a_mod_argument_and_file(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, make_archive: MakeArchive
 ) -> None:
-    """If the ``MOD``/``--file`` exclusivity check is removed, this fails:
-    exit code stays 0 instead of the BadParameter usage error."""
+    """``install`` refuses a mod name and an archive at the same time.
+
+    Runs ``install SomeMod --file <archive>``; asserts a non-zero exit and a message
+    telling the user to pass one or the other. Reason: the two targets mean different
+    installs, so guessing one silently would install something the user did not ask for.
+    """
     clean_repo_at(fake_game_dir)
     archive = make_archive({"BepInEx/plugins/CoolPlugin.dll": b"dll-bytes"}, "zip")
     monkeypatch.chdir(fake_game_dir)
@@ -268,8 +277,12 @@ def test_install_rejects_both_a_mod_argument_and_file(
 
 
 def test_install_rejects_neither_a_mod_argument_nor_file(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """If the missing-target check is removed, this fails: exit code stays 0
-    instead of the BadParameter usage error."""
+    """``install`` with no target at all says what it needs.
+
+    Runs ``install`` without a mod name and without ``--file``; asserts a non-zero exit
+    and a message naming both ways to say what to install. Reason: an install with nothing
+    to install must end in usage help, not in a silent success.
+    """
     clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -288,9 +301,13 @@ def test_install_forge_path_declining_the_plan_cancels_without_a_commit(
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
 ) -> None:
-    """If the plan-confirmation prompt is removed, this fails: the mod gets
-    installed (one extra commit) even though the simulated user answered
-    'n'."""
+    """Declining the install plan installs nothing.
+
+    Seeds a Forge mod into the catalog, runs ``install "Target Mod"`` and answers "n" at
+    the plan confirmation; asserts exit 0, a "cancelled" line and an unchanged commit
+    history. Reason: the plan is shown so the user can say no, and saying no must leave
+    the installation untouched.
+    """
     repo = clean_repo_at(fake_game_dir)
     commits_before = len(repo.log())
     _seed_forge_mod(
@@ -319,9 +336,13 @@ def test_install_forge_path_success_prints_each_installed_mod(
     isolated_default_db_path: Path,
     make_archive: MakeArchive,
 ) -> None:
-    """If the ``for installed in result.installed: _print_install(...)`` loop
-    is removed, this fails: the CLI's own install output never names the
-    mod even though the commit (checked via the RPC-covered path) succeeds."""
+    """A confirmed Forge install names every mod it installed with its version.
+
+    Seeds a Forge mod whose download link serves a real archive and runs
+    ``install "Target Mod" --yes``; asserts exit 0 and an ``installed Target Mod 2.0.0``
+    line. Reason: the install report is the only place the user learns which version
+    actually landed.
+    """
     clean_repo_at(fake_game_dir)
     archive = make_archive(
         {
@@ -360,9 +381,13 @@ def test_install_plan_with_no_reported_size_renders_without_crashing(
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
 ) -> None:
-    """Pins ``_size(None)``: if the ``None`` guard is removed, dividing
-    ``None`` by ``_BYTES_PER_MB`` raises a ``TypeError`` before the plan table
-    (and the cancel prompt after it) is ever reached, so this fails."""
+    """A Forge version without a reported download size still gets a readable plan.
+
+    Seeds a mod whose version carries no content length, runs ``install "Sizeless Mod"``
+    and declines; asserts exit 0, the mod named in the plan, the cancellation line, and no
+    literal "None" anywhere in the output. Reason: the Forge omits the size for some
+    versions, and the plan must stay readable rather than showing "None" or failing.
+    """
     clean_repo_at(fake_game_dir)
     _seed_forge_mod(
         respx_router,
@@ -392,10 +417,13 @@ def test_update_reports_a_mod_forge_cannot_identify_as_skipped_and_stops(
     monkeypatch: pytest.MonkeyPatch,
     install_commit: TrailerInstallCommit,
 ) -> None:
-    """If the ``for skipped in report.skipped`` loop, or the empty-report
-    'nothing to update' print, is removed, this fails: neither line appears
-    even though the mod carries no Forge ID and Forge lists nothing to
-    apply."""
+    """``update`` names the mods it cannot look up and then reports nothing to update.
+
+    Installs a mod carrying no Forge ID and runs ``update``; asserts exit 0, a line naming
+    the mod as not identified on Forge, and the "nothing to update" summary. Reason: a mod
+    installed from an archive can never be updated, and the user has to be told which one
+    was passed over rather than silently ignored.
+    """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "Ghost Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": ""})
     monkeypatch.chdir(fake_game_dir)
@@ -427,8 +455,13 @@ def test_update_check_renders_the_blocked_incompatible_and_uptodate_rows(
     respx_router: respx.MockRouter,
     install_commit: TrailerInstallCommit,
 ) -> None:
-    """If ``_updates_table``'s loop for this list is removed, this fails: the
-    row's state text never appears even though Forge reported an entry."""
+    """``update --check`` shows a row for every state the Forge reports back.
+
+    Installs a Forge-identified mod, mocks the update endpoint to return it in each of the
+    blocked, incompatible and up-to-date lists in turn, and runs ``update --check``;
+    asserts the state text appears in the table each time. Reason: a mod missing from the
+    table would read as "no answer", so every state the Forge knows must be shown.
+    """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "Some Mod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "77"})
     respx_router.get("/mods/updates").mock(
@@ -451,10 +484,15 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
     respx_router: respx.MockRouter,
     install_commit: TrailerInstallCommit,
 ) -> None:
-    """Pins the TOCTOU no-op path: ``update`` queries Forge once to display
-    the plan and confirm, then ``update_mod`` re-queries before downloading.
-    If ``_print_update``'s notice branch is removed, this fails: the second
-    (up-to-date) answer's ``notice`` is silently dropped instead of printed."""
+    """An update that the Forge withdraws between plan and download is reported, not
+    silently skipped.
+
+    Mocks the update endpoint to offer version 2.0.0 on the first call, which the user
+    confirms, and to report the mod as up to date on the second call the download makes;
+    asserts exit 0, a notice saying the mod is up to date and an unchanged commit history.
+    Reason: the user confirmed an update that then did not happen, so the outcome has to
+    be stated instead of leaving a silent success behind.
+    """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod", "1.0.0", mod_type="server", **{"Mod-Forge-Id": "10"})
     available = {
@@ -499,46 +537,52 @@ def test_update_reports_a_notice_when_forge_no_longer_offers_the_update(
 # --- disable / enable: notice branch -----------------------------------------
 
 
-def test_disabling_an_already_disabled_mod_prints_a_notice(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
+@pytest.mark.parametrize(
+    ("setup_command", "command", "expected_notice"),
+    [
+        ("disable", "disable", "notice: CoolMod is already disabled, nothing to disable"),
+        (None, "enable", "notice: CoolMod is installed, not disabled, nothing to enable"),
+    ],
+    ids=["disable-already-disabled", "enable-not-disabled"],
+)
+def test_toggling_a_mod_into_the_state_it_is_already_in_prints_a_notice(
+    setup_command: str | None,
+    command: str,
+    expected_notice: str,
+    fake_game_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    install_commit: InstallCommit,
 ) -> None:
-    """If ``_print_toggle``'s notice branch is removed, this fails: the
-    second disable prints the normal 'disabled ...' line (with an empty
-    commit hash) instead of the notice."""
+    """Disabling a disabled mod or enabling an active one says so instead of pretending
+    to have changed something.
+
+    Installs "CoolMod", optionally disables it first, then runs the toggle command that
+    would move it into the state it already has; asserts exit 0 and a notice naming the
+    current state. Reason: reporting a change that never happened would make the user
+    believe a stale mod state was fixed.
+    """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
-    first = runner.invoke(app, ["disable", "CoolMod"])
-    assert first.exit_code == 0
+    if setup_command is not None:
+        assert runner.invoke(app, [setup_command, "CoolMod"]).exit_code == 0
 
-    result = runner.invoke(app, ["disable", "CoolMod"])
-
-    assert result.exit_code == 0
-    assert "notice: CoolMod is already disabled, nothing to disable" in result.stdout
-
-
-def test_enabling_an_already_active_mod_prints_a_notice(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """If ``_print_toggle``'s notice branch is removed, this fails: enabling
-    a never-disabled mod prints the normal 'enabled ...' line instead of the
-    notice."""
-    repo = clean_repo_at(fake_game_dir)
-    install_commit(repo, "CoolMod")
-    monkeypatch.chdir(fake_game_dir)
-
-    result = runner.invoke(app, ["enable", "CoolMod"])
+    result = runner.invoke(app, [command, "CoolMod"])
 
     assert result.exit_code == 0
-    assert "notice: CoolMod is installed, not disabled, nothing to enable" in result.stdout
+    assert expected_notice in result.stdout
 
 
 # --- export: invalid format --------------------------------------------------
 
 
 def test_export_rejects_an_unknown_format(fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """If ``_export_format``'s raise is removed, this fails: exit code stays
-    0 instead of the BadParameter usage error."""
+    """``export`` rejects a format it cannot write and lists the ones it can.
+
+    Runs ``export --format yaml``; asserts a non-zero exit and a message naming text and
+    json. Reason: writing nothing, or writing the default format under a name the user did
+    not ask for, would both be worse than a usage error.
+    """
     clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
@@ -558,9 +602,12 @@ def test_browse_available_filter_excludes_the_installed_mod(
     isolated_default_db_path: Path,
     install_commit: TrailerInstallCommit,
 ) -> None:
-    """If ``_browse_filter``'s ``available`` branch is removed, ``available``
-    falls through to the default ``all`` filter, so this fails: the installed
-    mod (which ``available`` must exclude) still appears."""
+    """``browse --available`` hides the mods that are already installed.
+
+    Syncs two catalog mods, installs one of them, and runs ``browse --available``; asserts
+    exit 0, the free mod listed and the installed one absent. Reason: the flag exists to
+    show what is still worth installing.
+    """
     repo = clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(
         return_value=httpx.Response(
@@ -591,9 +638,12 @@ def test_browse_with_no_filter_flag_lists_every_cached_mod(
     respx_router: respx.MockRouter,
     isolated_default_db_path: Path,
 ) -> None:
-    """If ``_browse_filter``'s default-``all`` fallthrough is removed (e.g.
-    it returns ``None``), this fails: ``browse`` with no flags crashes or
-    lists nothing instead of showing the cached mod."""
+    """``browse`` without a filter flag lists everything the catalog holds.
+
+    Syncs one mod into the catalog and runs ``browse`` with no flags; asserts exit 0 and
+    the cached mod in the output. Reason: the bare command is the entry point into the
+    catalog, so it must default to showing all of it.
+    """
     clean_repo_at(fake_game_dir)
     respx_router.get("/mods").mock(
         return_value=httpx.Response(200, json=page_envelope([_mod_json(1, "Cached Mod", "1.0.0")], total=1))
@@ -624,11 +674,13 @@ def test_status_reports_dirty_profiles_or_nothing_changed(
     fake_game_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If ``_print_paths``'s early return is inverted (always returns), the
-    dirty-profile case fails: the modified-profiles headline never appears.
-    If the ``not any(...)`` guard in ``_print_status`` is removed, the
-    clean-tree case fails: no summary line appears instead of 'nothing
-    changed'."""
+    """``status`` either lists what changed or says that nothing did.
+
+    Runs ``status`` once on a game directory with a rewritten player profile and once on
+    an untouched one; asserts exit 0 and, respectively, the modified-profiles headline and
+    the "nothing changed" summary. Reason: a status command that prints nothing at all
+    leaves the user unsure whether it even ran.
+    """
     clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
     if write_profile:
@@ -650,8 +702,12 @@ def test_status_reports_dirty_profiles_or_nothing_changed(
 def test_check_reports_a_warning_for_an_unparseable_db_file(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
 ) -> None:
-    """If the ``for warning in result.warnings`` loop is removed, this fails:
-    no warning line appears even though the mod's db file is not valid JSON."""
+    """``check`` warns about a mod database file it cannot parse.
+
+    Installs a server mod whose ``db`` folder holds a file that is not valid JSON and runs
+    ``check``; asserts exit 0 and a ``warning:`` line. Reason: an unreadable database file
+    breaks the mod at runtime, and the check is where the user is supposed to find out.
+    """
     repo = clean_repo_at(fake_game_dir)
     install_commit(
         repo,
@@ -687,46 +743,34 @@ def _write_pre_existing_mod(fake_game_dir: Path, name: str = "CoolMod") -> Path:
     return mod_dir
 
 
-def test_init_prompts_per_pre_existing_mod_and_adopts_on_yes(
+@pytest.mark.parametrize(
+    ("extra_args", "stdin", "expected_text", "expected_commits"),
+    [
+        ([], "y\n", "adopted CoolMod 1.0.0", 2),
+        ([], "n\n", "left untracked, run 'sptmod adopt SPT/user/mods/CoolMod' later", 1),
+        (["--yes"], "", "adopted CoolMod 1.0.0", 2),
+    ],
+    ids=["prompt-yes-adopts", "prompt-no-leaves-untracked", "yes-flag-adopts-without-prompt"],
+)
+def test_init_asks_about_every_pre_existing_mod_and_follows_the_answer(
+    extra_args: list[str],
+    stdin: str,
+    expected_text: str,
+    expected_commits: int,
     fake_game_dir: Path,
 ) -> None:
-    """If the per-mod adopt loop is removed, this fails: neither the prompt's
-    'adopted' confirmation nor a commit for the mod appears."""
+    """``init`` offers to take an already-present mod under management and obeys the answer.
+
+    Puts a mod folder into an untracked game directory and runs ``init`` answering "y",
+    answering "n", and passing ``--yes`` with no input at all; asserts exit 0 each time,
+    the matching confirmation or hint on stdout, and a second commit only where the mod
+    was adopted. Reason: a user who already installed mods by hand decides per mod what
+    sptmod takes over, and ``--yes`` answers for them without needing a terminal.
+    """
     _write_pre_existing_mod(fake_game_dir)
 
-    result = runner.invoke(app, ["init", str(fake_game_dir)], input="y\n")
+    result = runner.invoke(app, ["init", str(fake_game_dir), *extra_args], input=stdin)
 
     assert result.exit_code == 0
-    assert "adopted CoolMod 1.0.0" in result.stdout
-    assert len(Repo(fake_game_dir).log()) == 2
-
-
-def test_init_prompts_per_pre_existing_mod_and_leaves_it_untracked_on_no(
-    fake_game_dir: Path,
-) -> None:
-    """If the per-mod adopt loop's decline branch prints nothing (or adopts
-    anyway), this fails: neither the 'left untracked' hint appears nor does
-    the repository stay at a single commit."""
-    _write_pre_existing_mod(fake_game_dir)
-
-    result = runner.invoke(app, ["init", str(fake_game_dir)], input="n\n")
-
-    assert result.exit_code == 0
-    assert "left untracked, run 'sptmod adopt SPT/user/mods/CoolMod' later" in (result.stdout)
-    assert len(Repo(fake_game_dir).log()) == 1
-
-
-def test_init_yes_flag_adopts_pre_existing_mods_without_further_prompting(
-    fake_game_dir: Path,
-) -> None:
-    """If the ``if yes: return`` early exit is removed, this fails: with an
-    empty stdin the interactive per-mod loop hits EOF and aborts instead of
-    exiting 0 after the ``adopted`` lines already printed by
-    ``init_game_dir`` itself."""
-    _write_pre_existing_mod(fake_game_dir)
-
-    result = runner.invoke(app, ["init", str(fake_game_dir), "--yes"], input="")
-
-    assert result.exit_code == 0
-    assert "adopted CoolMod 1.0.0" in result.stdout
-    assert len(Repo(fake_game_dir).log()) == 2
+    assert expected_text in result.stdout
+    assert len(Repo(fake_game_dir).log()) == expected_commits

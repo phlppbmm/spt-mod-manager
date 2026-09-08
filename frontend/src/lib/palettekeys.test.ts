@@ -30,103 +30,86 @@ describe('opensPalette', () => {
 });
 
 describe('paletteKey', () => {
-	it('ArrowDown does not move and does not run when the list is empty', () => {
-		expect(paletteKey('ArrowDown', state({ count: 0, index: 0 }))).toEqual({
-			index: null,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('ArrowUp does not move and does not run when the list is empty', () => {
-		expect(paletteKey('ArrowUp', state({ count: 0, index: 0 }))).toEqual({
-			index: null,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('ArrowDown moves to the next index', () => {
-		expect(paletteKey('ArrowDown', state({ count: 3, index: 0 }))).toEqual({
-			index: 1,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('ArrowDown wraps from the last index back to the first', () => {
-		expect(paletteKey('ArrowDown', state({ count: 3, index: 2 }))).toEqual({
+	it.each([
+		{
+			id: 'ArrowDown-empty-list',
+			key: 'ArrowDown',
+			count: 0,
 			index: 0,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('ArrowUp moves to the previous index', () => {
-		expect(paletteKey('ArrowUp', state({ count: 3, index: 2 }))).toEqual({
-			index: 1,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('ArrowUp wraps from the first index back to the last', () => {
-		expect(paletteKey('ArrowUp', state({ count: 3, index: 0 }))).toEqual({
+			expected: { index: null, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'ArrowUp-empty-list',
+			key: 'ArrowUp',
+			count: 0,
+			index: 0,
+			expected: { index: null, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'ArrowDown-next',
+			key: 'ArrowDown',
+			count: 3,
+			index: 0,
+			expected: { index: 1, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'ArrowDown-wraps',
+			key: 'ArrowDown',
+			count: 3,
 			index: 2,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('Enter runs when there is at least one entry', () => {
-		expect(paletteKey('Enter', state({ count: 1, index: 0 }))).toEqual({
-			index: null,
-			run: true,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('Enter does not run when the list is empty', () => {
-		expect(paletteKey('Enter', state({ count: 0, index: 0 }))).toEqual({
-			index: null,
-			run: false,
-			close: false,
-			preventDefault: false
-		});
-	});
-
-	it('Escape closes the palette', () => {
-		expect(paletteKey('Escape', state({ count: 5, index: 2 }))).toEqual({
-			index: null,
-			run: false,
-			close: true,
-			preventDefault: true
-		});
-	});
-
-	it('Tab is swallowed since the input is the only focusable element', () => {
-		expect(paletteKey('Tab', state())).toEqual({
-			index: null,
-			run: false,
-			close: false,
-			preventDefault: true
-		});
-	});
-
-	it('is inert for any other key', () => {
-		expect(paletteKey('a', state())).toEqual({
-			index: null,
-			run: false,
-			close: false,
-			preventDefault: false
-		});
+			expected: { index: 0, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'ArrowUp-previous',
+			key: 'ArrowUp',
+			count: 3,
+			index: 2,
+			expected: { index: 1, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'ArrowUp-wraps',
+			key: 'ArrowUp',
+			count: 3,
+			index: 0,
+			expected: { index: 2, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'Enter-runs',
+			key: 'Enter',
+			count: 1,
+			index: 0,
+			expected: { index: null, run: true, close: false, preventDefault: true }
+		},
+		{
+			id: 'Enter-empty-list',
+			key: 'Enter',
+			count: 0,
+			index: 0,
+			expected: { index: null, run: false, close: false, preventDefault: false }
+		},
+		{
+			id: 'Escape-closes',
+			key: 'Escape',
+			count: 5,
+			index: 2,
+			expected: { index: null, run: false, close: true, preventDefault: true }
+		},
+		{
+			id: 'Tab-swallowed',
+			key: 'Tab',
+			count: 3,
+			index: 0,
+			expected: { index: null, run: false, close: false, preventDefault: true }
+		},
+		{
+			id: 'other-key-inert',
+			key: 'a',
+			count: 3,
+			index: 0,
+			expected: { index: null, run: false, close: false, preventDefault: false }
+		}
+	])('$id', ({ key, count, index, expected }) => {
+		expect(paletteKey(key, state({ count, index }))).toEqual(expected);
 	});
 });
 

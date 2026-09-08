@@ -207,21 +207,26 @@ def test_update_without_asking_when_yes_is_given(
     assert _subjects(spt_game_dir)[0] == f"spt: {NEW}"
 
 
-def test_update_changes_nothing_when_the_confirmation_is_declined(
+@pytest.mark.parametrize("answer", ["n\n", ""], ids=["answered-no", "no-input-at-all"])
+def test_update_changes_nothing_unless_the_change_is_confirmed(
+    answer: str,
     spt_game_dir: Path,
     spt_release_source: SptReleaseSource,
     make_spt_release: MakeSptRelease,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``spt update`` answered with ``n`` leaves the installation alone.
+    """``spt update`` without ``--yes`` leaves the installation alone unless confirmed.
 
-    The command ends as aborted, no commit is written and no file of the
-    release reaches the game directory.
+    Offers a newer release and runs ``spt update`` once answering "n" and once with no
+    input at all, as a command without a terminal has; asserts both end aborted with exit
+    code 1, leave the commit history at the untouched baseline and write no file of the
+    release. Reason: a missing answer must count as a refusal, so a scripted run never
+    swaps the SPT installation by accident.
     """
     _offer(spt_release_source, make_spt_release, NEW)
     monkeypatch.chdir(spt_game_dir)
 
-    exit_code, output, errors = _invoke(["spt", "update", NEW], answer="n\n")
+    exit_code, output, errors = _invoke(["spt", "update", NEW], answer=answer)
 
     assert exit_code == 1
     assert f"change SPT from {INSTALLED} to {NEW}?" in _text(output)
@@ -487,30 +492,6 @@ def test_the_installed_version_survives_an_update_of_the_spt_server(
     assert exit_code == 0
     assert f"SPT releases (installed: {NEW})" in _text(output)
     assert [row[3] for row in _rows(output)[1:]] == ["installed", "older"]
-
-
-def test_update_changes_nothing_when_no_answer_can_be_read(
-    spt_game_dir: Path,
-    spt_release_source: SptReleaseSource,
-    make_spt_release: MakeSptRelease,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``spt update`` without ``--yes`` and without any input refuses the change.
-
-    A command run without a terminal cannot answer the question; the missing
-    answer counts as a refusal, so the command ends as aborted and neither a
-    commit nor a file of the release reaches the game directory.
-    """
-    _offer(spt_release_source, make_spt_release, NEW)
-    monkeypatch.chdir(spt_game_dir)
-
-    exit_code, output, errors = _invoke(["spt", "update", NEW])
-
-    assert exit_code == 1
-    assert f"change SPT from {INSTALLED} to {NEW}?" in _text(output)
-    assert "Aborted" in _text(errors)
-    assert _subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
-    assert not (spt_game_dir / "winhttp.dll").exists()
 
 
 def test_downgrade_keeps_the_version_when_the_undo_is_declined(

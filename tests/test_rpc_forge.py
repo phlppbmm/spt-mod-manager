@@ -18,7 +18,7 @@ from fixture_types import (
     MakeSptRelease,
     TrailerInstallCommit,
 )
-from fixtures_rpc import install_request
+from fixtures_rpc import assert_progress_then_result, install_request
 from fixtures_spt import SptReleaseSource
 from forge_json import mod_json_full, owner_json, page_envelope, version_json
 from sptmod.core.forge.client import DEFAULT_BASE_URL
@@ -242,9 +242,7 @@ def test_install_mod_downloads_and_installs_the_target(
         )
 
     assert exit_code == 0
-    events = [line["event"] for line in lines]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(lines)
     result = lines[-1]["data"]
     assert result["operation_id"] == "caller-chosen-id"
     assert result["plan"]["entries"][0]["name"] == "Target Mod"
@@ -380,9 +378,7 @@ def test_update_mod_applies_the_recommended_version(
         )
 
     assert exit_code == 0
-    events = [line["event"] for line in lines]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(lines)
     result = lines[-1]["data"]
     assert result["operation_id"] == "update-op-id"
     assert result["name"] == "CoolMod"
@@ -466,9 +462,7 @@ def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
         )
 
     assert exit_code == 0
-    events = [line["event"] for line in lines]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(lines)
     data = lines[-1]["data"]
     assert data["missing"] == [
         {

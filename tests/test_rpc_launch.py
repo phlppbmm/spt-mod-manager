@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 
 from conftest import invoke_rpc
 from fixtures_launch import LaunchableGameDir
+from fixtures_rpc import assert_progress_then_result
 from sptmod.core import game_dir
 from sptmod.core.game_dir import GameProcess
 from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
@@ -65,9 +66,7 @@ def test_launch_profile_rpc_reports_the_four_phases_and_the_result(
         exit_code, lines = invoke_rpc("launch_profile", {"path": str(d.root), "profile_id": d.profile_id})
 
     assert exit_code == 0
-    events = [doc["event"] for doc in lines]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(lines)
     steps = [doc["step"] for doc in lines[:-1]]
     assert steps[0] == "server"
     assert "waiting" in steps

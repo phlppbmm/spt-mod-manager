@@ -58,60 +58,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const invokeMock = vi.mocked(invoke);
 
-describe('listMods', () => {
-	it('calls rpc with the snake_case payload and returns the typed body', async () => {
-		const mods = [{ name: 'mod-a', version: '1.0.0' }];
-		invokeMock.mockResolvedValue(mods);
-
-		const result = await listMods('/game', true);
-
-		expect(invokeMock).toHaveBeenCalledWith('rpc', {
-			name: 'list_mods',
-			payload: { path: '/game', include_all: true }
-		});
-		expect(result).toEqual(mods);
-	});
-
-	it('defaults include_all to false when not given', async () => {
-		invokeMock.mockResolvedValue([]);
-
-		await listMods('/game');
-
-		expect(invokeMock).toHaveBeenCalledWith('rpc', {
-			name: 'list_mods',
-			payload: { path: '/game', include_all: false }
-		});
-	});
-});
-
-describe('listFavorites', () => {
-	it('calls rpc with name list_favorites and an empty payload', async () => {
-		invokeMock.mockResolvedValue({ mod_ids: [7] });
-
-		const result = await listFavorites();
-
-		expect(invokeMock).toHaveBeenCalledWith('rpc', {
-			name: 'list_favorites',
-			payload: {}
-		});
-		expect(result).toEqual({ mod_ids: [7] });
-	});
-});
-
-describe('setFavorite', () => {
-	it('sends mod_id and favorite, without a favorites_path', async () => {
-		invokeMock.mockResolvedValue({ mod_ids: [7] });
-
-		const result = await setFavorite(7, true);
-
-		expect(invokeMock).toHaveBeenCalledWith('rpc', {
-			name: 'set_favorite',
-			payload: { mod_id: 7, favorite: true }
-		});
-		expect(result).toEqual({ mod_ids: [7] });
-	});
-});
-
 /**
  * Every other RPC wrapper does the same job: hand-map its camelCase
  * arguments (with their default values) onto a snake_case payload and
@@ -131,6 +77,30 @@ const wrapperCases: Array<{
 	command: string;
 	payload: Record<string, unknown>;
 }> = [
+	{
+		id: 'listMods forwards an explicit include_all',
+		call: () => listMods('/game', true),
+		command: 'list_mods',
+		payload: { path: '/game', include_all: true }
+	},
+	{
+		id: 'listMods defaults include_all to false',
+		call: () => listMods('/game'),
+		command: 'list_mods',
+		payload: { path: '/game', include_all: false }
+	},
+	{
+		id: 'listFavorites sends an empty payload',
+		call: () => listFavorites(),
+		command: 'list_favorites',
+		payload: {}
+	},
+	{
+		id: 'setFavorite forwards mod_id and favorite',
+		call: () => setFavorite(7, true),
+		command: 'set_favorite',
+		payload: { mod_id: 7, favorite: true }
+	},
 	{
 		id: 'listDirectories omits path by default',
 		call: () => listDirectories(),

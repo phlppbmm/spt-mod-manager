@@ -14,12 +14,6 @@ beforeEach(() => {
 	clearFilter();
 });
 
-describe('DEFAULT_FILTER', () => {
-	it('has the compatible chip active, no category and an empty search', () => {
-		expect(DEFAULT_FILTER).toEqual({ chips: new Set(['compatible']), category: null, search: '' });
-	});
-});
-
 describe('getFilter and setFilter', () => {
 	it('getFilter returns the default filter before anything was set', () => {
 		expect(getFilter()).toEqual({ chips: new Set(['compatible']), category: null, search: '' });
@@ -86,12 +80,12 @@ describe('clearFilter', () => {
 describe('isDefaultFilter', () => {
 	it.each([
 		{
-			id: 'a filter matching the default exactly',
-			filter: { chips: new Set<ChipId>(['compatible']), category: null, search: '' },
+			id: 'the DEFAULT_FILTER object itself',
+			filter: DEFAULT_FILTER,
 			expected: true
 		},
 		{
-			id: 'a distinct Set instance with the same chip content',
+			id: 'an equal filter built independently',
 			filter: { chips: new Set<ChipId>(['compatible']), category: null, search: '' },
 			expected: true
 		},

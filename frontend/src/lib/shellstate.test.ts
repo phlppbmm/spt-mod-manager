@@ -105,28 +105,73 @@ describe('subNav', () => {
 	});
 });
 
-describe('searchEnabled', () => {
-	it('subscribeSearchEnabled calls the listener immediately with the current value', () => {
-		setSearchEnabled(true);
+interface StoreCase {
+	id: string;
+	subscribe: (listener: (value: unknown) => void) => () => void;
+	set: (value: unknown) => void;
+	initial: unknown;
+	next: unknown;
+}
+
+const storeCases: StoreCase[] = [
+	{
+		id: 'searchEnabled',
+		subscribe: (listener) => subscribeSearchEnabled(listener),
+		set: (value) => setSearchEnabled(value as boolean),
+		initial: true,
+		next: true
+	},
+	{
+		id: 'gameDir',
+		subscribe: (listener) => subscribeGameDir(listener),
+		set: (value) => setGameDir(value as string | null),
+		initial: '/games/foo',
+		next: '/games/bar'
+	},
+	{
+		id: 'commandMods',
+		subscribe: (listener) => subscribeCommandMods(listener),
+		set: (value) => setCommandMods(value as CommandMod[]),
+		initial: [{ id: 1, name: 'Alpha', author: 'Someone' }],
+		next: [{ id: 2, name: 'Beta', author: 'Someone' }]
+	}
+];
+
+describe.each(storeCases)('$id', ({ subscribe, set, initial, next }) => {
+	it('delivers the current value immediately on subscribe', () => {
+		set(initial);
 		const listener = vi.fn();
 
-		subscribeSearchEnabled(listener);
+		subscribe(listener);
 
 		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith(true);
+		expect(listener).toHaveBeenCalledWith(initial);
 	});
 
-	it('setSearchEnabled notifies subscribers of the new value', () => {
+	it('notifies subscribers of a value that was set', () => {
 		const listener = vi.fn();
-		subscribeSearchEnabled(listener);
+		subscribe(listener);
 		listener.mockClear();
 
-		setSearchEnabled(true);
+		set(next);
 
 		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith(true);
+		expect(listener).toHaveBeenCalledWith(next);
 	});
 
+	it('stops delivering notifications to a subscriber after unsubscribe', () => {
+		const listener = vi.fn();
+		const unsubscribe = subscribe(listener);
+		listener.mockClear();
+
+		unsubscribe();
+		set(next);
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+});
+
+describe('searchEnabled', () => {
 	it('setSearchEnabled notifies subscribers even when the value does not change', () => {
 		setSearchEnabled(true);
 		const listener = vi.fn();
@@ -138,41 +183,9 @@ describe('searchEnabled', () => {
 		expect(listener).toHaveBeenCalledTimes(1);
 		expect(listener).toHaveBeenCalledWith(true);
 	});
-
-	it('stops delivering notifications to a subscriber after unsubscribe', () => {
-		const listener = vi.fn();
-		const unsubscribe = subscribeSearchEnabled(listener);
-		listener.mockClear();
-
-		unsubscribe();
-		setSearchEnabled(true);
-
-		expect(listener).not.toHaveBeenCalled();
-	});
 });
 
 describe('gameDir', () => {
-	it('subscribeGameDir calls the listener immediately with the current value', () => {
-		setGameDir('/games/foo');
-		const listener = vi.fn();
-
-		subscribeGameDir(listener);
-
-		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith('/games/foo');
-	});
-
-	it('setGameDir notifies subscribers of the new value', () => {
-		const listener = vi.fn();
-		subscribeGameDir(listener);
-		listener.mockClear();
-
-		setGameDir('/games/bar');
-
-		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith('/games/bar');
-	});
-
 	it('setGameDir can clear a previously set value back to null', () => {
 		setGameDir('/games/foo');
 		const listener = vi.fn();
@@ -184,66 +197,19 @@ describe('gameDir', () => {
 		expect(listener).toHaveBeenCalledTimes(1);
 		expect(listener).toHaveBeenCalledWith(null);
 	});
-
-	it('stops delivering notifications to a subscriber after unsubscribe', () => {
-		const listener = vi.fn();
-		const unsubscribe = subscribeGameDir(listener);
-		listener.mockClear();
-
-		unsubscribe();
-		setGameDir('/games/foo');
-
-		expect(listener).not.toHaveBeenCalled();
-	});
 });
 
 describe('commandMods', () => {
-	function makeMod(overrides: Partial<CommandMod> = {}): CommandMod {
-		return { id: 1, name: 'Alpha', author: 'Someone', ...overrides };
-	}
-
-	it('subscribeCommandMods calls the listener immediately with the current value', () => {
-		setCommandMods([makeMod()]);
-		const listener = vi.fn();
-
-		subscribeCommandMods(listener);
-
-		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith([makeMod()]);
-	});
-
-	it('setCommandMods notifies subscribers of the new list', () => {
-		const listener = vi.fn();
-		subscribeCommandMods(listener);
-		listener.mockClear();
-
-		setCommandMods([makeMod({ id: 2, name: 'Beta' })]);
-
-		expect(listener).toHaveBeenCalledTimes(1);
-		expect(listener).toHaveBeenCalledWith([makeMod({ id: 2, name: 'Beta' })]);
-	});
-
 	it('mutating the array passed to setCommandMods afterwards does not affect the stored state', () => {
-		const mods: CommandMod[] = [makeMod()];
+		const mods: CommandMod[] = [{ id: 1, name: 'Alpha', author: 'Someone' }];
 		const listener = vi.fn();
 		subscribeCommandMods(listener);
 		listener.mockClear();
 
 		setCommandMods(mods);
-		mods.push(makeMod({ id: 2, name: 'Beta' }));
+		mods.push({ id: 2, name: 'Beta', author: 'Someone' });
 
-		expect(listener).toHaveBeenCalledWith([makeMod()]);
-	});
-
-	it('stops delivering notifications to a subscriber after unsubscribe', () => {
-		const listener = vi.fn();
-		const unsubscribe = subscribeCommandMods(listener);
-		listener.mockClear();
-
-		unsubscribe();
-		setCommandMods([makeMod()]);
-
-		expect(listener).not.toHaveBeenCalled();
+		expect(listener).toHaveBeenCalledWith([{ id: 1, name: 'Alpha', author: 'Someone' }]);
 	});
 });
 

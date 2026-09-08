@@ -25,33 +25,17 @@ beforeEach(() => {
 	);
 });
 
-describe('minimizeWindow', () => {
-	it('minimizes the current window', async () => {
-		appWindow.minimize.mockResolvedValue(undefined);
+describe('window controls', () => {
+	it.each([
+		{ id: 'minimize', call: minimizeWindow, spy: appWindow.minimize },
+		{ id: 'toggleMaximize', call: toggleMaximizeWindow, spy: appWindow.toggleMaximize },
+		{ id: 'close', call: closeWindow, spy: appWindow.close }
+	])('$id acts on the current window', async ({ call, spy }) => {
+		spy.mockResolvedValue(undefined);
 
-		await minimizeWindow();
+		await call();
 
-		expect(appWindow.minimize).toHaveBeenCalledTimes(1);
-	});
-});
-
-describe('toggleMaximizeWindow', () => {
-	it('toggles the maximized state of the current window', async () => {
-		appWindow.toggleMaximize.mockResolvedValue(undefined);
-
-		await toggleMaximizeWindow();
-
-		expect(appWindow.toggleMaximize).toHaveBeenCalledTimes(1);
-	});
-});
-
-describe('closeWindow', () => {
-	it('closes the current window', async () => {
-		appWindow.close.mockResolvedValue(undefined);
-
-		await closeWindow();
-
-		expect(appWindow.close).toHaveBeenCalledTimes(1);
+		expect(spy).toHaveBeenCalledTimes(1);
 	});
 });
 

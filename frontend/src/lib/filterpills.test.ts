@@ -55,35 +55,35 @@ describe('pillDefinitions', () => {
 		expect(defOf(defs, 'category').options).toEqual([]);
 	});
 
-	it('defines type, fika, state and featured pills with fixed options', () => {
-		const defs = pillDefinitions([], null);
-		expect(defOf(defs, 'type').options).toEqual([
-			{ id: 'client', label: 'Client', chips: ['client'] },
-			{ id: 'server', label: 'Server', chips: ['server'] }
-		]);
-		expect(defOf(defs, 'fika').options).toEqual([
-			{ id: 'fika', label: 'Compatible', chips: ['fika'] }
-		]);
-		expect(defOf(defs, 'state').options).toEqual([
-			{ id: 'installed', label: 'Installed', chips: ['installed'] },
-			{ id: 'disabled', label: 'Disabled', chips: ['disabled'] }
-		]);
-		expect(defOf(defs, 'featured').options).toEqual([
-			{ id: 'featured', label: 'Featured', chips: ['featured'] }
-		]);
-	});
-
-	it('returns all six pill keys, all of radio kind', () => {
-		const defs = pillDefinitions(['Weapons'], null);
-		expect(defs.map((def) => def.key)).toEqual([
-			'compatibility',
-			'category',
-			'type',
-			'fika',
-			'state',
-			'featured'
-		]);
-		expect(defs.every((def) => def.kind === 'radio')).toBe(true);
+	it.each([
+		{
+			id: 'type',
+			key: 'type' as PillKey,
+			options: [
+				{ id: 'client', label: 'Client', chips: ['client'] },
+				{ id: 'server', label: 'Server', chips: ['server'] }
+			]
+		},
+		{
+			id: 'fika',
+			key: 'fika' as PillKey,
+			options: [{ id: 'fika', label: 'Compatible', chips: ['fika'] }]
+		},
+		{
+			id: 'state',
+			key: 'state' as PillKey,
+			options: [
+				{ id: 'installed', label: 'Installed', chips: ['installed'] },
+				{ id: 'disabled', label: 'Disabled', chips: ['disabled'] }
+			]
+		},
+		{
+			id: 'featured',
+			key: 'featured' as PillKey,
+			options: [{ id: 'featured', label: 'Featured', chips: ['featured'] }]
+		}
+	])('the $id pill offers the labels and chips shown in the filter bar', ({ key, options }) => {
+		expect(defOf(pillDefinitions([], null), key).options).toEqual(options);
 	});
 });
 
@@ -227,8 +227,17 @@ describe('removePill', () => {
 describe('availablePills', () => {
 	const defs = pillDefinitions(['Weapons'], null);
 
-	it('returns every definition when nothing is active', () => {
-		expect(availablePills(makeFilter(), defs)).toEqual(defs);
+	it('offers every pill in display order when nothing is active', () => {
+		const result = availablePills(makeFilter(), defs);
+		expect(result).toEqual(defs);
+		expect(result.map((def) => def.key)).toEqual([
+			'compatibility',
+			'category',
+			'type',
+			'fika',
+			'state',
+			'featured'
+		]);
 	});
 
 	it('excludes only the pills that are currently active', () => {
@@ -239,7 +248,7 @@ describe('availablePills', () => {
 });
 
 describe('QUICK_TABS', () => {
-	it('lists the five quick-tab ids and labels in order', () => {
+	it('names the quick tabs in the order the tab strip shows them', () => {
 		expect(QUICK_TABS).toEqual([
 			{ id: 'all', label: 'All' },
 			{ id: 'installed', label: 'Installed' },

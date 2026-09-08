@@ -18,66 +18,65 @@ describe('rowKey', () => {
 		});
 	});
 
-	it('ArrowDown is a no-op when there are no rows', () => {
-		expect(rowKey('ArrowDown', state({ ids: [], focusId: null }))).toEqual(IGNORED);
-	});
-
-	it('ArrowUp is a no-op when there are no rows', () => {
-		expect(rowKey('ArrowUp', state({ ids: [], focusId: null }))).toEqual(IGNORED);
-	});
-
-	it('ArrowDown from no focus moves to the first row', () => {
-		expect(rowKey('ArrowDown', state({ focusId: null }))).toEqual({
-			focusId: 10,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
-	});
-
-	it('ArrowDown moves from the middle row to the next one', () => {
-		expect(rowKey('ArrowDown', state({ focusId: 20 }))).toEqual({
+	it.each([
+		{
+			id: 'ArrowDown-no-rows',
+			key: 'ArrowDown',
+			ids: [],
+			focusId: null,
+			expected: IGNORED
+		},
+		{
+			id: 'ArrowUp-no-rows',
+			key: 'ArrowUp',
+			ids: [],
+			focusId: null,
+			expected: IGNORED
+		},
+		{
+			id: 'ArrowDown-from-none',
+			key: 'ArrowDown',
+			ids: [10, 20, 30],
+			focusId: null,
+			expected: { focusId: 10, action: null, preventDefault: true, handled: true }
+		},
+		{
+			id: 'ArrowDown-middle',
+			key: 'ArrowDown',
+			ids: [10, 20, 30],
+			focusId: 20,
+			expected: { focusId: 30, action: null, preventDefault: true, handled: true }
+		},
+		{
+			id: 'ArrowDown-clamps-at-last',
+			key: 'ArrowDown',
+			ids: [10, 20, 30],
 			focusId: 30,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
-	});
-
-	it('ArrowDown stays on the last row', () => {
-		expect(rowKey('ArrowDown', state({ focusId: 30 }))).toEqual({
-			focusId: 30,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
-	});
-
-	it('ArrowUp from no focus moves to the last row', () => {
-		expect(rowKey('ArrowUp', state({ focusId: null }))).toEqual({
-			focusId: 30,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
-	});
-
-	it('ArrowUp moves from the middle row to the previous one', () => {
-		expect(rowKey('ArrowUp', state({ focusId: 20 }))).toEqual({
+			expected: { focusId: 30, action: null, preventDefault: true, handled: true }
+		},
+		{
+			id: 'ArrowUp-from-none',
+			key: 'ArrowUp',
+			ids: [10, 20, 30],
+			focusId: null,
+			expected: { focusId: 30, action: null, preventDefault: true, handled: true }
+		},
+		{
+			id: 'ArrowUp-middle',
+			key: 'ArrowUp',
+			ids: [10, 20, 30],
+			focusId: 20,
+			expected: { focusId: 10, action: null, preventDefault: true, handled: true }
+		},
+		{
+			id: 'ArrowUp-clamps-at-first',
+			key: 'ArrowUp',
+			ids: [10, 20, 30],
 			focusId: 10,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
-	});
-
-	it('ArrowUp stays on the first row', () => {
-		expect(rowKey('ArrowUp', state({ focusId: 10 }))).toEqual({
-			focusId: 10,
-			action: null,
-			preventDefault: true,
-			handled: true
-		});
+			expected: { focusId: 10, action: null, preventDefault: true, handled: true }
+		}
+	])('$id', ({ key, ids, focusId, expected }) => {
+		expect(rowKey(key, state({ ids, focusId }))).toEqual(expected);
 	});
 
 	it.each<[string, string]>([

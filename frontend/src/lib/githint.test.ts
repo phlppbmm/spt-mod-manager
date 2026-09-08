@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GIT_DOWNLOAD_URL, GIT_MISSING_CODE, gitMissingHint } from './githint';
+import { GIT_MISSING_CODE, gitMissingHint } from './githint';
 
 /**
  * `githint.ts` is the pure mapping from an RPC error code to the download link
@@ -10,13 +10,9 @@ import { GIT_DOWNLOAD_URL, GIT_MISSING_CODE, gitMissingHint } from './githint';
 describe('gitMissingHint', () => {
 	it('returns the git-scm download link for the GIT_MISSING code', () => {
 		expect(gitMissingHint(GIT_MISSING_CODE)).toEqual({
-			url: GIT_DOWNLOAD_URL,
+			url: 'https://git-scm.com/downloads',
 			label: 'Download Git'
 		});
-	});
-
-	it('points at the official downloads page', () => {
-		expect(GIT_DOWNLOAD_URL).toBe('https://git-scm.com/downloads');
 	});
 
 	it.each([

@@ -57,26 +57,15 @@ function status(overrides: Partial<LaunchStatus> = {}): LaunchStatus {
 }
 
 describe('loadStopServerOnExit', () => {
-	it('defaults to true when nothing was saved', () => {
-		expect(loadStopServerOnExit()).toBe(true);
-	});
+	it.each([
+		{ id: 'nothing-stored', stored: null, expected: true },
+		{ id: '"false"', stored: 'false', expected: false },
+		{ id: '"true"', stored: 'true', expected: true },
+		{ id: 'unrecognised-value', stored: 'garbage', expected: true }
+	])('$id yields $expected', ({ stored, expected }) => {
+		if (stored !== null) localStorage.setItem(STOP_SERVER_KEY, stored);
 
-	it('returns false only for the exact stored string "false"', () => {
-		localStorage.setItem(STOP_SERVER_KEY, 'false');
-
-		expect(loadStopServerOnExit()).toBe(false);
-	});
-
-	it('returns true for the stored string "true"', () => {
-		localStorage.setItem(STOP_SERVER_KEY, 'true');
-
-		expect(loadStopServerOnExit()).toBe(true);
-	});
-
-	it('returns true for any other stored value', () => {
-		localStorage.setItem(STOP_SERVER_KEY, 'garbage');
-
-		expect(loadStopServerOnExit()).toBe(true);
+		expect(loadStopServerOnExit()).toBe(expected);
 	});
 
 	it('propagates an error from a storage backend that cannot be read', () => {
@@ -105,40 +94,28 @@ describe('saveStopServerOnExit', () => {
 });
 
 describe('isGameUp', () => {
-	it('is false for a null status', () => {
-		expect(isGameUp(null)).toBe(false);
-	});
-
-	it('is false when neither process is running', () => {
-		expect(isGameUp(status())).toBe(false);
-	});
-
-	it('is true when only the client is running', () => {
-		expect(isGameUp(status({ client_running: true }))).toBe(true);
-	});
-
-	it('is true when only the server is running', () => {
-		expect(isGameUp(status({ server_running: true }))).toBe(true);
-	});
-
-	it('is true when both are running', () => {
-		expect(isGameUp(status({ server_running: true, client_running: true }))).toBe(true);
+	it.each([
+		{ id: 'null-status', running: null, expected: false },
+		{ id: 'nothing-running', running: {}, expected: false },
+		{ id: 'client-only', running: { client_running: true }, expected: true },
+		{ id: 'server-only', running: { server_running: true }, expected: true },
+		{ id: 'both-running', running: { server_running: true, client_running: true }, expected: true }
+	])('$id is $expected', ({ running, expected }) => {
+		expect(isGameUp(running === null ? null : status(running))).toBe(expected);
 	});
 });
 
 describe('bannerText', () => {
-	it('is empty for a null status', () => {
-		expect(bannerText(null)).toBe('');
-	});
-
-	it('is empty when the game is not running', () => {
-		expect(bannerText(status())).toBe('');
-	});
-
-	it('names the running state when the game is up', () => {
-		expect(bannerText(status({ client_running: true }))).toBe(
-			'The game is running, mod changes are paused'
-		);
+	it.each([
+		{ id: 'null-status', running: null, expected: '' },
+		{ id: 'not-running', running: {}, expected: '' },
+		{
+			id: 'running',
+			running: { client_running: true },
+			expected: 'The game is running, mod changes are paused'
+		}
+	])('$id yields the banner $expected', ({ running, expected }) => {
+		expect(bannerText(running === null ? null : status(running))).toBe(expected);
 	});
 });
 
@@ -316,15 +293,11 @@ describe('launchAction with a Fika host', () => {
 });
 
 describe('nextPollDelay', () => {
-	it('polls slowly for a null status', () => {
-		expect(nextPollDelay(null)).toBe(10000);
-	});
-
-	it('polls slowly while nothing is running', () => {
-		expect(nextPollDelay(status())).toBe(10000);
-	});
-
-	it('polls quickly while the game is running', () => {
-		expect(nextPollDelay(status({ server_running: true }))).toBe(3000);
+	it.each([
+		{ id: 'null-status-slow', running: null, expected: 10000 },
+		{ id: 'idle-slow', running: {}, expected: 10000 },
+		{ id: 'running-fast', running: { server_running: true }, expected: 3000 }
+	])('$id polls after $expected ms', ({ running, expected }) => {
+		expect(nextPollDelay(running === null ? null : status(running))).toBe(expected);
 	});
 });

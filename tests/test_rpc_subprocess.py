@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from conftest import clean_repo_at
+from fixtures_rpc import assert_progress_then_result
 
 SPTMOD_BINARY = shutil.which("sptmod")
 
@@ -90,9 +91,7 @@ def test_install_from_archive_streams_progress_then_a_result_all_valid_json(
     assert process.returncode == 0
     lines = [line for line in process.stdout.splitlines() if line]
     parsed = [json.loads(line) for line in lines]
-    events = [doc["event"] for doc in parsed]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(parsed)
     assert parsed[-1]["data"]["mod"]["name"] == "CoolMod"
 
 

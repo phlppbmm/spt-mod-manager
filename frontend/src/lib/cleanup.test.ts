@@ -52,20 +52,13 @@ describe('categoryLabel', () => {
 });
 
 describe('characterLabel', () => {
-	it('labels pmc as PMC', () => {
-		expect(characterLabel('pmc')).toBe('PMC');
-	});
-
-	it('labels scav as Scav', () => {
-		expect(characterLabel('scav')).toBe('Scav');
-	});
-
-	it('falls back to shared for an empty character', () => {
-		expect(characterLabel('')).toBe('shared');
-	});
-
-	it('falls back to shared for any other character value', () => {
-		expect(characterLabel('boss')).toBe('shared');
+	it.each([
+		{ id: 'pmc', character: 'pmc', expected: 'PMC' },
+		{ id: 'scav', character: 'scav', expected: 'Scav' },
+		{ id: 'empty-character', character: '', expected: 'shared' },
+		{ id: 'unknown-character', character: 'boss', expected: 'shared' }
+	])('$id is labelled $expected', ({ character, expected }) => {
+		expect(characterLabel(character)).toBe(expected);
 	});
 });
 

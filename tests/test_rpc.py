@@ -1,11 +1,10 @@
 """In-process tests for ``sptmod rpc <name>`` (typer ``CliRunner``): the NDJSON
 envelope contract on stdout, progress/result/error line ordering, operation ID
 echoing, wrapped string results, the error → ``{code, details}`` mapping, and
-the request-error exit path. Runs against the real service functions except
-for the error-mapping cases, where the dispatched function is swapped for a
-small stub raising a specific core exception -- the cheapest way to reach
-every ``error_details`` branch without reproducing each error's real
-precondition.
+the request-error exit path. Every case that can be provoked from a real
+precondition -- conflicting installs, an ambiguous mod name, a Forge error
+envelope, an unreadable archive -- is; the ``inject_error`` fixture covers only
+the errors listed in its docstring, whose preconditions no public call reaches.
 """
 
 import json
@@ -14,26 +13,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import respx
 from typer.testing import CliRunner
 
 from conftest import clean_repo_at, invoke_rpc
-from fixture_types import MakeArchive
-from fixtures_rpc import install_request
+from fixture_types import InstallCommit, MakeArchive
+from fixtures_rpc import assert_progress_then_result, install_request
 from sptmod.cli import app
 from sptmod.core import services
 from sptmod.core.errors import (
-    AmbiguousModError,
-    ArchiveError,
-    ConflictError,
     DependencyError,
-    ForgeApiError,
     GitError,
     PartialInstallError,
     ProfileResidueError,
     UnresolvableDependencyError,
 )
+from sptmod.core.forge.client import DEFAULT_BASE_URL
 from sptmod.core.models import (
     Conflict,
+    Json,
     ModInfo,
     ModState,
     ModType,
@@ -99,10 +97,14 @@ def test_success_envelope_carries_event_result_and_the_service_return_value(
 def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
     fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
-    """install_from_archive emits 8 progress events followed by one result event.
+    """install_from_archive reports every published install step, then the result.
 
-    All lines are valid JSON with event field; INSTALL_STEPS enumerate exactly
-    8 install steps, and the final line has event=result instead of progress.
+    Installs a one-file archive through ``sptmod rpc install_from_archive`` and parses
+    every stdout line as JSON; asserts that all lines but the last carry event=progress,
+    that the last carries event=result, that the reported ``step`` names are exactly
+    ``services.INSTALL_STEPS`` in order followed by a closing line on the final step at
+    percent=100. Reason: a caller drives its progress display off these step names and
+    the 100-percent line, so the published step sequence is the observable contract.
     """
     request = install_request(fake_game_dir, make_archive)
 
@@ -111,10 +113,10 @@ def test_progress_lines_precede_the_result_line_and_every_line_is_valid_json(
 
     assert result.exit_code == 0
     parsed = [json.loads(line) for line in raw_lines]
-    events = [doc["event"] for doc in parsed]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
-    assert len(events) == 9  # 8 install steps + 1 result, per INSTALL_STEPS
+    assert_progress_then_result(parsed)
+    expected_steps = [step.value for step in services.INSTALL_STEPS]
+    assert [doc["step"] for doc in parsed[:-1]] == [*expected_steps, expected_steps[-1]]
+    assert parsed[-2]["percent"] == 100
 
 
 def test_operation_id_supplied_by_the_caller_is_echoed_on_every_line(
@@ -159,45 +161,50 @@ def test_operation_id_is_generated_as_32_hex_chars_when_absent_and_identical_eve
 # --------------------------------------------------------------------------
 
 
-def test_set_spt_version_wraps_its_plain_string_result_under_spt_version(
+_WRAPPED_RESULT_CASES: list[tuple[str, Callable[[Path, Path], dict[str, str]], dict[str, Json]]] = [
+    (
+        "set_spt_version",
+        lambda repo_path, _tmp_path: {"path": str(repo_path), "version": "4.2.0"},
+        {"spt_version": "4.2.0"},
+    ),
+    (
+        "export_mods",
+        lambda repo_path, tmp_path: {"path": str(repo_path), "db_path": str(tmp_path / "unused-catalog.db")},
+        {"content": ""},
+    ),
+    (
+        "list_favorites",
+        lambda _repo_path, tmp_path: {"favorites_path": str(tmp_path / "favorites.json")},
+        {"mod_ids": []},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "build_request", "expected_data"),
+    _WRAPPED_RESULT_CASES,
+    ids=["spt_version-string", "content-string", "mod_ids-list"],
+)
+def test_service_results_that_are_not_objects_are_wrapped_under_a_named_field(
     fake_game_dir: Path,
+    tmp_path: Path,
+    name: str,
+    build_request: Callable[[Path, Path], dict[str, str]],
+    expected_data: dict[str, Json],
 ) -> None:
-    """set_spt_version returns plain string \"4.2.0\"; RPC wraps it as data.spt_version.
+    """Service functions returning a bare string or list still answer with a JSON object.
 
-    The RpcSpec for set_spt_version declares wrap=\"spt_version\", so the
-    core service's string result is put under that field in the JSON response.
+    Sets up a clean repository and invokes each of the three RPC functions whose service
+    returns a plain string or list; asserts the single result line carries the value under
+    the field the contract names for it. Reason: every RPC response must be a JSON object
+    so the generated client types stay stable, so a bare value has to be wrapped.
     """
     repo = clean_repo_at(fake_game_dir)
 
-    exit_code, lines = invoke_rpc("set_spt_version", {"path": str(repo.path), "version": "4.2.0"})
+    exit_code, lines = invoke_rpc(name, build_request(repo.path, tmp_path))
 
     assert exit_code == 0
-    assert lines == [{"event": "result", "data": {"spt_version": "4.2.0"}}]
-
-
-def test_export_mods_wraps_its_plain_string_result_under_content(fake_game_dir: Path, tmp_path: Path) -> None:
-    """export_mods returns plain string \"\"; RPC wraps it as data.content.
-
-    The RpcSpec for export_mods declares wrap=\"content\", so the service's
-    string result becomes data.content=\"\" in the JSON response.
-    """
-    repo = clean_repo_at(fake_game_dir)
-    db_path = tmp_path / "unused-catalog.db"
-
-    exit_code, lines = invoke_rpc("export_mods", {"path": str(repo.path), "db_path": str(db_path)})
-
-    assert exit_code == 0
-    assert lines == [{"event": "result", "data": {"content": ""}}]
-
-
-def test_list_favorites_wraps_its_list_result_under_mod_ids(tmp_path: Path) -> None:
-    """A list result is wrapped under the 'mod_ids' field."""
-    favorites_path = tmp_path / "favorites.json"
-
-    exit_code, lines = invoke_rpc("list_favorites", {"favorites_path": str(favorites_path)})
-
-    assert exit_code == 0
-    assert lines == [{"event": "result", "data": {"mod_ids": []}}]
+    assert lines == [{"event": "result", "data": expected_data}]
 
 
 def test_set_favorite_and_list_favorites_round_trip_through_the_rpc_layer(
@@ -225,30 +232,37 @@ def test_set_favorite_and_list_favorites_round_trip_through_the_rpc_layer(
 
 
 def test_conflict_error_details_carry_only_the_conflicts_list(
-    inject_error: Callable[[str, Exception], None],
+    fake_game_dir: Path, make_archive: MakeArchive
 ) -> None:
-    """ConflictError details include the conflicts list and empty residues."""
-    conflict = Conflict(
-        kind="tracked-file",
-        severity="error",
-        message="clashes with X",
-        path=Path("BepInEx/plugins/x.dll"),
-        mod="X",
-    )
-    inject_error("status", ConflictError("boom", conflicts=[conflict]))
+    """A second mod claiming an installed mod's file answers with the blocking conflict.
 
-    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
+    Installs an archive providing BepInEx/plugins/Shared.dll, then installs a second
+    archive under another mod name providing the same file; asserts the RPC call exits 1
+    with code CONFLICT and details listing the tracked-file conflict (path plus the mod
+    that already owns it) and no residues. Reason: the caller renders this list to explain
+    why the install was refused, so both the conflict entries and the empty residues
+    matter.
+    """
+    clean_repo_at(fake_game_dir)
+    first = make_archive({"BepInEx/plugins/Shared.dll": b"first-bytes"}, "zip")
+    assert invoke_rpc("install_from_archive", {"path": str(fake_game_dir), "archive": str(first)})[0] == 0
+    second = make_archive({"BepInEx/plugins/Shared.dll": b"second-bytes"}, "zip")
+
+    exit_code, lines = invoke_rpc(
+        "install_from_archive",
+        {"path": str(fake_game_dir), "archive": str(second), "name_override": "OtherMod"},
+    )
 
     assert exit_code == 1
-    data = lines[0]["data"]
+    data = lines[-1]["data"]
     assert data["code"] == "CONFLICT"
     assert data["details"]["conflicts"] == [
         {
             "kind": "tracked-file",
             "severity": "error",
-            "message": "clashes with X",
-            "path": "BepInEx/plugins/x.dll",
-            "mod": "X",
+            "message": "BepInEx/plugins/Shared.dll is already provided by mod Shared",
+            "path": "BepInEx/plugins/Shared.dll",
+            "mod": "Shared",
         }
     ]
     assert data["details"]["residues"] == []
@@ -362,41 +376,49 @@ def test_git_error_details_carry_the_conflicting_paths(
     assert data["details"]["conflicting_paths"] == ["a/b.txt", "c.txt"]
 
 
-def test_ambiguous_mod_error_details_carry_name_and_candidates_unsorted(
-    inject_error: Callable[[str, Exception], None],
+def test_ambiguous_mod_error_details_carry_the_requested_name_and_the_candidates(
+    fake_game_dir: Path, install_commit: InstallCommit
 ) -> None:
-    """AmbiguousModError(\"Foo\", [\"FooB\", \"FooA\"]) maps to details.name and candidates.
+    """Removing a mod by a name that matches two installs reports both candidates.
 
-    error_details() returns the error's own candidate order untouched, so
-    details.candidates=[\"FooB\", \"FooA\"] preserves insertion order.
+    Installs "CoolMod" and "coolmod" into one game directory and asks
+    ``sptmod rpc remove_mod`` to remove "COOLMOD"; asserts exit 1, code AMBIGUOUS_MOD and
+    details carrying the name as typed plus both matching mod names. Reason: the caller
+    turns these candidates into a disambiguation prompt, so it needs the requested name
+    and every match.
     """
-    inject_error("status", AmbiguousModError("Foo", ["FooB", "FooA"]))
+    repo = clean_repo_at(fake_game_dir)
+    install_commit(repo, "CoolMod", minute=1)
+    install_commit(repo, "coolmod", minute=2)
 
-    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("remove_mod", {"path": str(fake_game_dir), "name": "COOLMOD"})
 
     assert exit_code == 1
-    data = lines[0]["data"]
+    data = lines[-1]["data"]
     assert data["code"] == "AMBIGUOUS_MOD"
-    assert data["details"]["name"] == "Foo"
-    # error_details() passes the error's own (unsorted) candidate order
-    # through untouched; only the exception's message text sorts them.
-    assert data["details"]["candidates"] == ["FooB", "FooA"]
+    assert data["details"]["name"] == "COOLMOD"
+    assert data["details"]["candidates"] == ["CoolMod", "coolmod"]
 
 
-def test_forge_api_error_details_carry_the_upstream_code_and_status(
-    inject_error: Callable[[str, Exception], None],
-) -> None:
-    """ForgeApiError(\"NOT_FOUND\", \"mod is gone\", 404) maps to details fields.
+def test_forge_api_error_details_carry_the_upstream_code_and_status(tmp_path: Path) -> None:
+    """A Forge error envelope is passed on with its own code and HTTP status.
 
-    The error code (FORGE_API_ERROR) names the exception class, not the upstream
-    code; details.api_code=\"NOT_FOUND\" and details.api_status=404 preserve both.
+    Mocks the Forge answering the version list of mod 42 with an unsuccessful envelope
+    (code NOT_FOUND, message "mod is gone") under HTTP 404 and asks
+    ``sptmod rpc get_mod_details`` for that mod; asserts exit 1, the envelope code naming
+    the exception class, the upstream message as the error text, and details preserving
+    the upstream api_code and api_status. Reason: the caller needs the upstream code and
+    status to tell a deleted mod from a temporary Forge failure.
     """
-    inject_error("status", ForgeApiError("NOT_FOUND", "mod is gone", 404))
+    error_envelope = {"success": False, "code": "NOT_FOUND", "message": "mod is gone"}
+    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
+        router.get("/mod/42/versions").respond(404, json=error_envelope)
+        router.get("/mod/42").respond(404, json=error_envelope)
 
-    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
+        exit_code, lines = invoke_rpc("get_mod_details", {"mod_id": 42, "db_path": str(tmp_path / "catalog.db")})
 
     assert exit_code == 1
-    data = lines[0]["data"]
+    data = lines[-1]["data"]
     # The envelope code names the exception class, not the upstream code.
     assert data["code"] == "FORGE_API_ERROR"
     assert data["error"] == "mod is gone"
@@ -404,20 +426,23 @@ def test_forge_api_error_details_carry_the_upstream_code_and_status(
     assert data["details"]["api_status"] == 404
 
 
-def test_error_without_structured_payload_gets_empty_details(
-    inject_error: Callable[[str, Exception], None],
-) -> None:
-    """ArchiveError(\"archive is corrupt\") hits error_details default branch.
+def test_error_without_structured_payload_gets_empty_details(fake_game_dir: Path, tmp_path: Path) -> None:
+    """An unreadable archive answers with every details field at its empty default.
 
-    The function returns schemas.ErrorDetails() with all fields set to empty
-    defaults (conflicts=[], residues=[], api_status=0, etc.).
+    Points ``sptmod rpc install_from_archive`` at a file that carries a zip signature but
+    no readable archive; asserts exit 1, code ARCHIVE_ERROR and a details object whose
+    every field is present and empty. Reason: the generated client types declare all
+    details fields as required, so an error carrying no structured payload must still
+    serialise the complete object rather than omitting fields or emitting null.
     """
-    inject_error("status", ArchiveError("archive is corrupt"))
+    clean_repo_at(fake_game_dir)
+    broken = tmp_path / "broken.zip"
+    broken.write_bytes(b"PK\x03\x04 truncated before any entry")
 
-    exit_code, lines = invoke_rpc("status", {"path": "/whatever"})
+    exit_code, lines = invoke_rpc("install_from_archive", {"path": str(fake_game_dir), "archive": str(broken)})
 
     assert exit_code == 1
-    data = lines[0]["data"]
+    data = lines[-1]["data"]
     assert data["code"] == "ARCHIVE_ERROR"
     assert data["details"] == {
         "conflicts": [],

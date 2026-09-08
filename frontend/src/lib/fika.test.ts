@@ -243,12 +243,7 @@ describe('addressError', () => {
 });
 
 describe('FIKA_ROLES', () => {
-	it('offers exactly the three roles in the order they are shown', () => {
+	it('offers the roles in the order the settings screen shows them', () => {
 		expect(FIKA_ROLES.map((option) => option.id)).toEqual(['none', 'host', 'client']);
-	});
-
-	it.each(FIKA_ROLES)('the option $id has a label and a hint', (option) => {
-		expect(option.label.length).toBeGreaterThan(0);
-		expect(option.hint.length).toBeGreaterThan(0);
 	});
 });

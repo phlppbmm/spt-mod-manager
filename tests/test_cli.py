@@ -86,73 +86,31 @@ def test_install_file_with_a_version_override_prints_no_versionless_hint(
     assert "--version" not in result.stdout
 
 
-def test_list_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
+@pytest.mark.parametrize(
+    "argv",
+    [["list"], ["files", "CoolMod"], ["history"]],
+    ids=["list", "files-by-name", "history"],
+)
+def test_read_only_commands_exit_zero_on_a_repository_with_one_installed_mod(
+    argv: list[str],
+    fake_game_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    install_commit: InstallCommit,
 ) -> None:
-    """The list command exits 0 when the repository has one mod installed.
+    """The commands that only read the repository succeed on an ordinary installation.
 
-    Creates a repo with a single installed mod and runs ``sptmod list``;
-    must exit with code 0.
+    Creates a game directory with a single install commit for "CoolMod" and runs each
+    reading command from inside it; asserts every one exits 0. Reason: these are the
+    commands a user reaches for first, so a failure to even read the repository has to
+    surface immediately.
     """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["list"])
+    result = runner.invoke(app, argv)
 
     assert result.exit_code == 0
-
-
-def test_files_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """The files command exits 0 when querying an installed mod by name.
-
-    Creates a repo with one installed mod named "CoolMod" and runs
-    ``sptmod files CoolMod``; must exit with code 0.
-    """
-    repo = clean_repo_at(fake_game_dir)
-    install_commit(repo, "CoolMod")
-    monkeypatch.chdir(fake_game_dir)
-
-    result = runner.invoke(app, ["files", "CoolMod"])
-
-    assert result.exit_code == 0
-
-
-def test_history_happy_path_exits_zero(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """The history command exits 0 when the repository has one install commit.
-
-    Creates a repo with a mod install commit and runs ``sptmod history``;
-    must exit with code 0.
-    """
-    repo = clean_repo_at(fake_game_dir)
-    install_commit(repo, "CoolMod")
-    monkeypatch.chdir(fake_game_dir)
-
-    result = runner.invoke(app, ["history"])
-
-    assert result.exit_code == 0
-
-
-def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """The remove command exits 0 and prints the mod name to stdout.
-
-    Removes an installed mod with ``--yes``; must exit with code 0 and print
-    the mod name "CoolMod" to stdout.
-    """
-    repo = clean_repo_at(fake_game_dir)
-    install_commit(repo, "CoolMod")
-    monkeypatch.chdir(fake_game_dir)
-
-    result = runner.invoke(app, ["remove", "CoolMod", "--yes"])
-
-    assert result.exit_code == 0
-    assert "CoolMod" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -185,40 +143,32 @@ def test_remove_without_yes_prompts_and_declining_removes_nothing(
     assert dll.exists()
 
 
-def test_remove_without_yes_prompts_and_confirming_removes_the_mod(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
+@pytest.mark.parametrize(
+    ("extra_args", "stdin"),
+    [([], "y\n"), (["--yes"], None)],
+    ids=["confirm-at-prompt", "yes-flag"],
+)
+def test_an_approved_removal_deletes_the_mod_files_and_reports_the_mod(
+    extra_args: list[str],
+    stdin: str | None,
+    fake_game_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    install_commit: InstallCommit,
 ) -> None:
-    """Confirming the prompt removes the mod and exits 0.
+    """A removal the user approves deletes the mod files, whether approved at the prompt
+    or up front with ``--yes``.
 
-    Runs ``sptmod remove <name>`` without ``--yes`` and answers "y"; must exit
-    with code 0, print the mod name, and the DLL must no longer exist.
+    Installs "CoolMod" and removes it once by answering "y" at the confirmation prompt and
+    once by passing ``--yes`` without any input; asserts both exit 0, name the mod on
+    stdout and leave its DLL deleted. Reason: ``--yes`` exists to skip the question, not
+    to take a different path, so both routes must end in the same removal.
     """
     repo = clean_repo_at(fake_game_dir)
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
     dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
 
-    result = runner.invoke(app, ["remove", "CoolMod"], input="y\n")
-
-    assert result.exit_code == 0
-    assert "CoolMod" in result.stdout
-    assert not dll.exists()
-
-
-def test_remove_with_yes_flag_skips_the_confirmation_prompt(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """The --yes flag bypasses the confirmation prompt and removes the mod.
-
-    Runs ``sptmod remove <name> --yes``; must exit with code 0, print the mod
-    name, and the DLL must no longer exist (no interactive prompt).
-    """
-    repo = clean_repo_at(fake_game_dir)
-    install_commit(repo, "CoolMod")
-    monkeypatch.chdir(fake_game_dir)
-    dll = fake_game_dir / "BepInEx/plugins/CoolMod.dll"
-
-    result = runner.invoke(app, ["remove", "CoolMod", "--yes"])
+    result = runner.invoke(app, ["remove", "CoolMod", *extra_args], input=stdin)
 
     assert result.exit_code == 0
     assert "CoolMod" in result.stdout

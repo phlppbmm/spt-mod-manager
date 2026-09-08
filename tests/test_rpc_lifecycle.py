@@ -6,19 +6,14 @@ directory-browsing and init routes plus ``list_mods``, ``mod_files``,
 routes run against the real service functions on a temporary game directory.
 """
 
-import dataclasses
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from conftest import invoke_rpc
 from fixture_types import InstallCommit, JsonDict
-from sptmod.core import services
-from sptmod.core.errors import InvalidPathError
 from sptmod.core.repo import Repo
-from sptmod.server import rpc
 
 # --------------------------------------------------------------------------
 # Directory browsing / init: locate_directory, init_game_dir.
@@ -26,36 +21,33 @@ from sptmod.server import rpc
 
 
 def test_locate_directory_serialises_every_matched_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The route renders the service's result list as JSON objects.
+    """Every directory matching the picked folder's name and entries is reported with
+    whether it is a game directory.
 
-    Which directories the search finds is pinned at the service level; here
-    the dispatched function is swapped for a stub returning known matches so
-    that only the transport is under test.
+    Points the home directory at a scratch tree holding two folders named "SPT" that both
+    carry the "BepInEx" and "cache" entries the browser passed on, only one of which also
+    has a runtime directory, and calls ``sptmod rpc locate_directory``; asserts both are
+    reported with their absolute paths and only the complete one as is_game_dir. Reason:
+    the browser hands over a folder name plus a few entry names and relies on this answer
+    to offer the right candidate.
     """
-    matches = [
-        services.LocatedDirectory(path=tmp_path / "games" / "SPT", is_game_dir=True),
-        services.LocatedDirectory(path=tmp_path / "backup" / "SPT", is_game_dir=False),
-    ]
-    original = rpc.RPC_FUNCTIONS["locate_directory"]
-
-    def locate(**_kwargs: object) -> list[services.LocatedDirectory]:
-        return matches
-
-    monkeypatch.setitem(
-        rpc.RPC_FUNCTIONS, "locate_directory", dataclasses.replace(original, function=locate)
-    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for parent, runtime in (("games", True), ("backup", False)):
+        candidate = tmp_path / parent / "SPT"
+        (candidate / "BepInEx").mkdir(parents=True)
+        (candidate / "cache").mkdir()
+        if runtime:
+            (candidate / "SPT_Runtime").mkdir()
 
     exit_code, lines = invoke_rpc("locate_directory", {"name": "SPT", "fingerprint": ["BepInEx", "cache"]})
 
     assert exit_code == 0
-    assert lines == [
-        {
-            "event": "result",
-            "data": [
-                {"path": str(tmp_path / "games" / "SPT"), "is_game_dir": True},
-                {"path": str(tmp_path / "backup" / "SPT"), "is_game_dir": False},
-            ],
-        }
+    # The search also covers the machine's mount points, whose contents no test
+    # controls, so only the entries below the scratch home are compared.
+    found = [entry for entry in lines[0]["data"] if str(entry["path"]).startswith(str(tmp_path))]
+    assert sorted(found, key=lambda entry: str(entry["path"])) == [
+        {"path": str(tmp_path / "backup" / "SPT"), "is_game_dir": False},
+        {"path": str(tmp_path / "games" / "SPT"), "is_game_dir": True},
     ]
 
 
@@ -283,20 +275,27 @@ def test_clean_profile_writes_the_profile_and_reports_a_snapshot_through_rpc(
     assert cleaned["characters"]["pmc"]["Inventory"]["items"] == []
 
 
-def test_clean_profile_maps_invalid_path_error_to_the_invalid_path_code(
-    inject_error: Callable[[str, Exception], None],
+def test_clean_profile_naming_a_profile_that_does_not_exist_reports_invalid_path(
+    clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
-    """clean_profile raises InvalidPathError(\"no such profile\") and error code becomes INVALID_PATH.
+    """Cleaning a profile the game directory does not have is refused as an invalid path.
 
-    The ERROR_MAPPING at errors.py maps InvalidPathError to \"INVALID_PATH\" code
-    for the RPC envelope.
+    Installs "ServerMod" and then asks ``sptmod rpc clean_profile`` to clean that mod out
+    of the profile "ghost", which the game directory does not have; asserts exit 1, code
+    INVALID_PATH and an error message naming the profile. Reason: the caller distinguishes
+    a mistyped profile name from a failed cleanup by this code, so the name must not be
+    silently ignored.
     """
-    inject_error("clean_profile", InvalidPathError("no such profile"))
+    install_commit(clean_repo, "ServerMod", mod_type="server")
 
-    exit_code, lines = invoke_rpc("clean_profile", {"path": "/whatever", "mod_name": "ServerMod"})
+    exit_code, lines = invoke_rpc(
+        "clean_profile",
+        {"path": str(clean_repo.path), "mod_name": "ServerMod", "profiles": ["ghost"]},
+    )
 
     assert exit_code == 1
     assert lines[0]["data"]["code"] == "INVALID_PATH"
+    assert "ghost" in lines[0]["data"]["error"]
 
 
 def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:

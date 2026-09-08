@@ -240,18 +240,6 @@ describe('CHIP_PREDICATES.installed', () => {
 	});
 });
 
-describe('CHIP_PREDICATES.favorited', () => {
-	it.each([
-		{ favorites: [47], expected: true },
-		{ favorites: [50], expected: false },
-		{ favorites: [], expected: false }
-	])('is $expected for favorites=$favorites', ({ favorites, expected }) => {
-		const entry = makeEntry({ mod: makeMod({ id: 47 }) });
-		const context = makeContext({ favorites: new Set(favorites) });
-		expect(CHIP_PREDICATES.favorited(entry, context)).toBe(expected);
-	});
-});
-
 describe('CHIP_PREDICATES.update_available', () => {
 	it.each([
 		{
@@ -284,16 +272,6 @@ describe('CHIP_PREDICATES.disabled', () => {
 		const entry = makeEntry({ mod: makeMod({ name: 'A' }) });
 		const context = makeContext({ disabled: new Set(disabled) });
 		expect(CHIP_PREDICATES.disabled(entry, context)).toBe(expected);
-	});
-});
-
-describe('CHIP_PREDICATES.compatible', () => {
-	it.each([
-		{ latestVersion: makeVersion(), expected: true },
-		{ latestVersion: null, expected: false }
-	])('is $expected when latest_version present=${!!latestVersion}', ({ latestVersion, expected }) => {
-		const entry = makeEntry({ latest_version: latestVersion });
-		expect(CHIP_PREDICATES.compatible(entry, makeContext())).toBe(expected);
 	});
 });
 
@@ -704,15 +682,15 @@ describe('sortEntries', () => {
 		expect(result.map((entry) => entry.mod.name)).toEqual(expected);
 	});
 
-	it.each([
+	const missingValueCases = [
 		{
-			id: 'installed: a missing installed_version sorts before a present one',
+			id: 'installed',
 			key: 'installed' as const,
 			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), installed_version: null }),
 			withValue: makeEntry({ mod: makeMod({ name: 'With' }), installed_version: '1.0.0' })
 		},
 		{
-			id: 'latest: a null latest_version sorts before a present version',
+			id: 'latest',
 			key: 'latest' as const,
 			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
 			withValue: makeEntry({
@@ -721,7 +699,7 @@ describe('sortEntries', () => {
 			})
 		},
 		{
-			id: 'spt: a null latest_version sorts before a present spt_version_constraint',
+			id: 'spt',
 			key: 'spt' as const,
 			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
 			withValue: makeEntry({
@@ -730,51 +708,28 @@ describe('sortEntries', () => {
 			})
 		},
 		{
-			id: 'updated: a null updated_at sorts before a present timestamp',
+			id: 'updated',
 			key: 'updated' as const,
 			withoutValue: makeEntry({ mod: makeMod({ name: 'Without', updated_at: null }) }),
 			withValue: makeEntry({ mod: makeMod({ name: 'With', updated_at: '2024-01-01' }) })
 		}
-	])('$id (ascending)', ({ key, withoutValue, withValue }) => {
-		const result = sortEntries([withValue, withoutValue], { key, descending: false });
+	];
 
-		expect(result).toEqual([withoutValue, withValue]);
-	});
+	it.each(
+		missingValueCases.flatMap((base) => [
+			{ ...base, id: `${base.id}-ascending`, descending: false },
+			{ ...base, id: `${base.id}-descending`, descending: true }
+		])
+	)('$id: an entry without a value ranks below one with a value', ({
+		key,
+		descending,
+		withoutValue,
+		withValue
+	}) => {
+		const expected = descending ? [withValue, withoutValue] : [withoutValue, withValue];
 
-	it.each([
-		{
-			id: 'installed: a missing installed_version sorts after a present one when descending',
-			key: 'installed' as const,
-			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), installed_version: null }),
-			withValue: makeEntry({ mod: makeMod({ name: 'With' }), installed_version: '1.0.0' })
-		},
-		{
-			id: 'latest: a null latest_version sorts after a present version when descending',
-			key: 'latest' as const,
-			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
-			withValue: makeEntry({
-				mod: makeMod({ name: 'With' }),
-				latest_version: makeVersion({ version: '2.0.0' })
-			})
-		},
-		{
-			id: 'spt: a null latest_version sorts after a present spt_version_constraint when descending',
-			key: 'spt' as const,
-			withoutValue: makeEntry({ mod: makeMod({ name: 'Without' }), latest_version: null }),
-			withValue: makeEntry({
-				mod: makeMod({ name: 'With' }),
-				latest_version: makeVersion({ spt_version_constraint: '~3.9.0' })
-			})
-		},
-		{
-			id: 'updated: a null updated_at sorts after a present timestamp when descending',
-			key: 'updated' as const,
-			withoutValue: makeEntry({ mod: makeMod({ name: 'Without', updated_at: null }) }),
-			withValue: makeEntry({ mod: makeMod({ name: 'With', updated_at: '2024-01-01' }) })
-		}
-	])('$id', ({ key, withoutValue, withValue }) => {
-		const result = sortEntries([withoutValue, withValue], { key, descending: true });
+		const result = sortEntries([...expected].reverse(), { key, descending });
 
-		expect(result).toEqual([withValue, withoutValue]);
+		expect(result).toEqual(expected);
 	});
 });

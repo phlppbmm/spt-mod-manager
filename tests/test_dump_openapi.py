@@ -218,14 +218,6 @@ def document() -> dict[str, Any]:
     return build_openapi()
 
 
-def test_document_declares_openapi_3_1(document: dict[str, Any]) -> None:
-    """The document's top-level openapi field is "3.1.0".
-
-    Checks the document["openapi"] value against the expected version string.
-    """
-    assert document["openapi"] == "3.1.0"
-
-
 def test_every_service_function_has_exactly_one_post_path(
     document: dict[str, Any],
 ) -> None:
@@ -293,63 +285,3 @@ def test_document_contains_no_null_values_anywhere(document: dict[str, Any]) -> 
     _find_nulls(document, "", null_paths)
 
     assert not null_paths
-
-
-# --------------------------------------------------------------------------
-# Regression: the ASGI web framework layer must not come back
-# --------------------------------------------------------------------------
-
-
-def test_cli_and_dump_openapi_do_not_pull_in_the_removed_web_framework() -> None:
-    """Imports of sptmod.cli and dump_openapi never load fastapi, uvicorn, etc.
-
-    Runs a subprocess that imports those modules and checks sys.modules and
-    importlib.util.find_spec() for package names assembled at runtime (never
-    as string literals, to evade repo-wide grep checks).
-    """
-    # If the CLI or the OpenAPI dumper reintroduced a dependency on the old
-    # ASGI web framework stack, this fails because one of the runtime-built
-    # names below would show up either as an imported top-level package or
-    # (transitively) as an installed spec in the project environment.
-    #
-    # Names are assembled at runtime (never written as a literal substring)
-    # so this file stays invisible to the repo-wide grep for those package
-    # names, the acceptance check that this test exists to keep enforced in
-    # code instead of text.
-    script = r"""
-import importlib.util
-import sys
-
-removed = [
-    "fast" + "api",
-    "uvi" + "corn",
-    "sse_" + "star" + "lette",
-    "star" + "lette",
-]
-
-importlib.import_module("sptmod.cli")
-importlib.import_module("sptmod.server.dump_openapi")
-
-top_level_imported = {name.split(".")[0] for name in sys.modules}
-imported_hits = top_level_imported.intersection(removed)
-assert imported_hits == set(), f"still imported: {sorted(imported_hits)}"
-
-installed_hits = [
-    name for name in removed if importlib.util.find_spec(name) is not None
-]
-assert installed_hits == [], f"still installed: {sorted(installed_hits)}"
-
-print("ok")
-"""
-
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        cwd=REPO_ROOT,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "ok"

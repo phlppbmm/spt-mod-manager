@@ -33,27 +33,47 @@ function createMemoryStorage(): Storage {
 	};
 }
 
+type SystemChangeListener = (event: { matches: boolean }) => void;
+
 interface FakeMediaQuery {
 	matches: boolean;
-	addEventListener: ReturnType<typeof vi.fn>;
-	removeEventListener: ReturnType<typeof vi.fn>;
+	addEventListener: (type: string, listener: SystemChangeListener) => void;
+	removeEventListener: (type: string, listener: SystemChangeListener) => void;
 }
 
-let mediaQuery: FakeMediaQuery;
+let systemPrefersDark: boolean;
+let listeners: Set<SystemChangeListener>;
 let setAttribute: ReturnType<typeof vi.fn>;
 
+/**
+ * Only the `prefers-color-scheme: dark` query reports the simulated system
+ * setting or accepts listeners; every other query behaves like a media
+ * feature that never matches and never changes, as a browser would. Asking
+ * for the wrong query therefore reports "light" and never notifies.
+ */
+function mediaQueryFor(query: string): FakeMediaQuery {
+	const isDarkQuery = query === '(prefers-color-scheme: dark)';
+	return {
+		matches: isDarkQuery && systemPrefersDark,
+		addEventListener: (_type, listener) => {
+			if (isDarkQuery) listeners.add(listener);
+		},
+		removeEventListener: (_type, listener) => {
+			listeners.delete(listener);
+		}
+	};
+}
+
 function emitSystemChange(matches: boolean): void {
-	const listener = mediaQuery.addEventListener.mock.calls[0][1] as (
-		event: { matches: boolean }
-	) => void;
-	listener({ matches });
+	for (const listener of [...listeners]) listener({ matches });
 }
 
 beforeEach(() => {
-	mediaQuery = { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+	systemPrefersDark = false;
+	listeners = new Set<SystemChangeListener>();
 	setAttribute = vi.fn();
 	vi.stubGlobal('localStorage', createMemoryStorage());
-	vi.stubGlobal('matchMedia', vi.fn().mockReturnValue(mediaQuery));
+	vi.stubGlobal('matchMedia', (query: string) => mediaQueryFor(query));
 	vi.stubGlobal('document', { documentElement: { setAttribute } });
 });
 
@@ -96,19 +116,13 @@ describe('savePreference', () => {
 
 describe('systemTheme', () => {
 	it('reports dark while the operating system prefers a dark colour scheme', () => {
-		mediaQuery.matches = true;
+		systemPrefersDark = true;
 
 		expect(systemTheme()).toBe('dark');
 	});
 
 	it('reports light while the operating system prefers a light colour scheme', () => {
 		expect(systemTheme()).toBe('light');
-	});
-
-	it('asks for the prefers-color-scheme media query', () => {
-		systemTheme();
-
-		expect(matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: dark)');
 	});
 });
 
@@ -118,7 +132,7 @@ describe('resolveTheme', () => {
 	});
 
 	it('resolves "system" against the operating system setting', () => {
-		mediaQuery.matches = true;
+		systemPrefersDark = true;
 
 		expect(resolveTheme('system')).toBe('dark');
 	});
@@ -160,10 +174,8 @@ describe('watchSystemTheme', () => {
 
 		const unsubscribe = watchSystemTheme(handler);
 		unsubscribe();
+		emitSystemChange(true);
 
-		expect(mediaQuery.removeEventListener).toHaveBeenCalledWith(
-			'change',
-			mediaQuery.addEventListener.mock.calls[0][1]
-		);
+		expect(handler).not.toHaveBeenCalled();
 	});
 });

@@ -47,35 +47,29 @@ describe('cached', () => {
 		expect(after.value).toBe('second-value');
 	});
 
-	it('isolates keys by call name for the same game dir and args', async () => {
-		const gameDir = '/games/isolated-by-name';
-		const mods = cached(gameDir, 'listMods', [], async () => 'mods-value');
-		await mods.refresh();
+	it.each([
+		{
+			id: 'differing-call-name',
+			primed: { gameDir: '/games/isolated-by-name', call: 'listMods', args: [] as unknown[] },
+			neighbour: { gameDir: '/games/isolated-by-name', call: 'listProfiles', args: [] as unknown[] }
+		},
+		{
+			id: 'differing-args',
+			primed: { gameDir: '/games/isolated-by-args', call: 'getMod', args: [1] as unknown[] },
+			neighbour: { gameDir: '/games/isolated-by-args', call: 'getMod', args: [2] as unknown[] }
+		},
+		{
+			id: 'differing-game-dir',
+			primed: { gameDir: '/games/scope-a', call: 'listMods', args: [] as unknown[] },
+			neighbour: { gameDir: '/games/scope-b', call: 'listMods', args: [] as unknown[] }
+		}
+	])('a neighbouring key with $id is a miss', async ({ primed, neighbour }) => {
+		const view = cached(primed.gameDir, primed.call, primed.args, async () => 'primed-value');
+		await view.refresh();
 
-		const profiles = cached(gameDir, 'listProfiles', [], async () => 'profiles-value');
+		const other = cached(neighbour.gameDir, neighbour.call, neighbour.args, async () => 'other');
 
-		expect(profiles.value).toBeUndefined();
-	});
-
-	it('isolates keys by args for the same game dir and call name', async () => {
-		const gameDir = '/games/isolated-by-args';
-		const withArgOne = cached(gameDir, 'getMod', [1], async () => 'mod-one');
-		await withArgOne.refresh();
-
-		const withArgTwo = cached(gameDir, 'getMod', [2], async () => 'mod-two');
-
-		expect(withArgTwo.value).toBeUndefined();
-	});
-
-	it('scopes entries by game dir so a second game dir starts as a miss', async () => {
-		const gameDirA = '/games/scope-a';
-		const gameDirB = '/games/scope-b';
-		const viewA = cached(gameDirA, 'listMods', [], async () => 'value-a');
-		await viewA.refresh();
-
-		const viewB = cached(gameDirB, 'listMods', [], async () => 'value-b');
-
-		expect(viewB.value).toBeUndefined();
+		expect(other.value).toBeUndefined();
 	});
 });
 

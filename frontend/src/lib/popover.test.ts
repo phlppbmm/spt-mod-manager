@@ -7,59 +7,64 @@ function state(overrides: Partial<PopoverKeyState> = {}): PopoverKeyState {
 }
 
 describe('popoverKey', () => {
-	it('Escape closes the popover regardless of index or count', () => {
-		expect(popoverKey('Escape', state({ count: 0, index: 5 }))).toEqual({
-			close: true,
-			focusIndex: null,
-			preventDefault: true
-		});
-	});
-
-	it('Tab moves focus to the next index', () => {
-		expect(popoverKey('Tab', state({ count: 3, index: 0, shift: false }))).toEqual({
-			close: false,
-			focusIndex: 1,
-			preventDefault: true
-		});
-	});
-
-	it('Tab wraps from the last index back to the first', () => {
-		expect(popoverKey('Tab', state({ count: 3, index: 2, shift: false }))).toEqual({
-			close: false,
-			focusIndex: 0,
-			preventDefault: true
-		});
-	});
-
-	it('Shift+Tab moves focus to the previous index', () => {
-		expect(popoverKey('Tab', state({ count: 3, index: 2, shift: true }))).toEqual({
-			close: false,
-			focusIndex: 1,
-			preventDefault: true
-		});
-	});
-
-	it('Shift+Tab wraps from the first index back to the last', () => {
-		expect(popoverKey('Tab', state({ count: 3, index: 0, shift: true }))).toEqual({
-			close: false,
-			focusIndex: 2,
-			preventDefault: true
-		});
-	});
-
-	it('Tab is a no-op when there are no focusable elements', () => {
-		expect(popoverKey('Tab', state({ count: 0, index: 0, shift: false }))).toEqual({
-			close: false,
-			focusIndex: null,
-			preventDefault: false
-		});
-	});
-
-	it('other keys are a no-op', () => {
-		expect(popoverKey('Enter', state())).toEqual({
-			close: false,
-			focusIndex: null,
-			preventDefault: false
-		});
+	it.each([
+		{
+			id: 'Escape-closes',
+			key: 'Escape',
+			count: 0,
+			index: 5,
+			shift: false,
+			expected: { close: true, focusIndex: null, preventDefault: true }
+		},
+		{
+			id: 'Tab-next',
+			key: 'Tab',
+			count: 3,
+			index: 0,
+			shift: false,
+			expected: { close: false, focusIndex: 1, preventDefault: true }
+		},
+		{
+			id: 'Tab-wraps-to-first',
+			key: 'Tab',
+			count: 3,
+			index: 2,
+			shift: false,
+			expected: { close: false, focusIndex: 0, preventDefault: true }
+		},
+		{
+			id: 'ShiftTab-previous',
+			key: 'Tab',
+			count: 3,
+			index: 2,
+			shift: true,
+			expected: { close: false, focusIndex: 1, preventDefault: true }
+		},
+		{
+			id: 'ShiftTab-wraps-to-last',
+			key: 'Tab',
+			count: 3,
+			index: 0,
+			shift: true,
+			expected: { close: false, focusIndex: 2, preventDefault: true }
+		},
+		{
+			id: 'Tab-no-focusables',
+			key: 'Tab',
+			count: 0,
+			index: 0,
+			shift: false,
+			expected: { close: false, focusIndex: null, preventDefault: false }
+		},
+		{
+			id: 'other-key-noop',
+			key: 'Enter',
+			count: 3,
+			index: 0,
+			shift: false,
+			expected: { close: false, focusIndex: null, preventDefault: false }
+		}
+	])('$id', ({ key, count, index, shift, expected }) => {
+		expect(popoverKey(key, state({ count, index, shift }))).toEqual(expected);
 	});
 });

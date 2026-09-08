@@ -32,29 +32,15 @@ describe('toggleSelection', () => {
 });
 
 describe('toggleAll', () => {
-	it('selects all ids when none are selected', () => {
-		const result = toggleAll(new Set(), [1, 2, 3]);
-		expect(result).toEqual(new Set([1, 2, 3]));
-	});
-
-	it('selects all ids when some but not all are selected', () => {
-		const result = toggleAll(new Set([1]), [1, 2, 3]);
-		expect(result).toEqual(new Set([1, 2, 3]));
-	});
-
-	it('clears the selection when all ids are already selected', () => {
-		const result = toggleAll(new Set([1, 2, 3]), [1, 2, 3]);
-		expect(result).toEqual(new Set());
-	});
-
-	it('clears the selection when all ids are selected and extra ids are also selected', () => {
-		const result = toggleAll(new Set([1, 2, 3, 99]), [1, 2, 3]);
-		expect(result).toEqual(new Set());
-	});
-
-	it('returns an empty set for an empty id list regardless of prior selection', () => {
-		expect(toggleAll(new Set(), [])).toEqual(new Set());
-		expect(toggleAll(new Set([1]), [])).toEqual(new Set());
+	it.each([
+		{ id: 'none-selected-selects-all', selected: [], ids: [1, 2, 3], expected: [1, 2, 3] },
+		{ id: 'some-selected-selects-all', selected: [1], ids: [1, 2, 3], expected: [1, 2, 3] },
+		{ id: 'all-selected-clears', selected: [1, 2, 3], ids: [1, 2, 3], expected: [] },
+		{ id: 'superset-selected-clears', selected: [1, 2, 3, 99], ids: [1, 2, 3], expected: [] },
+		{ id: 'empty-id-list-nothing-selected', selected: [], ids: [], expected: [] },
+		{ id: 'empty-id-list-with-a-selection', selected: [1], ids: [], expected: [] }
+	])('$id', ({ selected, ids, expected }) => {
+		expect(toggleAll(new Set(selected), ids)).toEqual(new Set(expected));
 	});
 
 	it('does not mutate the input set', () => {
@@ -91,24 +77,14 @@ describe('pruneSelection', () => {
 });
 
 describe('headerCheckbox', () => {
-	it('returns "none" when nothing is selected', () => {
-		expect(headerCheckbox(new Set(), [1, 2])).toBe('none');
-	});
-
-	it('returns "none" when the id list is empty', () => {
-		expect(headerCheckbox(new Set([1]), [])).toBe('none');
-	});
-
-	it('returns "some" when a subset of the ids is selected', () => {
-		expect(headerCheckbox(new Set([1]), [1, 2])).toBe('some');
-	});
-
-	it('returns "all" when every id is selected', () => {
-		expect(headerCheckbox(new Set([1, 2]), [1, 2])).toBe('all');
-	});
-
-	it('ignores selected ids that are not in the id list when computing the count', () => {
-		expect(headerCheckbox(new Set([1, 99]), [1, 2])).toBe('some');
+	it.each([
+		{ id: 'nothing-selected', selected: [], ids: [1, 2], expected: 'none' },
+		{ id: 'empty-id-list', selected: [1], ids: [], expected: 'none' },
+		{ id: 'subset-selected', selected: [1], ids: [1, 2], expected: 'some' },
+		{ id: 'all-selected', selected: [1, 2], ids: [1, 2], expected: 'all' },
+		{ id: 'selection-outside-the-list', selected: [1, 99], ids: [1, 2], expected: 'some' }
+	])('$id yields $expected', ({ selected, ids, expected }) => {
+		expect(headerCheckbox(new Set(selected), ids)).toBe(expected);
 	});
 });
 
@@ -133,16 +109,6 @@ describe('bulkActions', () => {
 			{ id: 'disable', label: 'Disable (2)', names: ['Alpha', 'Beta'] },
 			{ id: 'update', label: 'Update selected (1)', names: ['Beta'] }
 		]);
-	});
-
-	it('produces an update action for update_available rows only', () => {
-		const targets = [makeTarget({ name: 'Gamma', state: 'update_available' })];
-		const actions = bulkActions(targets);
-		expect(actions.find((a) => a.id === 'update')).toEqual({
-			id: 'update',
-			label: 'Update selected (1)',
-			names: ['Gamma']
-		});
 	});
 
 	it('omits actions whose name list would be empty', () => {

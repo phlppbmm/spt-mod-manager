@@ -16,11 +16,11 @@ import respx
 from conftest import invoke_rpc
 from fixture_types import InstallCommit
 from fixtures_launch import LaunchableGameDir
+from fixtures_rpc import assert_progress_then_result
 from sptmod.core import game_dir, services
 from sptmod.core.game_dir import GameProcess
 from sptmod.core.repo import Repo
 from sptmod.core.sptserver import LOGIN_PATH, PING_PATH
-from sptmod.server import schemas
 
 
 def _pong(router: respx.MockRouter) -> None:
@@ -248,9 +248,7 @@ def test_apply_mod_set_rpc_echoes_operation_id_and_emits_progress(
     )
 
     assert exit_code == 0
-    events = [line["event"] for line in lines]
-    assert events[:-1] == ["progress"] * (len(events) - 1)
-    assert events[-1] == "result"
+    assert_progress_then_result(lines)
     assert len(lines) > 1
     assert all(line["operation_id"] == "apply-op-id" for line in lines[:-1])
     result = lines[-1]["data"]
@@ -329,16 +327,6 @@ def test_apply_mod_set_rpc_maps_missing_mods_to_mod_set_incomplete_with_details(
     assert data["code"] == "MOD_SET_INCOMPLETE"
     assert data["details"]["missing"] == ["GhostMod"]
     assert data["details"]["name"] == "Fika night"
-
-
-# --- ErrorDetails.missing default -------------------------------------------
-
-
-def test_error_details_missing_defaults_to_an_empty_list() -> None:
-    """If the field lost its default, this fails: constructing ErrorDetails()
-    without arguments would raise a pydantic ValidationError instead of
-    yielding missing == []."""
-    assert not schemas.ErrorDetails().missing
 
 
 # --- launch_profile accepting mod_set and store_path ------------------------

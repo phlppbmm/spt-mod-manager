@@ -169,51 +169,96 @@ async fn call_reports_progress_events_in_order_and_ignores_interleaved_junk_line
 }
 
 #[tokio::test]
-async fn call_returns_rpc_error_with_details_preserved_on_error_line_and_exit_1() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = write_script(
-        dir.path(),
-        "stub.sh",
-        "#!/usr/bin/env bash\n\
-         cat >/dev/null\n\
-         echo '{\"event\":\"error\",\"data\":{\"error\":\"archive is corrupt\",\"code\":\"install_failed\",\"details\":{\"path\":\"/mods/x.zip\"}}}'\n\
-         exit 1\n",
-    );
+async fn call_maps_an_error_line_to_an_rpc_error_carrying_its_details() {
+    struct Case {
+        id: &'static str,
+        data: &'static str,
+        expected_details: serde_json::Value,
+    }
+    let cases = [
+        Case {
+            id: "details preserved",
+            data: r#"{"error":"boom","code":"install_failed","details":{"path":"/mods/x.zip"}}"#,
+            expected_details: json!({"path": "/mods/x.zip"}),
+        },
+        Case {
+            id: "details missing defaults to {}",
+            data: r#"{"error":"boom","code":"install_failed"}"#,
+            expected_details: json!({}),
+        },
+    ];
 
-    let _guard = SPAWN_GUARD.lock().await;
-    let error = driver::call(&script, "install_from_archive", &json!({}), |_| {})
-        .await
-        .expect_err("stub emits an error line");
+    for case in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(
+            dir.path(),
+            "stub.sh",
+            &format!(
+                "#!/usr/bin/env bash\ncat >/dev/null\necho '{{\"event\":\"error\",\"data\":{}}}'\nexit 1\n",
+                case.data
+            ),
+        );
 
-    assert_eq!(error.error, "archive is corrupt");
-    assert_eq!(error.code, "install_failed");
-    assert_eq!(error.details, json!({"path": "/mods/x.zip"}));
+        let _guard = SPAWN_GUARD.lock().await;
+        let error = driver::call(&script, "install_from_archive", &json!({}), |_| {})
+            .await
+            .expect_err("stub emits an error line");
+
+        assert_eq!(error.error, "boom", "case: {}", case.id);
+        assert_eq!(error.code, "install_failed", "case: {}", case.id);
+        assert_eq!(error.details, case.expected_details, "case: {}", case.id);
+    }
 }
 
 #[tokio::test]
-async fn call_error_line_without_details_field_defaults_details_to_empty_object() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = write_script(
-        dir.path(),
-        "stub.sh",
-        "#!/usr/bin/env bash\n\
-         cat >/dev/null\n\
-         echo '{\"event\":\"error\",\"data\":{\"error\":\"boom\",\"code\":\"install_failed\"}}'\n\
-         exit 1\n",
-    );
+async fn call_without_a_parseable_final_line_reports_bad_output_with_the_exit_status() {
+    struct Case {
+        id: &'static str,
+        body: &'static str,
+        status: i32,
+    }
+    let cases = [
+        Case {
+            id: "garbage stdout, exit 3",
+            body: "echo 'this is garbage, not an NDJSON event'\n\
+                   echo 'still not a result or error line'\n\
+                   exit 3\n",
+            status: 3,
+        },
+        Case {
+            id: "empty stdout, exit 0",
+            body: "exit 0\n",
+            status: 0,
+        },
+    ];
 
-    let _guard = SPAWN_GUARD.lock().await;
-    let error = driver::call(&script, "install_mod", &json!({}), |_| {})
-        .await
-        .expect_err("stub emits an error line");
+    for case in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(
+            dir.path(),
+            "stub.sh",
+            &format!("#!/usr/bin/env bash\ncat >/dev/null\n{}", case.body),
+        );
 
-    assert_eq!(error.error, "boom");
-    assert_eq!(error.code, "install_failed");
-    assert_eq!(error.details, json!({}));
+        let _guard = SPAWN_GUARD.lock().await;
+        let error = driver::call(&script, "status", &json!({}), |_| {})
+            .await
+            .expect_err("no parseable final line means bad_output");
+
+        assert_eq!(error.code, "bad_output", "case: {}", case.id);
+        assert!(
+            error
+                .error
+                .contains(&format!("exit status: {}", case.status)),
+            "case: {}, message should contain the exit status, got: {}",
+            case.id,
+            error.error
+        );
+    }
 }
 
 #[tokio::test]
-async fn call_returns_bad_output_with_exit_status_and_last_20_stderr_lines_on_garbage_stdout() {
+async fn call_reports_only_the_last_20_stderr_lines_of_a_failing_child() {
     let dir = tempfile::tempdir().unwrap();
     let script = write_script(
         dir.path(),
@@ -221,7 +266,6 @@ async fn call_returns_bad_output_with_exit_status_and_last_20_stderr_lines_on_ga
         "#!/usr/bin/env bash\n\
          cat >/dev/null\n\
          echo 'this is garbage, not an NDJSON event'\n\
-         echo 'still not a result or error line'\n\
          for i in $(seq 1 25); do echo \"err line $i\" >&2; done\n\
          exit 3\n",
     );
@@ -230,13 +274,6 @@ async fn call_returns_bad_output_with_exit_status_and_last_20_stderr_lines_on_ga
     let error = driver::call(&script, "status", &json!({}), |_| {})
         .await
         .expect_err("no parseable final line means bad_output");
-
-    assert_eq!(error.code, "bad_output");
-    assert!(
-        error.error.contains("exit status: 3"),
-        "message should contain the exit status, got: {}",
-        error.error
-    );
 
     let tail_lines: Vec<&str> = error
         .error
@@ -247,28 +284,6 @@ async fn call_returns_bad_output_with_exit_status_and_last_20_stderr_lines_on_ga
     assert_eq!(
         tail_lines, expected,
         "only the last 20 stderr lines, in order"
-    );
-}
-
-#[tokio::test]
-async fn call_returns_bad_output_on_empty_stdout_with_exit_0() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = write_script(
-        dir.path(),
-        "stub.sh",
-        "#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n",
-    );
-
-    let _guard = SPAWN_GUARD.lock().await;
-    let error = driver::call(&script, "status", &json!({}), |_| {})
-        .await
-        .expect_err("empty stdout produces no final line");
-
-    assert_eq!(error.code, "bad_output");
-    assert!(
-        error.error.contains("exit status: 0"),
-        "message should contain the exit status, got: {}",
-        error.error
     );
 }
 
@@ -499,88 +514,41 @@ fn rpc_error_serializes_to_exactly_error_code_details_keys() {
     );
 }
 
+/// The committed `openapi.json` is the shared contract of the four transports
+/// and already feeds the frontend's type generation, so deriving the expected
+/// names from it keeps `FUNCTIONS` from drifting away from the Python service
+/// functions without anyone having to edit a hand-copied list here.
 #[test]
-fn rpc_error_deserializes_missing_details_field_to_empty_object() {
-    let parsed: RpcError =
-        serde_json::from_value(json!({"error": "boom", "code": "install_failed"})).unwrap();
-    assert_eq!(parsed.details, json!({}));
+fn functions_matches_the_routes_of_the_committed_openapi_document() {
+    let document: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../openapi.json"
+    )))
+    .expect("openapi.json parses as JSON");
+    let expected: std::collections::HashSet<&str> = document["paths"]
+        .as_object()
+        .expect("openapi.json declares paths")
+        .keys()
+        .map(|path| {
+            path.strip_prefix("/api/")
+                .expect("every route is an /api/<name> path")
+        })
+        .collect();
+
+    let actual: std::collections::HashSet<&str> = FUNCTIONS.iter().copied().collect();
+
+    assert_eq!(
+        actual.len(),
+        FUNCTIONS.len(),
+        "FUNCTIONS must contain no duplicates"
+    );
+    assert_eq!(actual, expected);
 }
 
+/// The `unknown_function` guard in `rpc::rpc` is `!FUNCTIONS.contains(&name)`
+/// and needs an `AppHandle` to reach, so this exercises the same Tauri-free
+/// seam: a name the contract does not list must not be accepted.
 #[test]
-fn functions_has_50_unique_entries_matching_python_rpc_functions_keys() {
-    // Hardcoded from the keys of RPC_FUNCTIONS in
-    // src/sptmod/server/rpc.py, as of the time this test was written.
-    // If the Python dict's key set changes, this must be updated in lockstep
-    // to keep the Rust FUNCTIONS list from silently drifting.
-    let mut expected_from_python = vec![
-        "list_directories",
-        "locate_directory",
-        "init_game_dir",
-        "set_spt_version",
-        "install_from_archive",
-        "list_mods",
-        "mod_files",
-        "remove_mod",
-        "list_profiles",
-        "check_profiles",
-        "plan_profile_cleanup",
-        "clean_profile",
-        "history",
-        "sync_catalog",
-        "search_catalog",
-        "browse_catalog",
-        "disable_mod",
-        "enable_mod",
-        "adopt_mod",
-        "status",
-        "snapshot",
-        "export_mods",
-        "import_list",
-        "clear_catalog_cache",
-        "get_mod_details",
-        "plan_mod_install",
-        "install_mod",
-        "check_updates",
-        "update_mod",
-        "list_favorites",
-        "set_favorite",
-        "list_mod_sets",
-        "save_mod_set",
-        "delete_mod_set",
-        "rename_mod_set",
-        "export_mod_set",
-        "import_mod_set",
-        "bind_profile_set",
-        "plan_mod_set",
-        "apply_mod_set",
-        "launch_profile",
-        "launch_status",
-        "stop_game",
-        "list_spt_releases",
-        "apply_spt_release",
-        "revert_spt_update",
-        "get_fika_settings",
-        "set_fika_settings",
-        "list_host_profiles",
-        "plan_fika_install",
-    ];
-    expected_from_python.sort_unstable();
-
-    let mut actual: Vec<&str> = FUNCTIONS.to_vec();
-    actual.sort_unstable();
-
-    assert_eq!(FUNCTIONS.len(), 50);
-    let unique: std::collections::HashSet<&str> = FUNCTIONS.iter().copied().collect();
-    assert_eq!(unique.len(), 50, "FUNCTIONS must contain no duplicates");
-    assert_eq!(actual, expected_from_python);
-}
-
-/// The `unknown_function` check in `rpc::rpc` (`!FUNCTIONS.contains(&name)`)
-/// requires an `AppHandle` and is not directly callable here. This test
-/// exercises the same Tauri-free seam the command uses to decide whether a
-/// name is known, without spawning a process.
-#[test]
-fn functions_contains_distinguishes_known_from_unknown_names() {
-    assert!(FUNCTIONS.contains(&"list_mods"));
+fn functions_rejects_a_name_the_contract_does_not_list() {
     assert!(!FUNCTIONS.contains(&"totally_made_up_function"));
 }

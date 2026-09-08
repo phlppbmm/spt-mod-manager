@@ -43,6 +43,7 @@ from sptmod.core.errors import (
     GitError,
     NotAGameDirError,
     SptReleaseUnavailableError,
+    SptReleaseWriteError,
 )
 from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY, GameLayout
 from sptmod.core.models import ModFile, Progress
@@ -1512,7 +1513,7 @@ def test_a_release_that_could_not_be_written_is_finished_by_the_next_change(
     loader = spt_game_dir / "winhttp.dll"
     loader.chmod(0o444)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(SptReleaseWriteError):
         services.apply_spt_release(spt_game_dir, NEWEST)
 
     assert _subjects(spt_game_dir) == [
@@ -1547,3 +1548,90 @@ def test_a_release_that_could_not_be_written_is_finished_by_the_next_change(
     assert (spt_game_dir / "BepInEx/plugins/ModA.dll").read_text(
         encoding="utf-8"
     ) == "mod"
+
+
+@pytest.mark.parametrize(
+    ("obstacle", "blocked_mode", "restored_mode", "expected_file"),
+    [
+        pytest.param(
+            "SPT_Runtime/SPT_Data/configs/core.json",
+            0o444,
+            0o644,
+            "SPT_Runtime/SPT_Data/configs/core.json",
+            id="an installed file that cannot be overwritten",
+        ),
+        pytest.param(
+            "BepInEx/plugins",
+            0o555,
+            0o755,
+            SPT_OWN_PLUGIN,
+            id="a folder that cannot take a new file",
+        ),
+    ],
+)
+def test_apply_says_which_file_it_could_not_write_and_where_the_previous_ones_are(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    obstacle: str,
+    blocked_mode: int,
+    restored_mode: int,
+    expected_file: str,
+) -> None:
+    """apply_spt_release() turns a refused write into a plain SptReleaseWriteError.
+
+    The game directory is made unwritable at one place -- a file of the
+    program set that may not be overwritten and a folder that may not take a
+    new file -- so writing the release stops there. The message has to name
+    that file, what the system said and where the previous files are, instead
+    of letting the raw operating system error reach the caller, and nothing
+    may be committed.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    blocked = spt_game_dir / obstacle
+    blocked.chmod(blocked_mode)
+
+    try:
+        with pytest.raises(SptReleaseWriteError) as failure:
+            services.apply_spt_release(spt_game_dir, NEW)
+    finally:
+        blocked.chmod(restored_mode)
+
+    assert str(failure.value) == (
+        "The game files could not be written: Permission denied. The update "
+        f"stopped at {expected_file}; your previous files are one snapshot back."
+    )
+    assert _subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_the_release_before_a_refused_write_is_one_snapshot_back(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """What the message promises holds: one snapshot back stands the previous release.
+
+    The first release is in place when the second cannot write its loader.
+    Securing the half-written state and undoing that one snapshot puts the
+    files and the version of the first release back, so the promise the
+    message makes is the state the game directory really reaches.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    _offer(spt_release_source, make_spt_release, NEWEST)
+    services.apply_spt_release(spt_game_dir, NEW)
+    loader = spt_game_dir / "winhttp.dll"
+    loader.chmod(0o444)
+
+    try:
+        with pytest.raises(SptReleaseWriteError):
+            services.apply_spt_release(spt_game_dir, NEWEST)
+    finally:
+        loader.chmod(0o644)
+    services.snapshot(spt_game_dir, "the half-written update")
+    result = services.revert_spt_update(spt_game_dir)
+
+    assert result.version == NEW
+    assert loader.read_text(encoding="utf-8") == f"doorstop of {NEW}"
+    assert (spt_game_dir / STALE_MEMBER).read_text(encoding="utf-8") == json.dumps(
+        {"release": NEW}
+    )

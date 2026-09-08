@@ -40,6 +40,7 @@ OTHER_BUILD = "40999"
 BAD_PARAMETER = 2
 RELEASE_UNAVAILABLE = 17
 BUILD_MISMATCH = 18
+WRITE_FAILED = 19
 GIT_FAILED = 10
 
 
@@ -347,6 +348,37 @@ def test_update_to_a_release_for_another_game_build_exits_eighteen(
     assert exit_code == BUILD_MISMATCH
     assert f"needs Escape from Tarkov build {OTHER_BUILD}" in _text(errors)
     assert f"your game is build {BUILD}" in _text(errors)
+    assert _subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_update_that_cannot_write_a_game_file_exits_nineteen(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt update`` exits 19 and says in plain words which file stopped it.
+
+    The core configuration of the installation is made read-only, so writing
+    the release stops there. The user has to read the file, the reason and
+    where the previous files are, and no commit may be made.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.chdir(spt_game_dir)
+    blocked = spt_game_dir / "SPT_Runtime/SPT_Data/configs/core.json"
+    blocked.chmod(0o444)
+
+    try:
+        exit_code, _, errors = _invoke(["spt", "update", NEW, "--yes"])
+    finally:
+        blocked.chmod(0o644)
+
+    assert exit_code == WRITE_FAILED
+    assert _text(errors) == (
+        "error: The game files could not be written: Permission denied. The "
+        "update stopped at SPT_Runtime/SPT_Data/configs/core.json; your "
+        "previous files are one snapshot back."
+    )
     assert _subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
 
 

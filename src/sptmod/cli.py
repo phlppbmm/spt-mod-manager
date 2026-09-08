@@ -28,6 +28,7 @@ from sptmod.core.errors import (
     ProfileResidueError,
     SptmodError,
     SptReleaseUnavailableError,
+    SptReleaseWriteError,
     SptVersionUnknownError,
     UnresolvableDependencyError,
 )
@@ -75,6 +76,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     SptVersionUnknownError: 16,
     SptReleaseUnavailableError: 17,
     ClientBuildMismatchError: 18,
+    SptReleaseWriteError: 19,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"

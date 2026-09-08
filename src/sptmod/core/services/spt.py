@@ -20,6 +20,7 @@ from sptmod.core.errors import (
     ClientBuildMismatchError,
     GitError,
     SptReleaseUnavailableError,
+    SptReleaseWriteError,
 )
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.forge.download import download_cached
@@ -184,6 +185,8 @@ def apply_spt_release(
         DirtyTreeError: the game folder holds files sptmod does not manage.
         GameRunningError: the SPT server or client is running.
         ArchiveError: the downloaded release is incomplete or unreadable.
+        SptReleaseWriteError: a file of the release could not be written into
+            the game directory.
         ForgeUnavailableError: the download cannot be reached.
         OperationInProgressError: another operation holds the game directory.
         GitError: git failed.
@@ -400,12 +403,7 @@ def _write_release(
         if installed not in targets
     ]
     report_step(progress, InstallStep.COPY, f"writing {len(files)} files")
-    for removed in stale:
-        (root / removed).unlink(missing_ok=True)
-    for entry in files:
-        destination = root / entry.target
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(entry.source, destination)
+    _write_files(root, stale, files)
     for directory in sorted(
         {(root / removed).parent for removed in stale}, reverse=True
     ):
@@ -419,6 +417,33 @@ def _write_release(
     )
     store_spt_version(repo, resolve_spt_version(layout, repo) or version)
     return commit_hash
+
+
+def _write_files(
+    root: Path, stale: Sequence[Path], files: Sequence[ReleaseFile]
+) -> None:
+    """Delete the ``stale`` program files below ``root`` and copy ``files`` in.
+
+    Raises:
+        SptReleaseWriteError: a file could not be deleted or written; the
+            message names the file it stopped at and what the system said.
+    """
+    reached = Path()
+    try:
+        for removed in stale:
+            reached = removed
+            (root / removed).unlink(missing_ok=True)
+        for entry in files:
+            reached = entry.target
+            destination = root / entry.target
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry.source, destination)
+    except OSError as error:
+        raise SptReleaseWriteError(
+            f"The game files could not be written: {error.strerror}. The "
+            f"update stopped at {reached.as_posix()}; your previous files are "
+            f"one snapshot back."
+        ) from error
 
 
 def _last_version_change(repo: Repo) -> CommitInfo:

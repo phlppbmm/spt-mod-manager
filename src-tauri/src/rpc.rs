@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::driver;
 
@@ -71,7 +71,8 @@ pub async fn rpc(app: AppHandle, name: String, payload: Value) -> Result<Value, 
             "unknown_function",
         ));
     }
-    let binary = driver::binary_path();
+    let resource_dir = app.path().resource_dir().ok();
+    let binary = driver::binary_path(resource_dir.as_deref());
     driver::call(&binary, &name, &payload, move |event| {
         let _ = app.emit("progress", event);
     })

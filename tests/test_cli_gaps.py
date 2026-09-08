@@ -1,7 +1,7 @@
 """CLI coverage gaps identified by the group-4 audit (see project scratchpad).
 
 Each test below pins one command or branch of ``cli.py`` that was reachable
-through the public CLI but had no test anywhere in the suite: ``version``,
+through the public CLI but had no test anywhere in the suite: ``main()``,
 ``snapshot``, ``install``'s two ``BadParameter`` guards and its Forge-path
 decline/success prints, ``update``'s skipped/nothing-to-update/blocked/
 incompatible/up-to-date rows and its notice branch, ``disable``/``enable``'s
@@ -30,6 +30,7 @@ from forge_json import (
     success_envelope,
     version_json,
 )
+from sptmod import __version__
 from sptmod.cli import app, main
 from sptmod.core.repo import Repo
 
@@ -171,17 +172,6 @@ def _updates_payload(kind: str, *, mod_id: int, name: str, version: str) -> dict
     return payload
 
 
-# --- version --------------------------------------------------------------
-
-
-def test_version_prints_the_version_string() -> None:
-    """If ``version``'s body is `pass`, this fails: nothing is printed."""
-    result = runner.invoke(app, ["version"])
-
-    assert result.exit_code == 0
-    assert "sptmod 0.1.0" in result.stdout
-
-
 # --- main(): the console-script entry point ----------------------------------
 
 
@@ -189,15 +179,15 @@ def test_main_runs_the_app_with_the_real_process_argv(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Exercises ``main()`` itself (not ``app`` via ``CliRunner``): if its
-    body is `pass`, this fails because ``app()`` (and its 'sptmod 0.1.0'
-    output) never runs at all, so no ``SystemExit`` is raised either."""
+    body is `pass`, this fails because ``app()`` (and its version banner)
+    never runs at all, so no ``SystemExit`` is raised either."""
     monkeypatch.setattr(sys, "argv", ["sptmod", "version"])
 
     with pytest.raises(SystemExit) as exit_info:
         main()
 
     assert exit_info.value.code == 0
-    assert "sptmod 0.1.0" in capsys.readouterr().out
+    assert f"sptmod {__version__}" in capsys.readouterr().out
 
 
 # --- snapshot ---------------------------------------------------------------

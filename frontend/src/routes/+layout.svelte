@@ -15,6 +15,8 @@
 		watchSystemTheme,
 		type ResolvedTheme
 	} from '$lib/theme';
+	import { checkForUpdate, installUpdate } from '$lib/updater';
+	import { runCheck, startupNotice } from '$lib/updatestate';
 	import { isWindowMaximized, toggleMaximizeWindow } from '$lib/window';
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
@@ -31,6 +33,7 @@
 	let theme = $state<ResolvedTheme>('light');
 	let maximized = $state(false);
 	let subnav = $state<SubNavState>({ items: [], active: null });
+	let updateNotice = $state('');
 
 	const sectionLabel = $derived(
 		LINKS.find((link) => link.href === page.url.pathname)?.label ?? ''
@@ -40,6 +43,7 @@
 		theme = resolveTheme(loadPreference());
 		applyTheme(theme);
 		void refreshMaximized();
+		void lookForUpdate();
 		// The settings page applies the theme too, so follow the attribute
 		// rather than the local state.
 		const observer = new MutationObserver(readAppliedTheme);
@@ -58,6 +62,15 @@
 			unsubscribeSubNav();
 		};
 	});
+
+	async function lookForUpdate(): Promise<void> {
+		const state = await runCheck({
+			check: checkForUpdate,
+			install: installUpdate,
+			onState: () => {}
+		});
+		updateNotice = startupNotice(state);
+	}
 
 	function readAppliedTheme(): void {
 		theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
@@ -98,6 +111,13 @@
 			</a>
 		{/each}
 	</nav>
+
+	{#if updateNotice !== ''}
+		<p class="updatenote">
+			{updateNotice}
+			<a href="/settings#updates">Open the update settings</a>
+		</p>
+	{/if}
 
 	<div class="body">
 		{#if subnav.items.length > 0}
@@ -152,6 +172,18 @@
 	.tab.is-active:hover {
 		background: var(--color-accent-hover);
 		color: var(--color-accent-fg);
+	}
+
+	.updatenote {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin: 0;
+		padding: var(--space-2) var(--page-gutter, 32px);
+		background: var(--color-accent-soft);
+		border-bottom: 1px solid var(--color-accent-border);
+		color: var(--color-text);
+		font-size: var(--text-sm);
 	}
 
 	.body {

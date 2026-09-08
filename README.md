@@ -27,16 +27,45 @@ run it against an installation you cannot afford to lose.
   import` diffs such a list against your installation — useful to share a Fika server's mod set.
 - **Linux and Windows.** No shell-outs beyond git, all paths via `pathlib`.
 
-## Requirements
-
-- Python 3.12 or newer and [uv](https://docs.astral.sh/uv/)
-- `git` on the `PATH`
-- An SPT installation (version 4.0+) with either `SPT/` or `SPT_Runtime/` directory and
-  `BepInEx/` directory
-
 ## Install
 
-From a clone of this repository:
+Download the package for your system from this repository's releases page:
+
+| System | Package | Updates itself |
+|---|---|---|
+| Linux | `.AppImage` | yes |
+| Linux | `.deb` | no — install the new version from the releases page |
+| Windows | `.msi` | yes |
+| Windows | NSIS `-setup.exe` | yes |
+
+Requirements:
+
+- `git` on the `PATH`. On Windows, install [Git for Windows](https://git-scm.com/download/win) and
+  keep the setup option *"Git from the command line and also from 3rd-party software"*. The `.deb`
+  package declares `git` as a dependency.
+- An SPT installation (version 4.0+) with either `SPT/` or `SPT_Runtime/` directory and
+  `BepInEx/` directory.
+- Optional: `unrar` or `bsdtar` (libarchive) on the `PATH` — needed only for mods that ship as
+  `.rar`.
+
+The Windows installers are not code-signed. SmartScreen shows *"Windows protected your PC"* (click
+*More info* → *Run anyway*), and some antivirus products flag the download; both are the expected
+reaction to an unsigned installer.
+
+Every push is also built: the CI run's `bundle-ubuntu-latest` and `bundle-windows-latest` artifacts
+hold the packages of that commit, kept for seven days. They are unsigned test builds and cannot
+update themselves.
+
+### Updates
+
+*Settings → Updates* shows the installed version and a *Check for updates* button that downloads and
+installs a new release; afterwards the same section offers a restart into the new version. The app
+also checks once on startup and then shows a line above the content that links to those settings — a
+startup check that fails stays silent.
+
+### From source
+
+Requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). From a clone of this repository:
 
 ```sh
 uv sync
@@ -70,7 +99,7 @@ log, `sptmod files NAME` the files of a single mod.
 
 ## First run (Tauri desktop app)
 
-Build and run the Tauri v2 app:
+Build and run the Tauri v2 app (build the sidecar once first, see *Development*):
 
 ```sh
 uv tool install --editable .         # install sptmod CLI
@@ -180,6 +209,20 @@ cargo test
 cargo tauri dev                       # dev mode with hot reload
 ```
 
+The app ships the Python core as a PyInstaller sidecar, declared in `src-tauri/tauri.conf.json` as a
+bundle resource. `cargo build` fails with a missing-resource error until that sidecar has been built
+once:
+
+```sh
+uv sync --group build
+uv run pyinstaller packaging/sptmod.spec --noconfirm --distpath src-tauri/sidecar \
+  --workpath packaging/build
+```
+
+It lands in `src-tauri/sidecar/sptmod/` (untracked) and is picked up by both `cargo tauri dev` and a
+bundle build. The desktop app prefers the binary named by `SPTMOD_CLI`, then this sidecar, then
+`sptmod` on the `PATH`.
+
 Frontend (SvelteKit, Svelte 5 runes, TypeScript, static adapter):
 
 ```sh
@@ -194,3 +237,40 @@ pnpm build
 The API types in `frontend/src/lib/api/types.ts` are generated from the RPC schemas; regenerate
 them with `pnpm gen:api` after changing service functions or request/response models, and keep
 `invoke` and `listen` confined to `frontend/src/lib/api/transport.ts`.
+
+## Release
+
+Bump the version in **both** `pyproject.toml` (`[project].version`) and `src-tauri/Cargo.toml`
+(`[package].version`); `tests/test_version_agreement.py` fails when they disagree.
+`src-tauri/tauri.conf.json` deliberately carries no `version` key and inherits the crate's.
+
+Then tag and push:
+
+```sh
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+`.github/workflows/release.yml` builds Linux and Windows one after the other and uploads the
+installers plus the updater manifest `latest.json` into a **draft** GitHub release. Publish that
+draft — the updater endpoint reads the latest published release.
+
+The workflow refuses to build when the one-time setup below is missing: it stops while
+`plugins.updater.endpoints` still names `OWNER/REPO` or `plugins.updater.pubkey` is still the
+placeholder key, and it stops when the tag is not `v` plus the `pyproject.toml` version.
+
+### One-time setup before the first release
+
+Update packages must be signed, otherwise installed apps reject them:
+
+```sh
+cargo tauri signer generate -w ~/.tauri/sptmod.key    # empty password
+```
+
+- Keep `~/.tauri/sptmod.key` offline and **never commit it**. Without that key no future release can
+  be signed for the apps already installed, and they can never update again.
+- Paste the content of `~/.tauri/sptmod.key.pub` into `plugins.updater.pubkey` in
+  `src-tauri/tauri.conf.json`, replacing the placeholder key committed here.
+- Replace `OWNER/REPO` in `plugins.updater.endpoints` with the GitHub repository.
+- Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (the content of the key file) and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty).

@@ -79,11 +79,20 @@ src-tauri/              Tauri v2 desktop app
   tests/
     rpc_driver_tests.rs   with mocked subprocess
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
-tests/                  Python test suite (1522 tests)
+  tauri.conf.json       bundle targets/resources, updater endpoint and pubkey
+  sidecar/              PyInstaller output, untracked, declared as bundle resource
+packaging/              freezing the Python core for the desktop bundle
+  sptmod_entry.py       PyInstaller entry point (calls sptmod.cli.main)
+  sptmod.spec           one-dir build named sptmod, console mode, UPX off
+.github/workflows/
+  ci.yml                Python/frontend/Rust gates plus sidecar and app matrices
+  release.yml           v* tag -> signed bundles in a draft release
+tests/                  Python test suite (1597 tests)
   conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
   fixture_types.py      fixture Protocols for typing
   forge_json.py         Forge API mock payload builders
   pe_builder.py         PE file assembly helpers
+  test_version_agreement.py  the version single-source rule
   test_*.py             individual test modules
 Cargo.toml              workspace (members: src-tauri)
 typings/                local stubs for untyped packages
@@ -95,6 +104,8 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/launch.ts          game launch UI logic (localStorage toggle, buttons, poll cadence)
   src/lib/theme.ts           theme preference (system|light|dark), localStorage, apply
   src/lib/window.ts          window chrome (minimize/maximize/close) — Tauri boundary
+  src/lib/updater.ts         version, update check/install, relaunch — Tauri boundary
+  src/lib/updatestate.ts     update state machine, progress and wording (pure)
   src/lib/styles/tokens.css  design tokens; light on :root, dark on [data-theme='dark']
   src/lib/styles/base.css    reset, native controls, global utility classes
   src/lib/api/transport.ts   the app's `rpc` invoke() and progress listen() site
@@ -127,12 +138,15 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   `tests/test_rpc_contract.py`; contract drift detection in `tests/test_dump_openapi.py`.
 - Contract change loop: edit schemas → `uv run python -m sptmod.server.dump_openapi
   openapi.json` → `pnpm gen:api` in frontend/ → fix client.ts/test literals.
-- Two sanctioned Tauri boundaries in the frontend, nothing else imports
-  `@tauri-apps/api`: `src/lib/api/transport.ts` is the only site of the app's
+- Three sanctioned Tauri boundaries in the frontend, nothing else imports
+  `@tauri-apps/*`: `src/lib/api/transport.ts` is the only site of the app's
   `rpc` `invoke()` and progress `listen()` (`subscribe()` returns
   `Promise<unsubscribe>`); `src/lib/window.ts` covers window chrome only
   (`getCurrentWindow()`: minimize, toggle maximize, close, is-maximized) and
-  never calls `invoke('rpc', ...)`.
+  never calls `invoke('rpc', ...)`; `src/lib/updater.ts` covers self-update only
+  (`getVersion`, the updater plugin's `check`/`downloadAndInstall`, the process
+  plugin's `relaunch`), with all of its decision logic in the import-free
+  `src/lib/updatestate.ts`.
 - All paths via pathlib; no Linux-only assumptions.
 - English in every generated artifact.
 - User-facing text never uses git vocabulary (see auto-snapshot below).
@@ -611,8 +625,10 @@ default true, passed as a parameter to each launch call).
 - The Tauri v2 desktop app runs `sptmod rpc <name>` as a child process,
   marshaling JSON request/response over stdin/stdout. Exit code 0 = success;
   1 = core exception mapped to RPC error code and details; 2 = request error
-  (validation, unknown function). Child binary from env `SPTMOD_CLI` (default:
-  `sptmod` on PATH; `uv tool install --editable .`).
+  (validation, unknown function). Child binary in this order: env `SPTMOD_CLI`
+  when set and non-empty, else the bundled sidecar under the app's resource
+  directory when it exists, else `sptmod` on PATH (`uv tool install
+  --editable .`). See "Packaging and updates".
 - RPC response envelope: `{event:"result",data:T}` or `{event:"error",data:{error,code,details}}`.
   Long ops emit zero or more `{event:"progress",...}` lines (ProgressEvent fields);
   `operation_id` is generated and echoed back. Progress and final result/error lines
@@ -624,7 +640,8 @@ default true, passed as a parameter to each launch call).
   rpc.rs); the frontend client.ts has 31 camelCase wrappers (`adopt_mod` is
   RPC-exposed but has no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
-  clipboard-manager (copy). Capabilities in `src-tauri/capabilities/default.json`.
+  clipboard-manager (copy), plus process and updater registered in `setup`.
+  Capabilities in `src-tauri/capabilities/default.json`.
 - Setup flow is ONE step (path — no login). Folder picking: native OS dialog
   via Tauri plugin → name+fingerprint → `locate_directory` search; fallback
   `list_directories` browser; text input always works. `ALREADY_INITIALIZED`
@@ -650,6 +667,114 @@ default true, passed as a parameter to each launch call).
   (two actions: clear cache alone, or clear cache + remove downloaded mod
   files). A left sub-nav links the sections by hash; the active entry follows
   `page.url.hash`.
+
+## Packaging and updates
+
+### The Python core as a PyInstaller sidecar
+
+- The bundle ships the Python core frozen by PyInstaller (`packaging/sptmod.spec`,
+  entry `packaging/sptmod_entry.py`), built into `src-tauri/sidecar/` (untracked)
+  with `uv sync --group build` followed by `uv run pyinstaller packaging/sptmod.spec
+  --noconfirm --distpath src-tauri/sidecar --workpath packaging/build`.
+- ONE-DIR, not one-file: measured 277 ms per RPC call against 427 ms for the
+  one-file build, which unpacks itself on every spawn (61 MB vs 27 MB on disk).
+  Console mode is mandatory — a windowed build has no stdin/stdout pipes.
+- A one-dir build is several files and `externalBin` takes exactly one file per
+  target triple, so the sidecar travels as a bundle resource:
+  `"resources": {"sidecar/sptmod": "sidecar"}` → `$RESOURCE/sidecar/sptmod[.exe]`
+  next to its `_internal/`. tauri-build copies resources into the cargo target
+  dir and `resource_dir()` points at the exe dir there, so `cargo tauri dev` and
+  an installed bundle resolve the same path. A missing `src-tauri/sidecar/` is a
+  hard build error (ResourcePathNotFound) — plain `cargo build` fails until the
+  sidecar has been built once.
+- Resolution order (`driver::resolve_binary`, pure and unit-tested): `SPTMOD_CLI`
+  when set and non-empty, then the sidecar below the resource dir when it exists,
+  then `sptmod` on PATH. The env var stays first so the documented escape hatch
+  keeps working in shipped builds; `rpc()` supplies
+  `app.path().resource_dir().ok()`. On Windows `driver::call` spawns with
+  `CREATE_NO_WINDOW` (0x0800_0000), otherwise every RPC call flashes a console.
+- The sidecar does not cover `git` (repo.py shells out to it; the deb declares it
+  as a dependency, Windows needs Git for Windows on PATH) and no rar backend
+  (`unrar`/`bsdtar`, see `archive.RAR_INSTALL_HINT`).
+
+### One version, two files
+
+`[project].version` in `pyproject.toml` is the source of truth. `src/sptmod/__init__.py`
+`__version__` (which `sptmod version` prints) and `[package].version` in
+`src-tauri/Cargo.toml` must equal it, and `src-tauri/tauri.conf.json` must NOT
+carry a `version` key — Tauri v2 falls back to the crate version only while that
+key is absent. `tests/test_version_agreement.py` enforces all four conditions.
+`frontend/package.json` is private and stays out of the rule.
+
+### Bundles
+
+`bundle.active` is true with targets `deb`, `appimage`, `nsis`, `msi` and
+`createUpdaterArtifacts: true`. The bundler signs updater artifacts for AppImage,
+msi and nsis only, so a deb install downloads the AppImage artifact and rejects
+it ("invalid updater binary format"); `updatestate.describe` turns exactly that
+failure into "Automatic updates are only available in the AppImage build —
+download the new version from the releases page."
+
+### Updater
+
+- `tauri-plugin-updater` and `tauri-plugin-process` are target-gated dependencies
+  and registered inside `setup`, each non-fatally: a plugin that fails to
+  initialise prints one line to stderr and the app runs on without update checks.
+- Permissions: `updater:allow-check`, `updater:allow-download-and-install` and
+  `process:allow-restart` in `capabilities/default.json`; `getVersion()` needs
+  nothing beyond `core:default`.
+- No raw plugin text reaches the window: `updatestate` matches the plugin's Rust
+  error strings against a pattern table and renders a plain sentence per case
+  (deb package mismatch, unreachable release feed, no artifact for this system,
+  signature/verification), with a generic "could not be downloaded" fallback for
+  everything unrecognised.
+- A checked `Update` owns a Rust-side handle. `updater.ts` closes the one it
+  holds before it stores the result of a new check and again after an install,
+  and a failing `close()` is swallowed so it cannot turn a successful check or
+  install into an error.
+- `plugins.updater.endpoints` is
+  `https://github.com/OWNER/REPO/releases/latest/download/latest.json` and
+  `plugins.updater.pubkey` holds a PLACEHOLDER key. Both must be replaced before
+  the first real release (README "Release"); until then a check simply fails,
+  which the UI treats as any other failed check.
+- `+layout.svelte` runs one check on mount and renders `startupNotice(state)` —
+  a non-blocking line linking to `/settings#updates`, empty for every state but
+  `available`, so a failed startup check is silent. The Updates section of
+  Settings shows the installed version, the manual check, download progress and
+  a restart button once an update is installed.
+
+### CI
+
+`.github/workflows/ci.yml` runs on push and pull request with six jobs: `python`
+(pytest --cov, ruff, mypy, pyright, pylint), `frontend` (check, vitest with
+coverage, build), `sidecar` (matrix Linux/Windows: build the frozen CLI, then
+smoke-test `sptmod version`, `rpc list_directories` and an offline
+`rpc search_catalog` against a scaffolded game directory, upload as artifact),
+`rust` (needs the Linux sidecar artifact, `cargo build` + `cargo test`), `app`
+(matrix Linux/Windows, needs sidecar and frontend, full `tauri build`) and
+`workflows` (actionlint). `rust` and `app` download the sidecar artifact and
+restore its exec bit because upload-artifact drops file permissions; the app
+build overrides `bundle.createUpdaterArtifacts` to false, since the CLI aborts
+without a signing key. `app` uploads the resulting packages (deb and AppImage on
+Linux, msi and nsis on Windows) as `bundle-<os>`, kept for seven days — unsigned
+test builds of that commit, not release artifacts.
+
+Linux-only by design, and therefore never proven on Windows CI: the pytest suite
+(POSIX shell stubs, `chmod 0o000` cases, `/proc`) and its 100% coverage gate (the
+`sys.platform == "win32"` exclusion only covers the excluded clause itself), plus
+`cargo test` (the Rust test files use `std::os::unix`). Windows CI proves that the
+sidecar builds and runs and that the desktop app compiles and bundles. Only CI can prove the
+Windows installers, `CREATE_NO_WINDOW`, and the signed `latest.json` that
+`.github/workflows/release.yml` produces; a real self-update has not been
+exercised yet.
+
+`release.yml` triggers on `v*` tags, builds the two platforms with
+`max-parallel: 1` (tauri-action rewrites `latest.json` read-merge-delete-upload,
+so parallel platforms would drop each other's entries) and uploads installers and
+manifest into a draft release. Two guards run before anything is built: the job
+fails while `plugins.updater.endpoints` still contains `OWNER/REPO` or
+`plugins.updater.pubkey` is still the throwaway placeholder key, and it fails
+when the tag is not `v` plus the `pyproject.toml` version.
 
 ## Frontend design system
 
@@ -806,29 +931,30 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (1522 collected: 1521 passed, 1 skipped)
+uv run pytest                        # Python suite (1597 collected: 1596 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (294 tests; 100% coverage)
-cargo build && cargo test            # Rust (13 driver + 2 ignored e2e)
-cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
+cd frontend && pnpm vitest run --coverage  # frontend (502 tests; 100% coverage)
+cargo build && cargo test            # Rust (17 driver + 2 ignored e2e)
+cd src-tauri && cargo llvm-cov       # Rust coverage
 ```
 
 ### Suite sizes and coverage
 
-- **Python:** 1521 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 1596 passed, 1 skipped; `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 294 vitest tests in 11 files; strict 100% statements/branches/functions/lines on
-  `src/lib/**/*.ts` (minus `*.test.ts` and generated `api/types.ts`; v8 provider).
-- **Rust (Tauri):** 13 driver tests + 2 ignored e2e tests; `cargo llvm-cov`
-  reports 70.5% overall coverage (91% in driver.rs; remaining 9% = async resume
-  points llvm-cov cannot attribute + error path in `child.wait()`). rpc.rs's
+- **Frontend:** 502 vitest tests in 17 files; strict 100%
+  statements/branches/functions/lines on `src/lib/**/*.ts` (minus `*.test.ts` and
+  generated `api/types.ts`; v8 provider).
+- **Rust (Tauri):** 17 driver tests + 2 ignored e2e tests. rpc.rs's
   `#[tauri::command] rpc()` glue is covered only by the `#[ignore]` e2e test,
-  which needs Wry display.
+  which needs Wry display; the rest of the uncovered lines in `cargo llvm-cov`
+  are async resume points it cannot attribute plus the error path in
+  `child.wait()`.
 - Svelte components and routes have no tests (file-based, not unit-testable
   without environment setup). To add: `@testing-library/svelte` or
   vitest-browser-svelte + jsdom/happy-dom/Playwright in vite.config.ts + Tauri
@@ -874,7 +1000,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 | Variable | Effect |
 |---|---|
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
-| `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
+| `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver); wins over the bundled sidecar |
 | `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
 | `SPTMOD_PROCESS_SCAN` | `off` switches both scans of the process table for SPT off; inherited by children |
 | `SPTMOD_SMOKE_GAME_DIR` | Rust e2e test only; override game directory path for `src-tauri/tests/rpc_e2e_ignored.rs` |

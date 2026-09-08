@@ -76,7 +76,7 @@ fn write_game_layout(root: &Path, spt_version: Option<&str>) {
 }
 
 async fn call(name: &str, payload: Value) -> Result<Value, RpcError> {
-    let outcome = driver::call(&driver::binary_path(), name, &payload, |_| {}).await;
+    let outcome = driver::call(&driver::binary_path(None), name, &payload, |_| {}).await;
     report(name, &outcome);
     outcome
 }
@@ -86,7 +86,7 @@ async fn call_with_progress(
     payload: Value,
     events: &mut Vec<ProgressEvent>,
 ) -> Result<Value, RpcError> {
-    let outcome = driver::call(&driver::binary_path(), name, &payload, |event| {
+    let outcome = driver::call(&driver::binary_path(None), name, &payload, |event| {
         events.push(event)
     })
     .await;

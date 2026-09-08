@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from sptmod import __version__
 from sptmod.core import services
 from sptmod.core.errors import (
     AlreadyInitializedError,
@@ -359,7 +360,7 @@ def callback() -> None:
 @app.command()
 def version() -> None:
     """Print the sptmod version."""
-    typer.echo("sptmod 0.1.0")
+    typer.echo(f"sptmod {__version__}")
 
 
 @app.command()

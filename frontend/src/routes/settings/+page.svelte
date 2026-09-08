@@ -24,6 +24,15 @@
 		savePreference,
 		type ThemePreference
 	} from '$lib/theme';
+	import { appVersion, checkForUpdate, installUpdate, restartApp } from '$lib/updater';
+	import {
+		describe,
+		progressPercent,
+		runCheck,
+		runInstall,
+		type UpdateDeps,
+		type UpdateState
+	} from '$lib/updatestate';
 
 	const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 		{ value: 'system', label: 'Use system setting' },
@@ -37,7 +46,8 @@
 		{ id: 'launching', label: 'Launching' },
 		{ id: 'export', label: 'Export the mod list' },
 		{ id: 'import', label: 'Import a mod list' },
-		{ id: 'catalog-cache', label: 'Catalog cache' }
+		{ id: 'catalog-cache', label: 'Catalog cache' },
+		{ id: 'updates', label: 'Updates' }
 	];
 
 	let path: string | null = $state(null);
@@ -58,6 +68,10 @@
 	let importNote = $state('');
 	let importing = $state(false);
 
+	let version = $state('');
+	let updateState: UpdateState = $state({ kind: 'idle' });
+	let restartError = $state('');
+
 	let clearing = $state(false);
 	let cacheNote = $state('');
 	let cacheError = $state('');
@@ -72,6 +86,7 @@
 		setSubNav([], null);
 		setSearchEnabled(false);
 		path = loadGameDir();
+		void readVersion();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
 		const observer = new MutationObserver(() => {
@@ -83,6 +98,50 @@
 			setSubNav([], null);
 		};
 	});
+
+	async function readVersion(): Promise<void> {
+		try {
+			version = await appVersion();
+		} catch {
+			version = '';
+		}
+	}
+
+	function updateDeps(): UpdateDeps {
+		return {
+			check: checkForUpdate,
+			install: installUpdate,
+			onState: (state) => {
+				updateState = state;
+			}
+		};
+	}
+
+	async function checkUpdate(): Promise<void> {
+		restartError = '';
+		await runCheck(updateDeps());
+	}
+
+	async function installNewVersion(newVersion: string): Promise<void> {
+		await runInstall(newVersion, updateDeps());
+	}
+
+	async function restart(): Promise<void> {
+		restartError = '';
+		try {
+			await restartApp();
+		} catch (cause) {
+			restartError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	function updateBusy(): boolean {
+		return (
+			updateState.kind === 'checking' ||
+			updateState.kind === 'downloading' ||
+			updateState.kind === 'installing'
+		);
+	}
 
 	function changeStopServerOnExit(value: boolean): void {
 		stopServerOnExit = value;
@@ -428,6 +487,46 @@
 				</div>
 				{#if cacheError !== ''}
 					<p class="error-text">{cacheError}</p>
+				{/if}
+			</section>
+
+			<section class="section panel">
+				<h2 id="updates">Updates</h2>
+				<p class="row">
+					Installed version: <code>{version === '' ? 'unknown' : version}</code>
+				</p>
+				<div class="row">
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={updateBusy()}
+						onclick={() => void checkUpdate()}
+					>
+						Check for updates
+					</button>
+					{#if updateState.kind === 'available'}
+						{@const newVersion = updateState.version}
+						<button type="button" onclick={() => void installNewVersion(newVersion)}>
+							Install
+						</button>
+					{/if}
+					{#if updateState.kind === 'ready'}
+						<button type="button" onclick={() => void restart()}>Restart now</button>
+					{/if}
+					{#if progressPercent(updateState) !== null}
+						<span class="note">{progressPercent(updateState)}%</span>
+					{/if}
+				</div>
+				{#if describe(updateState) !== ''}
+					<p class={updateState.kind === 'failed' ? 'error-text' : 'note'}>
+						{describe(updateState)}
+					</p>
+				{/if}
+				{#if updateState.kind === 'available' && updateState.notes !== ''}
+					<p class="note">{updateState.notes}</p>
+				{/if}
+				{#if restartError !== ''}
+					<p class="error-text">{restartError}</p>
 				{/if}
 			</section>
 		</div>

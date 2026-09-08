@@ -354,12 +354,126 @@ fn binary_path_reads_sptmod_cli_env_var_or_falls_back_to_default_when_unset_or_e
             None => unsafe { std::env::remove_var(driver::BINARY_ENV) },
         }
         assert_eq!(
-            driver::binary_path(),
+            driver::binary_path(None),
             PathBuf::from(case.expected),
             "case: {}",
             case.id
         );
     }
+    // `_restore` (dropped here) restores the original SPTMOD_CLI value even
+    // if one of the assertions above had panicked.
+}
+
+#[test]
+fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
+    struct Case {
+        id: &'static str,
+        env_value: Option<&'static str>,
+        bundled: Option<&'static str>,
+        exists_returns: bool,
+        expected: &'static str,
+    }
+    let cases = [
+        Case {
+            id: "non-empty env override wins even when the bundled sidecar exists",
+            env_value: Some("/opt/custom/sptmod-cli"),
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            expected: "/opt/custom/sptmod-cli",
+        },
+        Case {
+            id: "non-empty env override wins when there is no bundled sidecar",
+            env_value: Some("/opt/custom/sptmod-cli"),
+            bundled: None,
+            exists_returns: false,
+            expected: "/opt/custom/sptmod-cli",
+        },
+        Case {
+            id: "empty env override is ignored, falls through to the existing bundled sidecar",
+            env_value: Some(""),
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            expected: "/resources/sidecar/sptmod",
+        },
+        Case {
+            id: "unset env uses the bundled sidecar when it exists",
+            env_value: None,
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            expected: "/resources/sidecar/sptmod",
+        },
+        Case {
+            id: "unset env falls back to PATH default when the bundled file is missing",
+            env_value: None,
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: false,
+            expected: driver::DEFAULT_BINARY,
+        },
+        Case {
+            id: "empty env override with no bundled path known falls back to PATH default",
+            env_value: Some(""),
+            bundled: None,
+            exists_returns: false,
+            expected: driver::DEFAULT_BINARY,
+        },
+    ];
+
+    for case in cases {
+        let env_value = case.env_value.map(OsString::from);
+        let bundled = case.bundled.map(PathBuf::from);
+        let result = driver::resolve_binary(env_value, bundled, &|_path| case.exists_returns);
+        assert_eq!(result, PathBuf::from(case.expected), "case: {}", case.id);
+    }
+}
+
+/// `resolve_binary` must short-circuit before probing the filesystem when it
+/// has no bundled path to probe: this pins that `exists` is only ever called
+/// with a `Some(bundled)` path, never invented from thin air.
+#[test]
+fn resolve_binary_does_not_probe_exists_when_no_bundled_path_is_known() {
+    let result = driver::resolve_binary(None, None, &|_path| {
+        panic!("exists() must not be called when there is no bundled path")
+    });
+    assert_eq!(result, PathBuf::from(driver::DEFAULT_BINARY));
+}
+
+#[test]
+fn sidecar_path_joins_sidecar_subdir_and_binary_name_with_platform_exe_suffix() {
+    let resource_dir = Path::new("/resources");
+    let result = driver::sidecar_path(resource_dir);
+    let expected = Path::new("/resources")
+        .join("sidecar")
+        .join(format!("sptmod{}", std::env::consts::EXE_SUFFIX));
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn binary_path_with_resource_dir_uses_bundled_sidecar_when_present_else_path_default() {
+    let _guard = lock_env_guard();
+    let _restore = EnvVarRestore::capture(driver::BINARY_ENV);
+    // SAFETY: serialized by ENV_GUARD; no other code in this test binary
+    // reads or writes SPTMOD_CLI concurrently.
+    unsafe { std::env::remove_var(driver::BINARY_ENV) };
+
+    let dir = tempfile::tempdir().unwrap();
+    let sidecar_dir = dir.path().join("sidecar");
+    std::fs::create_dir_all(&sidecar_dir).unwrap();
+    let sidecar_file = sidecar_dir.join(format!("sptmod{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&sidecar_file, b"stub").unwrap();
+
+    assert_eq!(
+        driver::binary_path(Some(dir.path())),
+        sidecar_file,
+        "sidecar file exists on disk, must be preferred over the PATH default"
+    );
+
+    std::fs::remove_file(&sidecar_file).unwrap();
+
+    assert_eq!(
+        driver::binary_path(Some(dir.path())),
+        PathBuf::from(driver::DEFAULT_BINARY),
+        "sidecar file removed, must fall back to the PATH default"
+    );
     // `_restore` (dropped here) restores the original SPTMOD_CLI value even
     // if one of the assertions above had panicked.
 }

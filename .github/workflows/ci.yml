@@ -1,0 +1,177 @@
+# Continuous integration.
+#
+# Verifies: Python quality gates, frontend checks, Rust build/tests, the PyInstaller
+# sidecar on Linux and Windows, and that the Tauri app compiles on both platforms.
+#
+# Linux-only by design: pytest with coverage (the suite relies on POSIX shell stubs,
+# chmod 0o000 and /proc, and the 100% gate is unreachable on Windows) and `cargo test`
+# (the Rust tests use std::os::unix). Windows proves only that the sidecar builds and
+# runs and that the app compiles.
+#
+# The `rust` and `app` jobs depend on `sidecar`: tauri.conf.json declares
+# `sidecar/sptmod` as a bundle resource, so cargo fails with ResourcePathNotFound
+# unless the sidecar is present.
+
+name: ci
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest --cov
+      - run: uv run ruff check src
+      - run: uv run mypy --strict src tests
+      - run: uv run pyright
+      - run: uv run pylint src tests
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm vitest run --coverage
+      - run: pnpm build
+
+  sidecar:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev --group build
+      - run: uv run pyinstaller packaging/sptmod.spec --noconfirm --distpath src-tauri/sidecar --workpath packaging/build
+      - name: Smoke test the frozen CLI
+        shell: bash
+        run: |
+          binary=src-tauri/sidecar/sptmod/sptmod
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            binary="$binary.exe"
+          fi
+          "$binary" version
+          echo '{}' | "$binary" rpc list_directories
+          mkdir -p smoke/game/SPT_Runtime smoke/game/BepInEx/plugins
+          git -C smoke/game init -q
+          git -C smoke/game config sptmod.sptversion 4.1.0
+          echo '{"path":"smoke/game","query":"","db_path":"smoke/catalog.sqlite3"}' \
+            | "$binary" rpc search_catalog
+          rm -rf smoke
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sidecar-${{ matrix.os }}
+          path: src-tauri/sidecar
+
+  rust:
+    needs: sidecar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sidecar-ubuntu-latest
+          path: src-tauri/sidecar
+      # upload-artifact drops file permissions.
+      - run: chmod +x src-tauri/sidecar/sptmod/sptmod
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - run: cargo build
+      - run: cargo test
+
+  app:
+    needs: [sidecar, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: sidecar-${{ matrix.os }}
+          path: src-tauri/sidecar
+      # upload-artifact drops file permissions.
+      - if: runner.os == 'Linux'
+        run: chmod +x src-tauri/sidecar/sptmod/sptmod
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm build
+        working-directory: frontend
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - name: Build the desktop app
+        shell: bash
+        run: pnpm dlx '@tauri-apps/cli@^2' build --ci -c '{"bundle":{"createUpdaterArtifacts":false}}'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ matrix.os }}
+          path: target/release/bundle/**
+          retention-days: 7
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install actionlint
+        env:
+          # actionlint_1.7.12_checksums.txt of the v1.7.12 release.
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -sSLo actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "$ACTIONLINT_SHA256  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+      - run: ./actionlint -color .github/workflows/*.yml

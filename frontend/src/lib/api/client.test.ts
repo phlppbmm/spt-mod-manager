@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import {
+	applySptRelease,
 	browseCatalog,
 	checkProfiles,
 	checkUpdates,
@@ -20,11 +21,13 @@ import {
 	listFavorites,
 	listMods,
 	listProfiles,
+	listSptReleases,
 	locateDirectory,
 	modFiles,
 	planModInstall,
 	planProfileCleanup,
 	removeMod,
+	revertSptUpdate,
 	searchCatalog,
 	setFavorite,
 	setSptVersion,
@@ -418,6 +421,30 @@ const wrapperCases: Array<{
 		id: 'stopGame forwards path',
 		call: () => stopGame('/game'),
 		command: 'stop_game',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'listSptReleases forwards path',
+		call: () => listSptReleases('/game'),
+		command: 'list_spt_releases',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'applySptRelease defaults operationId to null',
+		call: () => applySptRelease('/game', '4.1.2'),
+		command: 'apply_spt_release',
+		payload: { path: '/game', version: '4.1.2', operation_id: null }
+	},
+	{
+		id: 'applySptRelease forwards an explicit operationId',
+		call: () => applySptRelease('/game', '4.1.2', 'op-5'),
+		command: 'apply_spt_release',
+		payload: { path: '/game', version: '4.1.2', operation_id: 'op-5' }
+	},
+	{
+		id: 'revertSptUpdate forwards path',
+		call: () => revertSptUpdate('/game'),
+		command: 'revert_spt_update',
 		payload: { path: '/game' }
 	}
 ];

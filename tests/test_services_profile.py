@@ -421,7 +421,7 @@ def test_cli_remove_maps_profile_residue_error_to_exit_code_8(
     _commit_profile_with_item(repo, item_id)
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--yes"])
 
     assert result.exit_code == 8
     assert result.stderr.startswith("error:")
@@ -442,7 +442,7 @@ def test_cli_remove_with_force_succeeds_despite_profile_residue(
     _commit_profile_with_item(repo, item_id)
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod", "--force"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--force", "--yes"])
 
     assert result.exit_code == 0
     assert "ServerMod" in result.stdout
@@ -463,7 +463,7 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
     profile_path = _commit_profile_with_item(repo, item_id)
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles", "--yes"])
 
     assert result.exit_code == 0
     cleaned = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -484,7 +484,7 @@ def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
     _commit_profile_with_item(repo, item_id)
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles", "--yes"])
 
     assert result.exit_code == 0
     assert "abc" in result.stdout
@@ -520,7 +520,7 @@ def test_cli_remove_clean_profiles_reports_no_cleaning_needed_and_untouched_coun
     repo.commit("chore: profile snapshot", paths=[Path("SPT/user/profiles/abc.json")])
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles", "--yes"])
 
     assert result.exit_code == 0
     assert "no profile needed cleaning" in result.stdout
@@ -552,7 +552,7 @@ def test_cli_remove_prints_a_warning_line_for_broken_db_json(
     )
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "ServerMod"])
+    result = runner.invoke(app, ["remove", "ServerMod", "--yes"])
 
     assert result.exit_code == 0
     assert "items.json" in result.stdout + result.stderr

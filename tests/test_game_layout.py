@@ -33,6 +33,7 @@ from pe_builder import (
     VERSION_DATA_FILE_OFFSET,
     build_pe_around_version_data,
     build_synthetic_exe,
+    build_synthetic_exe_multi,
     pad4,
     utf16z,
     version_block,
@@ -45,6 +46,8 @@ from sptmod.core.game_dir import (
     SPT_VERSION_CONFIG_KEY,
     GameLayout,
     detect_layout,
+    is_game_program_path,
+    read_client_build,
     read_core_json_version,
     read_pe_file_version,
     read_stored_version,
@@ -431,6 +434,122 @@ def test_game_layout_accessors_are_relative_to_the_runtime_dir(
     assert layout.profile_backups_dir == Path(runtime_dir_name) / "user" / "profiles" / "backups"
     assert layout.core_config_file == Path(runtime_dir_name) / "SPT_Data" / "configs" / "core.json"
     assert layout.server_exe == Path(runtime_dir_name) / "SPT.Server.exe"
+
+
+# ============================================================================
+# is_game_program_path
+# ============================================================================
+
+_PROGRAM_PATH_LAYOUT = GameLayout(root=Path("/game"), runtime_dir_name="SPT_Runtime")
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        pytest.param("SPT_Runtime/SPT.Server.exe", True, id="runtime-dir-file"),
+        pytest.param("SPT_Runtime/SPT_Data/checks.dat", True, id="spt-data-tree"),
+        pytest.param("BepInEx/plugins/spt/x.dll", True, id="spt-own-plugin"),
+        pytest.param("BepInEx/patchers/spt-prepatch.dll", True, id="spt-own-patcher"),
+        pytest.param("BepInEx/core/BepInEx.dll", True, id="bepinex-core"),
+        pytest.param("winhttp.dll", True, id="loader-winhttp"),
+        pytest.param("doorstop_config.ini", True, id="loader-doorstop-config"),
+        pytest.param(".doorstop_version", True, id="loader-doorstop-version"),
+        pytest.param("LICENSE-BepInEx.txt", True, id="loader-license-glob"),
+        pytest.param("WINHTTP.DLL", False, id="loader-file-other-spelling"),
+        pytest.param("BepInEx/plugins/SomeMod.dll", False, id="ordinary-plugin"),
+        pytest.param("SPT_Runtime/user/mods/Mod/package.json", False, id="mod-file"),
+        pytest.param("nested/winhttp.dll", False, id="loader-file-not-in-root"),
+        pytest.param("LICENSE.txt", False, id="license-without-version-suffix"),
+        pytest.param("BepInEx/config/SomeMod.cfg", False, id="bepinex-config"),
+    ],
+)
+def test_is_game_program_path_classifies_the_spt_program_set(entry: str, expected: bool) -> None:
+    """is_game_program_path() distinguishes files an SPT release owns from mod files.
+
+    Covers the runtime directory, SPT_Data, SPT's own BepInEx client files,
+    the BepInEx runtime and the root-anchored loader files (case-insensitively),
+    against ordinary mod paths and non-root-anchored or suffix-less lookalikes.
+    """
+    assert is_game_program_path(Path(entry), _PROGRAM_PATH_LAYOUT) is expected
+
+
+# ============================================================================
+# read_client_build
+# ============================================================================
+
+
+def test_read_client_build_returns_the_second_to_last_dash_and_dot_component(
+    tmp_path: Path,
+) -> None:
+    """read_client_build() splits ProductVersion on both '.' and '-' and
+    returns the second-to-last component: '0.16.9.5-40743.36018' is build
+    '40743', the value SPT compares an installation's client build against.
+    """
+    exe = tmp_path / "EscapeFromTarkov.exe"
+    exe.write_bytes(build_synthetic_exe_multi([("ProductVersion", "0.16.9.5-40743.36018")]))
+
+    assert read_client_build(exe) == "40743"
+
+
+def test_read_client_build_prefers_product_version_over_file_version(
+    tmp_path: Path,
+) -> None:
+    """When both version strings are present, ProductVersion wins for the
+    client build -- the opposite preference of read_pe_file_version, which
+    prefers FileVersion. FileVersion here would parse to a different build
+    ('3'), proving the function reads the right key rather than falling
+    through to the first one found.
+    """
+    exe = tmp_path / "EscapeFromTarkov.exe"
+    exe.write_bytes(
+        build_synthetic_exe_multi(
+            [("FileVersion", "1.2.3.4"), ("ProductVersion", "0.16.9.5-40743.36018")]
+        )
+    )
+
+    assert read_client_build(exe) == "40743"
+
+
+def test_read_client_build_falls_back_to_file_version_when_no_product_version(
+    tmp_path: Path,
+) -> None:
+    """Without a ProductVersion string, read_client_build() reads FileVersion instead."""
+    exe = tmp_path / "EscapeFromTarkov.exe"
+    exe.write_bytes(build_synthetic_exe_multi([("FileVersion", "0.16.9.5-40743.36018")]))
+
+    assert read_client_build(exe) == "40743"
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        pytest.param("40743", id="single-component"),
+        pytest.param("0.16.9.5-abcd.36018", id="non-numeric-component"),
+    ],
+)
+def test_read_client_build_empty_when_the_component_is_not_a_number(
+    tmp_path: Path, version: str
+) -> None:
+    """read_client_build() returns "" when the version has fewer than two
+    '.'/'-' separated components, or the second-to-last one is not a number.
+    """
+    exe = tmp_path / "EscapeFromTarkov.exe"
+    exe.write_bytes(build_synthetic_exe_multi([("ProductVersion", version)]))
+
+    assert read_client_build(exe) == ""
+
+
+def test_read_client_build_empty_for_a_missing_file(tmp_path: Path) -> None:
+    """read_client_build() returns "" (not raise) for a nonexistent file."""
+    assert read_client_build(tmp_path / "does-not-exist.exe") == ""
+
+
+def test_read_client_build_empty_for_a_non_pe_file(tmp_path: Path) -> None:
+    """read_client_build() returns "" for a file with no PE version resource."""
+    exe = tmp_path / "EscapeFromTarkov.exe"
+    exe.write_bytes(b"not a PE file at all, just some junk bytes" * 4)
+
+    assert read_client_build(exe) == ""
 
 
 # ============================================================================

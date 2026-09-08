@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
+    "libarchive-c>=5.3",
     "platformdirs>=4.11.7",
     "psutil>=7.2.2",
     "pydantic>=2.13.1",
@@ -56,6 +57,11 @@ load-plugins = ["pylint_pytest"]
 source-roots = ["src", "tests"]
 # workspace.py imports msvcrt under a sys.platform == "win32" guard (Windows-only).
 ignored-modules = ["msvcrt"]
+
+[tool.pylint.imports]
+# archive.py imports libarchive inside the 7z fallback: importing it loads the
+# system library libarchive.so, and sptmod has to keep running without it.
+allow-any-import-level = ["libarchive"]
 
 # Raised over the pylint defaults, never disabled: each limit is the smallest
 # value the current code needs, with the function or class that drives it.

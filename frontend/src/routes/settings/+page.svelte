@@ -6,17 +6,31 @@
 	import { writeTextFile } from '@tauri-apps/plugin-fs';
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 	import {
+		applySptRelease,
 		clearCatalogCache,
 		exportMods,
 		importList,
+		listSptReleases,
+		revertSptUpdate,
 		type ExportFormat,
 		type ImportDiff,
-		type ImportEntry
+		type ImportEntry,
+		type SptReleaseInfo,
+		type SptReleaseList
 	} from '$lib/api/client';
+	import { subscribe, type ProgressEvent } from '$lib/api/transport';
+	import Dialog from '$lib/components/Dialog.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
 	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
 	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
+	import {
+		canApply,
+		confirmationFor,
+		formatReleaseDate,
+		releaseState,
+		type ChangeKind
+	} from '$lib/spt';
 	import {
 		applyTheme,
 		loadPreference,
@@ -33,6 +47,7 @@
 		type UpdateDeps,
 		type UpdateState
 	} from '$lib/updatestate';
+	import { invalidate } from '$lib/viewcache';
 
 	const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 		{ value: 'system', label: 'Use system setting' },
@@ -42,6 +57,7 @@
 
 	const SECTIONS = [
 		{ id: 'game-directory', label: 'Game directory' },
+		{ id: 'spt-version', label: 'SPT version' },
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'launching', label: 'Launching' },
 		{ id: 'export', label: 'Export the mod list' },
@@ -76,6 +92,20 @@
 	let cacheNote = $state('');
 	let cacheError = $state('');
 
+	let releases: SptReleaseList | null = $state(null);
+	let releasesLoading = $state(false);
+	let sptError = $state('');
+	let sptNote = $state('');
+	let sptBusy = $state(false);
+	let sptProgress: ProgressEvent | null = $state(null);
+	let pendingKind: ChangeKind | null = $state(null);
+	let pendingRelease: SptReleaseInfo | null = $state(null);
+
+	const currentVersion = $derived(installedVersion());
+	const confirmation = $derived(
+		pendingKind === null ? null : confirmationFor(pendingRelease, currentVersion, pendingKind)
+	);
+
 	const active = $derived(
 		SECTIONS.some((section) => `#${section.id}` === page.url.hash)
 			? page.url.hash.slice(1)
@@ -87,6 +117,7 @@
 		setSearchEnabled(false);
 		path = loadGameDir();
 		void readVersion();
+		void loadReleases();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
 		const observer = new MutationObserver(() => {
@@ -161,6 +192,93 @@
 	function changePath(): void {
 		forgetGameDir();
 		void goto('/');
+	}
+
+	function installedVersion(): string {
+		return releases === null ? '' : releases.current_version;
+	}
+
+	async function loadReleases(): Promise<void> {
+		const gameDir = path;
+		if (gameDir === null) {
+			return;
+		}
+		releasesLoading = true;
+		sptError = '';
+		try {
+			releases = await listSptReleases(gameDir);
+		} catch (cause) {
+			sptError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			releasesLoading = false;
+		}
+	}
+
+	function ask(release: SptReleaseInfo | null, kind: ChangeKind): void {
+		pendingRelease = release;
+		pendingKind = kind;
+	}
+
+	function closeConfirmation(): void {
+		pendingRelease = null;
+		pendingKind = null;
+	}
+
+	async function runPending(): Promise<void> {
+		const gameDir = path;
+		const kind = pendingKind;
+		const release = pendingRelease;
+		closeConfirmation();
+		if (gameDir === null || kind === null) {
+			return;
+		}
+		sptBusy = true;
+		sptError = '';
+		sptNote = '';
+		try {
+			const version =
+				kind === 'undo' || release === null
+					? await undoChange(gameDir)
+					: await applyRelease(gameDir, release.version);
+			// The mods view serves the catalog, the installed mods and the SPT
+			// version from this cache; dropping it makes it check them again.
+			invalidate(gameDir);
+			const changed = version === '' ? 'The SPT version changed' : `SPT is now ${version}`;
+			sptNote = `${changed}. Mods built for the other version show up under Updates.`;
+			await loadReleases();
+		} catch (cause) {
+			sptError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			sptBusy = false;
+			sptProgress = null;
+		}
+	}
+
+	async function applyRelease(gameDir: string, version: string): Promise<string> {
+		const operationId = crypto.randomUUID();
+		const unsubscribe = await subscribe(operationId, (event) => {
+			sptProgress = event;
+		});
+		try {
+			const result = await applySptRelease(gameDir, version, operationId);
+			return result.version === '' ? version : result.version;
+		} finally {
+			unsubscribe();
+			sptProgress = null;
+		}
+	}
+
+	async function undoChange(gameDir: string): Promise<string> {
+		const result = await revertSptUpdate(gameDir);
+		return result.version;
+	}
+
+	function stateLabel(release: SptReleaseInfo): string {
+		const state = releaseState(release, currentVersion);
+		if (state === 'installed') {
+			return 'Installed';
+		}
+		return state === 'newer' ? 'Newer' : 'Older';
 	}
 
 	async function runExport(): Promise<void> {
@@ -310,6 +428,110 @@
 					</p>
 					<div class="row">
 						<button type="button" onclick={changePath}>Change path</button>
+					</div>
+				{/if}
+			</section>
+
+			<section class="section panel">
+				<h2 id="spt-version">SPT version</h2>
+				{#if path === null}
+					<p class="note">No game directory yet. <a href="/">Run the setup</a> first.</p>
+				{:else}
+					<p class="row">
+						<span>
+							Installed: <strong
+								>{currentVersion === '' ? 'not readable' : currentVersion}</strong
+							>
+						</span>
+						<span class="note">
+							Escape from Tarkov build {releases === null || releases.client_build === ''
+								? 'not readable'
+								: releases.client_build}
+						</span>
+					</p>
+
+					{#if sptBusy}
+						<div class="status-progress">
+							<progress max="100" value={sptProgress?.percent ?? 0}></progress>
+							<span
+								>Changing SPT…{#if sptProgress !== null}
+									{Math.round(sptProgress.percent)}% — {sptProgress.message}
+								{/if}</span
+							>
+						</div>
+					{/if}
+
+					{#if sptNote !== ''}
+						<p class="note">{sptNote}</p>
+					{/if}
+					{#if sptError !== ''}
+						<p class="error-text">{sptError}</p>
+					{/if}
+
+					{#if releasesLoading && releases === null}
+						<p class="note">Looking for SPT releases…</p>
+					{:else if releases !== null}
+						<table class="releases">
+							<thead>
+								<tr>
+									<th>Version</th>
+									<th>Required EFT build</th>
+									<th>Released</th>
+									<th>State</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each releases.releases as release (release.version)}
+									{@const state = releaseState(release, currentVersion)}
+									{@const check = canApply(release, currentVersion)}
+									<tr>
+										<td>
+											<a href={release.url} target="_blank" rel="noreferrer">
+												{release.version}
+											</a>
+										</td>
+										<td>
+											{release.client_build === '' ? '—' : release.client_build}
+										</td>
+										<td>{formatReleaseDate(release.published_at)}</td>
+										<td>{stateLabel(release)}</td>
+										<td>
+											{#if state !== 'installed'}
+												<button
+													type="button"
+													class="btn-sm"
+													disabled={!check.ok || sptBusy}
+													title={check.reason}
+													onclick={() =>
+														ask(
+															release,
+															state === 'newer' ? 'update' : 'downgrade'
+														)}
+												>
+													{state === 'newer'
+														? 'Update'
+														: 'Go back to this version'}
+												</button>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+								{#if releases.releases.length === 0}
+									<tr><td colspan="5" class="note">No SPT releases found.</td></tr>
+								{/if}
+							</tbody>
+						</table>
+						<p class="note">
+							SPT keeps a download only for the newest release of a line. To get back to
+							the version you had before, use the undo below.
+						</p>
+					{/if}
+
+					<div class="row">
+						<button type="button" disabled={sptBusy} onclick={() => ask(null, 'undo')}>
+							Undo the last SPT change
+						</button>
 					</div>
 				{/if}
 			</section>
@@ -533,6 +755,17 @@
 	</div>
 </div>
 
+{#if confirmation !== null}
+	<Dialog title={confirmation.title} onclose={closeConfirmation}>
+		<p>{confirmation.body}</p>
+		{#snippet actions()}
+			<button type="button" class="btn-primary" onclick={() => void runPending()}>
+				Continue
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
 <style>
 	.page {
 		padding: var(--page-gutter, 32px);
@@ -617,6 +850,41 @@
 		width: 100%;
 		font-family: var(--font-mono);
 		font-size: var(--text-sm);
+	}
+
+	.releases {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--text-sm);
+	}
+
+	.releases th {
+		padding: var(--space-1) var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		letter-spacing: var(--tracking-caps);
+		text-align: left;
+		text-transform: uppercase;
+	}
+
+	.releases td {
+		padding: var(--space-1) var(--space-2);
+		border-top: 1px solid var(--color-divider);
+	}
+
+	.releases td:last-child {
+		text-align: right;
+	}
+
+	.status-progress {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.status-progress progress {
+		width: 100%;
 	}
 
 	.group {

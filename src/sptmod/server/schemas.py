@@ -804,6 +804,67 @@ class StopResult(CoreModel):
     message: str
 
 
+class ListSptReleasesRequest(CoreModel):
+    """Parameters of ``list_spt_releases``."""
+
+    path: Path
+
+
+class SptReleaseInfo(CoreModel):
+    """One published SPT release, seen from the installed one."""
+
+    version: str
+    client_build: str
+    published_at: datetime
+    url: str
+    downloadable: bool
+    content_length: int | None
+    installed: bool
+    newer: bool
+
+
+class SptReleaseList(CoreModel):
+    """What ``list_spt_releases`` found for a game directory."""
+
+    current_version: str = ""
+    client_build: str = ""
+    releases: list[SptReleaseInfo] = []
+    latest: str = ""
+
+
+class ApplySptReleaseRequest(CoreModel):
+    """Parameters of ``apply_spt_release``.
+
+    ``operation_id`` names the progress stream of this version change; a
+    generated one is used and echoed back when the caller sends none.
+    """
+
+    path: Path
+    version: str
+    operation_id: str | None = None
+
+
+class SptApplyResult(CoreModel):
+    """Outcome of an SPT version change."""
+
+    previous_version: str
+    version: str
+    commit: str = ""
+    files: list[ModFile] = []
+
+
+class ApplySptReleaseResponse(SptApplyResult):
+    """Outcome of ``apply_spt_release`` plus its progress operation ID."""
+
+    operation_id: str
+
+
+class RevertSptUpdateRequest(CoreModel):
+    """Parameters of ``revert_spt_update``."""
+
+    path: Path
+
+
 class ProgressEvent(CoreModel):
     """One progress line of a long-running RPC operation on stdout."""
 

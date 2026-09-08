@@ -5,7 +5,9 @@
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import SubNav from '$lib/components/SubNav.svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
-	import { subscribeSubNav, type SubNavState } from '$lib/shellstate';
+	import { listSptReleases } from '$lib/api/client';
+	import { subscribeGameDir, subscribeSubNav, type SubNavState } from '$lib/shellstate';
+	import { loadDismissedRelease, noticeFor, saveDismissedRelease } from '$lib/spt';
 	import {
 		applyTheme,
 		loadPreference,
@@ -34,6 +36,9 @@
 	let maximized = $state(false);
 	let subnav = $state<SubNavState>({ items: [], active: null });
 	let updateNotice = $state('');
+	let sptNotice: string | null = $state(null);
+	let latestSpt = $state('');
+	let checkedGameDir: string | null = null;
 
 	const sectionLabel = $derived(
 		LINKS.find((link) => link.href === page.url.pathname)?.label ?? ''
@@ -56,10 +61,16 @@
 		const unsubscribeSubNav = subscribeSubNav((value) => {
 			subnav = value;
 		});
+		const unsubscribeGameDir = subscribeGameDir((gameDir) => {
+			if (gameDir !== null) {
+				void checkSptReleases(gameDir);
+			}
+		});
 		return () => {
 			observer.disconnect();
 			unwatch();
 			unsubscribeSubNav();
+			unsubscribeGameDir();
 		};
 	});
 
@@ -70,6 +81,27 @@
 			onState: () => {}
 		});
 		updateNotice = startupNotice(state);
+	}
+
+	// The notice is a courtesy: when the release list cannot be fetched the
+	// shell stays quiet and the Settings page reports the failure instead.
+	async function checkSptReleases(gameDir: string): Promise<void> {
+		if (checkedGameDir === gameDir) {
+			return;
+		}
+		checkedGameDir = gameDir;
+		try {
+			const list = await listSptReleases(gameDir);
+			latestSpt = list.latest;
+			sptNotice = noticeFor(list, loadDismissedRelease());
+		} catch {
+			sptNotice = null;
+		}
+	}
+
+	function dismissSptNotice(): void {
+		saveDismissedRelease(latestSpt);
+		sptNotice = null;
 	}
 
 	function readAppliedTheme(): void {
@@ -117,6 +149,14 @@
 			{updateNotice}
 			<a href="/settings#updates">Open the update settings</a>
 		</p>
+	{/if}
+
+	{#if sptNotice !== null}
+		<div class="notice panel">
+			<span>{sptNotice}</span>
+			<a href="/settings#spt-version">See the SPT versions</a>
+			<button type="button" class="btn-ghost btn-sm" onclick={dismissSptNotice}>Dismiss</button>
+		</div>
 	{/if}
 
 	<div class="body">
@@ -184,6 +224,18 @@
 		border-bottom: 1px solid var(--color-accent-border);
 		color: var(--color-text);
 		font-size: var(--text-sm);
+	}
+
+	.notice {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		margin: var(--space-3) var(--page-gutter, 32px) 0;
+		padding: var(--space-2) var(--space-3);
+	}
+
+	.notice button {
+		margin-left: auto;
 	}
 
 	.body {

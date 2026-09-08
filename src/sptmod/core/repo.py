@@ -30,12 +30,18 @@ def gitignore_whitelist(runtime_dir_name: str) -> str:
     # is tracked too, so an SPT update is one commit and a downgrade one
     # revert: "!<runtime>/*" covers the executables, DLLs and JSON files
     # directly in the runtime directory, "!<runtime>/SPT_Data/**" the static
-    # data of the release. Re-including a directory entry alone tracks
-    # nothing, so "user/" and any future subdirectory stay invisible until a
-    # line re-includes their files.
+    # data of the release, "!BepInEx/core/**" the BepInEx runtime, and the four
+    # anchored root patterns the Doorstop loader and the licences an SPT
+    # release ships next to it; the leading "/" keeps them in the game root.
+    # Re-including a directory entry alone tracks nothing, so "user/" and any
+    # future subdirectory stay invisible until a line re-includes their files.
     return f"""\
 *
 !.gitignore
+!/winhttp.dll
+!/doorstop_config.ini
+!/.doorstop_version
+!/LICENSE-*.txt
 !{runtime_dir_name}/
 !{runtime_dir_name}/*
 !{runtime_dir_name}/SPT_Data/**
@@ -49,6 +55,8 @@ def gitignore_whitelist(runtime_dir_name: str) -> str:
 {runtime_dir_name}/user/profiles/backups/
 !BepInEx/
 BepInEx/*
+!BepInEx/core/
+!BepInEx/core/**
 !BepInEx/plugins/
 !BepInEx/plugins/**
 !BepInEx/config/

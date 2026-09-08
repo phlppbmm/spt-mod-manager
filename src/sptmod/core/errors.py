@@ -155,6 +155,22 @@ class CatalogUnavailableError(SptmodError):
     """The local catalog cache cannot be opened or created."""
 
 
+class SptReleaseUnavailableError(SptmodError):
+    """The list of published SPT releases cannot be read or holds no usable entry.
+
+    Raised when the release source is unreachable, answers with an error
+    status, or sends a body that is not a list of releases.
+    """
+
+
+class SptReleaseWriteError(SptmodError):
+    """The files of an SPT release could not be written into the game directory."""
+
+
+class ClientBuildMismatchError(SptmodError):
+    """The installed Escape from Tarkov build does not match the SPT release."""
+
+
 class ForgeApiError(SptmodError):
     """The Forge API answered with an error envelope.
 

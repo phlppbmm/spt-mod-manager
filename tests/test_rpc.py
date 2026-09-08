@@ -21,8 +21,14 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from conftest import clean_repo_at, invoke_rpc
-from fixture_types import InstallCommit, JsonDict, MakeArchive, TrailerInstallCommit
+from conftest import SptReleaseSource, clean_repo_at, invoke_rpc
+from fixture_types import (
+    InstallCommit,
+    JsonDict,
+    MakeArchive,
+    MakeSptRelease,
+    TrailerInstallCommit,
+)
 from forge_json import mod_json_full, mod_json_minimal, owner_json, page_envelope, version_json
 from sptmod.cli import app
 from sptmod.core import services
@@ -1565,3 +1571,45 @@ def test_import_list_with_apply_installs_the_missing_mod_and_reports_progress(
     installed_mod = data["installed"][0]["installed"][0]["mod"]
     assert installed_mod["name"] == "GhostMod"
     assert installed_mod["version"] == "2.0.0"
+
+
+# --------------------------------------------------------------------------
+# SPT version change: apply_spt_release.
+# --------------------------------------------------------------------------
+
+
+def test_apply_spt_release_reports_a_refused_write_with_its_own_code(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release answers SPT_RELEASE_WRITE_FAILED when a file cannot be written.
+
+    The core configuration of the installation is read-only, so writing the
+    release stops there. The caller must get the mapped error envelope with
+    the plain message, not an INTERNAL_ERROR from a raw operating system
+    error.
+    """
+    spt_release_source.offer(
+        make_spt_release(version="4.1.1", client_build="40743"),
+        version="4.1.1",
+        client_build="40743",
+    )
+    blocked = spt_game_dir / "SPT_Runtime/SPT_Data/configs/core.json"
+    blocked.chmod(0o444)
+
+    try:
+        exit_code, lines = invoke_rpc(
+            "apply_spt_release", {"path": str(spt_game_dir), "version": "4.1.1"}
+        )
+    finally:
+        blocked.chmod(0o644)
+
+    assert exit_code == 1
+    data = lines[-1]["data"]
+    assert data["code"] == "SPT_RELEASE_WRITE_FAILED"
+    assert data["error"] == (
+        "The game files could not be written: Permission denied. The update "
+        "stopped at SPT_Runtime/SPT_Data/configs/core.json; your previous "
+        "files are one snapshot back."
+    )

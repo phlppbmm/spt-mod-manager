@@ -31,6 +31,7 @@ from sptmod.core.models import (
 )
 from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
+    GAME_FILES_SNAPSHOT,
     SNAPSHOT_PREFIX,
     current_mods,
     last_touching_mod,
@@ -41,7 +42,6 @@ from sptmod.core.services.common import (
 from sptmod.core.workspace import game_lock
 
 _SNAPSHOT_TIME_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
-_GAME_FILES_MESSAGE: Final = f"{SNAPSHOT_PREFIX}game files updated"
 _MOD_SETTINGS_MESSAGE: Final = f"{SNAPSHOT_PREFIX}mod settings changed"
 
 
@@ -280,7 +280,7 @@ def secure_updated_files(repo: Repo, report: StatusReport) -> None:
     after them, because an update usually raises it.
     """
     if report.game_files_changed:
-        repo.commit(_GAME_FILES_MESSAGE, paths=report.game_files_changed)
+        repo.commit(GAME_FILES_SNAPSHOT, paths=report.game_files_changed)
         _store_detected_version(repo)
     if report.modified_mod_settings:
         repo.commit(_MOD_SETTINGS_MESSAGE, paths=report.modified_mod_settings)

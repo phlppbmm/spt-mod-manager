@@ -88,6 +88,10 @@ UNSET_DATE: Final = datetime.min
 # carry no trailers and must not take a path's owner away from it.
 SNAPSHOT_PREFIX: Final = "snapshot: "
 
+# The subject of the snapshot securing game files an SPT update rewrote; both
+# the snapshot and the undo of a version change go by it.
+GAME_FILES_SNAPSHOT: Final = f"{SNAPSHOT_PREFIX}game files updated"
+
 
 def current_mods(repo: Repo) -> list[ModInfo]:
     """Return one entry per mod, newest first.

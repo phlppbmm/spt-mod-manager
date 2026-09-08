@@ -70,6 +70,13 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("launch_profile", schemas.LaunchProfileRequest, schemas.LaunchProfileResponse),
     ("launch_status", schemas.LaunchStatusRequest, schemas.LaunchStatus),
     ("stop_game", schemas.StopGameRequest, schemas.StopResult),
+    ("list_spt_releases", schemas.ListSptReleasesRequest, schemas.SptReleaseList),
+    (
+        "apply_spt_release",
+        schemas.ApplySptReleaseRequest,
+        schemas.ApplySptReleaseResponse,
+    ),
+    ("revert_spt_update", schemas.RevertSptUpdateRequest, schemas.SptApplyResult),
 ]
 
 STANDALONE: Final[list[tuple[str, Any]]] = [

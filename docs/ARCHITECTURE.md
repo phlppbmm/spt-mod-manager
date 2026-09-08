@@ -42,7 +42,7 @@ src/sptmod/
     conflicts.py        file/DLL/dependency/SPT-version checks (HANDOFF §6)
     profile.py          profile residue detection from install commits (§7)
     services/           all user-facing operations as pure functions
-      __init__.py       facade: the 34 service functions and their result types
+      __init__.py       facade: the 37 service functions and their result types
       common.py         shared constants, repo mod lookups, layout path translation
       state.py          status, history, snapshot, installability guard
       gamedir.py        directory browsing/locating, init, SPT version, launch
@@ -53,15 +53,21 @@ src/sptmod/
       update.py         update discovery and application
       catalog.py        catalog sync/search/browse, mod details, favorites
       transfer.py       export and import of mod lists
+      spt.py            list, apply and undo a published SPT release
     workspace.py        staging dir for downloads/extraction, apply lock
     favorites.py        list and persist per-user favorited mod IDs
     forge/
       __init__.py       package docstring only
-      client.py         the ONLY module allowed to use httpx; Forge v0 client
+      client.py         the ONLY module allowed httpx for the Forge; Forge v0 client
       catalog.py        SQLite cache (config dir), sync/search/classify
       cache.py          persistent archive cache (download resumption, LRU)
       download.py       streaming downloads, cache hit/resumption, size verification
       resolve.py        install plans over /mods/dependencies
+    sptrelease/
+      __init__.py       package docstring only
+      client.py         the ONLY module allowed httpx for the SPT release source
+      apply.py          pure path/version logic of a release (include set, stale set,
+                        required client build, version comparison)
   watch.py              process entry for detached game watcher
   cli.py                typer adapter; exceptions -> exit codes; rich tables
   server/
@@ -91,17 +97,25 @@ tests/                  Python test suite (1597 tests)
   conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
   fixture_types.py      fixture Protocols for typing
   forge_json.py         Forge API mock payload builders
+  github_json.py        SPT release source mock payload builders
   pe_builder.py         PE file assembly helpers
+  data/bcj2-*.7z        committed BCJ2 7z samples (py7zr cannot read them)
+  test_sptrelease_client.py  release source parsing and failures
+  test_services_spt.py  list/apply/undo of an SPT release
+  test_cli_spt.py       `sptmod spt list|update|downgrade`
   test_version_agreement.py  the version single-source rule
   test_*.py             individual test modules
 Cargo.toml              workspace (members: src-tauri)
 typings/                local stubs for untyped packages
   rarfile.pyi           stub for rarfile (rar support)
+  libarchive.pyi        stub for libarchive-c (BCJ2 7z fallback)
 frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/index.ts           re-exports of public API
   src/lib/updateall.ts       bulk update orchestration
   src/lib/gamedir.ts         game directory path resolution
   src/lib/launch.ts          game launch UI logic (localStorage toggle, buttons, poll cadence)
+  src/lib/spt.ts             SPT version logic (compare, state, apply check, confirmation
+                             texts, startup notice, dismissal storage)
   src/lib/theme.ts           theme preference (system|light|dark), localStorage, apply
   src/lib/window.ts          window chrome (minimize/maximize/close) — Tauri boundary
   src/lib/updater.ts         version, update check/install, relaunch — Tauri boundary
@@ -128,9 +142,12 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 - `subprocess` only in `core/repo.py` (git operations, always captured and
   waited) and `core/launch.py` (detached game/server processes that outlive the
   call) — one module per concern.
-- `httpx` only in `core/forge/client.py` (read-only Forge API with throttling)
-  and `core/sptserver.py` (local SPT server, loopback, self-signed cert, zlib) —
-  one module per remote service.
+- `httpx` only in `core/forge/client.py` (read-only Forge API with throttling),
+  `core/sptserver.py` (local SPT server, loopback, self-signed cert, zlib) and
+  `core/sptrelease/client.py` (the SPT release source on api.github.com,
+  anonymous, one GET) — one module per remote service. The release *archive* is
+  downloaded through `ForgeClient.stream`, which takes an arbitrary URL, so no
+  fourth module appears.
 - Core raises typed exceptions only; no print/logging outside cli.py/server/.
 - One API contract, four transports: service function ↔ `sptmod rpc <name>`
   ↔ Tauri `#[tauri::command] rpc()` ↔ camelCase wrapper in client.ts. Guarded
@@ -179,12 +196,25 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   `BepInEx/patchers/**`.
 - The whitelist tracks the SPT program set too, so an SPT update is one commit
   and a downgrade one revert: `!<runtime>/*` covers every file directly in the
-  runtime directory (executables, `.dll`, `.so`, `.json`, `.xml`) and
+  runtime directory (executables, `.dll`, `.so`, `.json`, `.xml`),
   `!<runtime>/SPT_Data/**` the static release data (including the ~670 MB
-  `database/`), while `<runtime>/SPT_Data/**/cache|logs/` and the unchanged
-  `<runtime>/user/*` re-ignore keep caches, logs, certificates, profile
-  backups and `.sptmod-*` out. Re-including a directory entry alone tracks
-  nothing, so subdirectories no line re-includes stay invisible.
+  `database/`), `!BepInEx/core/**` the BepInEx runtime an SPT release ships,
+  and the four root-anchored patterns `!/winhttp.dll`,
+  `!/doorstop_config.ini`, `!/.doorstop_version`, `!/LICENSE-*.txt` the
+  Doorstop loader and the bundled licences (the leading `/` keeps them in the
+  game root instead of matching at any depth), while
+  `<runtime>/SPT_Data/**/cache|logs/` and the unchanged `<runtime>/user/*`
+  re-ignore keep caches, logs, certificates, profile backups and `.sptmod-*`
+  out. Re-including a directory entry alone tracks nothing, so subdirectories
+  no line re-includes stay invisible.
+- `game_dir.is_game_program_path` was widened in lockstep with the whitelist —
+  otherwise the newly visible files land in `other_untracked` and block every
+  mod operation. It answers true for a file directly in the runtime directory,
+  anything below `<runtime>/SPT_Data`, SPT's own client paths
+  (`BepInEx/plugins/spt/`, `BepInEx/patchers/spt-prepatch.dll`), anything below
+  `BepInEx/core/`, and the four loader files in the game root. The root loader
+  files match case-sensitively, byte for byte like the whitelist patterns git
+  applies; the SPT client paths keep their case-insensitive match.
 - Migration of an existing repository: `Repo.write_whitelist` rewrites
   `.gitignore` whenever it differs from `gitignore_whitelist(...)`, and both
   `status()` and `ensure_installable` call it before they look at the tree
@@ -620,6 +650,97 @@ banner, mod-row lock while game is up). Settings page gains a "Launching" sectio
 one checkbox: "Stop the server when the game closes" (persisted in localStorage,
 default true, passed as a parameter to each launch call).
 
+## Updating SPT
+
+**Release source.** The published SPT releases come from the GitHub releases API of `sp-tarkov/build`
+(`core/sptrelease/client.py`): anonymous, one GET of 100 entries (that covers every release ever published, so
+pagination is never followed), 60 requests per hour per IP. `SPTMOD_SPT_RELEASE_URL` overrides the endpoint for
+mirrors and tests. Drafts, pre-releases and entries without a readable `x.y.z` tag are dropped; a leading `v` on old
+tags is stripped. The required Escape from Tarkov build is parsed from the release name (`SPT 4.1.2 (40743)`); when a
+name carries no build, `<runtime>/SPT_Data/configs/core.json` of the unpacked release answers with the trailing
+component of `compatibleTarkovVersion` (`0.16.9.40743` → `40743`). Release bodies are never parsed — their wording is
+inconsistent across versions. Two sources were rejected: the Forge's `/spt/versions` lists no 4.x at all (newest
+3.11.4), and the installer feed `release.json` describes only the newest release. The upstream org has been archived
+since 2026-08-06; releases and assets still resolve, and the env override is the mitigation if hosting moves.
+
+**Only the newest release of a line keeps its asset** (verified: 3 of 83 releases have one, the newest patch of 4.1,
+4.0 and 3.11; the mirror URLs in older release bodies answer 404). `list_spt_releases` therefore reports every release
+of the installed series with a `downloadable` flag, and the history undo — not a download — is the primary downgrade
+path. The UI and the CLI say so instead of promising more.
+
+**Applying a release** (`services.apply_spt_release`, one function for update and downgrade):
+
+1. `detect_layout`, `Repo`, `ensure_installable` — the usual auto-snapshot of profiles, mod settings and changed game
+   files, so there is a state to return to.
+2. Resolve the version against the release list. Unknown version, a version of another SPT series than the installed
+   one (a series change means the other runtime directory, which only the official installer does) and a version
+   without a published download all raise `SptReleaseUnavailableError` pointing at `https://sp-mod.com/installer`.
+3. Download through the existing cache (`forge/download.download_cached`) with the key `spt-<version>`; the key is
+   non-numeric, so it cannot collide with the numeric Forge version ids. Size verification is the cache's usual one.
+4. Extract into the staging area. py7zr stays the primary backend; SPT release archives are LZMA2 + BCJ2, which py7zr
+   does not implement, so `archive._extract_7z` falls back to libarchive-c on
+   `UnsupportedCompressionMethodError`. Member names are validated in a first read pass before extraction, as for
+   every other format. Without the system library the fallback raises `ArchiveError` carrying
+   `LIBARCHIVE_INSTALL_HINT`, in the same shape as the existing rar backend hint.
+5. **Client-build check, before anything is written.** The build the release needs is compared with the
+   `ProductVersion` of `EscapeFromTarkov.exe` (`game_dir.read_client_build`: `-` counts as a separator like `.`, the
+   second-to-last component is the build, `FileVersion` is read when there is no `ProductVersion`). A mismatch *and*
+   an unreadable installed build both raise `ClientBuildMismatchError` naming the official installer — a deviation
+   from the design's proposal to warn and proceed, because writing a program set the game cannot load is the worse
+   outcome. Only a release that names no build and ships no readable `core.json` skips the comparison.
+6. Under the game lock: `ensure_installable` again, then the tracked program files the release no longer ships are
+   deleted, the include set is copied in with the release's `SPT_Runtime/` prefix rewritten to the layout's runtime
+   directory, empty directories are pruned, and everything lands in **one** commit `spt: <version>` — no trailers, so
+   the touched paths stay unowned by any mod and later changes to them classify as `game_files_changed`. Afterwards
+   `sptmod.sptversion` is resolved again from the freshly written `SPT.Server.exe` and stored.
+7. A re-apply of the version already in place writes the same bytes, leaves the tree clean and commits nothing: the
+   result carries the version with an empty commit and no files.
+
+**Undoing** (`services.revert_spt_update`): under the game lock, the youngest commit whose subject is
+`spt: <version>` or `snapshot: game files updated` and that a later `Revert "…"` commit has not already taken back
+(so undoing twice reaches the change before instead of the same one again); when there is none, a plain `GitError`
+("There is no SPT version change to undo."). Otherwise `ensure_installable`, then one revert and the version stored
+again. A revert git cannot apply is reported the same way: "Going back to the previous SPT version did not work:
+these files have changed since then: <paths>" — or "…: the game folder no longer matches that state" when git names
+no path — with the conflicting paths carried on the error. Installed mods keep their files, because such a commit
+never contains any.
+
+**What a version change never touches:** player profiles and everything else under `<runtime>/user/`,
+`BepInEx/config/**` (BepInEx and mod settings), and every plugin or patcher that is not SPT's own. These are
+structurally outside `is_game_program_path`, so they are neither written nor deleted nor part of the commit; a
+release that shipped such a file would have it dropped silently. The four loader files in the game root are matched by
+name, case-sensitively, exactly as git applies the whitelist patterns.
+
+**Re-running the compatibility check is the caller's job.** The service reports nothing about mods: the Settings page
+invalidates its cached views and points at the Updates tab, the CLI prints the hint to run `sptmod update --check`.
+
+**CLI:** `sptmod spt list` (table Version | EFT build | Released | State | Download, plus the installed EFT build),
+`sptmod spt update <version>` and `sptmod spt downgrade [version]`, the latter without an argument being the undo.
+Both changing commands confirm first unless `--yes`/`-y` is given, and the confirmation refuses on closed stdin, so
+`--yes` is required for non-interactive use. `update` refuses a version that is not newer and `downgrade` one that is
+not older (exit 2, typer's parameter error); when the installed version cannot be read there is nothing to compare
+against and the direction check is skipped. Exit codes: 18 `SptReleaseUnavailableError`,
+19 `ClientBuildMismatchError`, 20 `SptReleaseWriteError`, plus the inherited 3/4/5/10.
+
+**RPC:** `list_spt_releases`, `apply_spt_release` (declares `operation_id`, reports download/extract/copy progress via
+the existing `InstallStep` steps) and `revert_spt_update`. New error codes `SPT_RELEASE_UNAVAILABLE` (503 in prose)
+and `CLIENT_BUILD_MISMATCH` (409); "nothing to undo" reuses `GIT_ERROR`.
+
+**UI:** the Settings page gains an "SPT version" section (installed version, installed EFT build, the releases of the
+line with their required build, date and state, per row an Update / "Go back to this version" button disabled with a
+reason when there is no download, and "Undo the last SPT change"). The confirmation dialog names the safety snapshot
+in plain language and warns that mods built for the other version may stop working. The app shell
+(`src/routes/+layout.svelte`) shows a dismissible startup banner when the newest release of the line is above the
+installed version; the dismissal is stored in `localStorage` under `sptmod.dismissedSptRelease` as the version
+string, so a later release shows the banner again. A failing release list keeps the shell quiet — only the Settings
+page reports it.
+
+**Known limitations:** the release list is fetched fresh on every use (one request per CLI invocation, one per app
+start and one per Settings visit) against a 60/h anonymous budget — there is no cache yet. The libarchive fallback
+needs the system library (`libarchive` on Arch, `libarchive13` on Debian/Ubuntu); on Windows it would need a shipped
+DLL. The `ProductVersion` layout of a real `EscapeFromTarkov.exe` was derived from the official installer's source,
+not read from a live install — the first live run should confirm it.
+
 ## Desktop app (Tauri) and RPC
 
 - The Tauri v2 desktop app runs `sptmod rpc <name>` as a child process,
@@ -636,9 +757,9 @@ default true, passed as a parameter to each launch call).
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 34 service functions (declared as `FUNCTIONS: [&str; 34]` in
-  rpc.rs); the frontend client.ts has 31 camelCase wrappers (`adopt_mod` is
-  RPC-exposed but has no wrapper or frontend caller).
+- RPC functions: 37 service functions (declared as `FUNCTIONS: [&str; 37]` in
+  rpc.rs); the frontend client.ts has 35 camelCase wrappers (`adopt_mod` and
+  `install_from_archive` are RPC-exposed but have no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy), plus process and updater registered in `setup`.
   Capabilities in `src-tauri/capabilities/default.json`.
@@ -662,11 +783,14 @@ default true, passed as a parameter to each launch call).
   source links, dates, description, version table with per-version Fika
   compatibility (compatible/incompatible shown as tags).
 - Mods view shows a result count line ("N mods") above the table.
-- Settings page: sections Game directory, Appearance (theme select: system,
-  light, dark), Launching, Export the mod list, Import a mod list, Catalog cache
-  (two actions: clear cache alone, or clear cache + remove downloaded mod
-  files). A left sub-nav links the sections by hash; the active entry follows
-  `page.url.hash`.
+- Settings page: sections Game directory, SPT version, Appearance (theme
+  select: system, light, dark), Launching, Export the mod list, Import a mod
+  list, Catalog cache (two actions: clear cache alone, or clear cache + remove
+  downloaded mod files) and Updates. A left sub-nav links the sections by
+  hash; the active entry follows `page.url.hash`. The SPT version section
+  lists the releases of the installed line with the required Escape from
+  Tarkov build and applies or undoes one (see "Updating SPT"); the app shell
+  carries the dismissible startup notice when a newer release exists.
 
 ## Packaging and updates
 
@@ -936,7 +1060,7 @@ uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (502 tests; 100% coverage)
+cd frontend && pnpm vitest run --coverage  # frontend (649 tests; 100% coverage)
 cargo build && cargo test            # Rust (17 driver + 2 ignored e2e)
 cd src-tauri && cargo llvm-cov       # Rust coverage
 ```
@@ -947,7 +1071,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 502 vitest tests in 17 files; strict 100%
+- **Frontend:** 649 vitest tests in 24 files; strict 100%
   statements/branches/functions/lines on `src/lib/**/*.ts` (minus `*.test.ts` and
   generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 17 driver tests + 2 ignored e2e tests. rpc.rs's
@@ -974,8 +1098,11 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   and reason. Tests are fully typed via fixture Protocols; NO suppression pragmas
   in src or tests (`type: ignore`, `noqa`, `pylint: disable`, `pragma: no cover`).
   Lint findings are resolved by refactoring; the only configured knobs are pylint
-  design limits set to the exact observed maxima and `min-similarity-lines = 24`
-  for the CatalogMod dataclass/schema mirror.
+  design limits set to the exact observed maxima, `min-similarity-lines = 24`
+  for the CatalogMod dataclass/schema mirror, and
+  `[tool.pylint.imports] allow-any-import-level = ["libarchive"]`, because
+  importing the bindings loads `libarchive.so` and the import therefore has to
+  stay inside the 7z fallback.
 - All Forge tests run against respx mocks shaped by docs/FORGE_API.md; the
   suite NEVER hits the network. Live verification happens manually against
   sp-mod.com (full pipeline verified 2026-09-02: sync 1862 mods, SAIN install
@@ -989,6 +1116,14 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   error-mapping), `tests/test_dump_openapi.py` (contract drift detection).
   Rust: `src-tauri/tests/rpc_driver_tests.rs` (stub-script driven),
   `src-tauri/tests/rpc_e2e_ignored.rs` (real CLI, `#[ignore]`).
+- SPT release tests: `tests/test_sptrelease_client.py` (respx mocks shaped by
+  `tests/github_json.py`: assets present/absent, `v`-prefixed tags, names without a
+  build, error statuses, malformed bodies), `tests/test_services_spt.py`
+  (list/apply/undo, include and exclude set, stale deletion, build check,
+  re-apply without a commit) and `tests/test_cli_spt.py` (`sptmod spt
+  list|update|downgrade`, confirmation, direction refusal, exit codes). The BCJ2
+  fallback runs against the committed `tests/data/bcj2-mod.7z` and
+  `tests/data/bcj2-traversal.7z` — no Python writer can produce that filter.
 - Download cache tests: `tests/test_forge_cache.py` (cache layout, claim/keep/release,
   LRU/part sweep, env cap), `tests/test_forge_download_cache.py` (respx mocks:
   hit/miss, resume 206/200, interruption, size mismatch, sweep).
@@ -1000,6 +1135,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
 | Variable | Effect |
 |---|---|
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
+| `SPTMOD_SPT_RELEASE_URL` | SPT release list endpoint (mirrors/testing) |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver); wins over the bundled sidecar |
 | `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
 | `SPTMOD_PROCESS_SCAN` | `off` switches both scans of the process table for SPT off; inherited by children |
@@ -1014,6 +1150,14 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   design); `--file` installs without metadata are versionless unless
   `--version` is given (CLI prints a hint).
 - `.rar` creation is untestable (extraction works via bsdtar).
+- SPT keeps a download only for the newest release of each line (3 of 83
+  releases carry an asset), so downgrading by download is effectively dead —
+  the history undo is the real downgrade path, and the UI greys out what cannot
+  be fetched.
+- The upstream `sp-tarkov/build` repository is archived (since 2026-08-06).
+  Releases and their assets still resolve; if release hosting moves,
+  `SPTMOD_SPT_RELEASE_URL` is the only lever, and the release list has no cache
+  against the 60-requests-per-hour anonymous budget.
 - sp-mod.com deviates from the old forge source in category/license/
   dependency-embed shapes — the client parses the LIVE shapes (with
   tolerant fallbacks); resolve uses `/mods/dependencies`, which matches.

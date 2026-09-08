@@ -149,7 +149,7 @@ def test_remove_happy_path_exits_zero_and_reports_the_removed_mod(
     install_commit(repo, "CoolMod")
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "CoolMod"])
+    result = runner.invoke(app, ["remove", "CoolMod", "--yes"])
 
     assert result.exit_code == 0
     assert "CoolMod" in result.stdout
@@ -237,7 +237,7 @@ def test_remove_unknown_mod_exits_with_code_11_and_reports_on_stderr(
     clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
 
-    result = runner.invoke(app, ["remove", "Ghost"])
+    result = runner.invoke(app, ["remove", "Ghost", "--yes"])
 
     assert result.exit_code == 11
     assert result.stderr.startswith("error:")
@@ -303,7 +303,7 @@ def test_cli_maps_specific_core_errors_to_their_exit_codes(
         repo = clean_repo_at(fake_game_dir)
         install_commit(repo, "CoolMod", minute=1)
         install_commit(repo, "coolmod", minute=2)
-        argv = ["remove", "COOLMOD"]
+        argv = ["remove", "COOLMOD", "--yes"]
     monkeypatch.chdir(fake_game_dir)
 
     result = runner.invoke(app, argv)

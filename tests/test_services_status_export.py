@@ -191,6 +191,27 @@ def test_status_reports_a_changed_spt_file_as_a_game_file_change(clean_repo: Rep
     assert not report.manual_mods
 
 
+def test_status_reports_a_new_untracked_spt_own_client_file_as_a_game_file(
+    clean_repo: Repo,
+) -> None:
+    """A brand-new (never committed) file under BepInEx/plugins/spt/ -- the
+    way an SPT update adds a file its previous release did not ship -- is
+    SPT's own client file, not a manual mod to adopt; status() must report it
+    under game_files_changed and leave manual_mods and other_untracked empty.
+    Getting this wrong would make every SPT update that adds such a file
+    block every mod operation with an "adopt this" prompt.
+    """
+    new_dll = clean_repo.path / "BepInEx/plugins/spt/spt-new-module.dll"
+    new_dll.parent.mkdir(parents=True, exist_ok=True)
+    new_dll.write_bytes(b"4.2.0-build")
+
+    report = services.status(clean_repo.path)
+
+    assert report.game_files_changed == [Path("BepInEx/plugins/spt/spt-new-module.dll")]
+    assert not report.manual_mods
+    assert not report.other_untracked
+
+
 @pytest.mark.parametrize(
     "delete",
     [pytest.param(False, id="modified"), pytest.param(True, id="deleted")],

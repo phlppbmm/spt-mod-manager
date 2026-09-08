@@ -76,7 +76,7 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (1522 collected: 1521 passed, 1 skipped)
+uv run pytest                        # full suite (1777 collected: 1776 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run pyright                       # strict type checking on src + tests
@@ -101,7 +101,8 @@ cargo tauri dev                      # hot reload during development
 
 - `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
   progress callbacks; it knows neither CLI nor HTTP.
-- `subprocess` ONLY in `core/repo.py` and `core/launch.py`; `httpx` ONLY in `core/forge/client.py` and `core/sptserver.py`.
+- `subprocess` ONLY in `core/repo.py` and `core/launch.py`; `httpx` ONLY in `core/forge/client.py` (Forge),
+  `core/sptserver.py` (local server) and `core/sptrelease/client.py` (SPT release source) — one per remote service.
 - One contract, four transports: service function ↔ `sptmod rpc <name>` ↔
   Tauri `#[tauri::command] rpc()` ↔ client.ts wrapper — guarded by
   route-per-function and schema-parity tests.
@@ -134,10 +135,13 @@ cargo tauri dev                      # hot reload during development
   NO suppression pragmas of any kind in src or tests (`type: ignore`, `noqa`,
   `pylint: disable`, `pragma: no cover`) — lint findings are resolved by
   refactoring; the only configured knobs are pylint design limits set to the
-  exact observed maxima and `min-similarity-lines = 24` for the CatalogMod
-  dataclass/schema mirror.
+  exact observed maxima, `min-similarity-lines = 24` for the CatalogMod
+  dataclass/schema mirror, and `[tool.pylint.imports]
+  allow-any-import-level = ["libarchive"]`, because libarchive-c loads
+  `libarchive.so` at import time, so archive.py imports it inside the 7z
+  fallback and that knob is the pragma-free way to allow it.
 - Every test module, class, and function has a docstring stating setup,
   assertion, and reason. Tests are fully typed via fixture Protocols in
   `tests/fixture_types.py`; shared builders in `tests/conftest.py`,
-  `tests/forge_json.py`, `tests/pe_builder.py`.
+  `tests/forge_json.py`, `tests/github_json.py`, `tests/pe_builder.py`.
 - A strict `xfail` may pin a known production bug only with a bead reference.

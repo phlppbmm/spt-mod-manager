@@ -12,6 +12,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -602,6 +603,116 @@ def test_watch_game_survives_a_launch_log_it_cannot_write(
 
     payload = json.loads(_state_file(tmp_path).read_text(encoding="utf-8"))
     assert payload["failure"] == CLIENT_NEVER_STARTED
+
+
+# --------------------------------------------------------------------------
+# watch_game: noting the game that outlives the process the launch started.
+# --------------------------------------------------------------------------
+
+
+def _gone_pid(spawn: SpawnSleeper) -> int:
+    """Return the number of a process that was started and has ended again."""
+    process = spawn()
+    process.kill()
+    process.wait(timeout=4)
+    return process.pid
+
+
+def _watch_a_running_game(root: Path, game: subprocess.Popen[bytes], *, ticks: int) -> list[Any]:
+    """Watch ``game`` for ``ticks`` polls, end it, and return what was noted each time.
+
+    Reads the ``adopted_client`` entry of the state file on every poll and
+    kills the game on the last one, because the watcher deletes that file as
+    soon as the game is gone: during the run is the only moment the note can
+    be read at all.
+    """
+    seen: list[Any] = []
+
+    def _on_tick(tick: int) -> None:
+        payload: dict[str, Any] = json.loads(_state_file(root).read_text(encoding="utf-8"))
+        seen.append(payload["adopted_client"])
+        if tick >= ticks:
+            game.kill()
+            game.wait(timeout=4)
+
+    sleep, clock = _ticking(_on_tick)
+    watch_game(root, poll_seconds=3.0, grace_seconds=30.0, sleep=sleep, clock=clock)
+    return seen
+
+
+@pytest.mark.usefixtures("own_processes_only")
+def test_watch_game_notes_the_game_that_outlived_the_process_the_launch_started(
+    tmp_path: Path,
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
+) -> None:
+    """The watcher writes the running game into the state file under its own number.
+
+    The process the launch started is already gone and a game the scan
+    classifies runs on its own; the watcher polls twice before that game is
+    killed. Both polls must read back the game's real process number and its
+    real start time, because that note is the only handle a later stop_game
+    has on a game that hangs off nothing -- and reading the same note twice
+    shows the second poll leaves the first one standing instead of writing it
+    again.
+    """
+    gone = _dead_ref(spawn_sleeper)
+    # Start times tick every hundredth of a second: the game has to be
+    # strictly younger than the process the launch started to be adoptable.
+    time.sleep(0.05)
+    game = spawn_client()
+    write_launch_state(tmp_path, profile_id="p", client=gone)
+    noted = process_ref(game.pid, psutil.Process(game.pid).create_time())
+
+    seen = _watch_a_running_game(tmp_path, game, ticks=2)
+
+    assert seen == [noted, noted]
+    assert not _state_file(tmp_path).exists()
+
+
+@pytest.mark.usefixtures("own_processes_only")
+def test_watch_game_refuses_a_game_that_was_already_running_before_the_launch(
+    tmp_path: Path,
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
+) -> None:
+    """A game older than the launch is never noted as this launch's game.
+
+    The game is started first and the process the launch started a hundredth
+    of a second later, so the game cannot have come from it. The state file
+    must still say no game was noted, because closing a raid the player
+    started before this launch is exactly what may never happen.
+    """
+    game = spawn_client()
+    time.sleep(0.05)
+    write_launch_state(tmp_path, profile_id="p", client=_dead_ref(spawn_sleeper))
+
+    seen = _watch_a_running_game(tmp_path, game, ticks=1)
+
+    assert seen == [None]
+    assert not _state_file(tmp_path).exists()
+
+
+@pytest.mark.usefixtures("own_processes_only")
+def test_watch_game_refuses_to_note_a_game_when_the_launch_time_is_unknown(
+    tmp_path: Path,
+    spawn_sleeper: SpawnSleeper,
+    spawn_client: SpawnSleeper,
+) -> None:
+    """Without a start time for the launch, no running game is noted as its own.
+
+    The state file records the process the launch started with a start time of
+    0.0, which is what a launch writes when it could not read one. Nothing
+    then orders that process against the running game, so the state file must
+    stay without a note rather than claim a game that may be the player's own.
+    """
+    game = spawn_client()
+    write_launch_state(tmp_path, profile_id="p", client=process_ref(_gone_pid(spawn_sleeper), 0.0))
+
+    seen = _watch_a_running_game(tmp_path, game, ticks=1)
+
+    assert seen == [None]
+    assert not _state_file(tmp_path).exists()
 
 
 # --------------------------------------------------------------------------

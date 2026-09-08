@@ -2,14 +2,16 @@
 
 Covers the zip and 7z roundtrip, rejection of an unknown suffix, path
 traversal inside a zip and a 7z, encrypted zip/7z archives, the
-rar-without-backend error path, and a real rar roundtrip against sample
-archives from the rarfile 4.5 test suite (tests/data/). Whichever of those
-two rar cases applies depends on whether this machine actually has a rar
-backend, via rar_backend_available().
+rar-without-backend error path, a real rar roundtrip against sample
+archives from the rarfile 4.5 test suite (tests/data/), and the BCJ2-filtered
+7z fallback to libarchive (roundtrip, path traversal, missing binding).
+Whichever of the two rar cases applies depends on whether this machine
+actually has a rar backend, via rar_backend_available().
 """
 
 import contextlib
 import os
+import sys
 from pathlib import Path
 
 import py7zr
@@ -17,7 +19,7 @@ import pytest
 import rarfile
 
 from fixture_types import MakeArchive
-from sptmod.core.archive import RAR_INSTALL_HINT, extract, rar_backend_available
+from sptmod.core.archive import LIBARCHIVE_INSTALL_HINT, RAR_INSTALL_HINT, extract, rar_backend_available
 from sptmod.core.errors import ArchiveError
 
 
@@ -399,6 +401,107 @@ def test_extract_corrupt_zip_with_valid_magic_bytes_raises_archive_error(
         extract(archive, dest)
 
     assert "cannot read zip archive" in str(excinfo.value)
+
+
+# --- BCJ2-filtered 7z: py7zr raises UnsupportedCompressionMethodError, the
+# libarchive fallback reads it instead. bcj2-mod.7z / bcj2-traversal.7z are
+# real 7z archives (built with 7z's default BCJ2-filtered "ultra" preset for
+# an executable, verified above to make py7zr raise that exact exception on
+# extractall()) committed to tests/data/ because building one needs the
+# proprietary 7-Zip CLI, which make_archive does not provide. ---------------
+
+
+def test_extract_bcj2_7z_falls_back_to_libarchive_and_reads_correctly(tmp_path: Path) -> None:
+    """extract() reads a BCJ2-filtered 7z (py7zr cannot) via the libarchive fallback.
+
+    bcj2-mod.7z holds three files (doorstop_config.ini, BepInEx/core/BepInEx.dll,
+    BepInEx/plugins/spt/x.dll) plus directory entries; every file must land with
+    its exact content and every directory entry must exist as a directory.
+    """
+    archive = Path(__file__).parent / "data" / "bcj2-mod.7z"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    extract(archive, dest)
+
+    assert (dest / "doorstop_config.ini").read_text(encoding="utf-8") == "[General]\nenabled=true\n"
+    core_dll = (dest / "BepInEx" / "core" / "BepInEx.dll").read_bytes()
+    assert len(core_dll) == 724
+    assert core_dll.startswith(b"MZ\x90\x00bepinex core stub\n")
+    plugin_dll = (dest / "BepInEx" / "plugins" / "spt" / "x.dll").read_bytes()
+    assert len(plugin_dll) == 644
+    assert plugin_dll.startswith(b"MZ\x90\x00spt client stub\n")
+    assert (dest / "BepInEx" / "core").is_dir()
+    assert (dest / "BepInEx" / "plugins" / "spt").is_dir()
+
+
+def test_extract_bcj2_7z_traversal_member_is_rejected_and_writes_nothing(tmp_path: Path) -> None:
+    """The libarchive fallback validates member paths before writing, exactly
+    like the py7zr/zipfile paths: bcj2-traversal.7z holds a single member
+    named ``../evil.dll``, which must be rejected before any byte is written,
+    neither inside dest nor as a sibling of it.
+    """
+    archive = Path(__file__).parent / "data" / "bcj2-traversal.7z"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert "unsafe path in archive (path traversal): ../evil.dll" in str(excinfo.value)
+    assert not any(dest.iterdir())
+    assert not (tmp_path / "evil.dll").exists()
+
+
+def test_extract_bcj2_7z_raises_archive_error_when_a_target_file_is_blocked(
+    tmp_path: Path,
+) -> None:
+    """extract() raises ArchiveError, not a raw OSError, when the libarchive
+    fallback cannot write one of the archive's files because a directory
+    already occupies that path.
+
+    py7zr's own extraction attempt (writing the plain-stored files and
+    creating every directory before hitting the BCJ2 entries) completes
+    without touching that path, so the ``OSError`` this reproduces comes from
+    inside the libarchive fallback's own write loop, not from py7zr.
+    """
+    archive = Path(__file__).parent / "data" / "bcj2-mod.7z"
+    dest = tmp_path / "dest"
+    # BepInEx/core/BepInEx.dll comes first among the BCJ2 files (per
+    # getnames() order) and is where py7zr's own extractall() call aborts
+    # with UnsupportedCompressionMethodError before writing anything else, so
+    # blocking a *later* file's path lets py7zr's attempt fail for the
+    # BCJ2 reason untouched, and the libarchive fallback -- an independent,
+    # full second pass over the archive -- is what then actually reaches and
+    # trips over the blocked path.
+    blocked = dest / "BepInEx" / "plugins" / "spt" / "x.dll"
+    blocked.mkdir(parents=True)
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert "bcj2-mod.7z" in str(excinfo.value)
+
+
+def test_extract_bcj2_7z_without_the_libarchive_binding_raises_a_helpful_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the ``libarchive`` bindings cannot be imported (missing package,
+    or its shared library failing to load), extract() must raise ArchiveError
+    naming the install hint instead of letting the raw ImportError escape.
+    Setting the module to ``None`` in ``sys.modules`` is the standard way to
+    make Python raise ImportError on the next ``import`` of it, without
+    needing the package to actually be absent from this environment.
+    """
+    monkeypatch.setitem(sys.modules, "libarchive", None)
+    archive = Path(__file__).parent / "data" / "bcj2-mod.7z"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert LIBARCHIVE_INSTALL_HINT in str(excinfo.value)
 
 
 def test_extract_corrupt_7z_with_valid_magic_bytes_raises_archive_error(

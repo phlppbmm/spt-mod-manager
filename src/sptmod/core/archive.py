@@ -33,6 +33,11 @@ RAR_INSTALL_HINT: Final = (
     "sure it is on PATH"
 )
 
+LIBARCHIVE_INSTALL_HINT: Final = (
+    "no libarchive backend found: install the system library 'libarchive' "
+    "(package 'libarchive' on Arch, 'libarchive13' on Debian/Ubuntu)"
+)
+
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _MAX_LISTED_ENTRIES: Final = 30
 # Directory names the SPT installer puts in front of "user/mods"; any other
@@ -174,7 +179,40 @@ def _extract_7z(archive_path: Path, dest_temp: Path) -> None:
         raise ArchiveError(
             f"cannot extract 7z archive {archive_path.name}: it is password protected"
         ) from exc
+    except py7zr.exceptions.UnsupportedCompressionMethodError:
+        # The SPT release archives are packed with the BCJ2 filter, which py7zr
+        # does not implement; libarchive reads them.
+        _extract_7z_libarchive(archive_path, dest_temp)
     except (py7zr.exceptions.ArchiveError, OSError) as exc:
+        raise ArchiveError(
+            f"cannot read 7z archive {archive_path.name}: {exc}"
+        ) from exc
+
+
+def _extract_7z_libarchive(archive_path: Path, dest_temp: Path) -> None:
+    try:
+        # Importing the bindings loads the system library libarchive.so, so the
+        # import stays here: without that library sptmod still reads every
+        # other archive.
+        import libarchive
+    except (ImportError, OSError, AttributeError) as exc:
+        raise ArchiveError(
+            f"cannot read 7z archive {archive_path.name}: {LIBARCHIVE_INSTALL_HINT}"
+        ) from exc
+    try:
+        with libarchive.file_reader(str(archive_path)) as archive:
+            validate_member_paths([entry.pathname for entry in archive])
+        with libarchive.file_reader(str(archive_path)) as archive:
+            for entry in archive:
+                target = dest_temp / entry.pathname
+                if entry.isdir:
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("wb") as handle:
+                    for block in entry.get_blocks():
+                        handle.write(block)
+    except (libarchive.ArchiveError, OSError) as exc:
         raise ArchiveError(
             f"cannot read 7z archive {archive_path.name}: {exc}"
         ) from exc

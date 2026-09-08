@@ -43,6 +43,15 @@ export type DirectoryListing = Schemas['DirectoryListing'];
 export type DirectoryEntry = Schemas['DirectoryEntry'];
 export type LocatedDirectory = Schemas['LocatedDirectory'];
 export type FavoritesResponse = Schemas['FavoritesResponse'];
+export type ModSet = Schemas['ModSet'];
+export type ModSetEntry = Schemas['ModSetEntry'];
+export type ModSetOverview = Schemas['ModSetOverview'];
+export type ModSetChange = Schemas['ModSetChange'];
+export type ModSetPlan = Schemas['ModSetPlan'];
+export type ModSetExport = Schemas['ModSetExport'];
+export type ModSetMode = Schemas['ModSetMode'];
+export type ProfileBinding = Schemas['ProfileBinding'];
+export type ApplyModSetResponse = Schemas['ApplyModSetResponse'];
 export type LaunchProfileResponse = Schemas['LaunchProfileResponse'];
 export type LaunchStatus = Schemas['LaunchStatus'];
 export type StopResult = Schemas['StopResult'];
@@ -50,6 +59,10 @@ export type SptReleaseInfo = Schemas['SptReleaseInfo'];
 export type SptReleaseList = Schemas['SptReleaseList'];
 export type SptApplyResult = Schemas['SptApplyResult'];
 export type ApplySptReleaseResponse = Schemas['ApplySptReleaseResponse'];
+export type FikaSettings = Schemas['FikaSettings'];
+export type FikaRole = Schemas['FikaRole'];
+export type HostProfile = Schemas['HostProfile'];
+export type FikaInstallPlan = Schemas['FikaInstallPlan'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -298,16 +311,99 @@ export function importList(
 	} satisfies Schemas['ImportListRequest']);
 }
 
+export function listModSets(path: string): Promise<ModSetOverview> {
+	return call<ModSetOverview>('list_mod_sets', { path } satisfies Schemas['ListModSetsRequest']);
+}
+
+export function saveModSet(
+	path: string,
+	name: string,
+	entries: ModSetEntry[] | null = null
+): Promise<ModSet> {
+	return call<ModSet>('save_mod_set', {
+		path,
+		name,
+		entries
+	} satisfies Schemas['SaveModSetRequest']);
+}
+
+export function deleteModSet(path: string, name: string): Promise<ModSetOverview> {
+	return call<ModSetOverview>('delete_mod_set', {
+		path,
+		name
+	} satisfies Schemas['DeleteModSetRequest']);
+}
+
+export function renameModSet(path: string, name: string, newName: string): Promise<ModSet> {
+	return call<ModSet>('rename_mod_set', {
+		path,
+		name,
+		new_name: newName
+	} satisfies Schemas['RenameModSetRequest']);
+}
+
+export function exportModSet(path: string, name: string): Promise<ModSetExport> {
+	return call<ModSetExport>('export_mod_set', {
+		path,
+		name
+	} satisfies Schemas['ExportModSetRequest']);
+}
+
+export function importModSet(
+	path: string,
+	source: { setFile?: string; content?: string },
+	name: string | null = null
+): Promise<ModSet> {
+	return call<ModSet>('import_mod_set', {
+		path,
+		set_file: source.setFile ?? null,
+		content: source.content ?? null,
+		name
+	} satisfies Schemas['ImportModSetRequest']);
+}
+
+export function bindProfileSet(
+	path: string,
+	profileId: string,
+	setName: string | null = null
+): Promise<ModSetOverview> {
+	return call<ModSetOverview>('bind_profile_set', {
+		path,
+		profile_id: profileId,
+		set_name: setName
+	} satisfies Schemas['BindProfileSetRequest']);
+}
+
+export function planModSet(path: string, name: string): Promise<ModSetPlan> {
+	return call<ModSetPlan>('plan_mod_set', { path, name } satisfies Schemas['PlanModSetRequest']);
+}
+
+export function applyModSet(
+	path: string,
+	name: string,
+	ignoreMissing: boolean = false,
+	operationId: string | null = null
+): Promise<ApplyModSetResponse> {
+	return call<ApplyModSetResponse>('apply_mod_set', {
+		path,
+		name,
+		ignore_missing: ignoreMissing,
+		operation_id: operationId
+	} satisfies Schemas['ApplyModSetRequest']);
+}
+
 export function launchProfile(
 	path: string,
 	profileId: string,
 	stopServerOnExit: boolean = true,
-	operationId: string | null = null
+	operationId: string | null = null,
+	modSet: ModSetMode = 'apply'
 ): Promise<LaunchProfileResponse> {
 	return call<LaunchProfileResponse>('launch_profile', {
 		path,
 		profile_id: profileId,
 		stop_server_on_exit: stopServerOnExit,
+		mod_set: modSet,
 		operation_id: operationId
 	} satisfies Schemas['LaunchProfileRequest']);
 }
@@ -342,4 +438,34 @@ export function revertSptUpdate(path: string): Promise<SptApplyResult> {
 	return call<SptApplyResult>('revert_spt_update', {
 		path
 	} satisfies Schemas['RevertSptUpdateRequest']);
+}
+
+export function getFikaSettings(path: string): Promise<FikaSettings> {
+	return call<FikaSettings>('get_fika_settings', {
+		path
+	} satisfies Schemas['GetFikaSettingsRequest']);
+}
+
+export function setFikaSettings(
+	path: string,
+	role: FikaRole,
+	hostAddress: string = ''
+): Promise<FikaSettings> {
+	return call<FikaSettings>('set_fika_settings', {
+		path,
+		role,
+		host_address: hostAddress
+	} satisfies Schemas['SetFikaSettingsRequest']);
+}
+
+export function listHostProfiles(path: string): Promise<HostProfile[]> {
+	return call<HostProfile[]>('list_host_profiles', {
+		path
+	} satisfies Schemas['ListHostProfilesRequest']);
+}
+
+export function planFikaInstall(path: string): Promise<FikaInstallPlan> {
+	return call<FikaInstallPlan>('plan_fika_install', {
+		path
+	} satisfies Schemas['PlanFikaInstallRequest']);
 }

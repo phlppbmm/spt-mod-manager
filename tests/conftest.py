@@ -858,6 +858,41 @@ def fake_launchable_dir(fake_game_dir_runtime: Path) -> Iterator[LaunchableGameD
         kill_launchable_processes(root)
 
 
+@pytest.fixture
+def launchable_repo(fake_launchable_dir: LaunchableGameDir) -> tuple[LaunchableGameDir, Repo]:
+    """A :func:`fake_launchable_dir` initialized as a clean git repository.
+
+    Mirrors how :func:`clean_repo` wraps ``fake_game_dir``: ``Repo.init`` writes the
+    whitelist, then one commit stages everything the whitelist allows, leaving a clean
+    tree. Mod set launch tests use ``install_commit`` on the returned ``Repo`` to install
+    mods before calling ``services.launch_profile``.
+    """
+    root = fake_launchable_dir.root
+    repo = Repo.init(detect_layout(root))
+    repo.commit("chore: clean SPT 4.1.0", trailers={"Spt-Version": "4.1.0"}, paths=None)
+    return fake_launchable_dir, repo
+
+
+@pytest.fixture
+def mod_set_store(tmp_path: Path) -> Path:
+    """A mod set store file path under ``tmp_path``, never the real config directory.
+
+    Passed as ``store_path`` to every mod set service/RPC call in the mod set test
+    suites, keeping them off the developer's real ``modsets.json``.
+    """
+    return tmp_path / "modsets.json"
+
+
+@pytest.fixture
+def fika_store(tmp_path: Path) -> Path:
+    """A Fika settings file path under ``tmp_path``, never the real config directory.
+
+    Passed as ``fika_path`` to every Fika service/RPC call in the Fika test suites,
+    keeping them off the developer's real ``fika.json``.
+    """
+    return tmp_path / "fika.json"
+
+
 class FakeClock:
     """A monotonic-clock stand-in that only advances when told to.
 
@@ -1211,13 +1246,15 @@ def write_launch_state(
     server: dict[str, Any] | None = None,
     client: dict[str, Any] | None = None,
     watcher: dict[str, Any] | None = None,
+    mode: str = "",
 ) -> None:
     """Write LAUNCH_STATE_FILE_NAME to the game directory with given process state.
 
     Creates the JSON state file recording the profile, process PIDs and start times
-    (server, client, watcher), and the stop_server_on_exit flag. Keyword args
-    allow each process reference and the flag to be individually set; defaults are
-    empty profile and true for stop_server_on_exit.
+    (server, client, watcher), the stop_server_on_exit flag and the launch mode
+    (empty for a launch on the local server, "client" for one on a Fika host).
+    Keyword args allow each process reference and the flag to be individually set;
+    defaults are empty profile and true for stop_server_on_exit.
     """
     payload = {
         "profile_id": profile_id,
@@ -1225,6 +1262,7 @@ def write_launch_state(
         "server": server,
         "client": client,
         "watcher": watcher,
+        "mode": mode,
     }
     (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
 

@@ -531,6 +531,159 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/list_mod_sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Mod Sets */
+        post: operations["list_mod_sets_api_list_mod_sets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/save_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Mod Set */
+        post: operations["save_mod_set_api_save_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/delete_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete Mod Set */
+        post: operations["delete_mod_set_api_delete_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rename_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename Mod Set */
+        post: operations["rename_mod_set_api_rename_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export Mod Set */
+        post: operations["export_mod_set_api_export_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Mod Set */
+        post: operations["import_mod_set_api_import_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bind_profile_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind Profile Set */
+        post: operations["bind_profile_set_api_bind_profile_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Mod Set */
+        post: operations["plan_mod_set_api_plan_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apply_mod_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Mod Set */
+        post: operations["apply_mod_set_api_apply_mod_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/launch_profile": {
         parameters: {
             query?: never;
@@ -633,6 +786,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/get_fika_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Fika Settings */
+        post: operations["get_fika_settings_api_get_fika_settings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/set_fika_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Fika Settings */
+        post: operations["set_fika_settings_api_set_fika_settings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/list_host_profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Host Profiles */
+        post: operations["list_host_profiles_api_list_host_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan_fika_install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Fika Install */
+        post: operations["plan_fika_install_api_plan_fika_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -668,6 +889,61 @@ export interface components {
              * @default []
              */
             files: string[];
+        };
+        /**
+         * ApplyModSetRequest
+         * @description Parameters of ``apply_mod_set``.
+         *
+         *     ``operation_id`` names the progress stream of this change; a generated one
+         *     is used and echoed back when the caller sends none.
+         */
+        ApplyModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /**
+             * Ignore Missing
+             * @default false
+             */
+            ignore_missing: boolean;
+            /** Store Path */
+            store_path?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * ApplyModSetResponse
+         * @description Outcome of ``apply_mod_set`` plus its progress operation ID.
+         */
+        ApplyModSetResponse: {
+            /** Name */
+            name: string;
+            /**
+             * Enabled
+             * @default []
+             */
+            enabled: string[];
+            /**
+             * Disabled
+             * @default []
+             */
+            disabled: string[];
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+            /**
+             * Notices
+             * @default []
+             */
+            notices: string[];
+            /** Operation Id */
+            operation_id: string;
         };
         /**
          * ApplySptReleaseRequest
@@ -708,6 +984,25 @@ export interface components {
             files: components["schemas"]["ModFile"][];
             /** Operation Id */
             operation_id: string;
+        };
+        /**
+         * BindProfileSetRequest
+         * @description Parameters of ``bind_profile_set``.
+         *
+         *     Without ``set_name`` the profile is unbound.
+         */
+        BindProfileSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Profile Id */
+            profile_id: string;
+            /** Set Name */
+            set_name?: string | null;
+            /** Store Path */
+            store_path?: string | null;
         };
         /**
          * BlockedUpdate
@@ -1075,6 +1370,21 @@ export interface components {
         /** @enum {string} */
         ConflictSeverity: "error" | "warning";
         /**
+         * DeleteModSetRequest
+         * @description Parameters of ``delete_mod_set``.
+         */
+        DeleteModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
+        /**
          * DirectoryEntry
          * @description One subdirectory of a browsed directory.
          */
@@ -1188,6 +1498,11 @@ export interface components {
              * @default 0
              */
             api_status: number;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
         };
         /**
          * ErrorResponse
@@ -1205,6 +1520,21 @@ export interface components {
         };
         /** @enum {string} */
         ExportFormat: "text" | "json";
+        /**
+         * ExportModSetRequest
+         * @description Parameters of ``export_mod_set``.
+         */
+        ExportModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
         /**
          * ExportModsRequest
          * @description Parameters of ``export_mods``.
@@ -1246,8 +1576,51 @@ export interface components {
         };
         /** @enum {string} */
         FikaCompatibility: "compatible" | "incompatible" | "unknown";
+        /**
+         * FikaInstallPlan
+         * @description What playing co-op needs: the two halves of Fika and their one plan.
+         */
+        FikaInstallPlan: {
+            /** Server Mod Id */
+            server_mod_id: number;
+            /** Client Mod Id */
+            client_mod_id: number;
+            plan: components["schemas"]["InstallPlan"];
+        };
+        /** @enum {string} */
+        FikaRole: "none" | "host" | "client";
+        /**
+         * FikaSettings
+         * @description The Fika role of one game directory and the host it plays on.
+         */
+        FikaSettings: {
+            role: components["schemas"]["FikaRole"];
+            /**
+             * Host Address
+             * @default
+             */
+            host_address: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+        };
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
+        /**
+         * GetFikaSettingsRequest
+         * @description Parameters of ``get_fika_settings``.
+         */
+        GetFikaSettingsRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Fika Path */
+            fika_path?: string | null;
+        };
         /**
          * GetModDetailsRequest
          * @description Parameters of ``get_mod_details``.
@@ -1270,6 +1643,36 @@ export interface components {
             path: string;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * HostProfile
+         * @description One player profile a Fika host offers to the players joining it.
+         */
+        HostProfile: {
+            /** Profile Id */
+            profile_id: string;
+            /** Username */
+            username: string;
+            /**
+             * Nickname
+             * @default
+             */
+            nickname: string;
+            /**
+             * Level
+             * @default 0
+             */
+            level: number;
+            /**
+             * Side
+             * @default
+             */
+            side: string;
+            /**
+             * Has Password
+             * @default false
+             */
+            has_password: boolean;
         };
         /**
          * ImportDiff
@@ -1343,6 +1746,27 @@ export interface components {
             content?: string | null;
             /** Db Path */
             db_path?: string | null;
+        };
+        /**
+         * ImportModSetRequest
+         * @description Parameters of ``import_mod_set``.
+         *
+         *     Exactly one of ``set_file`` and ``content`` carries the mod set.
+         */
+        ImportModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Set File */
+            set_file?: string | null;
+            /** Content */
+            content?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Store Path */
+            store_path?: string | null;
         };
         /**
          * IncompatibleMod
@@ -1574,6 +1998,12 @@ export interface components {
              * @default true
              */
             stop_server_on_exit: boolean;
+            /** @default apply */
+            mod_set: components["schemas"]["ModSetMode"];
+            /** Store Path */
+            store_path?: string | null;
+            /** Fika Path */
+            fika_path?: string | null;
             /** Operation Id */
             operation_id?: string | null;
         };
@@ -1646,6 +2076,32 @@ export interface components {
         ListFavoritesRequest: {
             /** Favorites Path */
             favorites_path?: string | null;
+        };
+        /**
+         * ListHostProfilesRequest
+         * @description Parameters of ``list_host_profiles``.
+         */
+        ListHostProfilesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Fika Path */
+            fika_path?: string | null;
+        };
+        /**
+         * ListModSetsRequest
+         * @description Parameters of ``list_mod_sets``.
+         */
+        ListModSetsRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Store Path */
+            store_path?: string | null;
         };
         /**
          * ListModsRequest
@@ -1795,6 +2251,118 @@ export interface components {
             source: string;
         };
         /**
+         * ModSet
+         * @description A named list of mods with the state each of them should have.
+         */
+        ModSet: {
+            /** Name */
+            name: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Entries
+             * @default []
+             */
+            entries: components["schemas"]["ModSetEntry"][];
+        };
+        /**
+         * ModSetChange
+         * @description One mod a set would turn on or off, or names in another version.
+         */
+        ModSetChange: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Installed Version
+             * @default
+             */
+            installed_version: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * ModSetEntry
+         * @description One mod of a mod set and the state the set gives it.
+         */
+        ModSetEntry: {
+            /** Forge Id */
+            forge_id: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * ModSetExport
+         * @description A mod set rendered for sharing, as file content and as a share code.
+         */
+        ModSetExport: {
+            /** Name */
+            name: string;
+            /** Content */
+            content: string;
+            /** Code */
+            code: string;
+        };
+        /** @enum {string} */
+        ModSetMode: "apply" | "ignore_missing" | "skip";
+        /**
+         * ModSetOverview
+         * @description The mod sets of one game directory and the profiles bound to them.
+         */
+        ModSetOverview: {
+            /**
+             * Sets
+             * @default []
+             */
+            sets: components["schemas"]["ModSet"][];
+            /**
+             * Bindings
+             * @default []
+             */
+            bindings: components["schemas"]["ProfileBinding"][];
+        };
+        /**
+         * ModSetPlan
+         * @description What applying a mod set would change.
+         */
+        ModSetPlan: {
+            /** Name */
+            name: string;
+            /**
+             * Enable
+             * @default []
+             */
+            enable: components["schemas"]["ModSetChange"][];
+            /**
+             * Disable
+             * @default []
+             */
+            disable: components["schemas"]["ModSetChange"][];
+            /**
+             * Missing
+             * @default []
+             */
+            missing: components["schemas"]["ModSetEntry"][];
+            /**
+             * Different
+             * @default []
+             */
+            different: components["schemas"]["ModSetChange"][];
+            /**
+             * Unchanged
+             * @default []
+             */
+            unchanged: string[];
+        };
+        /**
          * ModState
          * @description The lifecycle state a mod's youngest commit puts it in.
          * @enum {string}
@@ -1829,6 +2397,19 @@ export interface components {
             is_dependency: boolean;
         };
         /**
+         * PlanFikaInstallRequest
+         * @description Parameters of ``plan_fika_install``.
+         */
+        PlanFikaInstallRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Db Path */
+            db_path?: string | null;
+        };
+        /**
          * PlanModInstallRequest
          * @description Parameters of ``plan_mod_install``.
          */
@@ -1846,6 +2427,21 @@ export interface components {
             db_path?: string | null;
         };
         /**
+         * PlanModSetRequest
+         * @description Parameters of ``plan_mod_set``.
+         */
+        PlanModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
+        /**
          * PlanProfileCleanupRequest
          * @description Parameters of ``plan_profile_cleanup``.
          */
@@ -1857,6 +2453,16 @@ export interface components {
             path: string;
             /** Mod Name */
             mod_name: string;
+        };
+        /**
+         * ProfileBinding
+         * @description The mod set one player profile is played with.
+         */
+        ProfileBinding: {
+            /** Profile Id */
+            profile_id: string;
+            /** Set Name */
+            set_name: string;
         };
         /**
          * ProfileResidue
@@ -1980,6 +2586,23 @@ export interface components {
             cleanup?: components["schemas"]["CleanupResult"] | null;
         };
         /**
+         * RenameModSetRequest
+         * @description Parameters of ``rename_mod_set``.
+         */
+        RenameModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /** New Name */
+            new_name: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
+        /**
          * ResidueCategory
          * @description Which part of a player profile a mod's IDs were found in.
          * @enum {string}
@@ -1995,6 +2618,25 @@ export interface components {
              * Format: path
              */
             path: string;
+        };
+        /**
+         * SaveModSetRequest
+         * @description Parameters of ``save_mod_set``.
+         *
+         *     Without ``entries`` the set is taken from the installed mods.
+         */
+        SaveModSetRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Name */
+            name: string;
+            /** Entries */
+            entries?: components["schemas"]["ModSetEntry"][] | null;
+            /** Store Path */
+            store_path?: string | null;
         };
         /**
          * SearchCatalogRequest
@@ -2027,6 +2669,26 @@ export interface components {
             favorite: boolean;
             /** Favorites Path */
             favorites_path?: string | null;
+        };
+        /**
+         * SetFikaSettingsRequest
+         * @description Parameters of ``set_fika_settings``.
+         */
+        SetFikaSettingsRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** @default none */
+            role: components["schemas"]["FikaRole"];
+            /**
+             * Host Address
+             * @default
+             */
+            host_address: string;
+            /** Fika Path */
+            fika_path?: string | null;
         };
         /**
          * SetSptVersionRequest
@@ -3467,6 +4129,303 @@ export interface operations {
             };
         };
     };
+    list_mod_sets_api_list_mod_sets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListModSetsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSetOverview"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_mod_set_api_save_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSet"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_mod_set_api_delete_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSetOverview"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rename_mod_set_api_rename_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSet"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_mod_set_api_export_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSetExport"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_mod_set_api_import_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSet"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bind_profile_set_api_bind_profile_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindProfileSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSetOverview"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_mod_set_api_plan_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModSetPlan"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    apply_mod_set_api_apply_mod_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyModSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyModSetResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     launch_profile_api_launch_profile_post: {
         parameters: {
             query?: never;
@@ -3652,6 +4611,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SptApplyResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_fika_settings_api_get_fika_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GetFikaSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaSettings"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_fika_settings_api_set_fika_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFikaSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaSettings"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_host_profiles_api_list_host_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListHostProfilesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostProfile"][];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_fika_install_api_plan_fika_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanFikaInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaInstallPlan"];
                 };
             };
             /** @description Default Response */

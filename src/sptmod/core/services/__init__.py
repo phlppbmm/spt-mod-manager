@@ -3,6 +3,11 @@
 from sptmod.core.errors import (
     InvalidPathError,
 )
+from sptmod.core.fika import (
+    FIKA_ROLES,
+    FikaRole,
+    FikaSettings,
+)
 from sptmod.core.launch import (
     LaunchResult,
     LaunchStatus,
@@ -10,6 +15,11 @@ from sptmod.core.launch import (
 )
 from sptmod.core.models import (
     ACTIVE_STATES,
+)
+from sptmod.core.modsets import (
+    ModSet,
+    ModSetEntry,
+    ProfileBinding,
 )
 from sptmod.core.services.catalog import (
     BrowseFilter,
@@ -26,6 +36,12 @@ from sptmod.core.services.catalog import (
 from sptmod.core.services.common import (
     INSTALL_STEPS,
     InstallStep,
+)
+from sptmod.core.services.fika import (
+    HostProfile,
+    get_fika_settings,
+    list_host_profiles,
+    set_fika_settings,
 )
 from sptmod.core.services.gamedir import (
     SPT_VERSION_TRAILER,
@@ -47,8 +63,10 @@ from sptmod.core.services.install_archive import (
     install_from_archive,
 )
 from sptmod.core.services.install_forge import (
+    FikaInstallPlan,
     InstallModResult,
     install_mod,
+    plan_fika_install,
     plan_mod_install,
 )
 from sptmod.core.services.lifecycle import (
@@ -59,6 +77,25 @@ from sptmod.core.services.lifecycle import (
     disable_mod,
     enable_mod,
     remove_mod,
+)
+from sptmod.core.services.modsets import (
+    MOD_SET_MODES,
+    ModSetApplyResult,
+    ModSetChange,
+    ModSetExport,
+    ModSetMode,
+    ModSetOverview,
+    ModSetPlan,
+    ModSetStep,
+    apply_mod_set,
+    bind_profile_set,
+    delete_mod_set,
+    export_mod_set,
+    import_mod_set,
+    list_mod_sets,
+    plan_mod_set,
+    rename_mod_set,
+    save_mod_set,
 )
 from sptmod.core.services.profiles import (
     CleanupPlan,
@@ -121,6 +158,11 @@ __all__ = [
     "EXPORT_FORMATS",
     "ExportEntry",
     "ExportFormat",
+    "FIKA_ROLES",
+    "FikaInstallPlan",
+    "FikaRole",
+    "FikaSettings",
+    "HostProfile",
     "INSTALL_STEPS",
     "ImportDiff",
     "ImportEntry",
@@ -133,8 +175,19 @@ __all__ = [
     "LaunchResult",
     "LaunchStatus",
     "LocatedDirectory",
+    "MOD_SET_MODES",
     "ManualMod",
     "ModDetails",
+    "ModSet",
+    "ModSetApplyResult",
+    "ModSetChange",
+    "ModSetEntry",
+    "ModSetExport",
+    "ModSetMode",
+    "ModSetOverview",
+    "ModSetPlan",
+    "ModSetStep",
+    "ProfileBinding",
     "RemoveResult",
     "SPT_VERSION_TRAILER",
     "SnapshotResult",
@@ -150,18 +203,24 @@ __all__ = [
     "UpdateResult",
     "UpdatesReport",
     "adopt_mod",
+    "apply_mod_set",
     "apply_spt_release",
+    "bind_profile_set",
     "browse_catalog",
     "check_profiles",
     "check_updates",
     "clean_profile",
     "clear_catalog_cache",
+    "delete_mod_set",
     "disable_mod",
     "enable_mod",
+    "export_mod_set",
     "export_mods",
+    "get_fika_settings",
     "get_mod_details",
     "history",
     "import_list",
+    "import_mod_set",
     "init_game_dir",
     "install_from_archive",
     "install_mod",
@@ -169,17 +228,24 @@ __all__ = [
     "launch_status",
     "list_directories",
     "list_favorites",
+    "list_host_profiles",
+    "list_mod_sets",
     "list_mods",
     "list_profiles",
     "list_spt_releases",
     "locate_directory",
     "mod_files",
+    "plan_fika_install",
     "plan_mod_install",
+    "plan_mod_set",
     "plan_profile_cleanup",
     "remove_mod",
+    "rename_mod_set",
     "revert_spt_update",
+    "save_mod_set",
     "search_catalog",
     "set_favorite",
+    "set_fika_settings",
     "set_spt_version",
     "snapshot",
     "status",

@@ -231,6 +231,90 @@ describe('launchAction', () => {
 	});
 });
 
+describe('launchAction with a Fika host', () => {
+	const cases: Array<{
+		name: string;
+		status: LaunchStatus | null;
+		profileId: string;
+		busy: boolean;
+		hostLabel: string;
+		expected: LaunchAction;
+	}> = [
+		{
+			name: 'idle, not busy: the button names the host it connects to',
+			status: null,
+			profileId: 'p1',
+			busy: false,
+			hostLabel: 'pc.local',
+			expected: { label: 'Connect to pc.local', disabled: false, mode: 'launch', hint: '' }
+		},
+		{
+			name: 'idle, busy: connecting instead of starting, same in-flight hint',
+			status: null,
+			profileId: 'p1',
+			busy: true,
+			hostLabel: 'pc.local',
+			expected: {
+				label: 'Connecting…',
+				disabled: true,
+				mode: 'launch',
+				hint: 'A launch is running.'
+			}
+		},
+		{
+			name: 'a different profile running: named but disabled, already-running hint',
+			status: status({ client_running: true, profile_id: 'other' }),
+			profileId: 'p1',
+			busy: false,
+			hostLabel: 'pc.local',
+			expected: {
+				label: 'Connect to pc.local',
+				disabled: true,
+				mode: 'launch',
+				hint: 'The game is already running.'
+			}
+		},
+		{
+			name: 'this profile running: the stop button keeps its label and spares the host',
+			status: status({ server_running: true, profile_id: 'p1' }),
+			profileId: 'p1',
+			busy: false,
+			hostLabel: 'pc.local',
+			expected: {
+				label: 'Stop',
+				disabled: false,
+				mode: 'stop',
+				hint: "Closes the game. The host's server keeps running."
+			}
+		},
+		{
+			name: 'an empty host label behaves like the omitted parameter',
+			status: null,
+			profileId: 'p1',
+			busy: false,
+			hostLabel: '',
+			expected: { label: 'Launch', disabled: false, mode: 'launch', hint: '' }
+		},
+		{
+			name: 'an empty host label while busy still starts rather than connects',
+			status: null,
+			profileId: 'p1',
+			busy: true,
+			hostLabel: '',
+			expected: {
+				label: 'Starting…',
+				disabled: true,
+				mode: 'launch',
+				hint: 'A launch is running.'
+			}
+		}
+	];
+
+	it.each(cases)('$name', ({ status: s, profileId, busy, hostLabel, expected }) => {
+		expect(launchAction(s, profileId, busy, hostLabel)).toEqual(expected);
+	});
+});
+
 describe('nextPollDelay', () => {
 	it('polls slowly for a null status', () => {
 		expect(nextPollDelay(null)).toBe(10000);

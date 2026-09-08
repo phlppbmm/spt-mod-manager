@@ -486,6 +486,7 @@ def test_error_without_structured_payload_gets_empty_details(
         "reason": "",
         "api_code": "",
         "api_status": 0,
+        "missing": [],
     }
 
 

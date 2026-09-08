@@ -34,6 +34,7 @@ import psutil
 
 from sptmod.core import game_dir, sptserver
 from sptmod.core.errors import (
+    FikaHostUnreachableError,
     GameRunningError,
     LaunchError,
     LauncherSettingsError,
@@ -52,6 +53,7 @@ POLL_SECONDS: Final = 1.0
 WATCH_POLL_SECONDS: Final = 3.0
 WATCH_GRACE_SECONDS: Final = 120.0
 CLIENT_NEVER_STARTED: Final = "The game did not start."
+CLIENT_MODE: Final = "client"
 TERMINATE_TIMEOUT: Final = 10.0
 CLIENT_ARGS_HEAD: Final[tuple[str, ...]] = ("-force-gfx-jobs", "native")
 CLIENT_EXIT_GRACE_SECONDS: Final = 0.5
@@ -74,8 +76,10 @@ _QUOTES: Final[tuple[str, str]] = ('"', "'")
 class LaunchStep(StrEnum):
     """The phases a launch reports progress for."""
 
+    MODSET = "modset"
     SERVER = "server"
     WAITING = "waiting"
+    HOST = "host"
     LOGIN = "login"
     CLIENT = "client"
     DONE = "done"
@@ -139,7 +143,8 @@ class _LaunchState:
     """The contents of the launch state file.
 
     ``failure`` names why the launch did not end up with a running game,
-    empty while nothing went wrong.
+    empty while nothing went wrong. ``mode`` is :data:`CLIENT_MODE` when the
+    game was started on another player's server and empty otherwise.
     """
 
     profile_id: str = ""
@@ -149,6 +154,7 @@ class _LaunchState:
     client: _ProcessRef | None = None
     watcher: _ProcessRef | None = None
     failure: str = ""
+    mode: str = ""
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,7 @@ def launch_profile(
     stop_server_on_exit: bool = True,
     progress: Progress | None = None,
     *,
+    fika_host: str = "",
     ready_timeout: float = READY_TIMEOUT,
     poll_seconds: float = POLL_SECONDS,
     request_timeout: float = sptserver.REQUEST_TIMEOUT,
@@ -183,12 +190,18 @@ def launch_profile(
     :func:`stop_game` find it again. When ``stop_server_on_exit`` is set and
     the server was started here, it is closed once the game closes.
 
+    With ``fika_host`` the game is played on another player's server instead:
+    nothing is started locally, the profile and its player name come from that
+    server, and only the game itself runs here.
+
     Args:
         path: The game directory.
         profile_id: The profile to play, named by its file name without the
             extension.
         stop_server_on_exit: Close the server when the game closes.
         progress: Optional callback for the four phases of the launch.
+        fika_host: Base URL of the Fika host to play on; empty to play on the
+            server of this installation.
         ready_timeout: Seconds to wait for the server to answer.
         poll_seconds: Seconds between two questions to the server.
         request_timeout: Seconds one question to the server may take.
@@ -202,12 +215,15 @@ def launch_profile(
         NotAGameDirError: ``path`` is no SPT game directory.
         GameRunningError: The game is already running.
         ServerPortBusyError: Another program holds the server's address.
+        FikaHostUnreachableError: The Fika host does not answer as an SPT
+            server.
         LoginFailedError: The server does not know the profile.
         LauncherSettingsError: The settings of the official SPT launcher are
             missing or unusable.
         LaunchError: A program is missing, could not be started, the server
-            did not answer in time, another launch is already in progress, or
-            what was started could not be noted in the game directory.
+            did not answer in time, the host knows no such profile, another
+            launch is already in progress, or what was started could not be
+            noted in the game directory.
     """
     layout = detect_layout(path)
     with _launch_lock(path):
@@ -217,6 +233,7 @@ def launch_profile(
             profile_id,
             stop_server_on_exit,
             progress,
+            fika_host=fika_host,
             ready_timeout=ready_timeout,
             poll_seconds=poll_seconds,
             request_timeout=request_timeout,
@@ -232,6 +249,7 @@ def _launch(
     stop_server_on_exit: bool,
     progress: Progress | None,
     *,
+    fika_host: str,
     ready_timeout: float,
     poll_seconds: float,
     request_timeout: float,
@@ -241,6 +259,16 @@ def _launch(
     """Run one launch while the launch lock is held."""
     running = game_dir.game_processes()
     _refuse_running_client(running)
+    if fika_host:
+        return _launch_on_host(
+            path,
+            layout,
+            profile_id,
+            stop_server_on_exit,
+            progress,
+            fika_host=fika_host,
+            request_timeout=request_timeout,
+        )
     username, nickname = _profile_login(layout, profile_id)
     # The profile id is the login token, so only the player name is logged.
     _log(path, f"Starting the game for {nickname}.")
@@ -282,22 +310,16 @@ def _launch(
     _report(progress, LaunchStep.CLIENT, 95, "Starting the game")
     client = _spawn_client(layout, profile_id, base_url)
 
-    state = _LaunchState(
-        profile_id=profile_id,
-        stop_server_on_exit=stop_server_on_exit,
-        server=server,
-        server_started_by_sptmod=server_started,
-        client=client,
+    _remember(
+        path,
+        _LaunchState(
+            profile_id=profile_id,
+            stop_server_on_exit=stop_server_on_exit,
+            server=server,
+            server_started_by_sptmod=server_started,
+            client=client,
+        ),
     )
-    try:
-        _write_state(path, state)
-        _write_state(path, replace(state, watcher=_spawn_watcher(path)))
-    except OSError as error:
-        raise LaunchError(
-            f"The SPT server (process {server.pid if server else 0}) and the "
-            f"game (process {client.pid}) are running, but sptmod cannot note "
-            f"that in {path}: {error}. Close them yourself when you are done."
-        ) from error
     _report(progress, LaunchStep.DONE, 100, "The game is starting")
     return LaunchResult(
         profile_id=profile_id,
@@ -308,18 +330,131 @@ def _launch(
     )
 
 
+def _launch_on_host(
+    path: Path,
+    layout: GameLayout,
+    profile_id: str,
+    stop_server_on_exit: bool,
+    progress: Progress | None,
+    *,
+    fika_host: str,
+    request_timeout: float,
+) -> LaunchResult:
+    """Start the game on the server of another player.
+
+    Nothing is started here besides the game: the profile, its player name and
+    the sign-in all belong to the host, and the game is pointed at it.
+    """
+    _report(progress, LaunchStep.HOST, 5, f"Contacting the host at {fika_host}")
+    _log(path, f"Connecting to the host at {fika_host}.")
+    answer = sptserver.probe(fika_host, request_timeout)
+    if answer != "spt":
+        raise FikaHostUnreachableError(_host_message(answer, fika_host))
+
+    _report(progress, LaunchStep.HOST, 40, "Reading the profiles on the host")
+    profile = _host_profile(fika_host, profile_id, request_timeout)
+
+    _report(progress, LaunchStep.LOGIN, 80, f"Signing in as {profile.nickname}")
+    if not sptserver.login(fika_host, profile.username, request_timeout):
+        raise LoginFailedError(
+            f"The host at {fika_host} did not accept the profile "
+            f"{profile.nickname}. Profiles that need a password cannot be used."
+        )
+    _log(path, f"The host signed {profile.nickname} in.")
+
+    _report(progress, LaunchStep.CLIENT, 95, "Starting the game")
+    client = _spawn_client(layout, profile_id, fika_host)
+    _remember(
+        path,
+        _LaunchState(
+            profile_id=profile_id,
+            stop_server_on_exit=stop_server_on_exit,
+            client=client,
+            mode=CLIENT_MODE,
+        ),
+    )
+    _report(progress, LaunchStep.DONE, 100, "The game is starting")
+    return LaunchResult(
+        profile_id=profile_id,
+        nickname=profile.nickname,
+        server_pid=0,
+        client_pid=client.pid,
+        server_started=False,
+    )
+
+
+def _host_profile(
+    base_url: str, profile_id: str, request_timeout: float
+) -> sptserver.RemoteProfile:
+    """Return the profile ``profile_id`` among the ones the host offers.
+
+    Raises:
+        LaunchError: The host offers no profile with that id.
+    """
+    for profile in sptserver.host_profiles(base_url, request_timeout):
+        if profile.profile_id == profile_id:
+            return profile
+    raise LaunchError(
+        f"The host at {base_url} has no profile with this id. "
+        f"Pick one of the host's profiles."
+    )
+
+
+def _host_message(answer: sptserver.PortState, base_url: str) -> str:
+    """Return why the host at ``base_url`` cannot be played on."""
+    if answer == "free":
+        return (
+            f"No SPT server answers at {base_url}. Ask the host to start "
+            f"their server, then try again."
+        )
+    if answer == "timeout":
+        return (
+            f"The SPT server at {base_url} did not answer in time. Check the "
+            f"address and the connection to the host."
+        )
+    return (
+        f"Something at {base_url} answered, but it is not an SPT server. "
+        f"Check the address."
+    )
+
+
+def _remember(path: Path, state: _LaunchState) -> None:
+    """Note what a launch started and hand it over to its own watcher.
+
+    Raises:
+        LaunchError: What was started could not be noted in the game directory.
+    """
+    try:
+        _write_state(path, state)
+        _write_state(path, replace(state, watcher=_spawn_watcher(path)))
+    except OSError as error:
+        server = state.server.pid if state.server is not None else 0
+        client = state.client.pid if state.client is not None else 0
+        raise LaunchError(
+            f"The SPT server (process {server}) and the "
+            f"game (process {client}) are running, but sptmod cannot note "
+            f"that in {path}: {error}. Close them yourself when you are done."
+        ) from error
+
+
 def launch_status(path: Path) -> LaunchStatus:
     """Report whether the server and the game of ``path`` are running.
 
     Reads the remembered processes and the process table, so a server or game
-    started outside sptmod is reported as well. Never fails: an installation
-    nothing is known about simply reports nothing running. Only a process
-    sptmod started here is stoppable; one found by its name alone, and a server
-    that was already running, are reported and left alone.
+    started outside sptmod is reported as well. A game played on another
+    player's server reports no server of its own: the one on this machine, if
+    any, belongs to somebody else. Never fails: an installation nothing is
+    known about simply reports nothing running. Only a process sptmod started
+    here is stoppable; one found by its name alone, and a server that was
+    already running, are reported and left alone.
     """
     state = _read_state(path)
     running = game_dir.game_processes()
-    server = _running_pid(state.server, running, "server")
+    server = (
+        0
+        if state.mode == CLIENT_MODE
+        else _running_pid(state.server, running, "server")
+    )
     client = _running_pid(state.client, running, "client")
     return LaunchStatus(
         server_running=server != 0,
@@ -342,7 +477,9 @@ def stop_game(path: Path) -> StopResult:
     while the number and the start time noted with it still name that very
     process. Anything else is left alone, however plainly it shows up in the
     process table: it belongs to somebody else, the server that was already
-    answering when the launch began included.
+    answering when the launch began included. A game played on another
+    player's server closes alone: the server there belongs to that player and
+    was never noted here.
     """
     state = _read_state(path)
     if state.watcher is not None:
@@ -509,6 +646,13 @@ def _spawned_alive(client: _ProcessRef) -> bool:
 
 def _stop_watched_server(path: Path, state: _LaunchState) -> None:
     """Close the server of one launch when that launch asked for it."""
+    if state.mode == CLIENT_MODE:
+        _log(
+            path,
+            "The game was played on another player's server; "
+            "nothing to close here.",
+        )
+        return
     if (
         state.stop_server_on_exit
         and state.server_started_by_sptmod
@@ -1005,6 +1149,7 @@ def _read_state(path: Path) -> _LaunchState:
     profile_id = payload.get("profile_id")
     server = payload.get("server")
     failure = payload.get("failure")
+    mode = payload.get("mode")
     return _LaunchState(
         profile_id=profile_id if isinstance(profile_id, str) else "",
         stop_server_on_exit=payload.get("stop_server_on_exit") is not False,
@@ -1014,6 +1159,7 @@ def _read_state(path: Path) -> _LaunchState:
         client=_reference(payload.get("client")),
         watcher=_reference(payload.get("watcher")),
         failure=failure if isinstance(failure, str) else "",
+        mode=mode if isinstance(mode, str) else "",
     )
 
 
@@ -1042,6 +1188,7 @@ def _write_state(path: Path, state: _LaunchState) -> None:
         "client": _reference_payload(state.client),
         "watcher": _reference_payload(state.watcher),
         "failure": state.failure,
+        "mode": state.mode,
     }
     server = _reference_payload(state.server)
     if server is not None:

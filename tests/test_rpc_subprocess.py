@@ -126,6 +126,7 @@ def test_core_error_exits_one_with_a_mapped_error_envelope(tmp_path: Path) -> No
                 "reason": "",
                 "api_code": "",
                 "api_status": 0,
+                "missing": [],
             },
         },
     }

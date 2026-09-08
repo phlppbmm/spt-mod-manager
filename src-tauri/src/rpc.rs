@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::driver;
 
-pub const FUNCTIONS: [&str; 37] = [
+pub const FUNCTIONS: [&str; 50] = [
     "list_directories",
     "locate_directory",
     "init_game_dir",
@@ -36,12 +36,25 @@ pub const FUNCTIONS: [&str; 37] = [
     "update_mod",
     "list_favorites",
     "set_favorite",
+    "list_mod_sets",
+    "save_mod_set",
+    "delete_mod_set",
+    "rename_mod_set",
+    "export_mod_set",
+    "import_mod_set",
+    "bind_profile_set",
+    "plan_mod_set",
+    "apply_mod_set",
     "launch_profile",
     "launch_status",
     "stop_game",
     "list_spt_releases",
     "apply_spt_release",
     "revert_spt_update",
+    "get_fika_settings",
+    "set_fika_settings",
+    "list_host_profiles",
+    "plan_fika_install",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

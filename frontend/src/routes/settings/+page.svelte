@@ -6,23 +6,40 @@
 	import { writeTextFile } from '@tauri-apps/plugin-fs';
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 	import {
+		applyModSet,
 		applySptRelease,
 		clearCatalogCache,
+		deleteModSet,
 		exportMods,
+		exportModSet,
+		getFikaSettings,
 		importList,
+		importModSet,
+		installMod,
+		listModSets,
 		listSptReleases,
+		planFikaInstall,
+		renameModSet,
 		revertSptUpdate,
+		setFikaSettings,
 		type ExportFormat,
+		type FikaInstallPlan,
+		type FikaRole,
+		type FikaSettings,
 		type ImportDiff,
 		type ImportEntry,
+		type ModSet,
 		type SptReleaseInfo,
 		type SptReleaseList
 	} from '$lib/api/client';
-	import { subscribe, type ProgressEvent } from '$lib/api/transport';
+	import { ApiError, subscribe, type ProgressEvent } from '$lib/api/transport';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import ModSetDialog from '$lib/components/ModSetDialog.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { addressError, FIKA_ROLES, hostLabel } from '$lib/fika';
 	import { forgetGameDir, loadGameDir } from '$lib/gamedir';
 	import { loadStopServerOnExit, saveStopServerOnExit } from '$lib/launch';
+	import { exportFileName, installTargets, missingFromError } from '$lib/modsets';
 	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import {
 		canApply,
@@ -60,6 +77,8 @@
 		{ id: 'spt-version', label: 'SPT version' },
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'launching', label: 'Launching' },
+		{ id: 'fika', label: 'Fika' },
+		{ id: 'mod-sets', label: 'Mod sets' },
 		{ id: 'export', label: 'Export the mod list' },
 		{ id: 'import', label: 'Import a mod list' },
 		{ id: 'catalog-cache', label: 'Catalog cache' },
@@ -76,6 +95,34 @@
 	let exportError = $state('');
 	let exporting = $state(false);
 	let copyNote = $state('');
+
+	let sets: ModSet[] = $state([]);
+	let setsError = $state('');
+	let setsNote = $state('');
+	let setsBusy = $state(false);
+	let setFile = $state('');
+	let setCode = $state('');
+	let prompt: 'rename' | 'import' | 'host' | null = $state(null);
+	let promptTarget = $state('');
+	let promptName = $state('');
+
+	let fikaRole: FikaRole = $state('none');
+	let fikaAddress = $state('');
+	let fikaBaseUrl = $state('');
+	let fikaSaving = $state(false);
+	let fikaError = $state('');
+	let fikaNote = $state('');
+	let fikaPlan: FikaInstallPlan | null = $state(null);
+	let fikaBusy = $state(false);
+	let fikaProgress: ProgressEvent | null = $state(null);
+
+	let hostFile = $state('');
+	let hostCode = $state('');
+	let hostSet: ModSet | null = $state(null);
+	let hostMissing: string[] = $state([]);
+	let hostBusy = $state(false);
+	let hostError = $state('');
+	let hostNote = $state('');
 
 	let listFile = $state('');
 	let listContent = $state('');
@@ -106,6 +153,8 @@
 		pendingKind === null ? null : confirmationFor(pendingRelease, currentVersion, pendingKind)
 	);
 
+	const fikaAddressError = $derived(addressError(fikaRole, fikaAddress));
+
 	const active = $derived(
 		SECTIONS.some((section) => `#${section.id}` === page.url.hash)
 			? page.url.hash.slice(1)
@@ -118,6 +167,8 @@
 		path = loadGameDir();
 		void readVersion();
 		void loadReleases();
+		void loadSets();
+		void loadFika();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
 		const observer = new MutationObserver(() => {
@@ -172,6 +223,343 @@
 			updateState.kind === 'downloading' ||
 			updateState.kind === 'installing'
 		);
+	}
+
+	async function loadSets(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsError = '';
+		try {
+			sets = (await listModSets(path)).sets;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function removeSet(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			sets = (await deleteModSet(path, name)).sets;
+			setsNote = `"${name}" was deleted.`;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function saveSetFile(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const shared = await exportModSet(path, name);
+			const target = await save({ defaultPath: exportFileName(name) });
+			if (target !== null) {
+				await writeTextFile(target, shared.content);
+				setsNote = `Saved to ${target}.`;
+			}
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function copySetCode(name: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			await writeText((await exportModSet(path, name)).code);
+			setsNote = `The share code for "${name}" is in the clipboard.`;
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function pickSetFile(): Promise<void> {
+		setsError = '';
+		try {
+			const picked = await open({
+				multiple: false,
+				filters: [{ name: 'Mod set', extensions: ['json'] }]
+			});
+			if (picked !== null) {
+				setFile = picked;
+			}
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function runImportSet(name: string | null): Promise<void> {
+		if (path === null || !hasSetSource()) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const imported = await importModSet(
+				path,
+				setCode.trim() === '' ? { setFile: setFile.trim() } : { content: setCode },
+				name
+			);
+			setFile = '';
+			setCode = '';
+			setsNote = `"${imported.name}" was added.`;
+			await loadSets();
+		} catch (cause) {
+			if (cause instanceof ApiError && cause.code === 'MOD_SET_EXISTS') {
+				promptName = '';
+				prompt = 'import';
+			} else {
+				setsError = cause instanceof Error ? cause.message : String(cause);
+			}
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	async function loadFika(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		try {
+			applyFika(await getFikaSettings(path));
+		} catch (cause) {
+			fikaError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	function applyFika(settings: FikaSettings): void {
+		fikaRole = settings.role;
+		fikaAddress = settings.host_address;
+		fikaBaseUrl = settings.base_url;
+	}
+
+	async function saveFika(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		fikaSaving = true;
+		fikaError = '';
+		fikaNote = '';
+		try {
+			applyFika(await setFikaSettings(path, fikaRole, fikaRole === 'none' ? '' : fikaAddress));
+			fikaNote =
+				fikaBaseUrl === ''
+					? 'Saved.'
+					: `Saved. The game connects to ${hostLabel(fikaBaseUrl)}.`;
+		} catch (cause) {
+			fikaError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			fikaSaving = false;
+		}
+	}
+
+	async function openFikaPlan(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		fikaBusy = true;
+		fikaError = '';
+		fikaNote = '';
+		try {
+			fikaPlan = await planFikaInstall(path);
+		} catch (cause) {
+			fikaError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			fikaBusy = false;
+		}
+	}
+
+	async function installFika(): Promise<void> {
+		const target = fikaPlan;
+		if (path === null || target === null) {
+			return;
+		}
+		fikaPlan = null;
+		fikaBusy = true;
+		fikaError = '';
+		fikaNote = '';
+		const operationId = crypto.randomUUID();
+		const unsubscribe = await subscribe(operationId, (event) => {
+			fikaProgress = event;
+		});
+		try {
+			await installMod(path, target.server_mod_id, null, false, operationId);
+			await installMod(path, target.client_mod_id, null, false, operationId);
+			fikaNote = 'Fika is installed: the server mod and the client plugin.';
+		} catch (cause) {
+			fikaError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			unsubscribe();
+			fikaProgress = null;
+			fikaBusy = false;
+		}
+	}
+
+	function planSize(bytes: number | null): string {
+		return bytes === null ? 'unknown size' : `${(bytes / 1_048_576).toFixed(1)} MB`;
+	}
+
+	async function pickHostFile(): Promise<void> {
+		hostError = '';
+		try {
+			const picked = await open({
+				multiple: false,
+				filters: [{ name: 'Mod set', extensions: ['json'] }]
+			});
+			if (picked !== null) {
+				hostFile = picked;
+			}
+		} catch (cause) {
+			hostError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	function hasHostSource(): boolean {
+		return hostFile.trim() !== '' || hostCode.trim() !== '';
+	}
+
+	async function importHostSet(name: string | null): Promise<void> {
+		if (path === null || !hasHostSource()) {
+			return;
+		}
+		hostBusy = true;
+		hostError = '';
+		hostNote = '';
+		let imported: ModSet | null = null;
+		try {
+			imported = await importModSet(
+				path,
+				hostCode.trim() === '' ? { setFile: hostFile.trim() } : { content: hostCode },
+				name
+			);
+			hostSet = imported;
+			hostFile = '';
+			hostCode = '';
+		} catch (cause) {
+			if (cause instanceof ApiError && cause.code === 'MOD_SET_EXISTS') {
+				promptName = '';
+				prompt = 'host';
+			} else {
+				hostError = cause instanceof Error ? cause.message : String(cause);
+			}
+		} finally {
+			hostBusy = false;
+		}
+		if (imported !== null) {
+			await loadSets();
+			await applyHostSet(imported.name, false);
+		}
+	}
+
+	async function applyHostSet(name: string, ignoreMissing: boolean): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		hostBusy = true;
+		hostError = '';
+		hostNote = '';
+		try {
+			const applied = await applyModSet(path, name, ignoreMissing);
+			hostMissing = [];
+			hostNote = `"${applied.name}": ${applied.enabled.length} on, ${applied.disabled.length} off, ${applied.missing.length} missing.`;
+		} catch (cause) {
+			const missing = missingFromError(cause);
+			if (missing.length > 0) {
+				hostMissing = missing;
+			} else {
+				hostError = cause instanceof Error ? cause.message : String(cause);
+			}
+		} finally {
+			hostBusy = false;
+		}
+	}
+
+	async function installHostMissing(): Promise<void> {
+		const set = hostSet;
+		if (path === null || set === null) {
+			return;
+		}
+		hostBusy = true;
+		hostError = '';
+		const failed: string[] = [];
+		for (const { name, target } of installTargets(set, hostMissing)) {
+			try {
+				await installMod(path, target);
+			} catch (cause) {
+				failed.push(`${name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+			}
+		}
+		hostBusy = false;
+		if (failed.length > 0) {
+			hostError = `Some mods could not be installed. ${failed.join(' · ')}`;
+			return;
+		}
+		hostMissing = [];
+		await applyHostSet(set.name, false);
+	}
+
+	async function runRename(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		setsBusy = true;
+		setsError = '';
+		setsNote = '';
+		try {
+			const renamed = await renameModSet(path, promptTarget, promptName.trim());
+			prompt = null;
+			setsNote = `The set is now called "${renamed.name}".`;
+			await loadSets();
+		} catch (cause) {
+			setsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			setsBusy = false;
+		}
+	}
+
+	function askRename(name: string): void {
+		promptTarget = name;
+		promptName = name;
+		prompt = 'rename';
+	}
+
+	async function confirmPrompt(): Promise<void> {
+		if (prompt === 'rename') {
+			await runRename();
+			return;
+		}
+		const name = promptName.trim();
+		const target = prompt;
+		prompt = null;
+		if (target === 'host') {
+			await importHostSet(name);
+			return;
+		}
+		await runImportSet(name);
+	}
+
+	function hasSetSource(): boolean {
+		return setFile.trim() !== '' || setCode.trim() !== '';
 	}
 
 	function changeStopServerOnExit(value: boolean): void {
@@ -576,6 +964,210 @@
 			</section>
 
 			<section class="section panel">
+				<h2 id="fika">Fika</h2>
+				<p class="note">
+					Fika lets several players share one SPT server. Pick what this machine does.
+				</p>
+				<div class="roles">
+					{#each FIKA_ROLES as option (option.id)}
+						<label>
+							<input
+								type="radio"
+								name="fika-role"
+								value={option.id}
+								checked={fikaRole === option.id}
+								onchange={() => (fikaRole = option.id)}
+							/>
+							{option.label}
+						</label>
+						<p class="note hint">{option.hint}</p>
+					{/each}
+				</div>
+				{#if fikaRole !== 'none'}
+					<div class="row">
+						<label>
+							Host address
+							<input
+								type="text"
+								placeholder="192.168.1.20"
+								aria-label="Host address"
+								bind:value={fikaAddress}
+							/>
+						</label>
+					</div>
+					{#if fikaAddressError !== ''}
+						<p class="error-text">{fikaAddressError}</p>
+					{/if}
+				{/if}
+				<div class="row">
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || fikaSaving || fikaAddressError !== ''}
+						onclick={() => void saveFika()}
+					>
+						{fikaSaving ? 'Saving…' : 'Save'}
+					</button>
+					{#if fikaBaseUrl !== ''}
+						<span class="note">Stored address: {hostLabel(fikaBaseUrl)}</span>
+					{/if}
+				</div>
+				{#if fikaError !== ''}
+					<p class="error-text">{fikaError}</p>
+				{/if}
+				{#if fikaNote !== ''}
+					<p class="note">{fikaNote}</p>
+				{/if}
+
+				<h3>Install Fika</h3>
+				<p class="note">
+					Fika needs two parts: a mod for the server and a plugin for the game. Both are
+					installed together.
+				</p>
+				<div class="row">
+					<button
+						type="button"
+						disabled={path === null || fikaBusy}
+						onclick={() => void openFikaPlan()}
+					>
+						Install Fika (server mod + client plugin)
+					</button>
+					{#if fikaProgress !== null}
+						<span class="note">{fikaProgress.message}</span>
+					{/if}
+				</div>
+
+				<h3>Apply the host's mod set</h3>
+				<p class="note">
+					The host shares the mods they play with, either as a file or as a share code. A
+					pasted code wins over the file path.
+				</p>
+				<div class="row">
+					<input
+						type="text"
+						placeholder="/path/to/mod-set.json"
+						aria-label="Host mod set file"
+						bind:value={hostFile}
+					/>
+					<button type="button" onclick={() => void pickHostFile()}>Choose file…</button>
+				</div>
+				<div class="row">
+					<textarea
+						rows="3"
+						placeholder="Paste the share code the host sent"
+						aria-label="Host mod set share code"
+						bind:value={hostCode}
+					></textarea>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || hostBusy || !hasHostSource()}
+						onclick={() => void importHostSet(null)}
+					>
+						Use the host's mods
+					</button>
+				</div>
+				{#if hostError !== ''}
+					<p class="error-text">{hostError}</p>
+				{/if}
+				{#if hostNote !== ''}
+					<p class="note">{hostNote}</p>
+				{/if}
+			</section>
+
+			<section class="section panel">
+				<h2 id="mod-sets">Mod sets</h2>
+				<p class="note">
+					A mod set holds a list of mods and whether each of them is on or off. A profile
+					started from the Profiles page uses the set it is set up with. Sets are saved from
+					the Mods page.
+				</p>
+				{#if sets.length === 0}
+					<p class="note">No sets yet.</p>
+				{:else}
+					<ul class="sets panel">
+						{#each sets as set (set.name)}
+							<li class="panel-row">
+								<span class="name">{set.name}</span>
+								<span class="versions">
+									{set.entries.length}
+									{set.entries.length === 1 ? 'mod' : 'mods'}
+								</span>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => askRename(set.name)}
+								>
+									Rename
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void saveSetFile(set.name)}
+								>
+									Export
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void copySetCode(set.name)}
+								>
+									Copy share code
+								</button>
+								<button
+									type="button"
+									class="btn-sm"
+									disabled={setsBusy}
+									onclick={() => void removeSet(set.name)}
+								>
+									Delete
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				<h3>Add a set</h3>
+				<p class="note">
+					Either name a file someone shared or paste a share code. A pasted code wins over the
+					file path.
+				</p>
+				<div class="row">
+					<input
+						type="text"
+						placeholder="/path/to/mod-set.json"
+						aria-label="Mod set file"
+						bind:value={setFile}
+					/>
+					<button type="button" onclick={() => void pickSetFile()}>Choose file…</button>
+				</div>
+				<div class="row">
+					<textarea
+						rows="3"
+						placeholder="Paste a share code"
+						aria-label="Mod set share code"
+						bind:value={setCode}
+					></textarea>
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || setsBusy || !hasSetSource()}
+						onclick={() => void runImportSet(null)}
+					>
+						Add the set
+					</button>
+				</div>
+				{#if setsError !== ''}
+					<p class="error-text">{setsError}</p>
+				{/if}
+				{#if setsNote !== ''}
+					<p class="note">{setsNote}</p>
+				{/if}
+			</section>
+
+			<section class="section panel">
 				<h2 id="export">Export the mod list</h2>
 				<div class="row">
 					<label>
@@ -766,6 +1358,66 @@
 	</Dialog>
 {/if}
 
+{#if prompt !== null}
+	<Dialog
+		title={prompt === 'rename' ? 'Rename the set' : 'Choose another name'}
+		onclose={() => (prompt = null)}
+	>
+		<p>
+			{prompt === 'rename'
+				? `Give "${promptTarget}" a new name.`
+				: 'A set of that name already exists. Give the new set another name.'}
+		</p>
+		<label>
+			Name
+			<input type="text" aria-label="Set name" bind:value={promptName} />
+		</label>
+
+		{#snippet actions()}
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={setsBusy || hostBusy || promptName.trim() === ''}
+				onclick={() => void confirmPrompt()}
+			>
+				Save
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
+{#if fikaPlan !== null}
+	<Dialog title="Install Fika" onclose={() => (fikaPlan = null)}>
+		<ul class="plan">
+			{#each fikaPlan.plan.entries as planned (planned.version_id)}
+				<li>
+					<span class="name">{planned.name} {planned.version}</span>
+					{#if planned.is_dependency}<span class="kind">dependency</span>{/if}
+					<span class="kind">{planSize(planned.content_length)}</span>
+				</li>
+			{/each}
+		</ul>
+		<p class="note">Resolved for SPT {fikaPlan.plan.spt_version}.</p>
+
+		{#snippet actions()}
+			<button type="button" class="btn-primary" onclick={() => void installFika()}>
+				Install
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
+{#if hostMissing.length > 0}
+	<ModSetDialog
+		title="Mods are missing"
+		missing={hostMissing}
+		busy={hostBusy}
+		onInstall={() => void installHostMissing()}
+		onIgnore={() => void applyHostSet(hostSet?.name ?? '', true)}
+		onclose={() => (hostMissing = [])}
+	/>
+{/if}
+
 <style>
 	.page {
 		padding: var(--page-gutter, 32px);
@@ -900,14 +1552,42 @@
 		text-transform: uppercase;
 	}
 
-	.diff {
+	.roles {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.hint {
+		margin-left: var(--space-6);
+	}
+
+	.plan {
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 
-	.diff li {
+	.plan li {
+		padding: var(--space-1) 0;
+	}
+
+	.kind {
+		margin-right: var(--space-2);
+		color: var(--color-text-muted);
+	}
+
+	.diff,
+	.sets {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.diff li,
+	.sets li {
 		display: flex;
+		align-items: center;
 		gap: var(--space-3);
 		padding: var(--space-2) var(--space-3);
 	}

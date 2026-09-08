@@ -714,6 +714,17 @@ class Catalog:
             (mod for mod in self._all_mods() if mod.name.casefold() == wanted), None
         )
 
+    def find_by_slug(self, slug: str) -> CatalogMod | None:
+        """Return the cached mod whose slug matches ``slug`` case-insensitively.
+
+        The slug is the stable name a mod carries in its Forge address, so it
+        identifies a mod where its display name would not.
+        """
+        wanted = slug.casefold()
+        return next(
+            (mod for mod in self._all_mods() if mod.slug.casefold() == wanted), None
+        )
+
     def search(
         self, query: str, *, compatible_with: str | None = None
     ) -> list[CatalogMod]:

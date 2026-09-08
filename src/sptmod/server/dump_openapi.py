@@ -67,6 +67,15 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("update_mod", schemas.UpdateModRequest, schemas.UpdateModResponse),
     ("list_favorites", schemas.ListFavoritesRequest, schemas.FavoritesResponse),
     ("set_favorite", schemas.SetFavoriteRequest, schemas.FavoritesResponse),
+    ("list_mod_sets", schemas.ListModSetsRequest, schemas.ModSetOverview),
+    ("save_mod_set", schemas.SaveModSetRequest, schemas.ModSet),
+    ("delete_mod_set", schemas.DeleteModSetRequest, schemas.ModSetOverview),
+    ("rename_mod_set", schemas.RenameModSetRequest, schemas.ModSet),
+    ("export_mod_set", schemas.ExportModSetRequest, schemas.ModSetExport),
+    ("import_mod_set", schemas.ImportModSetRequest, schemas.ModSet),
+    ("bind_profile_set", schemas.BindProfileSetRequest, schemas.ModSetOverview),
+    ("plan_mod_set", schemas.PlanModSetRequest, schemas.ModSetPlan),
+    ("apply_mod_set", schemas.ApplyModSetRequest, schemas.ApplyModSetResponse),
     ("launch_profile", schemas.LaunchProfileRequest, schemas.LaunchProfileResponse),
     ("launch_status", schemas.LaunchStatusRequest, schemas.LaunchStatus),
     ("stop_game", schemas.StopGameRequest, schemas.StopResult),
@@ -77,6 +86,10 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
         schemas.ApplySptReleaseResponse,
     ),
     ("revert_spt_update", schemas.RevertSptUpdateRequest, schemas.SptApplyResult),
+    ("get_fika_settings", schemas.GetFikaSettingsRequest, schemas.FikaSettings),
+    ("set_fika_settings", schemas.SetFikaSettingsRequest, schemas.FikaSettings),
+    ("list_host_profiles", schemas.ListHostProfilesRequest, list[schemas.HostProfile]),
+    ("plan_fika_install", schemas.PlanFikaInstallRequest, schemas.FikaInstallPlan),
 ]
 
 STANDALONE: Final[list[tuple[str, Any]]] = [

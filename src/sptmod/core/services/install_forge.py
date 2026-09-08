@@ -7,12 +7,13 @@ report progress step by step so the caller can show what is happening.
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Final
 
 from sptmod.core.errors import (
     ArchiveError,
     PartialInstallError,
 )
-from sptmod.core.forge.catalog import Catalog
+from sptmod.core.forge.catalog import Catalog, NoCompatibleVersionError
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.forge.download import download_cached
 from sptmod.core.forge.resolve import plan_install
@@ -36,6 +37,32 @@ from sptmod.core.services.state import (
 
 # The public surface of this module: the service functions behind the CLI and
 # the RPC adapter, their result types, and the constants consumers read.
+
+
+FIKA_SERVER_SLUG: Final = "project-fika-server"
+
+
+FIKA_CLIENT_SLUG: Final = "project-fika"
+
+
+_FIKA_SERVER_TITLE: Final = "Project Fika - Server"
+
+
+_FIKA_CLIENT_TITLE: Final = "Project Fika"
+
+
+@dataclass(frozen=True)
+class FikaInstallPlan:
+    """What playing co-op needs: the two halves of Fika and their one plan.
+
+    Fika is published as two mods, the server mod and the client plugin. The
+    plan holds both halves in one list, the server mod first, so a caller
+    confirms them together and then installs them by their ids.
+    """
+
+    server_mod_id: int
+    client_mod_id: int
+    plan: InstallPlan
 
 
 @dataclass(frozen=True)
@@ -168,6 +195,89 @@ def install_mod(
         return _install_plan(
             path, mod_id_or_name, version, force, progress, db_path, owned
         )
+
+
+def plan_fika_install(
+    path: Path,
+    *,
+    db_path: Path | None = None,
+    client: ForgeClient | None = None,
+) -> FikaInstallPlan:
+    """Resolve what installing Fika into ``path`` would download.
+
+    Both halves are looked up by their Forge address and planned on their own,
+    because they are published as separate mods with their own versions and
+    dependencies. The two plans become one list, the server mod and its
+    dependencies first, with anything both halves need listed once.
+
+    Args:
+        path: The tracked game directory.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+        client: Forge API client; a default one is built when omitted.
+
+    Returns:
+        The ids of the two halves and the plan installing both of them.
+
+    Raises:
+        NotAGameDirError: the SPT version of ``path`` cannot be determined.
+        NoCompatibleVersionError: one half of Fika is not in the catalog, or
+            the catalog knows no version of it matching the SPT version.
+        UnresolvableDependencyError: a dependency conflicts, has no compatible
+            version or takes part in a cycle.
+        ForgeUnavailableError: the Forge API is unreachable.
+        ForgeApiError: the Forge API answered with an error envelope.
+        GitError: git failed.
+    """
+    if client is not None:
+        return _resolve_fika_plan(path, db_path, client)
+    with ForgeClient() as owned:
+        return _resolve_fika_plan(path, db_path, owned)
+
+
+def _resolve_fika_plan(
+    path: Path, db_path: Path | None, client: ForgeClient
+) -> FikaInstallPlan:
+    server_mod_id = _fika_mod_id(db_path, FIKA_SERVER_SLUG, _FIKA_SERVER_TITLE)
+    client_mod_id = _fika_mod_id(db_path, FIKA_CLIENT_SLUG, _FIKA_CLIENT_TITLE)
+    server_plan = _resolve_plan(path, server_mod_id, None, db_path, client)
+    client_plan = _resolve_plan(path, client_mod_id, None, db_path, client)
+    return FikaInstallPlan(
+        server_mod_id=server_mod_id,
+        client_mod_id=client_mod_id,
+        plan=replace(
+            server_plan,
+            entries=_merged_entries(server_plan.entries, client_plan.entries),
+        ),
+    )
+
+
+def _fika_mod_id(db_path: Path | None, slug: str, title: str) -> int:
+    """Return the Forge id of one half of Fika.
+
+    Raises:
+        NoCompatibleVersionError: the catalog does not know that half.
+    """
+    with open_catalog(db_path) as catalog:
+        mod = catalog.find_by_slug(slug)
+    if mod is None:
+        raise NoCompatibleVersionError(
+            f"{title} is not in the mod catalog. Sync the catalog and try again."
+        )
+    return mod.id
+
+
+def _merged_entries(
+    server_entries: list[PlanEntry], client_entries: list[PlanEntry]
+) -> list[PlanEntry]:
+    """Return both halves as one install order, each mod appearing once."""
+    merged: list[PlanEntry] = []
+    seen: set[int] = set()
+    for entry in [*server_entries, *client_entries]:
+        if entry.mod_id in seen:
+            continue
+        seen.add(entry.mod_id)
+        merged.append(entry)
+    return merged
 
 
 def _resolve_plan(

@@ -14,6 +14,7 @@ from sptmod.core.errors import (
     AlreadyInitializedError,
     AmbiguousModError,
     ArchiveError,
+    ClientBuildMismatchError,
     ConflictError,
     DependencyError,
     DirtyTreeError,
@@ -26,6 +27,7 @@ from sptmod.core.errors import (
     PartialInstallError,
     ProfileResidueError,
     SptmodError,
+    SptReleaseUnavailableError,
     SptVersionUnknownError,
     UnresolvableDependencyError,
 )
@@ -41,9 +43,12 @@ from sptmod.core.models import (
     ProfileResidue,
 )
 from sptmod.core.modmeta import InvalidMetadataError
+from sptmod.core.sptrelease.apply import compare_versions
 from sptmod.server.rpc import main as run_rpc
 
 app = typer.Typer(help="sptmod: mod manager for SPT (Single Player Tarkov).")
+spt_app = typer.Typer(help="Change the SPT version of the game directory.")
+app.add_typer(spt_app, name="spt")
 
 console = Console()
 error_console = Console(stderr=True)
@@ -68,6 +73,8 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     ForgeUnavailableError: 14,
     NotImplementedYetError: 15,
     SptVersionUnknownError: 16,
+    SptReleaseUnavailableError: 17,
+    ClientBuildMismatchError: 18,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"
@@ -311,11 +318,11 @@ def _updates_table(report: services.UpdatesReport) -> Table:
 
 
 def _confirmed(question: str) -> bool:
-    """Ask ``question`` and answer it with the default when no input arrives."""
+    """Ask ``question``, refusing it when no answer can be read."""
     try:
         return typer.confirm(question, default=True)
     except typer.Abort:
-        return True
+        return False
 
 
 def _print_install(result: services.InstallResult) -> None:
@@ -823,6 +830,150 @@ def browse(
                 )
             )
         )
+
+
+def _spt_table(releases: services.SptReleaseList) -> Table:
+    table = Table(
+        title=f"SPT releases (installed: {releases.current_version or 'unknown'})"
+    )
+    for column in ("Version", "EFT build", "Released", "State", "Download"):
+        table.add_column(column)
+    for release in releases.releases:
+        table.add_row(
+            release.version,
+            release.client_build,
+            release.published_at.strftime(_DATE_FORMAT),
+            _release_state(release),
+            "yes" if release.downloadable else "no",
+        )
+    return table
+
+
+def _release_state(release: services.SptReleaseInfo) -> str:
+    """Describe how ``release`` stands to the installed version."""
+    if release.installed:
+        return "installed"
+    return "newer" if release.newer else "older"
+
+
+def _print_spt_result(result: services.SptApplyResult) -> None:
+    """Report the version change and what it means for the installed mods."""
+    if not result.commit:
+        console.print(
+            f"SPT {result.version} is already in place, nothing changed",
+            markup=False,
+        )
+        return
+    console.print(
+        f"SPT is now {result.version} ({len(result.files)} files)", markup=False
+    )
+    console.print(
+        "mods made for the old version may no longer fit; check them with "
+        "'sptmod update --check'",
+        markup=False,
+    )
+
+
+def _confirm_spt_change(wanted: str, current: str, yes: bool) -> None:
+    """Ask before the version changes, naming the safety copy in plain words."""
+    if yes:
+        return
+    if not _confirmed(
+        f"change SPT from {current or 'the installed version'} to {wanted}? "
+        "Your profiles, settings and installed mods stay as they are, and the "
+        "current state of the game folder is secured first, so you can go back"
+    ):
+        raise typer.Abort()
+
+
+def _confirm_spt_undo(yes: bool) -> None:
+    """Ask before the last SPT change is taken back."""
+    if yes:
+        return
+    if not _confirmed(
+        "Undo the last SPT change? sptmod secures the current state of your "
+        "game folder first"
+    ):
+        raise typer.Abort()
+
+
+def _spt_releases(wanted: str, newer: bool) -> services.SptReleaseList:
+    """Return the release list, refusing ``wanted`` in the wrong direction.
+
+    While the installed version cannot be read there is nothing to compare
+    against, so both directions are allowed.
+    """
+    releases = services.list_spt_releases(Path.cwd())
+    if not releases.current_version:
+        return releases
+    order = compare_versions(wanted, releases.current_version)
+    installed = releases.current_version
+    if newer and order <= 0:
+        raise typer.BadParameter(
+            f"SPT {wanted} is not newer than the installed {installed}; "
+            f"go back to it with 'sptmod spt downgrade'"
+        )
+    if not newer and order >= 0:
+        raise typer.BadParameter(
+            f"SPT {wanted} is not older than the installed {installed}; "
+            f"move up to it with 'sptmod spt update'"
+        )
+    return releases
+
+
+def _change_spt_version(wanted: str, newer: bool, yes: bool) -> None:
+    """Confirm and then put the SPT version ``wanted`` into the game directory."""
+    releases = _spt_releases(wanted, newer)
+    _confirm_spt_change(wanted, releases.current_version, yes)
+    _print_spt_result(services.apply_spt_release(Path.cwd(), wanted, _report_progress))
+
+
+@spt_app.command("list")
+def spt_list() -> None:
+    """List the SPT versions the game directory can change to."""
+    with _handled():
+        releases = services.list_spt_releases(Path.cwd())
+        console.print(_spt_table(releases))
+        console.print(
+            f"installed Escape from Tarkov build: {releases.client_build or 'unknown'}",
+            markup=False,
+        )
+
+
+@spt_app.command("update")
+def spt_update(
+    spt_version: Annotated[
+        str, typer.Argument(metavar="VERSION", help="SPT version to change to.")
+    ],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Change the version without asking.")
+    ] = False,
+) -> None:
+    """Change the game directory to a newer SPT version."""
+    with _handled():
+        _change_spt_version(spt_version, newer=True, yes=yes)
+
+
+@spt_app.command("downgrade")
+def spt_downgrade(
+    spt_version: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="[VERSION]",
+            help="SPT version to go back to; default: undo the last change.",
+        ),
+    ] = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Change the version without asking.")
+    ] = False,
+) -> None:
+    """Go back to an older SPT version, or undo the last SPT change."""
+    with _handled():
+        if spt_version is None:
+            _confirm_spt_undo(yes)
+            _print_spt_result(services.revert_spt_update(Path.cwd()))
+            return
+        _change_spt_version(spt_version, newer=False, yes=yes)
 
 
 @app.command(hidden=True)

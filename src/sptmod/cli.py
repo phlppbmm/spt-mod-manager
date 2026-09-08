@@ -20,6 +20,7 @@ from sptmod.core.errors import (
     ForgeUnavailableError,
     GameRunningError,
     GitError,
+    GitMissingError,
     ModNotFoundError,
     NotAGameDirError,
     NotImplementedYetError,
@@ -68,6 +69,7 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     ForgeUnavailableError: 14,
     NotImplementedYetError: 15,
     SptVersionUnknownError: 16,
+    GitMissingError: 17,
 }
 
 _DATE_FORMAT: Final = "%Y-%m-%d %H:%M"

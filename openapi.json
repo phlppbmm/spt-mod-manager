@@ -1667,6 +1667,162 @@
           }
         }
       }
+    },
+    "/api/get_fika_settings": {
+      "post": {
+        "summary": "Get Fika Settings",
+        "operationId": "get_fika_settings_api_get_fika_settings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetFikaSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FikaSettings"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/set_fika_settings": {
+      "post": {
+        "summary": "Set Fika Settings",
+        "operationId": "set_fika_settings_api_set_fika_settings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFikaSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FikaSettings"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/list_host_profiles": {
+      "post": {
+        "summary": "List Host Profiles",
+        "operationId": "list_host_profiles_api_list_host_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListHostProfilesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HostProfile"
+                  },
+                  "title": "Response List Host Profiles Api List Host Profiles Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan_fika_install": {
+      "post": {
+        "summary": "Plan Fika Install",
+        "operationId": "plan_fika_install_api_plan_fika_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanFikaInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FikaInstallPlan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3049,6 +3205,60 @@
         ],
         "type": "string"
       },
+      "FikaInstallPlan": {
+        "description": "What playing co-op needs: the two halves of Fika and their one plan.",
+        "properties": {
+          "server_mod_id": {
+            "title": "Server Mod Id",
+            "type": "integer"
+          },
+          "client_mod_id": {
+            "title": "Client Mod Id",
+            "type": "integer"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/InstallPlan"
+          }
+        },
+        "required": [
+          "server_mod_id",
+          "client_mod_id",
+          "plan"
+        ],
+        "title": "FikaInstallPlan",
+        "type": "object"
+      },
+      "FikaRole": {
+        "enum": [
+          "none",
+          "host",
+          "client"
+        ],
+        "type": "string"
+      },
+      "FikaSettings": {
+        "description": "The Fika role of one game directory and the host it plays on.",
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/FikaRole"
+          },
+          "host_address": {
+            "default": "",
+            "title": "Host Address",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "FikaSettings",
+        "type": "object"
+      },
       "FileChange": {
         "enum": [
           "added",
@@ -3056,6 +3266,33 @@
           "deleted"
         ],
         "type": "string"
+      },
+      "GetFikaSettingsRequest": {
+        "description": "Parameters of ``get_fika_settings``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "fika_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fika Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "GetFikaSettingsRequest",
+        "type": "object"
       },
       "GetModDetailsRequest": {
         "description": "Parameters of ``get_mod_details``.",
@@ -3107,6 +3344,45 @@
           "path"
         ],
         "title": "HistoryRequest",
+        "type": "object"
+      },
+      "HostProfile": {
+        "description": "One player profile a Fika host offers to the players joining it.",
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "nickname": {
+            "default": "",
+            "title": "Nickname",
+            "type": "string"
+          },
+          "level": {
+            "default": 0,
+            "title": "Level",
+            "type": "integer"
+          },
+          "side": {
+            "default": "",
+            "title": "Side",
+            "type": "string"
+          },
+          "has_password": {
+            "default": false,
+            "title": "Has Password",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "profile_id",
+          "username"
+        ],
+        "title": "HostProfile",
         "type": "object"
       },
       "ImportDiff": {
@@ -3723,6 +3999,18 @@
             ],
             "title": "Store Path"
           },
+          "fika_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fika Path"
+          },
           "operation_id": {
             "anyOf": [
               {
@@ -3866,6 +4154,33 @@
           }
         },
         "title": "ListFavoritesRequest",
+        "type": "object"
+      },
+      "ListHostProfilesRequest": {
+        "description": "Parameters of ``list_host_profiles``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "fika_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fika Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ListHostProfilesRequest",
         "type": "object"
       },
       "ListModSetsRequest": {
@@ -4422,6 +4737,33 @@
         "title": "PlanEntry",
         "type": "object"
       },
+      "PlanFikaInstallRequest": {
+        "description": "Parameters of ``plan_fika_install``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "PlanFikaInstallRequest",
+        "type": "object"
+      },
       "PlanModInstallRequest": {
         "description": "Parameters of ``plan_mod_install``.",
         "properties": {
@@ -4911,6 +5253,42 @@
           "favorite"
         ],
         "title": "SetFavoriteRequest",
+        "type": "object"
+      },
+      "SetFikaSettingsRequest": {
+        "description": "Parameters of ``set_fika_settings``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/FikaRole",
+            "default": "none"
+          },
+          "host_address": {
+            "default": "",
+            "title": "Host Address",
+            "type": "string"
+          },
+          "fika_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fika Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "SetFikaSettingsRequest",
         "type": "object"
       },
       "SetSptVersionRequest": {

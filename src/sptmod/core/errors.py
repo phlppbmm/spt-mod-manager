@@ -51,6 +51,10 @@ class LauncherSettingsError(SptmodError):
     """The settings the official SPT launcher writes are missing or unusable."""
 
 
+class FikaHostUnreachableError(SptmodError):
+    """The Fika host does not answer as an SPT server."""
+
+
 class OperationInProgressError(SptmodError):
     """Another operation is changing the game directory and did not finish.
 

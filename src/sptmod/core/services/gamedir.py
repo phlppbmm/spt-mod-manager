@@ -16,6 +16,7 @@ from typing import Final
 from sptmod.core.errors import (
     AlreadyInitializedError,
     InvalidPathError,
+    LaunchError,
     SptVersionUnknownError,
 )
 from sptmod.core.game_dir import (
@@ -43,6 +44,9 @@ from sptmod.core.models import (
 from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
     mod_prefix_of,
+)
+from sptmod.core.services.fika import (
+    get_fika_settings,
 )
 from sptmod.core.services.lifecycle import (
     adopt_mod_at,
@@ -422,6 +426,7 @@ def launch_profile(
     progress: Progress | None = None,
     *,
     store_path: Path | None = None,
+    fika_path: Path | None = None,
 ) -> LaunchResult:
     """Start the SPT server and the game at ``path`` for one player profile.
 
@@ -435,6 +440,9 @@ def launch_profile(
     ``ignore_missing`` applies the rest of the set anyway, and ``skip`` leaves
     the mods untouched. Nothing is started before the mods are the set's.
 
+    A game directory that joins a Fika host starts no server of its own: the
+    profile is played on that host, which has to be answering already.
+
     Args:
         path: The tracked game directory.
         profile_id: The profile to play, named by its file name without the
@@ -443,6 +451,7 @@ def launch_profile(
         mod_set: How the mod set bound to the profile is handled.
         progress: Optional callback for the phases of the launch.
         store_path: Mod set file; defaults to :func:`default_modsets_path`.
+        fika_path: Fika settings file; defaults to :func:`default_fika_path`.
 
     Returns:
         The profile, its player name and the started processes.
@@ -456,11 +465,14 @@ def launch_profile(
             not have; nothing was started.
         GameRunningError: The game is already running.
         ServerPortBusyError: Another program holds the server's address.
+        FikaHostUnreachableError: The Fika host does not answer as an SPT
+            server.
         LoginFailedError: The server does not know the profile.
         LauncherSettingsError: The settings of the official SPT launcher are
             missing or unusable.
-        LaunchError: A program is missing, could not be started, or the server
-            did not answer in time.
+        LaunchError: A program is missing, could not be started, the server
+            did not answer in time, no usable address is set for the Fika
+            host, or the host knows no such profile.
     """
     bound = None if mod_set == "skip" else _bound_set(path, profile_id, store_path)
     if bound is not None:
@@ -472,7 +484,15 @@ def launch_profile(
             _mod_set_progress(progress),
             store_path=store_path,
         )
-    return _launch_profile(path, profile_id, stop_server_on_exit, progress)
+    settings = get_fika_settings(path, fika_path=fika_path)
+    host = settings.base_url if settings.role == "client" else ""
+    if settings.role == "client" and not host:
+        raise LaunchError(
+            "No usable address is set for the Fika host. Set it in the settings."
+        )
+    return _launch_profile(
+        path, profile_id, stop_server_on_exit, progress, fika_host=host
+    )
 
 
 def _bound_set(path: Path, profile_id: str, store_path: Path | None) -> str | None:

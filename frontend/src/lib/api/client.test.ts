@@ -13,6 +13,7 @@ import {
 	enableMod,
 	exportMods,
 	exportModSet,
+	getFikaSettings,
 	getModDetails,
 	history,
 	importList,
@@ -23,11 +24,13 @@ import {
 	launchStatus,
 	listDirectories,
 	listFavorites,
+	listHostProfiles,
 	listMods,
 	listModSets,
 	listProfiles,
 	locateDirectory,
 	modFiles,
+	planFikaInstall,
 	planModInstall,
 	planModSet,
 	planProfileCleanup,
@@ -36,6 +39,7 @@ import {
 	saveModSet,
 	searchCatalog,
 	setFavorite,
+	setFikaSettings,
 	setSptVersion,
 	snapshot,
 	status,
@@ -525,6 +529,36 @@ const wrapperCases: Array<{
 			mod_set: 'skip',
 			operation_id: 'op-7'
 		}
+	},
+	{
+		id: 'getFikaSettings forwards the game path',
+		call: () => getFikaSettings('/game'),
+		command: 'get_fika_settings',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'setFikaSettings defaults the host address to an empty string',
+		call: () => setFikaSettings('/game', 'host'),
+		command: 'set_fika_settings',
+		payload: { path: '/game', role: 'host', host_address: '' }
+	},
+	{
+		id: 'setFikaSettings forwards an explicit host address',
+		call: () => setFikaSettings('/game', 'client', 'https://pc.local:6969'),
+		command: 'set_fika_settings',
+		payload: { path: '/game', role: 'client', host_address: 'https://pc.local:6969' }
+	},
+	{
+		id: 'listHostProfiles forwards the game path',
+		call: () => listHostProfiles('/game'),
+		command: 'list_host_profiles',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'planFikaInstall forwards the game path',
+		call: () => planFikaInstall('/game'),
+		command: 'plan_fika_install',
+		payload: { path: '/game' }
 	}
 ];
 

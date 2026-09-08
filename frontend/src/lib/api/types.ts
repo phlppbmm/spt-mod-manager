@@ -735,6 +735,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/get_fika_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Fika Settings */
+        post: operations["get_fika_settings_api_get_fika_settings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/set_fika_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Fika Settings */
+        post: operations["set_fika_settings_api_set_fika_settings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/list_host_profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Host Profiles */
+        post: operations["list_host_profiles_api_list_host_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan_fika_install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Fika Install */
+        post: operations["plan_fika_install_api_plan_fika_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1417,8 +1485,51 @@ export interface components {
         };
         /** @enum {string} */
         FikaCompatibility: "compatible" | "incompatible" | "unknown";
+        /**
+         * FikaInstallPlan
+         * @description What playing co-op needs: the two halves of Fika and their one plan.
+         */
+        FikaInstallPlan: {
+            /** Server Mod Id */
+            server_mod_id: number;
+            /** Client Mod Id */
+            client_mod_id: number;
+            plan: components["schemas"]["InstallPlan"];
+        };
+        /** @enum {string} */
+        FikaRole: "none" | "host" | "client";
+        /**
+         * FikaSettings
+         * @description The Fika role of one game directory and the host it plays on.
+         */
+        FikaSettings: {
+            role: components["schemas"]["FikaRole"];
+            /**
+             * Host Address
+             * @default
+             */
+            host_address: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+        };
         /** @enum {string} */
         FileChange: "added" | "modified" | "deleted";
+        /**
+         * GetFikaSettingsRequest
+         * @description Parameters of ``get_fika_settings``.
+         */
+        GetFikaSettingsRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Fika Path */
+            fika_path?: string | null;
+        };
         /**
          * GetModDetailsRequest
          * @description Parameters of ``get_mod_details``.
@@ -1441,6 +1552,36 @@ export interface components {
             path: string;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * HostProfile
+         * @description One player profile a Fika host offers to the players joining it.
+         */
+        HostProfile: {
+            /** Profile Id */
+            profile_id: string;
+            /** Username */
+            username: string;
+            /**
+             * Nickname
+             * @default
+             */
+            nickname: string;
+            /**
+             * Level
+             * @default 0
+             */
+            level: number;
+            /**
+             * Side
+             * @default
+             */
+            side: string;
+            /**
+             * Has Password
+             * @default false
+             */
+            has_password: boolean;
         };
         /**
          * ImportDiff
@@ -1770,6 +1911,8 @@ export interface components {
             mod_set: components["schemas"]["ModSetMode"];
             /** Store Path */
             store_path?: string | null;
+            /** Fika Path */
+            fika_path?: string | null;
             /** Operation Id */
             operation_id?: string | null;
         };
@@ -1833,6 +1976,19 @@ export interface components {
         ListFavoritesRequest: {
             /** Favorites Path */
             favorites_path?: string | null;
+        };
+        /**
+         * ListHostProfilesRequest
+         * @description Parameters of ``list_host_profiles``.
+         */
+        ListHostProfilesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Fika Path */
+            fika_path?: string | null;
         };
         /**
          * ListModSetsRequest
@@ -2130,6 +2286,19 @@ export interface components {
             is_dependency: boolean;
         };
         /**
+         * PlanFikaInstallRequest
+         * @description Parameters of ``plan_fika_install``.
+         */
+        PlanFikaInstallRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Db Path */
+            db_path?: string | null;
+        };
+        /**
          * PlanModInstallRequest
          * @description Parameters of ``plan_mod_install``.
          */
@@ -2378,6 +2547,26 @@ export interface components {
             favorite: boolean;
             /** Favorites Path */
             favorites_path?: string | null;
+        };
+        /**
+         * SetFikaSettingsRequest
+         * @description Parameters of ``set_fika_settings``.
+         */
+        SetFikaSettingsRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** @default none */
+            role: components["schemas"]["FikaRole"];
+            /**
+             * Host Address
+             * @default
+             */
+            host_address: string;
+            /** Fika Path */
+            fika_path?: string | null;
         };
         /**
          * SetSptVersionRequest
@@ -4128,6 +4317,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StopResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_fika_settings_api_get_fika_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GetFikaSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaSettings"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_fika_settings_api_set_fika_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFikaSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaSettings"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_host_profiles_api_list_host_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListHostProfilesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostProfile"][];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_fika_install_api_plan_fika_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanFikaInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FikaInstallPlan"];
                 };
             };
             /** @description Default Response */

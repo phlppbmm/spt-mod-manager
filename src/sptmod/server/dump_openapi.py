@@ -79,6 +79,10 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("launch_profile", schemas.LaunchProfileRequest, schemas.LaunchProfileResponse),
     ("launch_status", schemas.LaunchStatusRequest, schemas.LaunchStatus),
     ("stop_game", schemas.StopGameRequest, schemas.StopResult),
+    ("get_fika_settings", schemas.GetFikaSettingsRequest, schemas.FikaSettings),
+    ("set_fika_settings", schemas.SetFikaSettingsRequest, schemas.FikaSettings),
+    ("list_host_profiles", schemas.ListHostProfilesRequest, list[schemas.HostProfile]),
+    ("plan_fika_install", schemas.PlanFikaInstallRequest, schemas.FikaInstallPlan),
 ]
 
 STANDALONE: Final[list[tuple[str, Any]]] = [

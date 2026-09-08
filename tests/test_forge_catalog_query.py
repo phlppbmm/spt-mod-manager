@@ -116,6 +116,56 @@ def test_find_mod_returns_none_when_no_name_matches(
     assert catalog.find_mod("Does Not Exist") is None
 
 
+@pytest.mark.parametrize(
+    "slug,expected_id",
+    [
+        pytest.param("beta-mod", 2, id="exact-slug"),
+        pytest.param("ALPHA-MOD", 1, id="slug-in-the-wrong-case"),
+        pytest.param("GaMmA-MoD", 3, id="slug-in-mixed-case"),
+    ],
+)
+def test_find_by_slug_matches_the_address_name_case_insensitively(
+    catalog: Catalog,
+    client_factory: ClientFactory,
+    respx_router: respx.MockRouter,
+    slug: str,
+    expected_id: int,
+) -> None:
+    """find_by_slug("beta-mod") returns the cached mod with that slug.
+
+    The slug is the stable name a mod carries in its Forge address, which is
+    how a mod is identified where its display name would not do. If the body
+    returned None, no lookup by address would find anything.
+    """
+    _seed_search_mods(client_factory, respx_router, catalog)
+
+    mod = catalog.find_by_slug(slug)
+
+    assert mod is not None
+    assert mod.id == expected_id
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        pytest.param("does-not-exist", id="unknown-slug"),
+        pytest.param("Alpha Mod", id="the-display-name-is-no-slug"),
+        pytest.param("", id="empty-slug"),
+    ],
+)
+def test_find_by_slug_returns_none_when_no_slug_matches(
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter, slug: str
+) -> None:
+    """find_by_slug returns None for a slug no cached mod carries, not raising.
+
+    A display name is deliberately not a slug: matching it would let a lookup
+    by address hit a mod that only happens to be called that.
+    """
+    _seed_search_mods(client_factory, respx_router, catalog)
+
+    assert catalog.find_by_slug(slug) is None
+
+
 def test_search_matches_name_case_insensitively(
     catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
 ) -> None:

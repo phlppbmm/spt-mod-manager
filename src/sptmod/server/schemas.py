@@ -21,7 +21,7 @@ from sptmod.core.models import (
     ModType,
     ResidueCategory,
 )
-from sptmod.core.services import BrowseFilter, ExportFormat, ModSetMode
+from sptmod.core.services import BrowseFilter, ExportFormat, FikaRole, ModSetMode
 
 
 class CoreModel(BaseModel):
@@ -923,6 +923,63 @@ class ApplyModSetResponse(ModSetApplyResult):
     operation_id: str
 
 
+class FikaSettings(CoreModel):
+    """The Fika role of one game directory and the host it plays on."""
+
+    role: FikaRole
+    host_address: str = ""
+    base_url: str = ""
+
+
+class HostProfile(CoreModel):
+    """One player profile a Fika host offers to the players joining it."""
+
+    profile_id: str
+    username: str
+    nickname: str = ""
+    level: int = 0
+    side: str = ""
+    has_password: bool = False
+
+
+class FikaInstallPlan(CoreModel):
+    """What playing co-op needs: the two halves of Fika and their one plan."""
+
+    server_mod_id: int
+    client_mod_id: int
+    plan: InstallPlan
+
+
+class GetFikaSettingsRequest(CoreModel):
+    """Parameters of ``get_fika_settings``."""
+
+    path: Path
+    fika_path: Path | None = None
+
+
+class SetFikaSettingsRequest(CoreModel):
+    """Parameters of ``set_fika_settings``."""
+
+    path: Path
+    role: FikaRole = "none"
+    host_address: str = ""
+    fika_path: Path | None = None
+
+
+class ListHostProfilesRequest(CoreModel):
+    """Parameters of ``list_host_profiles``."""
+
+    path: Path
+    fika_path: Path | None = None
+
+
+class PlanFikaInstallRequest(CoreModel):
+    """Parameters of ``plan_fika_install``."""
+
+    path: Path
+    db_path: Path | None = None
+
+
 class LaunchProfileRequest(CoreModel):
     """Parameters of ``launch_profile``.
 
@@ -935,6 +992,7 @@ class LaunchProfileRequest(CoreModel):
     stop_server_on_exit: bool = True
     mod_set: ModSetMode = "apply"
     store_path: Path | None = None
+    fika_path: Path | None = None
     operation_id: str | None = None
 
 

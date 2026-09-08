@@ -55,6 +55,10 @@ export type ApplyModSetResponse = Schemas['ApplyModSetResponse'];
 export type LaunchProfileResponse = Schemas['LaunchProfileResponse'];
 export type LaunchStatus = Schemas['LaunchStatus'];
 export type StopResult = Schemas['StopResult'];
+export type FikaSettings = Schemas['FikaSettings'];
+export type FikaRole = Schemas['FikaRole'];
+export type HostProfile = Schemas['HostProfile'];
+export type FikaInstallPlan = Schemas['FikaInstallPlan'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -406,4 +410,34 @@ export function launchStatus(path: string): Promise<LaunchStatus> {
 
 export function stopGame(path: string): Promise<StopResult> {
 	return call<StopResult>('stop_game', { path } satisfies Schemas['StopGameRequest']);
+}
+
+export function getFikaSettings(path: string): Promise<FikaSettings> {
+	return call<FikaSettings>('get_fika_settings', {
+		path
+	} satisfies Schemas['GetFikaSettingsRequest']);
+}
+
+export function setFikaSettings(
+	path: string,
+	role: FikaRole,
+	hostAddress: string = ''
+): Promise<FikaSettings> {
+	return call<FikaSettings>('set_fika_settings', {
+		path,
+		role,
+		host_address: hostAddress
+	} satisfies Schemas['SetFikaSettingsRequest']);
+}
+
+export function listHostProfiles(path: string): Promise<HostProfile[]> {
+	return call<HostProfile[]>('list_host_profiles', {
+		path
+	} satisfies Schemas['ListHostProfilesRequest']);
+}
+
+export function planFikaInstall(path: string): Promise<FikaInstallPlan> {
+	return call<FikaInstallPlan>('plan_fika_install', {
+		path
+	} satisfies Schemas['PlanFikaInstallRequest']);
 }

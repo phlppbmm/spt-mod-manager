@@ -14,6 +14,7 @@ from sptmod.core.errors import (
     ConflictError,
     DependencyError,
     DirtyTreeError,
+    FikaHostUnreachableError,
     ForgeApiError,
     ForgeUnavailableError,
     GameRunningError,
@@ -64,6 +65,7 @@ class ErrorCode(StrEnum):
     SERVER_PORT_BUSY = "SERVER_PORT_BUSY"
     LOGIN_FAILED = "LOGIN_FAILED"
     LAUNCHER_SETTINGS_MISSING = "LAUNCHER_SETTINGS_MISSING"
+    FIKA_HOST_UNREACHABLE = "FIKA_HOST_UNREACHABLE"
     OPERATION_IN_PROGRESS = "OPERATION_IN_PROGRESS"
     CONFLICT = "CONFLICT"
     DEPENDENCY = "DEPENDENCY"
@@ -100,6 +102,7 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     ServerPortBusyError: ErrorCode.SERVER_PORT_BUSY,
     LoginFailedError: ErrorCode.LOGIN_FAILED,
     LauncherSettingsError: ErrorCode.LAUNCHER_SETTINGS_MISSING,
+    FikaHostUnreachableError: ErrorCode.FIKA_HOST_UNREACHABLE,
     OperationInProgressError: ErrorCode.OPERATION_IN_PROGRESS,
     ConflictError: ErrorCode.CONFLICT,
     DependencyError: ErrorCode.DEPENDENCY,

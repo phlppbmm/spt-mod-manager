@@ -1,6 +1,6 @@
-"""Tests for ``sptmod.core.sptserver``: address derivation, the port probe and
-sign-in against the local SPT server's launcher API. All HTTP is mocked with
-respx; no test opens a real socket.
+"""Tests for ``sptmod.core.sptserver``: address derivation, the port probe,
+sign-in and the profile list of a server's launcher API. All HTTP is mocked
+with respx; no test opens a real socket.
 """
 
 import json
@@ -14,7 +14,16 @@ import respx
 
 from sptmod.core.errors import LaunchError
 from sptmod.core.game_dir import GameLayout
-from sptmod.core.sptserver import LOGIN_PATH, PING_PATH, login, probe, server_base_url
+from sptmod.core.sptserver import (
+    LOGIN_PATH,
+    PING_PATH,
+    PROFILES_PATH,
+    RemoteProfile,
+    host_profiles,
+    login,
+    probe,
+    server_base_url,
+)
 
 BASE_URL = "https://127.0.0.1:6969"
 
@@ -283,3 +292,181 @@ def test_login_raises_launch_error_when_the_server_stops_answering() -> None:
 
         with pytest.raises(LaunchError):
             login(BASE_URL, "0Sullivan")
+
+
+# --------------------------------------------------------------------------
+# host_profiles
+# --------------------------------------------------------------------------
+
+
+def _mini_profile(profile_id: str, **overrides: Any) -> dict[str, Any]:
+    """Build one mini profile as the SPT launcher API lists it."""
+    entry: dict[str, Any] = {
+        "profileId": profile_id,
+        "username": "0Sullivan",
+        "nickname": "TesterNick",
+        "currlvl": 12,
+        "side": "Usec",
+        "edition": "Edge Of Darkness",
+        "hasPassword": False,
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_host_profiles_reports_every_field_of_the_listed_profiles_in_order() -> None:
+    """host_profiles maps the launcher API's mini profiles field by field.
+
+    The server answers with two profiles; both come back as RemoteProfile in
+    the order the server sent them, with profileId, username, nickname,
+    currlvl, side and hasPassword mapped onto the dataclass. If the body were
+    `pass`, nothing would be returned at all -- a joining machine, which has
+    no profile files, would have nothing to play.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(
+            200,
+            json={
+                "Response": [
+                    _mini_profile("aaa111", nickname="First", currlvl=42),
+                    _mini_profile("bbb222", username="Nikita", nickname="Second", side="Bear", hasPassword=True),
+                ]
+            },
+        )
+
+        profiles = host_profiles(BASE_URL)
+
+    assert profiles == [
+        RemoteProfile(
+            profile_id="aaa111", username="0Sullivan", nickname="First", level=42, side="Usec", has_password=False
+        ),
+        RemoteProfile(
+            profile_id="bbb222", username="Nikita", nickname="Second", level=12, side="Bear", has_password=True
+        ),
+    ]
+
+
+def test_host_profiles_sends_a_get_with_the_raw_response_header() -> None:
+    """host_profiles asks the launcher API for the profile list uncompressed.
+
+    The recorded request must be a GET to PROFILES_PATH carrying
+    responsecompressed: 0, the header every call of this module sends; without
+    it the server answers with a deflated body.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        route = router.get(PROFILES_PATH).respond(200, json={"Response": []})
+
+        host_profiles(BASE_URL)
+
+    request = route.calls.last.request
+    assert request.method == "GET"
+    assert request.headers["responsecompressed"] == "0"
+
+
+def test_host_profiles_accepts_a_zlib_compressed_answer() -> None:
+    """host_profiles reads a deflated body, like probe and login do.
+
+    A server that ignores responsecompressed: 0 answers with a zlib body; the
+    profile in it must still be reported instead of the list coming back
+    empty.
+    """
+    body = zlib.compress(json.dumps({"Response": [_mini_profile("aaa111")]}).encode())
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(200, content=body)
+
+        assert [profile.profile_id for profile in host_profiles(BASE_URL)] == ["aaa111"]
+
+
+def test_host_profiles_falls_back_to_the_account_name_without_a_nickname() -> None:
+    """A profile without a nickname is reported under its account name.
+
+    The server lists a profile whose nickname is empty; the mapped profile
+    carries the username instead, because a nameless entry cannot be picked
+    from a list.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(200, json={"Response": [_mini_profile("aaa111", nickname="")]})
+
+        assert [profile.nickname for profile in host_profiles(BASE_URL)] == ["0Sullivan"]
+
+
+def test_host_profiles_reports_a_profile_the_server_describes_with_nothing_but_an_id() -> None:
+    """Fields of an unexpected type are reported as empty, not passed on.
+
+    The server lists an entry whose level, side and password flag have the
+    wrong types; the profile is still offered, with the empty values of its
+    dataclass, so one odd field does not cost a player their profile.
+    """
+    entry = {"profileId": "aaa111", "currlvl": True, "side": 5, "hasPassword": "yes"}
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(200, json={"Response": [entry]})
+
+        assert host_profiles(BASE_URL) == [
+            RemoteProfile(profile_id="aaa111", username="", nickname="", level=0, side="", has_password=False)
+        ]
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        pytest.param([{"username": "Nameless"}], id="entry-without-a-profile-id"),
+        pytest.param([{"profileId": ""}], id="entry-with-an-empty-profile-id"),
+        pytest.param([{"profileId": 42}], id="profile-id-is-a-number"),
+        pytest.param(["aaa111"], id="entry-is-a-string"),
+        pytest.param([["aaa111"]], id="entry-is-a-list"),
+    ],
+)
+def test_host_profiles_leaves_out_an_entry_it_cannot_identify(listed: list[Any]) -> None:
+    """An entry without a usable profile id is left out of the list.
+
+    The profile id is the token the game is started with, so an entry the
+    server describes without one cannot be played and must not be offered.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(200, json={"Response": listed})
+
+        assert host_profiles(BASE_URL) == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"Response": "not a list"}, id="response-is-a-string"),
+        pytest.param({"Response": {"aaa111": {}}}, id="response-is-an-object"),
+        pytest.param({}, id="no-response-key"),
+        pytest.param([1, 2, 3], id="answer-is-not-an-object"),
+    ],
+)
+def test_host_profiles_reports_no_profiles_for_an_answer_it_cannot_read(payload: Any) -> None:
+    """An answer that holds no profile list is reported as no profiles.
+
+    Anything but a list under "Response" -- a string, an object, a missing key
+    or an answer that is no object at all -- yields an empty list instead of
+    raising, because the caller shows "no profiles" rather than a stack trace.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).respond(200, json=payload)
+
+        assert host_profiles(BASE_URL) == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(httpx.ConnectError("refused"), id="connection-refused"),
+        pytest.param(httpx.ReadTimeout("slow"), id="no-answer-in-time"),
+        pytest.param(httpx.RemoteProtocolError("garbled"), id="garbled-answer"),
+    ],
+)
+def test_host_profiles_raises_launch_error_when_the_server_stops_answering(failure: Exception) -> None:
+    """A transport failure is raised as LaunchError naming the server.
+
+    Every way the request can fail -- refused, timed out, garbled -- ends in
+    the same error as login, so the launch reports one unreachable host
+    instead of an httpx exception.
+    """
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as router:
+        router.get(PROFILES_PATH).mock(side_effect=failure)
+
+        with pytest.raises(LaunchError, match=BASE_URL):
+            host_profiles(BASE_URL)

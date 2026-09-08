@@ -346,7 +346,10 @@ def test_error_details_missing_defaults_to_an_empty_list() -> None:
 
 
 def test_launch_profile_rpc_accepts_mod_set_and_store_path(
-    fake_launchable_dir: LaunchableGameDir, mod_set_store: Path, monkeypatch: pytest.MonkeyPatch
+    fake_launchable_dir: LaunchableGameDir,
+    mod_set_store: Path,
+    fika_store: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If mod_set/store_path were not accepted request fields, this fails:
     the request would be rejected with a validation error (exit code 2)
@@ -364,6 +367,7 @@ def test_launch_profile_rpc_accepts_mod_set_and_store_path(
                 "profile_id": d.profile_id,
                 "mod_set": "skip",
                 "store_path": str(mod_set_store),
+                "fika_path": str(fika_store),
             },
         )
 

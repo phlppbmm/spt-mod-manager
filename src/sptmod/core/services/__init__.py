@@ -3,6 +3,11 @@
 from sptmod.core.errors import (
     InvalidPathError,
 )
+from sptmod.core.fika import (
+    FIKA_ROLES,
+    FikaRole,
+    FikaSettings,
+)
 from sptmod.core.launch import (
     LaunchResult,
     LaunchStatus,
@@ -32,6 +37,12 @@ from sptmod.core.services.common import (
     INSTALL_STEPS,
     InstallStep,
 )
+from sptmod.core.services.fika import (
+    HostProfile,
+    get_fika_settings,
+    list_host_profiles,
+    set_fika_settings,
+)
 from sptmod.core.services.gamedir import (
     SPT_VERSION_TRAILER,
     UNKNOWN_SPT_VERSION,
@@ -52,8 +63,10 @@ from sptmod.core.services.install_archive import (
     install_from_archive,
 )
 from sptmod.core.services.install_forge import (
+    FikaInstallPlan,
     InstallModResult,
     install_mod,
+    plan_fika_install,
     plan_mod_install,
 )
 from sptmod.core.services.lifecycle import (
@@ -137,6 +150,11 @@ __all__ = [
     "EXPORT_FORMATS",
     "ExportEntry",
     "ExportFormat",
+    "FIKA_ROLES",
+    "FikaInstallPlan",
+    "FikaRole",
+    "FikaSettings",
+    "HostProfile",
     "INSTALL_STEPS",
     "ImportDiff",
     "ImportEntry",
@@ -186,6 +204,7 @@ __all__ = [
     "enable_mod",
     "export_mod_set",
     "export_mods",
+    "get_fika_settings",
     "get_mod_details",
     "history",
     "import_list",
@@ -197,11 +216,13 @@ __all__ = [
     "launch_status",
     "list_directories",
     "list_favorites",
+    "list_host_profiles",
     "list_mod_sets",
     "list_mods",
     "list_profiles",
     "locate_directory",
     "mod_files",
+    "plan_fika_install",
     "plan_mod_install",
     "plan_mod_set",
     "plan_profile_cleanup",
@@ -210,6 +231,7 @@ __all__ = [
     "save_mod_set",
     "search_catalog",
     "set_favorite",
+    "set_fika_settings",
     "set_spt_version",
     "snapshot",
     "status",

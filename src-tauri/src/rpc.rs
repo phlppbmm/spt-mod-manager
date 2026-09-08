@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::driver;
 
-pub const FUNCTIONS: [&str; 43] = [
+pub const FUNCTIONS: [&str; 47] = [
     "list_directories",
     "locate_directory",
     "init_game_dir",
@@ -48,6 +48,10 @@ pub const FUNCTIONS: [&str; 43] = [
     "launch_profile",
     "launch_status",
     "stop_game",
+    "get_fika_settings",
+    "set_fika_settings",
+    "list_host_profiles",
+    "plan_fika_install",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

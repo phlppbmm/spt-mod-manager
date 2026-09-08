@@ -1,14 +1,15 @@
 """The launcher API of the local SPT server: address, reachability, sign-in.
 
 This is the second module allowed to use ``httpx``: the SPT server is a
-different remote service than the Forge, reached over the loopback address of
-the installation itself with a self-signed certificate, zlib bodies and PUT
-writes. Only the two calls a launch needs live here — reachability and sign-in.
+different remote service than the Forge, reached with a self-signed
+certificate, zlib bodies and PUT writes. Only the calls a launch needs live
+here — reachability, the profiles of a Fika host, and sign-in.
 """
 
 import http
 import json
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
@@ -23,6 +24,7 @@ DEFAULT_PORT: Final = 6969
 REQUEST_TIMEOUT: Final = 10.0
 PING_PATH: Final = "/launcher/v2/ping"
 LOGIN_PATH: Final = "/launcher/v2/login"
+PROFILES_PATH: Final = "/launcher/v2/profiles"
 PONG: Final = "Pong!"
 
 # Addresses that mean "every interface" in the server configuration; the game
@@ -33,6 +35,19 @@ _ANY_HOSTS: Final[tuple[str, ...]] = ("", "0.0.0.0", "::", "[::]")
 _RAW_RESPONSE_HEADERS: Final[dict[str, str]] = {"responsecompressed": "0"}
 
 type PortState = Literal["free", "spt", "foreign", "timeout"]
+
+
+@dataclass(frozen=True)
+class RemoteProfile:
+    """One player profile as another machine's SPT server describes it."""
+
+    profile_id: str
+    username: str
+    nickname: str
+    level: int
+    side: str
+    has_password: bool
+
 
 
 def server_base_url(layout: GameLayout) -> str:
@@ -96,14 +111,63 @@ def login(base_url: str, username: str, timeout: float = REQUEST_TIMEOUT) -> boo
     return isinstance(payload, dict) and payload.get("Response") is True
 
 
+def host_profiles(base_url: str, timeout: float = REQUEST_TIMEOUT) -> list[RemoteProfile]:
+    """Return the player profiles the SPT server at ``base_url`` offers.
+
+    A machine that joins a Fika session has no profile files of its own: the
+    profiles it can play belong to the host, so they are read over the network
+    in the order the host sends them. Entries the server describes in an
+    unexpected shape are left out.
+
+    Raises:
+        LaunchError: The server stopped answering.
+    """
+    try:
+        response = _request("GET", base_url, PROFILES_PATH, timeout, None)
+    except httpx.HTTPError as error:
+        raise LaunchError(
+            f"The SPT server at {base_url} stopped answering: {error}"
+        ) from error
+    payload = _decode(response.content)
+    listed = payload.get("Response") if isinstance(payload, dict) else None
+    if not isinstance(listed, list):
+        return []
+    read = (_remote_profile(entry) for entry in listed)
+    return [profile for profile in read if profile is not None]
+
+
+def _remote_profile(entry: Json) -> RemoteProfile | None:
+    """Read one profile of a server's profile list, ``None`` when it has no id."""
+    if not isinstance(entry, dict):
+        return None
+    profile_id = entry.get("profileId")
+    if not isinstance(profile_id, str) or not profile_id:
+        return None
+    username = _text(entry.get("username"))
+    level = entry.get("currlvl")
+    return RemoteProfile(
+        profile_id=profile_id,
+        username=username,
+        nickname=_text(entry.get("nickname")) or username,
+        level=level if isinstance(level, int) and not isinstance(level, bool) else 0,
+        side=_text(entry.get("side")),
+        has_password=entry.get("hasPassword") is True,
+    )
+
+
+def _text(value: Json) -> str:
+    """Return a text field of a server answer, empty when it is none."""
+    return value if isinstance(value, str) else ""
+
+
 def _request(
     method: str, base_url: str, path: str, timeout: float, body: bytes | None
 ) -> httpx.Response:
-    """Send one request to the local SPT server.
+    """Send one request to an SPT server.
 
-    Certificate validation is off: the server generates a self-signed
-    certificate per installation, and the address is the loopback one taken
-    from that installation's own configuration.
+    Certificate validation is off: every installation generates its own
+    self-signed certificate, the local one as much as the one of a Fika host
+    a player deliberately named.
     """
     with httpx.Client(verify=False, timeout=timeout) as client:
         return client.request(

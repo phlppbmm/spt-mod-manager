@@ -271,6 +271,26 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.StopGameRequest,
         schemas.StopResult,
     ),
+    "get_fika_settings": RpcSpec(
+        services.get_fika_settings,
+        schemas.GetFikaSettingsRequest,
+        schemas.FikaSettings,
+    ),
+    "set_fika_settings": RpcSpec(
+        services.set_fika_settings,
+        schemas.SetFikaSettingsRequest,
+        schemas.FikaSettings,
+    ),
+    "list_host_profiles": RpcSpec(
+        services.list_host_profiles,
+        schemas.ListHostProfilesRequest,
+        list[schemas.HostProfile],
+    ),
+    "plan_fika_install": RpcSpec(
+        services.plan_fika_install,
+        schemas.PlanFikaInstallRequest,
+        schemas.FikaInstallPlan,
+    ),
 }
 
 

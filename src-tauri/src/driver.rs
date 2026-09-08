@@ -3,6 +3,7 @@
 //! Stage 2 replaces the Python core with a native Rust core and deletes this
 //! file together with the CLI it drives.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -15,8 +16,12 @@ use crate::rpc::RpcError;
 
 pub const BINARY_ENV: &str = "SPTMOD_CLI";
 pub const DEFAULT_BINARY: &str = "sptmod";
+pub const SIDECAR_SUBDIR: &str = "sidecar";
 
 const STDERR_TAIL_LINES: usize = 20;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgressEvent {
@@ -26,38 +31,65 @@ pub struct ProgressEvent {
     pub message: String,
 }
 
-/// The CLI to spawn: `SPTMOD_CLI` if set, else `sptmod` resolved on `PATH`.
-pub fn binary_path() -> PathBuf {
-    match std::env::var_os(BINARY_ENV) {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
+/// Where a bundled sidecar lives under Tauri's resource directory.
+pub fn sidecar_path(resource_dir: &Path) -> PathBuf {
+    resource_dir
+        .join(SIDECAR_SUBDIR)
+        .join(format!("{DEFAULT_BINARY}{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Resolution order: `SPTMOD_CLI`, then the bundled sidecar, then `sptmod` on `PATH`.
+pub fn resolve_binary(
+    env_value: Option<OsString>,
+    bundled: Option<PathBuf>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> PathBuf {
+    if let Some(value) = env_value {
+        if !value.is_empty() {
+            return PathBuf::from(value);
+        }
+    }
+    match bundled {
+        Some(path) if exists(&path) => path,
         _ => PathBuf::from(DEFAULT_BINARY),
     }
+}
+
+/// The CLI to spawn, resolved against the process environment and the app's
+/// resource directory.
+pub fn binary_path(resource_dir: Option<&Path>) -> PathBuf {
+    resolve_binary(
+        std::env::var_os(BINARY_ENV),
+        resource_dir.map(sidecar_path),
+        &|path| path.exists(),
+    )
 }
 
 /// Run `<binary> rpc <name>` with `payload` on stdin, reporting every progress
 /// line to `progress` and returning the final result or error line.
 // Stage-2 option: serialise calls per game directory with a mutex. Stage 1
 // relies on the Python core's own locking.
-// Follow-up: pass CREATE_NO_WINDOW on Windows so no console window flashes up.
 pub async fn call(
     binary: &Path,
     name: &str,
     payload: &Value,
     mut progress: impl FnMut(ProgressEvent),
 ) -> Result<Value, RpcError> {
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .arg("rpc")
         .arg(name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            RpcError::new(
-                format!("cannot run {}: {error}", binary.display()),
-                "unreachable",
-            )
-        })?;
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command.spawn().map_err(|error| {
+        RpcError::new(
+            format!("cannot run {}: {error}", binary.display()),
+            "unreachable",
+        )
+    })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let request = payload.to_string();

@@ -17,6 +17,8 @@ dist/
 # Rust / Tauri
 target/
 src-tauri/gen/
+src-tauri/sidecar/
+packaging/build/
 
 # launch bookkeeping written into a game directory
 .sptmod-launch.json

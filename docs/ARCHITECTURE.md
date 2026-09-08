@@ -97,7 +97,7 @@ packaging/              freezing the Python core for the desktop bundle
 .github/workflows/
   ci.yml                Python/frontend/Rust gates plus sidecar and app matrices
   release.yml           v* tag -> signed bundles in a draft release
-tests/                  Python test suite (1597 tests)
+tests/                  Python test suite (2142 tests)
   conftest.py           fixtures: fake_game_dir, fake_launchable_dir, etc.
   fixture_types.py      fixture Protocols for typing
   forge_json.py         Forge API mock payload builders
@@ -1410,23 +1410,23 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (1597 collected: 1596 passed, 1 skipped)
+uv run pytest                        # Python suite (2142 collected: 2141 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # frontend (649 tests; 100% coverage)
+cd frontend && pnpm vitest run --coverage  # frontend (798 tests; 100% coverage)
 cargo build && cargo test            # Rust (17 driver + 2 ignored e2e)
 cd src-tauri && cargo llvm-cov       # Rust coverage
 ```
 
 ### Suite sizes and coverage
 
-- **Python:** 1596 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 2141 passed, 1 skipped; `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend:** 649 vitest tests in 24 files; strict 100%
+- **Frontend:** 798 vitest tests in 26 files; strict 100%
   statements/branches/functions/lines on `src/lib/**/*.ts` (minus `*.test.ts` and
   generated `api/types.ts`; v8 provider).
 - **Rust (Tauri):** 17 driver tests + 2 ignored e2e tests. rpc.rs's

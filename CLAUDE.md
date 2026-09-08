@@ -76,7 +76,7 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (1777 collected: 1776 passed, 1 skipped)
+uv run pytest                        # full suite (2142 collected: 2141 passed, 1 skipped)
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run pyright                       # strict type checking on src + tests

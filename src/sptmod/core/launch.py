@@ -101,7 +101,11 @@ class LaunchStatus:
     """What of the installation is running right now.
 
     The process IDs are ``0`` where nothing runs; ``profile_id`` names the
-    profile the last launch used and is empty when that is unknown.
+    profile the last launch used and is empty when that is unknown. The
+    ``_stoppable`` flags say that sptmod can close this process: it started it
+    and it is still that same process. A process found only by its name, and a
+    server that was already running when the launch began, are reported but
+    never closed.
     """
 
     server_running: bool
@@ -109,14 +113,17 @@ class LaunchStatus:
     server_pid: int
     client_pid: int
     profile_id: str
+    server_stoppable: bool
+    client_stoppable: bool
 
 
 @dataclass(frozen=True)
 class StopResult:
-    """What stopping the game closed."""
+    """What stopping the game closed, and how to say so to the player."""
 
     server_stopped: bool
     client_stopped: bool
+    message: str
 
 
 @dataclass(frozen=True)
@@ -306,7 +313,9 @@ def launch_status(path: Path) -> LaunchStatus:
 
     Reads the remembered processes and the process table, so a server or game
     started outside sptmod is reported as well. Never fails: an installation
-    nothing is known about simply reports nothing running.
+    nothing is known about simply reports nothing running. Only a process
+    sptmod started here is stoppable; one found by its name alone, and a server
+    that was already running, are reported and left alone.
     """
     state = _read_state(path)
     running = game_dir.game_processes()
@@ -318,30 +327,86 @@ def launch_status(path: Path) -> LaunchStatus:
         server_pid=server,
         client_pid=client,
         profile_id=state.profile_id,
+        server_stoppable=state.server_started_by_sptmod
+        and _live_ref(state.server) is not None,
+        client_stoppable=_live_ref(state.client) is not None,
     )
 
 
 def stop_game(path: Path) -> StopResult:
-    """Close the game and the SPT server of the installation at ``path``.
+    """Close the game and the SPT server sptmod started at ``path``.
 
     Closes the watcher first so it cannot act on a half-stopped installation,
-    then the game with everything it started, then the server. A server or
-    game that is running without being remembered is found in the process
-    table and closed as well; every game process found there is closed, not
-    only the first, because a game hosted by Wine shows up next to the
-    program that started it.
+    then the game with everything it started, then the server. Only a process
+    sptmod both noted at launch time and started itself is closed, and only
+    while the number and the start time noted with it still name that very
+    process. Anything else is left alone, however plainly it shows up in the
+    process table: it belongs to somebody else, the server that was already
+    answering when the launch began included.
     """
     state = _read_state(path)
-    running = game_dir.game_processes()
     if state.watcher is not None:
         _terminate(state.watcher)
-    server = _live_ref(state.server) or _running_ref(running, "server")
-    client_stopped = False
-    for client in _client_refs(state.client, running):
-        client_stopped = _terminate(client) or client_stopped
-    server_stopped = server is not None and _terminate(server)
+    client_stopped = state.client is not None and _terminate(state.client)
+    server_stopped = (
+        state.server is not None
+        and state.server_started_by_sptmod
+        and _terminate(state.server)
+    )
     _clear_state(path)
-    return StopResult(server_stopped=server_stopped, client_stopped=client_stopped)
+    still_playing = any(
+        process.kind == "client" for process in game_dir.game_processes()
+    )
+    return StopResult(
+        server_stopped=server_stopped,
+        client_stopped=client_stopped,
+        message=_stop_message(
+            state,
+            server_stopped=server_stopped,
+            client_stopped=client_stopped,
+            still_playing=still_playing,
+        ),
+    )
+
+
+def _stop_message(
+    state: _LaunchState,
+    *,
+    server_stopped: bool,
+    client_stopped: bool,
+    still_playing: bool,
+) -> str:
+    """Say in plain words what closing the game did.
+
+    ``still_playing`` says a game is left in the process table afterwards,
+    which on Linux is the usual outcome: what a launch starts there only hosts
+    the game and the game outlives it under a number of its own. It is said out
+    loud rather than acted on, because sptmod closes nothing it did not start.
+    """
+    if state.server is None and state.client is None:
+        first = "sptmod did not start a game here, so there is nothing to close."
+    else:
+        closed = [
+            name
+            for name, stopped in (
+                ("game", client_stopped),
+                ("SPT server", server_stopped),
+            )
+            if stopped
+        ]
+        first = (
+            f"Closed the {' and the '.join(closed)}."
+            if closed
+            else "Nothing sptmod started here is still running."
+        )
+    sentences = [first]
+    if state.server is not None and not state.server_started_by_sptmod:
+        sentences.append(
+            "The SPT server was already running before sptmod, so it stays up."
+        )
+    if still_playing:
+        sentences.append("The game is still running; close it yourself.")
+    return " ".join(sentences)
 
 
 def watch_game(
@@ -838,14 +903,17 @@ def _terminate(reference: _ProcessRef, timeout: float = TERMINATE_TIMEOUT) -> bo
     """Close the remembered process and everything it started.
 
     Returns whether the process was still the remembered one and got asked to
-    close; survivors of the friendly request are killed.
+    close; survivors of the friendly request are killed. Whether it still runs
+    is the one question :func:`_live_ref` answers, so what a status call calls
+    stoppable is what this closes; a process that has ended and only waits to
+    be reaped counts as gone for both.
     """
     try:
         process = psutil.Process(reference.pid)
-        if process.create_time() != reference.started_at:
-            return False
         targets = [*process.children(recursive=True), process]
     except psutil.Error:
+        return False
+    if _live_ref(reference) is None:
         return False
     for target in targets:
         with suppress(psutil.Error):
@@ -885,23 +953,6 @@ def _running_ref(running: Sequence[GameProcess], kind: str) -> _ProcessRef | Non
         if process.kind == kind:
             return _ProcessRef(pid=process.pid, started_at=process.started_at)
     return None
-
-
-def _client_refs(
-    client: _ProcessRef | None, running: Sequence[GameProcess]
-) -> list[_ProcessRef]:
-    """Return every running game process, remembered one and scanned ones."""
-    references: dict[int, _ProcessRef] = {}
-    live = _live_ref(client)
-    if live is not None:
-        references[live.pid] = live
-    for process in running:
-        if process.kind == "client":
-            references.setdefault(
-                process.pid,
-                _ProcessRef(pid=process.pid, started_at=process.started_at),
-            )
-    return list(references.values())
 
 
 def _report(progress: Progress | None, step: str, percent: int, message: str) -> None:

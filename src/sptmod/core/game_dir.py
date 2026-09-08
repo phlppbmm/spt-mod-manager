@@ -1,6 +1,7 @@
 """Game directory detection, SPT version lookup and the running-game check."""
 
 import json
+import os
 import struct
 import sys
 from collections.abc import Sequence
@@ -18,6 +19,7 @@ RUNTIME_DIR_NAMES: Final[tuple[str, ...]] = ("SPT_Runtime", "SPT")
 BEPINEX_DIR: Final = Path("BepInEx")
 PLUGINS_DIR: Final = Path("BepInEx/plugins")
 BEPINEX_CONFIG_DIR: Final = Path("BepInEx/config")
+PROCESS_SCAN_ENV: Final = "SPTMOD_PROCESS_SCAN"
 SERVER_EXE_NAME: Final = "SPT.Server.exe"
 SERVER_LINUX_NAME: Final = "SPT.Server.Linux"
 CLIENT_EXE_NAME: Final = "EscapeFromTarkov.exe"
@@ -594,7 +596,14 @@ def game_processes() -> list[GameProcess]:
     processes. A process counts when its name matches, when its name is the
     truncated form Linux reports, or when the program of its command line
     matches: the Proton client passes none of those checks but the last.
+
+    Setting the environment variable ``SPTMOD_PROCESS_SCAN`` to ``off`` switches
+    the scan off and reports nothing running, the same kind of test seam as the
+    ``SPTMOD_FORGE_URL`` override. Processes sptmod starts inherit the
+    environment, so a child scans no more than its parent does.
     """
+    if _process_scan_off():
+        return []
     found: list[GameProcess] = []
     for process in psutil.process_iter():
         try:
@@ -620,8 +629,11 @@ def spt_process_sightings() -> list[ProcessSighting]:
 
     Deliberately vaguer than :func:`game_processes`: it answers "what did the
     process table really hold" for a launch that found no game, including the
-    processes the classification did not recognise.
+    processes the classification did not recognise. ``SPTMOD_PROCESS_SCAN`` set
+    to ``off`` switches this scan off as well.
     """
+    if _process_scan_off():
+        return []
     found: list[ProcessSighting] = []
     for process in psutil.process_iter():
         try:
@@ -637,6 +649,11 @@ def spt_process_sightings() -> list[ProcessSighting]:
                 )
             )
     return found
+
+
+def _process_scan_off() -> bool:
+    """Return whether the environment switched the process scan off."""
+    return os.environ.get(PROCESS_SCAN_ENV) == "off"
 
 
 def running_game_processes() -> list[str]:

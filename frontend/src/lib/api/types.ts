@@ -1507,6 +1507,11 @@ export interface components {
         /**
          * LaunchStatus
          * @description What of the installation is running right now.
+         *
+         *     The ``_stoppable`` flags say that sptmod can close this process: it started
+         *     it and it is still that same process. A process found only by its name, and
+         *     a server that was already running when the launch began, are reported but
+         *     never closed.
          */
         LaunchStatus: {
             /** Server Running */
@@ -1519,6 +1524,10 @@ export interface components {
             client_pid: number;
             /** Profile Id */
             profile_id: string;
+            /** Server Stoppable */
+            server_stoppable: boolean;
+            /** Client Stoppable */
+            client_stoppable: boolean;
         };
         /**
          * LaunchStatusRequest
@@ -2035,13 +2044,15 @@ export interface components {
         };
         /**
          * StopResult
-         * @description What stopping the game closed.
+         * @description What stopping the game closed, and how to say so to the player.
          */
         StopResult: {
             /** Server Stopped */
             server_stopped: boolean;
             /** Client Stopped */
             client_stopped: boolean;
+            /** Message */
+            message: string;
         };
         /**
          * SyncCatalogRequest

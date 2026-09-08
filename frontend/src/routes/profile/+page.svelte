@@ -147,8 +147,8 @@
 		stopping = true;
 		launchNote = '';
 		try {
-			await stopGame(path);
-			launchNote = 'The game was closed.';
+			const result = await stopGame(path);
+			launchNote = result.message;
 		} catch (cause) {
 			launchNote = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -381,7 +381,9 @@
 {#if stopTarget !== ''}
 	<Dialog title="Close the game" onclose={() => (stopTarget = '')}>
 		<p>This closes the game immediately. Progress since the last save is lost.</p>
-		<p class="note">The SPT server is closed with it.</p>
+		{#if gameStatus?.server_stoppable}
+			<p class="note">The SPT server is closed with it.</p>
+		{/if}
 
 		{#snippet actions()}
 			<button type="button" class="btn-primary" disabled={stopping} onclick={() => void stop()}>

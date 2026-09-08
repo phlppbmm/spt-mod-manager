@@ -439,16 +439,18 @@ def launch_status(path: Path) -> LaunchStatus:
 
     Reads only, and never fails: an installation nothing is known about
     reports nothing running. A server or game started outside sptmod is
-    reported as well.
+    reported as well, and marked as one sptmod cannot close.
     """
     return _launch_status(path)
 
 
 def stop_game(path: Path) -> StopResult:
-    """Close the game and the SPT server of the installation at ``path``.
+    """Close the game and the SPT server sptmod started at ``path``.
 
-    Everything the game started is closed with it. Progress the game has not
-    saved yet is lost, so callers ask before calling this.
+    Only what sptmod started here is closed, together with everything that game
+    started; a server or game that was already running is left alone. Progress
+    the game has not saved yet is lost, so callers ask before calling this. The
+    result says in plain words what was closed.
     """
     return _stop_game(path)
 

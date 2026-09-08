@@ -24,8 +24,6 @@ from sptmod.core.errors import (
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import game_lock
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 
 def test_remove_mod_deletes_the_files_added_by_its_install_commit(
     clean_repo: Repo, install_commit: InstallCommit

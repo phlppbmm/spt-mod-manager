@@ -27,8 +27,6 @@ from sptmod.core import services
 from sptmod.core.errors import ConflictError, DependencyError
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 _BLOCKING_ERRORS: tuple[type[ConflictError | DependencyError], ...] = (
     ConflictError,
     DependencyError,

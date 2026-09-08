@@ -53,8 +53,6 @@ from sptmod.core.game_dir import (
 )
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

@@ -28,8 +28,6 @@ from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

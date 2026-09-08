@@ -29,8 +29,6 @@ from sptmod.core.forge.client import ForgeClient
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo, gitignore_whitelist
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 runner = CliRunner()
 
 

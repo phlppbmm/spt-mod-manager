@@ -10,7 +10,7 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 """
 
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import psutil
@@ -19,6 +19,7 @@ import pytest
 from fixture_types import SpawnProcess
 from sptmod.core.errors import GameRunningError, NotAGameDirError
 from sptmod.core.game_dir import (
+    PROCESS_SCAN_ENV,
     GameProcess,
     GameProcessKind,
     ProcessSighting,
@@ -32,6 +33,25 @@ from sptmod.core.game_dir import (
     spt_process_sightings,
     validate_game_dir,
 )
+
+
+@pytest.fixture(autouse=True)
+def real_process_table(real_process_scan: None) -> None:
+    """Undo the suite-wide process-scan switch for the scanner's own tests.
+
+    This module is the unit test of the scan itself, so every test here has to
+    reach the real implementation the rest of the suite is protected from.
+    Everything below only reads the process table -- no test in this module
+    starts, stops or signals a process it did not spawn itself, which
+    ``tests/test_process_scan_isolation.py`` pins -- so reaching the real table
+    is safe here. The tests of the off switch set the variable again themselves.
+    """
+    del real_process_scan
+
+
+def _refuse_to_scan() -> Iterator[psutil.Process]:
+    """Stand in for ``psutil.process_iter``; fails when the scan asks at all."""
+    raise AssertionError("the process table was scanned while the scan was switched off")
 
 
 def _make_game_dir(root: Path) -> Path:
@@ -561,6 +581,63 @@ def test_spt_process_sightings_scans_the_real_process_table_without_crashing() -
         assert sighting.pid > 0
         assert isinstance(sighting.name, str)
         assert isinstance(sighting.command, str)
+
+
+# --- SPTMOD_PROCESS_SCAN -------------------------------------------------------
+
+
+def test_game_processes_reports_nothing_while_the_scan_is_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """game_processes() answers nothing before it looks at the process table.
+
+    A process table holding the server and the game is prepared, and
+    SPTMOD_PROCESS_SCAN is set to off. The scan must answer with an empty list
+    without asking psutil at all: this is the seam every process a launch
+    starts inherits, so a machine that plays SPT can still run the test suite.
+    """
+    monkeypatch.setenv(PROCESS_SCAN_ENV, "off")
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        _refuse_to_scan,
+    )
+
+    assert not game_processes()
+
+
+def test_spt_process_sightings_reports_nothing_while_the_scan_is_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spt_process_sightings() answers nothing before it looks at the table.
+
+    The diagnostic scan of the launch log carries the same off switch as
+    game_processes(), asserted the same way: psutil must not be asked at all.
+    """
+    monkeypatch.setenv(PROCESS_SCAN_ENV, "off")
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        _refuse_to_scan,
+    )
+
+    assert not spt_process_sightings()
+
+
+@pytest.mark.parametrize("value", ["", "on", "OFF", "0"], ids=["empty", "on", "uppercase", "zero"])
+def test_the_scan_runs_for_every_value_that_is_not_off(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    """Only the exact value "off" switches the scan off; anything else scans.
+
+    The same fake table is offered under four other values of the variable,
+    including the uppercase spelling. Each must be scanned and report the
+    server, so a typo in the variable silently disabling the running-game check
+    would fail here.
+    """
+    monkeypatch.setenv(PROCESS_SCAN_ENV, value)
+    monkeypatch.setattr(
+        "sptmod.core.game_dir.psutil.process_iter",
+        lambda: iter([_FakeProcess(4711, "SPT.Server.Linux", 5.0)]),
+    )
+
+    assert game_processes() == [GameProcess(pid=4711, name="SPT.Server.Linux", kind="server", started_at=5.0)]
 
 
 # --- process_alive -------------------------------------------------------------

@@ -30,8 +30,6 @@ from sptmod.core.errors import (
 from sptmod.core.game_dir import detect_layout
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 # --------------------------------------------------------------------------
 # Fixed content IDs shared by every test in this module. Item and trader IDs
 # are 24-character hex, matching the pattern ``_collect_from_file`` requires

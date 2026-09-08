@@ -567,8 +567,15 @@ the Proton client's `argv[0]` is `X:\Games\SPT\EscapeFromTarkov.exe`, which
 `os.path.basename` does not split. A process whose command line cannot be read
 is skipped. Since the spawned pid is only the wrapper on Linux, this scan is
 not a fallback but the second half of the detection.
-`stop_game` closes every scanned game process, not only the first, because a
-Wine-hosted game appears next to the program that started it.
+`stop_game` closes only what the launch state file recorded, identified by pid
+and start time together, and the server only when `server_started_by_sptmod`
+says sptmod started it rather than adopted one that was already answering. A
+process the scan alone found is reported (`launch_status` sets `server_running`
+/ `client_running` from it) but never signalled, and the `server_stoppable` /
+`client_stoppable` flags say which of the two sptmod may close. Because the
+recorded client on Linux is only the wrapper, the game frequently outlives it:
+`stop_game` therefore looks at the scan once more afterwards, purely to say in
+its `message` that the game is still running and has to be closed by hand.
 
 **What sptmod deliberately does not do:** Pre-launch cleanup (the launcher
 deletes `BattlEye/`, `Logs/`, `ConsistencyInfo`, and others before every start;
@@ -831,6 +838,7 @@ cd src-tauri && cargo llvm-cov       # Rust coverage (70.5% lines)
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver) |
 | `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
+| `SPTMOD_PROCESS_SCAN` | `off` switches both scans of the process table for SPT off; inherited by children |
 | `SPTMOD_SMOKE_GAME_DIR` | Rust e2e test only; override game directory path for `src-tauri/tests/rpc_e2e_ignored.rs` |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
 | `XDG_CACHE_HOME` | relocates the staging dir and download cache (platformdirs) |

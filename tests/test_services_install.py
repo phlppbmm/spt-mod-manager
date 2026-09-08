@@ -28,8 +28,6 @@ from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 
 def _tree_listing(root: Path) -> set[Path]:
     """A snapshot of every file below ``root`` (git internals excluded)."""

@@ -38,7 +38,7 @@ export function launchAction(
 			label: 'Stop',
 			disabled: busy,
 			mode: 'stop',
-			hint: 'Closes the game and the SPT server.'
+			hint: 'Closes the game, and the SPT server if sptmod started it.'
 		};
 	}
 	if (busy) {

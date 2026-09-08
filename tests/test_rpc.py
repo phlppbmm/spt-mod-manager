@@ -52,8 +52,6 @@ from sptmod.core.repo import Repo
 from sptmod.core.workspace import download_cache_dir
 from sptmod.server import rpc
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 SPT_CONSTRAINT = "^4.0.0"
 
 

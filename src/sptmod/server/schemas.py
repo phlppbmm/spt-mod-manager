@@ -773,13 +773,21 @@ class LaunchStatusRequest(CoreModel):
 
 
 class LaunchStatus(CoreModel):
-    """What of the installation is running right now."""
+    """What of the installation is running right now.
+
+    The ``_stoppable`` flags say that sptmod can close this process: it started
+    it and it is still that same process. A process found only by its name, and
+    a server that was already running when the launch began, are reported but
+    never closed.
+    """
 
     server_running: bool
     client_running: bool
     server_pid: int
     client_pid: int
     profile_id: str
+    server_stoppable: bool
+    client_stoppable: bool
 
 
 class StopGameRequest(CoreModel):
@@ -789,10 +797,11 @@ class StopGameRequest(CoreModel):
 
 
 class StopResult(CoreModel):
-    """What stopping the game closed."""
+    """What stopping the game closed, and how to say so to the player."""
 
     server_stopped: bool
     client_stopped: bool
+    message: str
 
 
 class ProgressEvent(CoreModel):

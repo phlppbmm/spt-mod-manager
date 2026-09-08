@@ -35,8 +35,6 @@ from sptmod.core.workspace import (
     staging_dir,
 )
 
-pytestmark = pytest.mark.usefixtures("not_running")
-
 
 def _dead_pid() -> int:
     """Return a process id that is guaranteed not to exist right now."""

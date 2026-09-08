@@ -3149,7 +3149,7 @@
         "type": "object"
       },
       "LaunchStatus": {
-        "description": "What of the installation is running right now.",
+        "description": "What of the installation is running right now.\n\nThe ``_stoppable`` flags say that sptmod can close this process: it started\nit and it is still that same process. A process found only by its name, and\na server that was already running when the launch began, are reported but\nnever closed.",
         "properties": {
           "server_running": {
             "title": "Server Running",
@@ -3170,6 +3170,14 @@
           "profile_id": {
             "title": "Profile Id",
             "type": "string"
+          },
+          "server_stoppable": {
+            "title": "Server Stoppable",
+            "type": "boolean"
+          },
+          "client_stoppable": {
+            "title": "Client Stoppable",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3177,7 +3185,9 @@
           "client_running",
           "server_pid",
           "client_pid",
-          "profile_id"
+          "profile_id",
+          "server_stoppable",
+          "client_stoppable"
         ],
         "title": "LaunchStatus",
         "type": "object"
@@ -4136,7 +4146,7 @@
         "type": "object"
       },
       "StopResult": {
-        "description": "What stopping the game closed.",
+        "description": "What stopping the game closed, and how to say so to the player.",
         "properties": {
           "server_stopped": {
             "title": "Server Stopped",
@@ -4145,11 +4155,16 @@
           "client_stopped": {
             "title": "Client Stopped",
             "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
           }
         },
         "required": [
           "server_stopped",
-          "client_stopped"
+          "client_stopped",
+          "message"
         ],
         "title": "StopResult",
         "type": "object"

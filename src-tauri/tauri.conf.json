@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "sptmod",
-  "version": "0.1.0",
   "identifier": "de.baumm.sptmod",
   "build": {
     "frontendDist": "../frontend/build",
@@ -30,8 +29,14 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage",
+      "nsis",
+      "msi"
+    ],
+    "createUpdaterArtifacts": true,
     "resources": {
       "sidecar/sptmod": "sidecar"
     },
@@ -41,6 +46,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "git"
+        ]
+      }
+    }
   }
 }

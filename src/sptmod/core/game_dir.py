@@ -5,6 +5,7 @@ import struct
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import IO, Final, Literal
 
@@ -33,6 +34,17 @@ SPT_OWN_CLIENT_PATHS: Final[tuple[Path, ...]] = (
     Path("BepInEx/plugins/spt"),
     Path("BepInEx/patchers/spt-prepatch.dll"),
 )
+
+# The BepInEx runtime an SPT release ships, and the loader files it puts in the
+# game root: the Doorstop proxy DLL, its configuration, its version marker and
+# the licences of the bundled components.
+BEPINEX_CORE_DIR: Final = Path("BepInEx/core")
+LOADER_ROOT_FILES: Final[tuple[str, ...]] = (
+    "winhttp.dll",
+    "doorstop_config.ini",
+    ".doorstop_version",
+)
+LOADER_ROOT_LICENSE_GLOB: Final = "LICENSE-*.txt"
 
 SPT_VERSION_FIELD: Final = "sptVersion"
 SPT_VERSION_CONFIG_KEY: Final = "sptmod.sptversion"
@@ -211,16 +223,36 @@ def is_spt_own_path(entry: Path) -> bool:
     )
 
 
+def _is_loader_root_file(entry: Path) -> bool:
+    """Return whether ``entry`` is a loader file directly in the game root.
+
+    The names are matched exactly, because the ignore rules of the repository
+    are case-sensitive too: a file spelled differently is not the ignored one.
+    """
+    if entry.parent != Path("."):
+        return False
+    return entry.name in LOADER_ROOT_FILES or fnmatchcase(
+        entry.name, LOADER_ROOT_LICENSE_GLOB
+    )
+
+
 def is_game_program_path(entry: Path, layout: GameLayout) -> bool:
     """Return whether ``entry`` belongs to the SPT program set of ``layout``.
 
-    ``entry`` is relative to the game directory. The program set is what an SPT
-    release ships below its runtime directory: the executables, libraries and
-    JSON files directly in it, plus the whole ``SPT_Data`` tree. Those paths
-    belong to the installation, never to a mod.
+    ``entry`` is relative to the game directory. The program set is everything
+    an SPT release ships: the executables, libraries and JSON files directly in
+    the runtime directory, the whole ``SPT_Data`` tree, SPT's own client files
+    below ``BepInEx``, the BepInEx runtime in ``BepInEx/core`` and the loader
+    files in the game root. Those paths belong to the installation, never to a
+    mod, so they are both the set a release writes and the set a changed file
+    is attributed to when no mod accounts for it.
     """
-    return entry.parent == layout.runtime_dir or entry.is_relative_to(
-        layout.spt_data_dir
+    return (
+        entry.parent == layout.runtime_dir
+        or entry.is_relative_to(layout.spt_data_dir)
+        or is_spt_own_path(entry)
+        or entry.is_relative_to(BEPINEX_CORE_DIR)
+        or _is_loader_root_file(entry)
     )
 
 
@@ -316,19 +348,45 @@ def read_pe_file_version(exe_path: Path) -> str | None:
     when the file is missing, unreadable, no PE image or has no version
     resource; version detection stays best effort.
     """
-    try:
-        with exe_path.open("rb") as stream:
-            block = _read_version_resource(stream)
-    except OSError:
-        return None
-    if block is None:
-        return None
-    strings = _version_strings(block)
+    strings = _pe_version_strings(exe_path)
     for key in ("FileVersion", "ProductVersion"):
         value = strings.get(key, "").strip()
         if value:
             return value
     return None
+
+
+def read_client_build(exe: Path) -> str:
+    """Return the Escape from Tarkov client build of the PE file ``exe``.
+
+    The build is what SPT compares an installation against: the second-to-last
+    component of the ``ProductVersion`` string resource once ``-`` counts as a
+    separator like ``.``, so ``0.16.9.5-40743.36018`` is build ``40743``.
+    ``FileVersion`` is read when the executable carries no ``ProductVersion``.
+    Returns ``""`` when the file is missing, unreadable, carries no version
+    resource, or that component is no number.
+    """
+    strings = _pe_version_strings(exe)
+    version = (
+        strings.get("ProductVersion", "").strip()
+        or strings.get("FileVersion", "").strip()
+    )
+    components = version.replace("-", ".").split(".")
+    if len(components) < 2 or not components[-2].isdigit():
+        return ""
+    return components[-2]
+
+
+def _pe_version_strings(exe_path: Path) -> dict[str, str]:
+    """Return the version resource strings of ``exe_path``, empty when it has none."""
+    try:
+        with exe_path.open("rb") as stream:
+            block = _read_version_resource(stream)
+    except OSError:
+        return {}
+    if block is None:
+        return {}
+    return _version_strings(block)
 
 
 def _read_version_resource(stream: IO[bytes]) -> bytes | None:

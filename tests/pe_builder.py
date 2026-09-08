@@ -9,6 +9,7 @@ valid image instead of hand-building malformed PEs.
 """
 
 import struct
+from collections.abc import Sequence
 from pathlib import Path
 
 
@@ -34,14 +35,22 @@ def version_block(key: str, value_word_count: int, value: bytes, children: bytes
     return struct.pack("<HHH", len(total), value_word_count, 1) + key_bytes + total[len(head) :]
 
 
-def build_version_resource(version: str, key_name: str) -> bytes:
-    """Build a VS_VERSION_INFO resource with a single string-table entry."""
+def build_version_resource_multi(entries: Sequence[tuple[str, str]]) -> bytes:
+    """Build a VS_VERSION_INFO resource with one string-table entry per pair
+    in ``entries``, in order (so a later entry of the same key would shadow
+    an earlier one, the way the real string table does)."""
     fixed_file_info = struct.pack("<13I", 0xFEEF04BD, 0x10000, 0, 0, 0, 0, 0x3F, 0, 4, 1, 0, 0, 0)
-    value_str = utf16z(version)
-    string_entry = version_block(key_name, len(version) + 1, value_str)
-    string_table = version_block("040904B0", 0, b"", string_entry)
+    string_entries = b"".join(
+        version_block(key, len(value) + 1, utf16z(value)) for key, value in entries
+    )
+    string_table = version_block("040904B0", 0, b"", string_entries)
     string_file_info = version_block("StringFileInfo", 0, b"", string_table)
     return version_block("VS_VERSION_INFO", len(fixed_file_info) // 2, fixed_file_info, string_file_info)
+
+
+def build_version_resource(version: str, key_name: str) -> bytes:
+    """Build a VS_VERSION_INFO resource with a single string-table entry."""
+    return build_version_resource_multi([(key_name, version)])
 
 
 # Fixed layout constants shared between the builder and the corruption tests
@@ -158,6 +167,12 @@ def build_pe_around_version_data(version_data: bytes) -> bytes:
 def build_synthetic_exe(version: str, key_name: str = "FileVersion") -> bytes:
     """Build a minimal PE32+ image whose VS_VERSION_INFO carries ``key_name``."""
     return build_pe_around_version_data(build_version_resource(version, key_name))
+
+
+def build_synthetic_exe_multi(entries: Sequence[tuple[str, str]]) -> bytes:
+    """Build a minimal PE32+ image whose VS_VERSION_INFO carries every
+    ``(key, value)`` pair in ``entries`` as its own string-table entry."""
+    return build_pe_around_version_data(build_version_resource_multi(entries))
 
 
 def write_server_exe(root: Path, runtime_dir_name: str, version: str) -> Path:

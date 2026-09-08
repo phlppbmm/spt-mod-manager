@@ -1,12 +1,17 @@
 """Tests for the whitelist semantics implied by the .gitignore written by Repo.init.
 
 Trackable: .gitignore, <runtime>/user/mods/**, <runtime>/user/profiles/*.json,
-BepInEx/plugins/**, BepInEx/config/**, BepInEx/patchers/** and the SPT program
-set (every file directly in <runtime>/ plus <runtime>/SPT_Data/**).
+BepInEx/plugins/**, BepInEx/config/**, BepInEx/patchers/**, BepInEx/core/**,
+the root-anchored loader files (/winhttp.dll, /doorstop_config.ini,
+/.doorstop_version, /LICENSE-*.txt) and the SPT program set (every file
+directly in <runtime>/ plus <runtime>/SPT_Data/**).
 Must stay invisible (ignored): <runtime>/user/logs/**, <runtime>/user/cache/**,
 <runtime>/user/certs/**, cache and log directories below <runtime>/SPT_Data/,
 BepInEx/cache/**, Logs/**, .sptmod-* lock files, EscapeFromTarkov_Data/**,
-<runtime>/user/profiles/backups/** and anything else outside the whitelist.
+<runtime>/user/profiles/backups/**, a non-root-anchored copy of a loader file
+(e.g. nested/winhttp.dll, nested/LICENSE-X.txt), a root LICENSE.txt with no
+version suffix, a loader name spelled differently (WINHTTP.DLL), and anything
+else outside the whitelist.
 
 The assertions go through a real git repository (``Repo.status`` on the
 ``initialized_repo`` fixture), not through the generated pattern text.
@@ -148,6 +153,98 @@ def test_commit_with_paths_none_stages_bepinex_patchers(
     files = {mod_file.path for mod_file in initialized_repo.show_files(commit_hash)}
 
     assert Path("BepInEx/patchers/Fixer.dll") in files
+
+
+def test_untracked_under_shows_new_trackable_bepinex_core_file(
+    initialized_repo: Repo,
+) -> None:
+    """``BepInEx/core/`` (the BepInEx runtime an SPT release ships) must be
+    trackable like ``BepInEx/plugins/`` and ``BepInEx/patchers/``.
+    """
+    _write(initialized_repo.path / "BepInEx" / "core" / "BepInEx.dll", "runtime")
+
+    result = initialized_repo.untracked_under(Path("BepInEx"))
+
+    assert Path("BepInEx/core/BepInEx.dll") in result
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        pytest.param("winhttp.dll", id="winhttp-dll"),
+        pytest.param("doorstop_config.ini", id="doorstop-config-ini"),
+        pytest.param(".doorstop_version", id="doorstop-version"),
+        pytest.param("LICENSE-BepInEx.txt", id="license-glob"),
+    ],
+)
+def test_untracked_under_shows_new_trackable_loader_root_file(
+    initialized_repo: Repo, relative: str
+) -> None:
+    """The root-anchored Doorstop loader files and licences an SPT release
+    ships (``/winhttp.dll``, ``/doorstop_config.ini``, ``/.doorstop_version``,
+    ``/LICENSE-*.txt``) must be trackable directly in the game root.
+    """
+    _write(initialized_repo.path / relative, "loader")
+
+    result = initialized_repo.untracked_under(Path("."))
+
+    assert Path(relative) in result
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        pytest.param("nested/winhttp.dll", id="nested-winhttp-dll"),
+        pytest.param("nested/LICENSE-BepInEx.txt", id="nested-license-glob"),
+        pytest.param("LICENSE.txt", id="license-without-version-suffix"),
+        pytest.param("WINHTTP.DLL", id="loader-file-other-spelling"),
+    ],
+)
+def test_root_loader_whitelist_matches_only_the_exact_root_anchored_names(
+    initialized_repo: Repo, relative: str
+) -> None:
+    """The root-anchored loader patterns must not widen into a directory
+    (``nested/winhttp.dll``, ``nested/LICENSE-*.txt``), a licence file with
+    no version suffix (``LICENSE.txt``, distinct from ``LICENSE-*.txt``) or
+    another spelling of a loader name (``WINHTTP.DLL``); those stay ignored
+    like every other file outside the whitelist. The spelling matters because
+    ``is_game_program_path`` reads the same names case-sensitively, so a
+    differently spelled file belongs to neither the program set nor the
+    repository.
+    """
+    _write(initialized_repo.path / relative, "not a loader file")
+
+    status = initialized_repo.status()
+
+    assert Path(relative) not in status.untracked
+
+
+def test_commit_with_paths_none_stages_loader_root_files_and_bepinex_core(
+    initialized_repo: Repo,
+) -> None:
+    """Repo.commit(paths=None) stages the loader root files and BepInEx/core.
+
+    Creates winhttp.dll, doorstop_config.ini, .doorstop_version, a
+    LICENSE-*.txt file and BepInEx/core/BepInEx.dll, all untracked. Commits
+    with paths=None. commit_hash show_files must include every one of them.
+    """
+    root = initialized_repo.path
+    _write(root / "winhttp.dll", "proxy")
+    _write(root / "doorstop_config.ini", "config")
+    _write(root / ".doorstop_version", "1.0.0")
+    _write(root / "LICENSE-BepInEx.txt", "licence")
+    _write(root / "BepInEx" / "core" / "BepInEx.dll", "runtime")
+
+    commit_hash = initialized_repo.commit("chore: track loader files", paths=None)
+    files = {mod_file.path for mod_file in initialized_repo.show_files(commit_hash)}
+
+    assert {
+        Path("winhttp.dll"),
+        Path("doorstop_config.ini"),
+        Path(".doorstop_version"),
+        Path("LICENSE-BepInEx.txt"),
+        Path("BepInEx/core/BepInEx.dll"),
+    } <= files
 
 
 def test_status_untracked_lists_profile_json_before_first_commit(

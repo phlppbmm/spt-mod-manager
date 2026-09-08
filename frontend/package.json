@@ -11,7 +11,8 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run --passWithNoTests",
-		"gen:api": "openapi-typescript ../openapi.json --output src/lib/api/types.ts"
+		"gen:api": "openapi-typescript ../openapi.json --output src/lib/api/types.ts",
+		"test:components": "vitest run --config vitest.components.config.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",
@@ -24,7 +25,11 @@
 		"@tauri-apps/plugin-opener": "^2.5.5",
 		"@tauri-apps/plugin-process": "^2.3.1",
 		"@tauri-apps/plugin-updater": "^2.11.0",
+		"@testing-library/jest-dom": "7.0.1",
+		"@testing-library/svelte": "5.4.2",
+		"@testing-library/user-event": "14.6.7",
 		"@vitest/coverage-v8": "4.1.11",
+		"happy-dom": "20.14.0",
 		"openapi-typescript": "^7.13.0",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",

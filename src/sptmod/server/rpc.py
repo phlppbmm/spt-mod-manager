@@ -225,6 +225,22 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.StopGameRequest,
         schemas.StopResult,
     ),
+    "list_spt_releases": RpcSpec(
+        services.list_spt_releases,
+        schemas.ListSptReleasesRequest,
+        schemas.SptReleaseList,
+    ),
+    "apply_spt_release": RpcSpec(
+        services.apply_spt_release,
+        schemas.ApplySptReleaseRequest,
+        schemas.ApplySptReleaseResponse,
+        operation_id=True,
+    ),
+    "revert_spt_update": RpcSpec(
+        services.revert_spt_update,
+        schemas.RevertSptUpdateRequest,
+        schemas.SptApplyResult,
+    ),
 }
 
 

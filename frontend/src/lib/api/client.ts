@@ -46,6 +46,10 @@ export type FavoritesResponse = Schemas['FavoritesResponse'];
 export type LaunchProfileResponse = Schemas['LaunchProfileResponse'];
 export type LaunchStatus = Schemas['LaunchStatus'];
 export type StopResult = Schemas['StopResult'];
+export type SptReleaseInfo = Schemas['SptReleaseInfo'];
+export type SptReleaseList = Schemas['SptReleaseList'];
+export type SptApplyResult = Schemas['SptApplyResult'];
+export type ApplySptReleaseResponse = Schemas['ApplySptReleaseResponse'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -314,4 +318,28 @@ export function launchStatus(path: string): Promise<LaunchStatus> {
 
 export function stopGame(path: string): Promise<StopResult> {
 	return call<StopResult>('stop_game', { path } satisfies Schemas['StopGameRequest']);
+}
+
+export function listSptReleases(path: string): Promise<SptReleaseList> {
+	return call<SptReleaseList>('list_spt_releases', {
+		path
+	} satisfies Schemas['ListSptReleasesRequest']);
+}
+
+export function applySptRelease(
+	path: string,
+	version: string,
+	operationId: string | null = null
+): Promise<ApplySptReleaseResponse> {
+	return call<ApplySptReleaseResponse>('apply_spt_release', {
+		path,
+		version,
+		operation_id: operationId
+	} satisfies Schemas['ApplySptReleaseRequest']);
+}
+
+export function revertSptUpdate(path: string): Promise<SptApplyResult> {
+	return call<SptApplyResult>('revert_spt_update', {
+		path
+	} satisfies Schemas['RevertSptUpdateRequest']);
 }

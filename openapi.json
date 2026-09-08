@@ -1325,6 +1325,120 @@
           }
         }
       }
+    },
+    "/api/list_spt_releases": {
+      "post": {
+        "summary": "List Spt Releases",
+        "operationId": "list_spt_releases_api_list_spt_releases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListSptReleasesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SptReleaseList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply_spt_release": {
+      "post": {
+        "summary": "Apply Spt Release",
+        "operationId": "apply_spt_release_api_apply_spt_release_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplySptReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplySptReleaseResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/revert_spt_update": {
+      "post": {
+        "summary": "Revert Spt Update",
+        "operationId": "revert_spt_update_api_revert_spt_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertSptUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SptApplyResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1392,6 +1506,74 @@
           "mod"
         ],
         "title": "AdoptResult",
+        "type": "object"
+      },
+      "ApplySptReleaseRequest": {
+        "description": "Parameters of ``apply_spt_release``.\n\n``operation_id`` names the progress stream of this version change; a\ngenerated one is used and echoed back when the caller sends none.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "required": [
+          "path",
+          "version"
+        ],
+        "title": "ApplySptReleaseRequest",
+        "type": "object"
+      },
+      "ApplySptReleaseResponse": {
+        "description": "Outcome of ``apply_spt_release`` plus its progress operation ID.",
+        "properties": {
+          "previous_version": {
+            "title": "Previous Version",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "commit": {
+            "default": "",
+            "title": "Commit",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "previous_version",
+          "version",
+          "operation_id"
+        ],
+        "title": "ApplySptReleaseResponse",
         "type": "object"
       },
       "BlockedUpdate": {
@@ -3270,6 +3452,21 @@
         "title": "ListProfilesRequest",
         "type": "object"
       },
+      "ListSptReleasesRequest": {
+        "description": "Parameters of ``list_spt_releases``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ListSptReleasesRequest",
+        "type": "object"
+      },
       "LocateDirectoryRequest": {
         "description": "Parameters of ``locate_directory``.",
         "properties": {
@@ -3857,6 +4054,21 @@
         "title": "ResidueCategory",
         "type": "string"
       },
+      "RevertSptUpdateRequest": {
+        "description": "Parameters of ``revert_spt_update``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "RevertSptUpdateRequest",
+        "type": "object"
+      },
       "SearchCatalogRequest": {
         "description": "Parameters of ``search_catalog``.",
         "properties": {
@@ -4029,6 +4241,125 @@
           "message"
         ],
         "title": "SnapshotResult",
+        "type": "object"
+      },
+      "SptApplyResult": {
+        "description": "Outcome of an SPT version change.",
+        "properties": {
+          "previous_version": {
+            "title": "Previous Version",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "commit": {
+            "default": "",
+            "title": "Commit",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModFile"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "previous_version",
+          "version"
+        ],
+        "title": "SptApplyResult",
+        "type": "object"
+      },
+      "SptReleaseInfo": {
+        "description": "One published SPT release, seen from the installed one.",
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "client_build": {
+            "title": "Client Build",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "downloadable": {
+            "title": "Downloadable",
+            "type": "boolean"
+          },
+          "content_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Length"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "newer": {
+            "title": "Newer",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "version",
+          "client_build",
+          "published_at",
+          "url",
+          "downloadable",
+          "content_length",
+          "installed",
+          "newer"
+        ],
+        "title": "SptReleaseInfo",
+        "type": "object"
+      },
+      "SptReleaseList": {
+        "description": "What ``list_spt_releases`` found for a game directory.",
+        "properties": {
+          "current_version": {
+            "default": "",
+            "title": "Current Version",
+            "type": "string"
+          },
+          "client_build": {
+            "default": "",
+            "title": "Client Build",
+            "type": "string"
+          },
+          "releases": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SptReleaseInfo"
+            },
+            "title": "Releases",
+            "type": "array"
+          },
+          "latest": {
+            "default": "",
+            "title": "Latest",
+            "type": "string"
+          }
+        },
+        "title": "SptReleaseList",
         "type": "object"
       },
       "StatusReport": {

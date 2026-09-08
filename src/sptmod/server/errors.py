@@ -11,6 +11,7 @@ from sptmod.core.errors import (
     AmbiguousModError,
     ArchiveError,
     CatalogUnavailableError,
+    ClientBuildMismatchError,
     ConflictError,
     DependencyError,
     DirtyTreeError,
@@ -30,6 +31,7 @@ from sptmod.core.errors import (
     ProfileResidueError,
     ServerPortBusyError,
     SptmodError,
+    SptReleaseUnavailableError,
     SptVersionUnknownError,
     UnresolvableDependencyError,
 )
@@ -71,6 +73,8 @@ class ErrorCode(StrEnum):
     FORGE_API_ERROR = "FORGE_API_ERROR"
     FORGE_UNAVAILABLE = "FORGE_UNAVAILABLE"
     CATALOG_UNAVAILABLE = "CATALOG_UNAVAILABLE"
+    SPT_RELEASE_UNAVAILABLE = "SPT_RELEASE_UNAVAILABLE"
+    CLIENT_BUILD_MISMATCH = "CLIENT_BUILD_MISMATCH"
 
 
 # Stable machine-readable code per core exception class. The lookup walks the
@@ -105,6 +109,8 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     ForgeApiError: ErrorCode.FORGE_API_ERROR,
     ForgeUnavailableError: ErrorCode.FORGE_UNAVAILABLE,
     CatalogUnavailableError: ErrorCode.CATALOG_UNAVAILABLE,
+    SptReleaseUnavailableError: ErrorCode.SPT_RELEASE_UNAVAILABLE,
+    ClientBuildMismatchError: ErrorCode.CLIENT_BUILD_MISMATCH,
 }
 
 

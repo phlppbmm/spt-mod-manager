@@ -582,6 +582,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/list_spt_releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Spt Releases */
+        post: operations["list_spt_releases_api_list_spt_releases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apply_spt_release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Spt Release */
+        post: operations["apply_spt_release_api_apply_spt_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/revert_spt_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revert Spt Update */
+        post: operations["revert_spt_update_api_revert_spt_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -617,6 +668,46 @@ export interface components {
              * @default []
              */
             files: string[];
+        };
+        /**
+         * ApplySptReleaseRequest
+         * @description Parameters of ``apply_spt_release``.
+         *
+         *     ``operation_id`` names the progress stream of this version change; a
+         *     generated one is used and echoed back when the caller sends none.
+         */
+        ApplySptReleaseRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Version */
+            version: string;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * ApplySptReleaseResponse
+         * @description Outcome of ``apply_spt_release`` plus its progress operation ID.
+         */
+        ApplySptReleaseResponse: {
+            /** Previous Version */
+            previous_version: string;
+            /** Version */
+            version: string;
+            /**
+             * Commit
+             * @default
+             */
+            commit: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["ModFile"][];
+            /** Operation Id */
+            operation_id: string;
         };
         /**
          * BlockedUpdate
@@ -1575,6 +1666,17 @@ export interface components {
             path: string;
         };
         /**
+         * ListSptReleasesRequest
+         * @description Parameters of ``list_spt_releases``.
+         */
+        ListSptReleasesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+        };
+        /**
          * LocateDirectoryRequest
          * @description Parameters of ``locate_directory``.
          */
@@ -1875,6 +1977,17 @@ export interface components {
          */
         ResidueCategory: "item" | "encyclopedia" | "wishlist" | "trader" | "trader-purchase" | "quest" | "repeatable-quest" | "task-counter" | "hideout-production" | "hideout-area" | "unlocked-recipe" | "insured-item" | "achievement" | "insurance" | "dialogue" | "userbuild" | "string";
         /**
+         * RevertSptUpdateRequest
+         * @description Parameters of ``revert_spt_update``.
+         */
+        RevertSptUpdateRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+        };
+        /**
          * SearchCatalogRequest
          * @description Parameters of ``search_catalog``.
          */
@@ -1964,6 +2077,77 @@ export interface components {
              * @default []
              */
             mod_settings: string[];
+        };
+        /**
+         * SptApplyResult
+         * @description Outcome of an SPT version change.
+         */
+        SptApplyResult: {
+            /** Previous Version */
+            previous_version: string;
+            /** Version */
+            version: string;
+            /**
+             * Commit
+             * @default
+             */
+            commit: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["ModFile"][];
+        };
+        /**
+         * SptReleaseInfo
+         * @description One published SPT release, seen from the installed one.
+         */
+        SptReleaseInfo: {
+            /** Version */
+            version: string;
+            /** Client Build */
+            client_build: string;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /** Url */
+            url: string;
+            /** Downloadable */
+            downloadable: boolean;
+            /** Content Length */
+            content_length: number | null;
+            /** Installed */
+            installed: boolean;
+            /** Newer */
+            newer: boolean;
+        };
+        /**
+         * SptReleaseList
+         * @description What ``list_spt_releases`` found for a game directory.
+         */
+        SptReleaseList: {
+            /**
+             * Current Version
+             * @default
+             */
+            current_version: string;
+            /**
+             * Client Build
+             * @default
+             */
+            client_build: string;
+            /**
+             * Releases
+             * @default []
+             */
+            releases: components["schemas"]["SptReleaseInfo"][];
+            /**
+             * Latest
+             * @default
+             */
+            latest: string;
         };
         /**
          * StatusReport
@@ -3358,6 +3542,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StopResult"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_spt_releases_api_list_spt_releases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListSptReleasesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SptReleaseList"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    apply_spt_release_api_apply_spt_release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplySptReleaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplySptReleaseResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revert_spt_update_api_revert_spt_update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevertSptUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SptApplyResult"];
                 };
             };
             /** @description Default Response */

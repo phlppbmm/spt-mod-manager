@@ -684,7 +684,15 @@ there lists what is implemented and what is not. What exists:
   250 ms debounce, is disabled while no view claims search, `/` focuses it from
   anywhere outside a text field, Escape leaves it.
 - `GameDirMenu` — shows the last segment of the game folder path; its menu
-  shows the full path and a "Change folder" button that emits the request.
+  shows the full path and a "Change folder" button that goes to Mods and
+  requests the folder change there.
+- `CommandPalette` — the Ctrl+K (Cmd+K) overlay the layout always renders:
+  one input, a grouped result list (Go to / Actions / Mods) and "No matches".
+  Arrow keys move the highlight, Enter runs the entry, Escape closes and
+  returns focus where it was; Tab is swallowed, so the input keeps the focus.
+  It reads the mod rows from `shellstate`, loads the profiles from the same
+  cached `list_profiles` view the Profiles page fills, and turns an entry into
+  a route change, an intent, a filter reset or the theme toggle.
 - `SubNav` — the left column the layout renders when a page publishes entries;
   a click emits the selection back to that page.
 - `PageHeader` — title, optional subtitle, and the `aside`, `secondary` and
@@ -709,11 +717,30 @@ there lists what is implemented and what is not. What exists:
 ### Pure logic (`src/lib/`, unit-tested)
 
 - `shellstate.ts` — the channel between the layout and the pages: stores for
-  the sub-nav entries, the search-enabled flag and the game folder path, plus
-  signals for sub-nav selection, sync request and change-folder request. A
+  the sub-nav entries, the search-enabled flag, the game folder path and the
+  mod rows the palette offers, plus the sub-nav selection signal. A
   subscription delivers the current value immediately and returns an
   unsubscribe function; every page calls it on destroy and resets what it
   published.
+- `intents.ts` — the queued channel for requests that cross a page change:
+  sync, update all, change folder, snapshot, launch a profile and reveal a
+  mod row. At most one request per kind is pending and a newer one replaces
+  it; the page that owns the action drains its kinds on mount and on every
+  notification, so a request survives until its page is there.
+- `fuzzy.ts` — the subsequence match behind the palette: a score that rewards
+  a prefix, a word start and consecutive letters and penalises gaps, plus
+  `rank`, which drops the non-matches, orders by score and truncates.
+- `commands.ts` — the palette registry built from the current page, game
+  folder, theme, profiles and mod rows: the four navigation entries, the
+  game actions (sync, update all, snapshot, one launch per profile, change
+  folder), clearing the filters, the theme toggle and one entry per mod.
+- `palettekeys.ts` — what Ctrl+K/Cmd+K looks like, and the palette key
+  handling: arrows wrap through the list, Enter runs, Escape closes, Tab is
+  swallowed, plus clamping the highlight when the list shrinks.
+- `rownav.ts` — the mod table key handling: the arrows move the focused row
+  and stop at the ends, Enter opens the details, Space picks the row, `f`
+  toggles the favorite and Escape gives up the focus. The focused row is kept
+  as a mod id, so filtering and sorting keep it.
 - `filterstate.ts` — the single source for search text, pills and quick tabs.
   It holds one `ModFilter` (chips, category, search), defaults to
   compatible-only, survives route changes but not an app restart, and notifies
@@ -733,14 +760,17 @@ there lists what is implemented and what is not. What exists:
 ### Mods view behaviour
 
 - `ModsView` mirrors `filterstate` into local state and writes changes back,
-  publishes the sub-nav entries with the active quick tab, and enables the
-  top-bar search while it is mounted.
+  publishes the sub-nav entries with the active quick tab and the visible rows
+  for the command palette, and enables the top-bar search while it is mounted.
 - A filter change prunes the selection to the rows that stay visible, so a bulk
   action can never touch a mod the user cannot see.
 - Bulk actions reuse the per-row RPCs `enable_mod`, `disable_mod` and
   `update_mod` sequentially; there is no multi-row RPC. Two mod operations at
   once would queue on the backend lock for minutes. Failures are collected and
   shown as one line above the table.
+- `ModTable` owns the focused row, keeps it valid when the rows change and
+  focuses it when the palette reveals a mod; `ModRow` carries the focus ring
+  and applies the key handling of `rownav.ts` to its own actions.
 - `ModTable` is a container-query container: below 1060px table width the
   Downloads, Updated and Type columns drop out of the header and the rows, and
   the shared `--mods-grid` template shrinks with them.
@@ -750,8 +780,8 @@ there lists what is implemented and what is not. What exists:
   which then reads "SPT <version>" instead of "Compatible".
 
 **Deferred** (no data or demand for them yet): shadcn-svelte / Tailwind /
-TanStack Table, command palette (Ctrl+K), arrow-key row navigation, loading
-skeletons, detail side panel (the detail dialog covers it), pagination.
+TanStack Table, loading skeletons, detail side panel (the detail dialog
+covers it), pagination.
 
 ## Testing
 

@@ -1,483 +1,52 @@
-"""Local Forge catalog: SQLite cache with sync, search, resolve and browse."""
+"""The :class:`Catalog` database object: the only module that opens the SQLite cache.
+
+The shared names of :mod:`sptmod.core.forge.catalog.schema` and
+:mod:`sptmod.core.forge.catalog.rows` are imported back under their original
+private names, so the method bodies read exactly as they did in the single
+module they were split out of.
+"""
 
 import contextlib
-import json
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import replace
 from pathlib import Path
-from typing import Final, Literal
 
-import platformdirs
-
-from sptmod.core.errors import SptmodError
-from sptmod.core.forge.client import (
-    MAX_PER_PAGE,
-    FikaCompatibility,
-    ForgeClient,
-    ForgeMod,
-    ForgeVersion,
-    ForgeVersionSummary,
+from sptmod.core.forge.catalog.rows import delta_filter as _delta_filter
+from sptmod.core.forge.catalog.rows import first_seen_at as _first_seen_at
+from sptmod.core.forge.catalog.rows import highest as _highest
+from sptmod.core.forge.catalog.rows import is_compatible, is_newer
+from sptmod.core.forge.catalog.rows import links_to_json as _links_to_json
+from sptmod.core.forge.catalog.rows import merge_version as _merge_version
+from sptmod.core.forge.catalog.rows import mod_from_forge as _mod_from_forge
+from sptmod.core.forge.catalog.rows import mod_from_row as _mod_from_row
+from sptmod.core.forge.catalog.rows import percent as _percent
+from sptmod.core.forge.catalog.rows import version_from_forge as _version_from_forge
+from sptmod.core.forge.catalog.rows import version_from_row as _version_from_row
+from sptmod.core.forge.catalog.rows import version_from_summary as _version_from_summary
+from sptmod.core.forge.catalog.schema import (
+    DATA_VERSION,
+    DATA_VERSION_KEY,
+    SCHEMA,
+    SYNC_PAGE_STEP,
+    WATERMARK_KEY,
+    CachedDescription,
+    CatalogEntry,
+    CatalogMod,
+    CatalogVersion,
+    NoCompatibleVersionError,
+    SyncResult,
+    default_db_path,
 )
-from sptmod.core.models import Json, ModInfo, Progress
-from sptmod.core.modmeta import UnsupportedRangeError, version_matches
-
-APP_NAME: Final = "sptmod"
-DB_FILE_NAME: Final = "forge-catalog.db"
-WATERMARK_KEY: Final = "mods_updated_at"
-DATA_VERSION_KEY: Final = "data_version"
-# Bump when a sync starts caching NEW per-mod data (e.g. added columns):
-# caches synced under an older data version force their next sync to run
-# full, so existing rows pick the new fields up without a manual --full.
-DATA_VERSION: Final = "2"
-SYNC_OVERLAP_DAYS: Final = 1
-SYNC_PAGE_STEP: Final = "page"
-
-SCHEMA: Final = """
-CREATE TABLE IF NOT EXISTS mods (
-    id INTEGER PRIMARY KEY,
-    hub_id INTEGER,
-    guid TEXT,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL DEFAULT '',
-    teaser TEXT,
-    thumbnail TEXT,
-    author TEXT NOT NULL DEFAULT '',
-    downloads INTEGER NOT NULL DEFAULT 0,
-    detail_url TEXT NOT NULL DEFAULT '',
-    published_at TEXT,
-    created_at TEXT,
-    updated_at TEXT,
-    favourites_count INTEGER NOT NULL DEFAULT 0,
-    endorsements_count INTEGER NOT NULL DEFAULT 0,
-    fika_compatibility INTEGER,
-    featured INTEGER NOT NULL DEFAULT 0,
-    contains_ads INTEGER NOT NULL DEFAULT 0,
-    contains_ai_content INTEGER NOT NULL DEFAULT 0,
-    category TEXT,
-    license_name TEXT,
-    license_link TEXT,
-    source_links TEXT NOT NULL DEFAULT '[]',
-    description TEXT,
-    description_updated_at TEXT,
-    first_seen_at TEXT
-);
-CREATE INDEX IF NOT EXISTS mods_name_idx ON mods (name COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS mods_author_idx ON mods (author COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS mods_updated_at_idx ON mods (updated_at);
-"""
-
-# Columns added after the first release; applied via ALTER TABLE on open so
-# existing caches keep working (the cache is disposable, this is the only
-# schema evolution mechanism).
-_MOD_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = (
-    "thumbnail TEXT",
-    "favourites_count INTEGER NOT NULL DEFAULT 0",
-    "endorsements_count INTEGER NOT NULL DEFAULT 0",
-    "fika_compatibility INTEGER",
-    "featured INTEGER NOT NULL DEFAULT 0",
-    "contains_ads INTEGER NOT NULL DEFAULT 0",
-    "contains_ai_content INTEGER NOT NULL DEFAULT 0",
-    "category TEXT",
-    "license_name TEXT",
-    "license_link TEXT",
-    "source_links TEXT NOT NULL DEFAULT '[]'",
-    "description TEXT",
-    "description_updated_at TEXT",
-    "first_seen_at TEXT",
-)
-
-_VERSIONS_SCHEMA: Final = """
-
-CREATE TABLE IF NOT EXISTS versions (
-    id INTEGER PRIMARY KEY,
-    mod_id INTEGER NOT NULL,
-    version TEXT NOT NULL,
-    link TEXT,
-    content_length INTEGER,
-    spt_version_constraint TEXT NOT NULL DEFAULT '',
-    downloads INTEGER NOT NULL DEFAULT 0,
-    published_at TEXT,
-    updated_at TEXT,
-    fika_compatibility TEXT
-);
-CREATE INDEX IF NOT EXISTS versions_mod_id_idx ON versions (mod_id);
-
-CREATE TABLE IF NOT EXISTS sync_state (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-"""
-
-_VERSION_COLUMN_MIGRATIONS: Final[tuple[str, ...]] = ("fika_compatibility TEXT",)
-
-_MOD_COLUMNS: Final = (
-    "id, hub_id, guid, name, slug, teaser, thumbnail, author, downloads,"
-    " detail_url, published_at, created_at, updated_at, favourites_count,"
-    " endorsements_count, fika_compatibility, featured, contains_ads,"
-    " contains_ai_content, category, license_name, license_link, source_links,"
-    " first_seen_at"
-)
-_VERSION_COLUMNS: Final = (
-    "id, mod_id, version, link, content_length, spt_version_constraint,"
-    " downloads, published_at, updated_at, fika_compatibility"
-)
-_DESCRIPTION_COLUMNS: Final = "description, description_updated_at"
-
-type CatalogState = Literal["installed", "update_available", "available"]
-
-CATALOG_STATES: Final[tuple[CatalogState, ...]] = (
-    "installed",
-    "update_available",
-    "available",
-)
-
-type _UpsertOutcome = Literal["new", "updated", "unchanged"]
-
-
-class NoCompatibleVersionError(SptmodError):
-    """No cached version of the mod satisfies the requested constraints."""
-
-
-@dataclass(frozen=True)
-class CatalogMod:
-    """A mod as cached in the local catalog.
-
-    ``author`` is the Forge owner name; additional authors are not cached.
-    ``updated_at`` is the raw ISO-8601 timestamp from the API and drives the
-    delta sync watermark.
-    """
-
-    id: int
-    hub_id: int | None
-    guid: str | None
-    name: str
-    slug: str
-    teaser: str | None
-    thumbnail: str | None
-    author: str
-    downloads: int
-    detail_url: str
-    published_at: str | None
-    created_at: str | None
-    updated_at: str | None
-    favourites_count: int = 0
-    endorsements_count: int = 0
-    fika_compatibility: bool | None = None
-    featured: bool = False
-    contains_ads: bool = False
-    contains_ai_content: bool = False
-    category: str | None = None
-    license_name: str | None = None
-    license_link: str | None = None
-    source_links: tuple["CatalogSourceLink", ...] = ()
-    first_seen_at: str | None = None
-
-
-@dataclass(frozen=True)
-class CatalogSourceLink:
-    """A labeled source-code link of a catalog mod."""
-
-    url: str
-    label: str
-
-
-@dataclass(frozen=True)
-class CatalogVersion:
-    """A mod version as cached in the local catalog.
-
-    ``link``, ``content_length`` and ``fika_compatibility`` are None for
-    versions that only ever arrived through the ``include=versions`` summary of
-    /mods; they are filled once :meth:`Catalog.fetch_versions` loads the full
-    version list.
-    """
-
-    id: int
-    mod_id: int
-    version: str
-    link: str | None
-    content_length: int | None
-    spt_version_constraint: str
-    downloads: int
-    published_at: str | None
-    updated_at: str | None
-    fika_compatibility: FikaCompatibility | None = None
-
-
-@dataclass(frozen=True)
-class CachedDescription:
-    """A stored mod description and the mod state it was fetched for.
-
-    ``updated_at`` is the ``updated_at`` the mod row carried when the
-    description was stored; a differing mod ``updated_at`` means the stored
-    text is outdated.
-    """
-
-    text: str
-    updated_at: str | None
-
-
-@dataclass(frozen=True)
-class SyncResult:
-    """Counts of what a :meth:`Catalog.sync` run changed."""
-
-    new_mods: int
-    updated_mods: int
-    new_versions: int
-    updated_versions: int
-    pages: int
-    full: bool
-
-
-@dataclass(frozen=True)
-class CatalogEntry:
-    """A cached mod joined with the installed state of the game repository."""
-
-    mod: CatalogMod
-    state: CatalogState
-    installed_version: str | None
-    latest_version: CatalogVersion | None
-
-
-def default_db_path() -> Path:
-    """Return the catalog database path in the user's config directory.
-
-    Never points into the game directory: the cache is foreign state and must
-    stay out of the tracked repository.
-    """
-    return platformdirs.user_config_path(APP_NAME, appauthor=False) / DB_FILE_NAME
-
-
-def is_compatible(spt_version_constraint: str, spt_version: str) -> bool:
-    """Return whether ``spt_version`` satisfies the version's SPT constraint.
-
-    Constraints the semver matcher does not understand count as incompatible
-    rather than raising, so a single odd catalog entry cannot break a search.
-    An empty constraint means the compatibility is unknown and counts as
-    incompatible too (old hub imports ship versions without one).
-    """
-    if not spt_version_constraint.strip():
-        return False
-    try:
-        return version_matches(spt_version, spt_version_constraint)
-    except UnsupportedRangeError:
-        return False
-
-
-def is_newer(candidate: str, installed: str) -> bool:
-    """Return whether ``candidate`` is a strictly newer version than ``installed``.
-
-    Versions that the semver matcher cannot parse count as not newer.
-    """
-    try:
-        return version_matches(candidate, f">{installed}")
-    except UnsupportedRangeError:
-        return False
-
-
-def _mod_from_row(row: sqlite3.Row) -> CatalogMod:
-    return CatalogMod(
-        id=row["id"],
-        hub_id=row["hub_id"],
-        guid=row["guid"],
-        name=row["name"],
-        slug=row["slug"],
-        teaser=row["teaser"],
-        thumbnail=row["thumbnail"],
-        author=row["author"],
-        downloads=row["downloads"],
-        detail_url=row["detail_url"],
-        published_at=row["published_at"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        favourites_count=row["favourites_count"],
-        endorsements_count=row["endorsements_count"],
-        fika_compatibility=(
-            None
-            if row["fika_compatibility"] is None
-            else bool(row["fika_compatibility"])
-        ),
-        featured=bool(row["featured"]),
-        contains_ads=bool(row["contains_ads"]),
-        contains_ai_content=bool(row["contains_ai_content"]),
-        category=row["category"],
-        license_name=row["license_name"],
-        license_link=row["license_link"],
-        source_links=_links_from_json(row["source_links"]),
-        first_seen_at=row["first_seen_at"],
-    )
-
-
-def _links_from_json(raw: str | None) -> tuple[CatalogSourceLink, ...]:
-    """Decode the JSON-encoded source links column, tolerating junk."""
-    try:
-        data: Json = json.loads(raw or "[]")
-    except json.JSONDecodeError:
-        return ()
-    if not isinstance(data, list):
-        return ()
-    return tuple(
-        CatalogSourceLink(
-            url=str(item.get("url", "")), label=str(item.get("label", ""))
-        )
-        for item in data
-        if isinstance(item, dict) and item.get("url")
-    )
-
-
-def _links_to_json(links: tuple[CatalogSourceLink, ...]) -> str:
-    return json.dumps([{"url": link.url, "label": link.label} for link in links])
-
-
-def _version_from_row(row: sqlite3.Row) -> CatalogVersion:
-    return CatalogVersion(
-        id=row["id"],
-        mod_id=row["mod_id"],
-        version=row["version"],
-        link=row["link"],
-        content_length=row["content_length"],
-        spt_version_constraint=row["spt_version_constraint"],
-        downloads=row["downloads"],
-        published_at=row["published_at"],
-        updated_at=row["updated_at"],
-        fika_compatibility=row["fika_compatibility"],
-    )
-
-
-def _mod_from_forge(mod: ForgeMod) -> CatalogMod:
-    return CatalogMod(
-        id=mod.id,
-        hub_id=mod.hub_id,
-        guid=mod.guid,
-        name=mod.name,
-        slug=mod.slug,
-        teaser=mod.teaser,
-        thumbnail=mod.thumbnail,
-        author="" if mod.owner is None else mod.owner.name,
-        downloads=mod.downloads,
-        detail_url=mod.detail_url,
-        published_at=mod.published_at,
-        created_at=mod.created_at,
-        updated_at=mod.updated_at,
-        favourites_count=mod.favourites_count,
-        endorsements_count=mod.endorsements_count,
-        fika_compatibility=mod.fika_compatibility,
-        featured=mod.featured,
-        contains_ads=mod.contains_ads,
-        contains_ai_content=mod.contains_ai_content,
-        category=None if mod.category is None else mod.category.title,
-        license_name=None if mod.license is None else mod.license.name,
-        license_link=None if mod.license is None else mod.license.link,
-        source_links=tuple(
-            CatalogSourceLink(url=link.url, label=link.label)
-            for link in mod.source_code_links
-        ),
-    )
-
-
-def _version_from_summary(mod_id: int, summary: ForgeVersionSummary) -> CatalogVersion:
-    return CatalogVersion(
-        id=summary.id,
-        mod_id=mod_id,
-        version=summary.version,
-        link=None,
-        content_length=None,
-        spt_version_constraint=summary.spt_version_constraint,
-        downloads=summary.downloads,
-        published_at=summary.published_at,
-        updated_at=None,
-    )
-
-
-def _version_from_forge(mod_id: int, version: ForgeVersion) -> CatalogVersion:
-    return CatalogVersion(
-        id=version.id,
-        mod_id=mod_id,
-        version=version.version,
-        link=version.link,
-        content_length=version.content_length,
-        spt_version_constraint=version.spt_version_constraint,
-        downloads=version.downloads,
-        published_at=version.published_at,
-        updated_at=version.updated_at,
-        fika_compatibility=version.fika_compatibility,
-    )
-
-
-def _merge_version(
-    existing: CatalogVersion | None, incoming: CatalogVersion
-) -> CatalogVersion:
-    """Keep cached download details that the incoming payload does not carry.
-
-    The ``include=versions`` summaries of /mods know neither ``link`` nor
-    ``content_length`` nor ``updated_at`` nor ``fika_compatibility``, so a sync
-    must not wipe what a previous :meth:`Catalog.fetch_versions` already stored.
-    """
-    if existing is None:
-        return incoming
-    return replace(
-        incoming,
-        link=existing.link if incoming.link is None else incoming.link,
-        content_length=(
-            existing.content_length
-            if incoming.content_length is None
-            else incoming.content_length
-        ),
-        updated_at=(
-            existing.updated_at if incoming.updated_at is None else incoming.updated_at
-        ),
-        fika_compatibility=(
-            existing.fika_compatibility
-            if incoming.fika_compatibility is None
-            else incoming.fika_compatibility
-        ),
-    )
-
-
-def _first_seen_at(existing: CatalogMod | None) -> str | None:
-    """Return the first-seen stamp for an upsert: stored value, or now for new mods."""
-    if existing is not None:
-        return existing.first_seen_at
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _is_comparable(version: str) -> bool:
-    try:
-        return version_matches(version, version)
-    except UnsupportedRangeError:
-        return False
-
-
-def _highest(versions: Sequence[CatalogVersion]) -> CatalogVersion:
-    """Pick the highest of ``versions``, which are ordered newest published first.
-
-    Version strings the semver matcher cannot compare are ignored as long as
-    comparable ones exist; if none is comparable, the most recently published
-    version wins.
-    """
-    comparable = [version for version in versions if _is_comparable(version.version)]
-    if not comparable:
-        return versions[0]
-    best = comparable[0]
-    for candidate in comparable[1:]:
-        if is_newer(candidate.version, best.version):
-            best = candidate
-    return best
-
-
-def _delta_filter(watermark: str) -> str | None:
-    """Build the ``updated_between`` filter value for a delta sync.
-
-    The filter is date-granular, so the range starts ``SYNC_OVERLAP_DAYS``
-    before the watermark day and ends today. Returns None if the watermark
-    carries no parsable date.
-    """
-    try:
-        start = date.fromisoformat(watermark[:10]) - timedelta(days=SYNC_OVERLAP_DAYS)
-    except ValueError:
-        return None
-    return f"{start.isoformat()},{datetime.now(UTC).date().isoformat()}"
+from sptmod.core.forge.catalog.schema import DESCRIPTION_COLUMNS as _DESCRIPTION_COLUMNS
+from sptmod.core.forge.catalog.schema import MOD_COLUMN_MIGRATIONS as _MOD_COLUMN_MIGRATIONS
+from sptmod.core.forge.catalog.schema import MOD_COLUMNS as _MOD_COLUMNS
+from sptmod.core.forge.catalog.schema import VERSION_COLUMN_MIGRATIONS as _VERSION_COLUMN_MIGRATIONS
+from sptmod.core.forge.catalog.schema import VERSION_COLUMNS as _VERSION_COLUMNS
+from sptmod.core.forge.catalog.schema import VERSIONS_SCHEMA as _VERSIONS_SCHEMA
+from sptmod.core.forge.catalog.schema import UpsertOutcome as _UpsertOutcome
+from sptmod.core.forge.client import MAX_PER_PAGE, ForgeClient
+from sptmod.core.models import ModInfo, Progress
 
 
 class Catalog:
@@ -981,9 +550,3 @@ class Catalog:
             "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)",
             (WATERMARK_KEY, updated_at),
         )
-
-
-def _percent(current_page: int, last_page: int) -> int:
-    if last_page <= 0:
-        return 100
-    return min(100, round(current_page * 100 / last_page))

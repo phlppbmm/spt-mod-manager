@@ -99,18 +99,18 @@ log, `sptmod files NAME` the files of a single mod.
 
 ## First run (Tauri desktop app)
 
-Build and run the Tauri v2 app (build the sidecar once first, see *Development*):
+Build and run the Tauri v2 app:
 
 ```sh
 uv tool install --editable .         # install sptmod CLI
 cargo tauri dev                       # dev mode with hot reload
 ```
 
-Or build a distributable binary:
+Or build a distributable binary (build the sidecar once first, see *Development*):
 
 ```sh
 cargo build
-cargo tauri build --debug             # or `--release`
+cargo tauri build --debug -c src-tauri/tauri.bundle.conf.json   # drop --debug to optimize
 ```
 
 The app uses native dialogs (folder picking, file operations) and communicates with `sptmod rpc`
@@ -212,9 +212,10 @@ cargo test
 cargo tauri dev                       # dev mode with hot reload
 ```
 
-The app ships the Python core as a PyInstaller sidecar, declared in `src-tauri/tauri.conf.json` as a
-bundle resource. `cargo build` fails with a missing-resource error until that sidecar has been built
-once:
+The app ships the Python core as a PyInstaller sidecar, declared as a bundle resource in
+`src-tauri/tauri.bundle.conf.json`. That overlay is kept out of `src-tauri/tauri.conf.json` so that a
+fresh checkout builds and tests before the sidecar exists; bundle builds merge it in with
+`-c src-tauri/tauri.bundle.conf.json`. Build the sidecar with:
 
 ```sh
 uv sync --group build
@@ -222,9 +223,9 @@ uv run pyinstaller packaging/sptmod.spec --noconfirm --distpath src-tauri/sideca
   --workpath packaging/build
 ```
 
-It lands in `src-tauri/sidecar/sptmod/` (untracked) and is picked up by both `cargo tauri dev` and a
-bundle build. The desktop app prefers the binary named by `SPTMOD_CLI`, then this sidecar, then
-`sptmod` on the `PATH`.
+It lands in `src-tauri/sidecar/sptmod/` (untracked). A bundle build passing the overlay copies it
+into the package; `cargo tauri dev` resolves no resources and runs against `sptmod` on the `PATH`. A
+shipped app prefers the binary named by `SPTMOD_CLI`, then this sidecar, then `sptmod` on the `PATH`.
 
 Frontend (SvelteKit, Svelte 5 runes, TypeScript, static adapter):
 

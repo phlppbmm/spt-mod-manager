@@ -107,3 +107,6 @@ jobs:
           releaseName: 'sptmod __VERSION__'
           releaseDraft: true
           prerelease: false
+          # Adds the PyInstaller sidecar as a bundle resource; it is declared in an
+          # overlay so that a checkout without src-tauri/sidecar still compiles.
+          args: -c src-tauri/tauri.bundle.conf.json

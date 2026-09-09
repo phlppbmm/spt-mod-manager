@@ -6,7 +6,6 @@
 //! `uv run python _data/fakegame_setup.py`).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
 
 use serde_json::{json, Value};
 
@@ -16,13 +15,9 @@ use sptmod_desktop_lib::rpc::RpcError;
 const ARCHIVE: &str = "_data/mods/Tyfon-UIFixes-6.0.2.zip";
 
 /// Both tests drive the same game directory, so they must not overlap.
-static GAME_DIR_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock_game_dir() -> MutexGuard<'static, ()> {
-    GAME_DIR_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-}
+/// `tokio::sync::Mutex` (rather than `std::sync::Mutex`) is used because the
+/// guard is held across `.await` points.
+static GAME_DIR_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -111,7 +106,7 @@ fn expect_code(outcome: Result<Value, RpcError>, code: &str) {
 #[tokio::test]
 #[ignore = "drives the real sptmod binary"]
 async fn smoke_readonly_and_errors() {
-    let _guard = lock_game_dir();
+    let _guard = GAME_DIR_LOCK.lock().await;
     let dir = game_dir();
     reset_repo(&dir);
     let cache = tempfile::tempdir().unwrap();
@@ -173,7 +168,7 @@ async fn smoke_readonly_and_errors() {
 #[tokio::test]
 #[ignore = "drives the real sptmod binary and writes to the game directory"]
 async fn smoke_install_remove() {
-    let _guard = lock_game_dir();
+    let _guard = GAME_DIR_LOCK.lock().await;
     let dir = game_dir();
     reset_repo(&dir);
     let cache = tempfile::tempdir().unwrap();

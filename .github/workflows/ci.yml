@@ -8,9 +8,10 @@
 # (the Rust tests use std::os::unix). Windows proves only that the sidecar builds and
 # runs and that the app compiles.
 #
-# The `rust` and `app` jobs depend on `sidecar`: tauri.conf.json declares
-# `sidecar/sptmod` as a bundle resource, so cargo fails with ResourcePathNotFound
-# unless the sidecar is present.
+# The `app` job depends on `sidecar`: the bundle overlay tauri.bundle.conf.json
+# declares `sidecar/sptmod` as a bundle resource, so the bundled build fails with
+# ResourcePathNotFound unless the sidecar is present. The `rust` job builds against
+# the plain tauri.conf.json, which declares no resources, and needs no sidecar.
 
 name: ci
 
@@ -93,16 +94,9 @@ jobs:
           path: src-tauri/sidecar
 
   rust:
-    needs: sidecar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: sidecar-ubuntu-latest
-          path: src-tauri/sidecar
-      # upload-artifact drops file permissions.
-      - run: chmod +x src-tauri/sidecar/sptmod/sptmod
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
@@ -155,7 +149,10 @@ jobs:
           workspaces: '. -> target'
       - name: Build the desktop app
         shell: bash
-        run: pnpm dlx '@tauri-apps/cli@^2' build --ci -c '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: |
+          pnpm dlx '@tauri-apps/cli@^2' build --ci \
+            -c src-tauri/tauri.bundle.conf.json \
+            -c '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.os }}

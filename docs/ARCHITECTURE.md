@@ -124,7 +124,8 @@ src-tauri/              Tauri v2 desktop app
   tests/
     rpc_driver_tests.rs   with mocked subprocess
     rpc_e2e_ignored.rs    against real CLI on _data/fakegame/
-  tauri.conf.json       bundle targets/resources, updater endpoint and pubkey
+  tauri.conf.json       bundle targets, updater endpoint and pubkey
+  tauri.bundle.conf.json bundle-only overlay declaring the sidecar resource
   sidecar/              PyInstaller output, untracked, declared as bundle resource
 packaging/              freezing the Python core for the desktop bundle
   sptmod_entry.py       PyInstaller entry point (calls sptmod.cli.main)
@@ -1209,11 +1210,15 @@ not read from a live install — the first live run should confirm it.
 - A one-dir build is several files and `externalBin` takes exactly one file per
   target triple, so the sidecar travels as a bundle resource:
   `"resources": {"sidecar/sptmod": "sidecar"}` → `$RESOURCE/sidecar/sptmod[.exe]`
-  next to its `_internal/`. tauri-build copies resources into the cargo target
-  dir and `resource_dir()` points at the exe dir there, so `cargo tauri dev` and
-  an installed bundle resolve the same path. A missing `src-tauri/sidecar/` is a
-  hard build error (ResourcePathNotFound) — plain `cargo build` fails until the
-  sidecar has been built once.
+  next to its `_internal/`. tauri-build resolves resource paths at compile time
+  and a missing `src-tauri/sidecar/` is a hard build error (ResourcePathNotFound),
+  so the declaration lives in the overlay `src-tauri/tauri.bundle.conf.json`
+  instead of `tauri.conf.json`: a fresh checkout runs `cargo build`, `cargo test`,
+  `cargo clippy` and `cargo tauri dev` without the sidecar, and bundle builds merge
+  the overlay in with `cargo tauri build -c src-tauri/tauri.bundle.conf.json`
+  (`-c` takes a file path as well as inline JSON and may be repeated; later values
+  win). Without the overlay `cargo tauri dev` copies no resources, so dev runs
+  resolve `sptmod` on PATH — which debug builds prefer anyway.
 - Resolution order (`driver::resolve_binary`, pure and unit-tested): `SPTMOD_CLI`
   when set and non-empty, then the sidecar below the resource dir when it exists,
   then `sptmod` on PATH. The env var stays first so the documented escape hatch
@@ -1278,12 +1283,13 @@ coverage, the component suite with coverage, build), `sidecar` (matrix
 Linux/Windows: build the frozen CLI, then
 smoke-test `sptmod version`, `rpc list_directories` and an offline
 `rpc search_catalog` against a scaffolded game directory, upload as artifact),
-`rust` (needs the Linux sidecar artifact, `cargo build` + `cargo test`), `app`
+`rust` (`cargo build` + `cargo test`, no sidecar needed), `app`
 (matrix Linux/Windows, needs sidecar and frontend, full `tauri build`) and
-`workflows` (actionlint). `rust` and `app` download the sidecar artifact and
-restore its exec bit because upload-artifact drops file permissions; the app
-build overrides `bundle.createUpdaterArtifacts` to false, since the CLI aborts
-without a signing key. `app` uploads the resulting packages (deb and AppImage on
+`workflows` (actionlint). `app` downloads the sidecar artifact and restores its
+exec bit because upload-artifact drops file permissions; it passes
+`-c src-tauri/tauri.bundle.conf.json` to bundle the sidecar and overrides
+`bundle.createUpdaterArtifacts` to false, since the CLI aborts without a signing
+key. `app` uploads the resulting packages (deb and AppImage on
 Linux, msi and nsis on Windows) as `bundle-<os>`, kept for seven days — unsigned
 test builds of that commit, not release artifacts.
 
@@ -1298,8 +1304,9 @@ exercised yet.
 
 `release.yml` triggers on `v*` tags, builds the two platforms with
 `max-parallel: 1` (tauri-action rewrites `latest.json` read-merge-delete-upload,
-so parallel platforms would drop each other's entries) and uploads installers and
-manifest into a draft release. Two guards run before anything is built: the job
+so parallel platforms would drop each other's entries), passes
+`-c src-tauri/tauri.bundle.conf.json` through tauri-action's `args` so the sidecar
+is bundled, and uploads installers and manifest into a draft release. Two guards run before anything is built: the job
 fails while `plugins.updater.endpoints` still contains `OWNER/REPO` or
 `plugins.updater.pubkey` is still the throwaway placeholder key, and it fails
 when the tag is not `v` plus the `pyproject.toml` version.

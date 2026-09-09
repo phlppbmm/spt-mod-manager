@@ -6,6 +6,7 @@ import json
 import os
 import zipfile
 from collections.abc import Iterator, Mapping
+from contextlib import suppress
 from pathlib import Path
 
 import psutil
@@ -459,8 +460,45 @@ def real_process_scan(no_process_scan: None, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(game_dir, "spt_process_sightings", _real_spt_process_sightings)
 
 
+def _started_by_a_test_run(pid: int, test_temp_root: Path) -> bool:
+    """Return whether ``pid`` is a stub some pytest run started, not a real game.
+
+    The stubs these tests spawn carry the file names of the SPT server and the
+    game on purpose, so a second pytest run of this repository -- another
+    worktree, another agent -- looks exactly like a running game to a scan of
+    the whole process table. Two marks tell such a stub apart from the real
+    thing: its program lives under the temporary directory pytest hands out,
+    and a pytest process is among its ancestors. A game a developer really
+    plays has neither.
+
+    A process that vanishes while it is examined was not playing anything, so
+    it does not count; anything else that cannot be read counts as real,
+    because refusing to run a test is the harmless answer.
+    """
+    try:
+        process = psutil.Process(pid)
+        if Path(process.exe()).is_relative_to(test_temp_root):
+            return True
+        return any(_runs_pytest(ancestor) for ancestor in process.parents())
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.Error:
+        return False
+
+
+def _runs_pytest(process: psutil.Process) -> bool:
+    """Return whether ``process`` is a pytest run, by the program it was given."""
+    with suppress(psutil.Error):
+        return any("pytest" in Path(argument).name for argument in process.cmdline())
+    return False
+
+
 @pytest.fixture
-def own_processes_only(real_process_scan: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def own_processes_only(
+    real_process_scan: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     """Narrow the real process scans to the processes this test started.
 
     Requested by the tests that drive the watcher and the launch state against
@@ -472,9 +510,17 @@ def own_processes_only(real_process_scan: None, monkeypatch: pytest.MonkeyPatch)
     or game running. These are the only tests that act on what a real scan
     reports, so this is the one place where refusing is the right answer: one
     of them closing a running raid is what the whole seam exists to prevent.
+    The refusal ignores what :func:`_started_by_a_test_run` recognises as
+    another pytest run's stub, and only that: narrowing it to this test's own
+    processes instead would make it a no-op, since those are precisely the ones
+    it must not look at.
     """
     del real_process_scan
-    if game_dir.game_processes():
+    test_temp_root = tmp_path_factory.getbasetemp().parent
+    if any(
+        not _started_by_a_test_run(process.pid, test_temp_root)
+        for process in game_dir.game_processes()
+    ):
         pytest.fail(
             "An SPT server or game is running on this machine. This test must "
             "not stop it; close the game before running the launch tests."

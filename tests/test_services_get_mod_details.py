@@ -76,26 +76,20 @@ def _seed(
         cat.sync(client, full=True)
 
 
-def test_get_mod_details_strips_html_and_fetches_missing_version_links(
-    db_path: Path,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-) -> None:
-    """If get_mod_details' body is `pass`, this fails: returns None instead of
-    ModDetails with the cached mod, the fetched version link and plain text."""
-    client = client_factory()
-    _seed(db_path, client, respx_router, [_mod_summary_json(1, "Alpha Mod")])
-    respx_router.get("/mod/1").mock(
-        return_value=httpx.Response(
-            200,
-            json=success_envelope(_mod_detail_json(1, "Alpha Mod", _DESCRIPTION_HTML)),
-        )
+def _detail_route(respx_router: respx.MockRouter, mod_id: int, name: str, html: str) -> respx.Route:
+    """Mock the /mod/{id} detail endpoint returning ``html`` as description."""
+    return respx_router.get(f"/mod/{mod_id}").mock(
+        return_value=httpx.Response(200, json=success_envelope(_mod_detail_json(mod_id, name, html)))
     )
-    respx_router.get("/mod/1/versions").mock(
+
+
+def _versions_route(respx_router: respx.MockRouter, mod_id: int, link: str | None) -> respx.Route:
+    """Mock the /mod/{id}/versions endpoint returning one version."""
+    return respx_router.get(f"/mod/{mod_id}/versions").mock(
         return_value=httpx.Response(
             200,
             json=page_envelope(
-                [version_json(id=100, link="https://cdn.example/alpha-1.0.0.zip")],
+                [version_json(id=mod_id * 100, link=link)],
                 current_page=1,
                 last_page=1,
                 total=1,
@@ -104,7 +98,27 @@ def test_get_mod_details_strips_html_and_fetches_missing_version_links(
         )
     )
 
-    result = services.get_mod_details(1, db_path=db_path, client=client)
+
+@pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])
+def test_get_mod_details_strips_html_and_fetches_missing_version_links(
+    db_path: Path,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    use_client: bool,
+) -> None:
+    """get_mod_details returns the cached mod, the fetched version link and plain text.
+
+    The description arrives as HTML with script and style blocks and is
+    reduced to text; the cached version carries no download link yet, so it is
+    fetched. Both ways of reaching the Forge are exercised: a client handed in
+    and the one get_mod_details builds for itself when ``client`` is omitted.
+    """
+    client = client_factory()
+    _seed(db_path, client, respx_router, [_mod_summary_json(1, "Alpha Mod")])
+    _detail_route(respx_router, 1, "Alpha Mod", _DESCRIPTION_HTML)
+    _versions_route(respx_router, 1, "https://cdn.example/alpha-1.0.0.zip")
+
+    result = services.get_mod_details(1, db_path=db_path, client=client if use_client else None)
 
     assert result.mod is not None
     assert result.mod.name == "Alpha Mod"
@@ -152,41 +166,6 @@ def test_get_mod_details_skips_refetching_versions_that_already_have_a_link(
     assert versions_route.call_count == 1
 
 
-def test_get_mod_details_owned_client_fetches_missing_version_links(
-    db_path: Path,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-) -> None:
-    """Same as the injected-client happy path, but exercised through the
-    branch that builds its own ForgeClient (``client=None`` is the default).
-    If get_mod_details' body is `pass`, this fails: returns None."""
-    seed_client = client_factory()
-    _seed(db_path, seed_client, respx_router, [_mod_summary_json(3, "Gamma Mod")])
-    respx_router.get("/mod/3").mock(
-        return_value=httpx.Response(
-            200,
-            json=success_envelope(_mod_detail_json(3, "Gamma Mod", "<p>Owned.</p>")),
-        )
-    )
-    respx_router.get("/mod/3/versions").mock(
-        return_value=httpx.Response(
-            200,
-            json=page_envelope(
-                [version_json(id=300, link="https://cdn.example/gamma-1.0.0.zip")],
-                current_page=1,
-                last_page=1,
-                total=1,
-                next_url=None,
-            ),
-        )
-    )
-
-    result = services.get_mod_details(3, db_path=db_path)
-
-    assert result.description == "Owned."
-    assert [version.link for version in result.versions] == ["https://cdn.example/gamma-1.0.0.zip"]
-
-
 def test_get_mod_details_degrades_to_cached_data_when_forge_is_unreachable(
     db_path: Path,
     client_factory: Callable[..., ForgeClient],
@@ -217,29 +196,6 @@ def test_get_mod_details_reraises_when_nothing_is_cached_and_forge_is_unreachabl
 
     with pytest.raises(ForgeUnavailableError):
         services.get_mod_details(999, db_path=db_path, client=client)
-
-
-def _detail_route(respx_router: respx.MockRouter, mod_id: int, name: str, html: str) -> respx.Route:
-    """Mock the /mod/{id} detail endpoint returning ``html`` as description."""
-    return respx_router.get(f"/mod/{mod_id}").mock(
-        return_value=httpx.Response(200, json=success_envelope(_mod_detail_json(mod_id, name, html)))
-    )
-
-
-def _versions_route(respx_router: respx.MockRouter, mod_id: int, link: str | None) -> respx.Route:
-    """Mock the /mod/{id}/versions endpoint returning one version."""
-    return respx_router.get(f"/mod/{mod_id}/versions").mock(
-        return_value=httpx.Response(
-            200,
-            json=page_envelope(
-                [version_json(id=mod_id * 100, link=link)],
-                current_page=1,
-                last_page=1,
-                total=1,
-                next_url=None,
-            ),
-        )
-    )
 
 
 @pytest.mark.parametrize("use_client", [True, False], ids=["injected", "owned"])

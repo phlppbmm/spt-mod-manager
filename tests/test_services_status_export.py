@@ -31,6 +31,10 @@ from sptmod.core.repo import Repo, gitignore_whitelist
 
 runner = CliRunner()
 
+# The JSON encoding of a mod list holding exactly ModA 1.0.0, as export_mods
+# writes it: a "mods" array of objects with name, version, type and link.
+JSON_LIST_OF_MOD_A = '{"mods": [{"name": "ModA", "version": "1.0.0", "type": "client", "link": ""}]}'
+
 
 # --- status ------------------------------------------------------------------
 
@@ -519,182 +523,113 @@ def test_import_diff_reports_missing_different_and_extra(
     ]
 
 
-def test_import_matches_names_case_insensitively(
-    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
-) -> None:
-    """import_list matches mod names case-insensitively, yielding an empty diff when versions match.
+def _written_list_file(tmp_path: Path, name: str | None, text: str | None) -> Path | None:
+    """Return the list file ``name`` below ``tmp_path``, written with ``text``.
 
-    After installing ModA 1.0.0 and importing content='moda 1.0.0\\n', import_list() returns
-    diff == ImportDiff() (no missing/different/extra). This guards the case-folding that lets
-    lists and installs use any casing independently.
+    ``name`` None means no file is handed over at all; ``text`` None names a
+    file that was never written.
+    """
+    if name is None:
+        return None
+    list_file = tmp_path / name
+    if text is not None:
+        list_file.write_text(text, encoding="utf-8")
+    return list_file
+
+
+@pytest.mark.parametrize(
+    ("list_file_name", "list_file_text", "content"),
+    [
+        pytest.param("wanted.txt", "moda 1.0.0\n", None, id="case-insensitive"),
+        pytest.param("wanted.txt", JSON_LIST_OF_MOD_A, None, id="json-content-in-txt-file"),
+        pytest.param(None, None, "\n\nModA 1.0.0\n\n", id="blank-lines"),
+    ],
+)
+def test_import_reads_a_list_that_matches_what_is_installed(
+    clean_repo: Repo,
+    install_commit: InstallCommit,
+    tmp_path: Path,
+    list_file_name: str | None,
+    list_file_text: str | None,
+    content: str | None,
+) -> None:
+    """import_list reports no difference for a list naming the installed mod.
+
+    ModA 1.0.0 is installed. The list names it in another casing, as JSON in a
+    file called ``.txt`` -- the format is read from the content, never from the
+    file name -- and as text padded with blank lines. All three describe the
+    same installation, so the diff has to stay empty.
     """
     install_commit(clean_repo, "ModA", version="1.0.0")
-    list_file = tmp_path / "wanted.txt"
-    list_file.write_text("moda 1.0.0\n", encoding="utf-8")
+    list_file = _written_list_file(tmp_path, list_file_name, list_file_text)
 
-    diff = services.import_list(clean_repo.path, list_file)
+    diff = services.import_list(clean_repo.path, list_file, content=content)
 
     assert diff == services.ImportDiff()
 
 
-def test_import_json_format_is_recognised_by_content_not_extension(
-    clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path
-) -> None:
-    """import_list detects JSON format by JSON structure, not by file extension.
-
-    After installing ModA 1.0.0 and importing a file named 'wanted.txt' (text extension)
-    containing {'mods': [{'name': 'ModA', 'version': '1.0.0', ...}]} (JSON content), import_list()
-    recognizes the JSON structure and returns diff == ImportDiff(). This guards the format detection
-    that ignores unreliable file names.
-    """
-    install_commit(clean_repo, "ModA", version="1.0.0")
-    list_file = tmp_path / "wanted.txt"  # ".txt" extension, JSON content
-    payload = {"mods": [{"name": "ModA", "version": "1.0.0", "type": "client", "link": ""}]}
-    list_file.write_text(json.dumps(payload), encoding="utf-8")
-
-    diff = services.import_list(clean_repo.path, list_file)
-
-    assert diff == services.ImportDiff()
-
-
-def test_import_raises_invalid_metadata_for_a_missing_list_file(clean_repo: Repo, tmp_path: Path) -> None:
-    """import_list raises InvalidMetadataError when the given file path does not exist.
-
-    Calling import_list(path, tmp_path / 'does-not-exist.txt') raises InvalidMetadataError
-    before any processing. This guards the input validation that rejects missing sources.
-    """
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, tmp_path / "does-not-exist.txt")
-
-
-def test_import_raises_invalid_metadata_when_neither_source_is_given(
+@pytest.mark.parametrize(
+    ("list_file_name", "list_file_text", "content", "fragment"),
+    [
+        pytest.param("does-not-exist.txt", None, None, "", id="missing-file"),
+        pytest.param(None, None, None, "", id="no-source"),
+        pytest.param("wanted.txt", "ModA 1.0.0\n", "ModA 1.0.0\n", "", id="both-sources"),
+        pytest.param(None, None, "{not valid json", "", id="malformed-json"),
+        pytest.param(None, None, '{"mods": "nope"}', "", id="mods-not-a-list"),
+        pytest.param(None, None, '{"mods": ["just-a-string"]}', "", id="entry-not-an-object"),
+        pytest.param(None, None, '{"mods": [{"name": "ModA"}]}', "", id="entry-without-version"),
+        pytest.param(None, None, "JustAName\n", "JustAName", id="text-line-without-version"),
+    ],
+)
+def test_import_raises_invalid_metadata_for_a_list_it_cannot_use(
     clean_repo: Repo,
+    tmp_path: Path,
+    list_file_name: str | None,
+    list_file_text: str | None,
+    content: str | None,
+    fragment: str,
 ) -> None:
-    """import_list raises InvalidMetadataError when both list_file and content are None.
+    """import_list refuses every source it cannot read as a mod list.
 
-    Calling import_list(path) with no arguments raises InvalidMetadataError. This guards
-    the signature requirement that at least one source (file or content) must be provided.
+    A file that does not exist, no source at all, both sources at once, JSON
+    that does not parse, a ``mods`` field that is no list, an entry that is no
+    object, an entry without a version and a text line carrying only a name
+    are all rejected as invalid metadata before anything is compared. The text
+    line names itself in the message, so the user sees which line to fix.
     """
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path)
+    list_file = _written_list_file(tmp_path, list_file_name, list_file_text)
+
+    with pytest.raises(InvalidMetadataError) as error:
+        services.import_list(clean_repo.path, list_file, content=content)
+
+    assert fragment in str(error.value)
 
 
-def test_import_raises_invalid_metadata_when_both_sources_are_given(clean_repo: Repo, tmp_path: Path) -> None:
-    """import_list raises InvalidMetadataError when both list_file and content are provided.
-
-    Calling import_list(path, list_file, content='...') with both arguments raises
-    InvalidMetadataError. This guards the mutual exclusion that prevents ambiguous sources.
-    """
-    list_file = tmp_path / "wanted.txt"
-    list_file.write_text("ModA 1.0.0\n", encoding="utf-8")
-
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, list_file, content="ModA 1.0.0\n")
-
-
-def test_import_raises_invalid_metadata_for_malformed_json_content(
+@pytest.mark.parametrize(
+    ("export_format", "list_file_name"),
+    [
+        pytest.param("text", "wanted.txt", id="text"),
+        pytest.param("json", "wanted.json", id="json"),
+    ],
+)
+def test_export_import_roundtrip(
     clean_repo: Repo,
+    install_commit: InstallCommit,
+    tmp_path: Path,
+    export_format: services.ExportFormat,
+    list_file_name: str,
 ) -> None:
-    """import_list raises InvalidMetadataError when content is malformed JSON.
+    """export_mods and import_list round-trip through both formats without loss.
 
-    Calling import_list(path, content='{not valid json') raises InvalidMetadataError before
-    any further parsing. This guards the JSON syntax validation.
-    """
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, content="{not valid json")
-
-
-def test_import_raises_invalid_metadata_when_json_has_no_mods_list(
-    clean_repo: Repo,
-) -> None:
-    """Import raises InvalidMetadataError when JSON mods field is not an array."""
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, content=json.dumps({"mods": "nope"}))
-
-
-def test_import_raises_invalid_metadata_for_a_non_object_mod_entry(
-    clean_repo: Repo,
-) -> None:
-    """import_list raises InvalidMetadataError when a JSON mods array entry is not an object.
-
-    Calling import_list(path, content=json.dumps({'mods': ['just-a-string']})) raises
-    InvalidMetadataError. This guards the mod entry type validation.
-    """
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, content=json.dumps({"mods": ["just-a-string"]}))
-
-
-def test_import_raises_invalid_metadata_for_a_mod_entry_missing_name_or_version(
-    clean_repo: Repo,
-) -> None:
-    """import_list raises InvalidMetadataError when a JSON mod entry is missing name or version.
-
-    Calling import_list(path, content=json.dumps({'mods': [{'name': 'ModA'}]})) (no version)
-    raises InvalidMetadataError. This guards the required field validation.
-    """
-    with pytest.raises(InvalidMetadataError):
-        services.import_list(clean_repo.path, content=json.dumps({"mods": [{"name": "ModA"}]}))
-
-
-def test_import_text_format_skips_blank_lines(clean_repo: Repo, install_commit: InstallCommit) -> None:
-    """import_list skips empty lines in text format, yielding empty diff when content matches.
-
-    After installing ModA 1.0.0 and calling import_list(content='\\n\\nModA 1.0.0\\n\\n'),
-    returns diff == ImportDiff() (blank lines ignored). This enables readable text lists.
-    """
-    install_commit(clean_repo, "ModA", version="1.0.0")
-
-    diff = services.import_list(clean_repo.path, content="\n\nModA 1.0.0\n\n")
-
-    assert diff == services.ImportDiff()
-
-
-def test_import_raises_invalid_metadata_for_a_text_line_with_no_version(
-    clean_repo: Repo,
-) -> None:
-    """import_list raises InvalidMetadataError when text format line lacks a version field.
-
-    Calling import_list(content='JustAName\\n') raises InvalidMetadataError that names
-    the offending line ('JustAName' in str(exc_info.value)). This guards the text-format
-    structure (two fields: name + version).
-    """
-    with pytest.raises(InvalidMetadataError) as exc_info:
-        services.import_list(clean_repo.path, content="JustAName\n")
-
-    assert "JustAName" in str(exc_info.value)
-
-
-def test_export_import_text_roundtrip(clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path) -> None:
-    """export_mods and import_list round-trip through text format without data loss.
-
-    After installing ModA 1.0.0 (mod_type=client), exporting to text format and re-importing
-    yields diff == ImportDiff() (no missing/different/extra). This verifies that the text
-    encoding (name + space + version) preserves installed state through export and re-import.
+    ModA 1.0.0 is installed as a client mod, exported and read back in. Both
+    encodings -- name plus version as text, and the mods array with name,
+    version, type and link as JSON -- have to describe the installation
+    exactly, so the diff of the re-import is empty.
     """
     install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
-    list_file = tmp_path / "wanted.txt"
+    list_file = tmp_path / list_file_name
     list_file.write_text(
-        services.export_mods(clean_repo.path, export_format="text", db_path=tmp_path / "catalog.db"),
-        encoding="utf-8",
-    )
-
-    diff = services.import_list(clean_repo.path, list_file)
-
-    assert diff == services.ImportDiff()
-
-
-def test_export_import_json_roundtrip(clean_repo: Repo, install_commit: InstallCommit, tmp_path: Path) -> None:
-    """export_mods and import_list round-trip through JSON format without data loss.
-
-    After installing ModA 1.0.0 (mod_type=client), exporting to JSON format and re-importing
-    yields diff == ImportDiff() (no missing/different/extra). This verifies that the JSON
-    structure (mods array with name/version/type/link) preserves installed state through
-    export and re-import.
-    """
-    install_commit(clean_repo, "ModA", version="1.0.0", mod_type="client")
-    list_file = tmp_path / "wanted.json"
-    list_file.write_text(
-        services.export_mods(clean_repo.path, export_format="json", db_path=tmp_path / "catalog.db"),
+        services.export_mods(clean_repo.path, export_format=export_format, db_path=tmp_path / "catalog.db"),
         encoding="utf-8",
     )
 

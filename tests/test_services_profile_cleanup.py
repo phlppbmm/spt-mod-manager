@@ -8,6 +8,7 @@ untouched profile, and the backup-and-snapshot safety net.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -101,24 +102,40 @@ def test_plan_profile_cleanup_works_for_an_already_removed_mod(
     assert plan.mod == MOD_NAME
 
 
-def test_plan_profile_cleanup_skips_an_unreadable_profile_and_warns(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """plan_profile_cleanup reports unreadable profiles in warnings and continues.
+CLEANUP_CALLS = [
+    services.plan_profile_cleanup,
+    services.clean_profile,
+]
+CLEANUP_CALL_IDS = ["plan_profile_cleanup", "clean_profile"]
 
-    A profile with invalid JSON ('{not valid json') is included in
-    plan.warnings with its filename but skipped from plan.profiles, and
-    planning proceeds without raising.
+
+@pytest.mark.parametrize("call", CLEANUP_CALLS, ids=CLEANUP_CALL_IDS)
+def test_profile_cleanup_skips_an_unreadable_profile_and_warns(
+    clean_repo: Repo,
+    install_commit: InstallCommit,
+    call: Callable[[Path, str], services.CleanupPlan | services.CleanupResult],
+) -> None:
+    """Both entry points warn about an unreadable profile and carry on.
+
+    One profile holds invalid JSON, the other the mod's residues. The broken
+    file is named in the warnings, stays out of the reported profiles and
+    keeps its bytes, while the readable one is still planned for and cleaned
+    -- a profile nobody can parse must never stop the other ones.
     """
     install_mod(clean_repo, install_commit)
+    good_path = write_profile(clean_repo, "abc", full_profile())
     broken_relpath = Path("SPT/user/profiles/broken.json")
-    (clean_repo.path / broken_relpath).write_text("{not valid json", encoding="utf-8")
+    broken_path = clean_repo.path / broken_relpath
+    broken_path.write_text("{not valid json", encoding="utf-8")
     clean_repo.commit("chore: broken profile", paths=[broken_relpath])
+    broken_before = broken_path.read_bytes()
 
-    plan = services.plan_profile_cleanup(clean_repo.path, MOD_NAME)
+    result = call(clean_repo.path, MOD_NAME)
 
-    assert "broken.json" in " ".join(plan.warnings)
-    assert "broken" not in plan.profiles
+    assert "broken.json" in " ".join(result.warnings)
+    assert result.profiles == ["abc"]
+    assert broken_path.read_bytes() == broken_before
+    assert good_path.exists()
 
 
 def test_plan_profile_cleanup_only_lists_profiles_that_have_a_hit(
@@ -142,32 +159,33 @@ def test_plan_profile_cleanup_only_lists_profiles_that_have_a_hit(
     assert plan.profiles == ["hit"]
 
 
-def test_plan_profile_cleanup_raises_mod_not_found_for_unknown_name(
-    clean_repo: Repo,
+@pytest.mark.parametrize("call", CLEANUP_CALLS, ids=CLEANUP_CALL_IDS)
+def test_profile_cleanup_raises_mod_not_found_for_unknown_name(
+    clean_repo: Repo, call: Callable[[Path, str], object]
 ) -> None:
-    """plan_profile_cleanup raises ModNotFoundError when the mod name does not exist.
+    """Both entry points raise ModNotFoundError for a name nobody installed.
 
-    Calling plan_profile_cleanup(clean_repo.path, "Ghost") raises
-    ModNotFoundError when no mod by that name has been installed.
+    Nothing is installed, so "Ghost" resolves to no mod; planning and cleaning
+    share that name resolution and must both refuse before touching a profile.
     """
     with pytest.raises(ModNotFoundError):
-        services.plan_profile_cleanup(clean_repo.path, "Ghost")
+        call(clean_repo.path, "Ghost")
 
 
-def test_plan_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
-    clean_repo: Repo, install_commit: InstallCommit
+@pytest.mark.parametrize("call", CLEANUP_CALLS, ids=CLEANUP_CALL_IDS)
+def test_profile_cleanup_raises_ambiguous_mod_error_for_case_variants(
+    clean_repo: Repo, install_commit: InstallCommit, call: Callable[[Path, str], object]
 ) -> None:
-    """plan_profile_cleanup raises AmbiguousModError when multiple case variants exist.
+    """Both entry points raise AmbiguousModError when two mods differ in case only.
 
-    After installing both "CoolMod" and "coolmod", calling
-    plan_profile_cleanup(path, "COOLMOD") raises AmbiguousModError because
-    the name matches both case-insensitively.
+    "CoolMod" and "coolmod" are both installed, so "COOLMOD" matches both
+    case-insensitively; neither planning nor cleaning may pick one of them.
     """
     install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
     with pytest.raises(AmbiguousModError):
-        services.plan_profile_cleanup(clean_repo.path, "COOLMOD")
+        call(clean_repo.path, "COOLMOD")
 
 
 # --------------------------------------------------------------------------

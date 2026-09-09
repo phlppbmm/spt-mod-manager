@@ -42,6 +42,10 @@ from sptmod.core.repo import Repo
 # A release member a custom archive drops to make the installed copy stale.
 STALE_MEMBER = "SPT_Runtime/SPT_Data/database/x.json"
 
+# The core configuration of a release archive of the 4.1 layout, which
+# names the Escape from Tarkov build the release needs.
+RUNTIME_CORE_CONFIG = "SPT_Runtime/SPT_Data/configs/core.json"
+
 
 # --- apply_spt_release, the refusals -------------------------------------
 
@@ -124,6 +128,109 @@ def test_apply_refuses_a_release_needing_another_game_build(
         f"installer from https://sp-mod.com/installer first, then try again."
     )
     assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_takes_the_build_the_release_names_over_the_one_its_archive_names(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() believes the release entry, not the unpacked archive.
+
+    The release title names another build than the core configuration inside
+    its archive; the published title is what the refusal names, because that
+    is what the source says the release needs.
+    """
+    spt_release_source.offer(
+        make_spt_release(version=NEW, client_build=BUILD),
+        version=NEW,
+        client_build=OTHER_BUILD,
+    )
+
+    with pytest.raises(ClientBuildMismatchError) as error:
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert f"needs Escape from Tarkov build {OTHER_BUILD}" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("core_member", "core_json", "required_build"),
+    [
+        pytest.param(
+            RUNTIME_CORE_CONFIG,
+            '{"compatibleTarkovVersion": "0.16.9.40999"}',
+            OTHER_BUILD,
+            id="build-named",
+        ),
+        pytest.param(
+            "SPT/SPT_Data/configs/core.json",
+            '{"compatibleTarkovVersion": "0.16.9.40999"}',
+            OTHER_BUILD,
+            id="build-named-in-the-4-0-layout",
+        ),
+        pytest.param(
+            RUNTIME_CORE_CONFIG,
+            '{"compatibleTarkovVersion": "0.16.9.x"}',
+            "",
+            id="no-numeric-build",
+        ),
+        pytest.param(
+            RUNTIME_CORE_CONFIG,
+            '{"compatibleTarkovVersion": 40743}',
+            "",
+            id="build-not-a-string",
+        ),
+        pytest.param(
+            RUNTIME_CORE_CONFIG, '{"projectName": "SPT"}', "", id="no-build-field"
+        ),
+        pytest.param(RUNTIME_CORE_CONFIG, "not json at all", "", id="unreadable-json"),
+        pytest.param(RUNTIME_CORE_CONFIG, "[1, 2]", "", id="not-an-object"),
+        pytest.param(
+            RUNTIME_CORE_CONFIG, b"\xff\xfe\x00binary", "", id="undecodable-config"
+        ),
+        pytest.param(RUNTIME_CORE_CONFIG, None, "", id="no-config-at-all"),
+    ],
+)
+def test_apply_reads_the_build_of_a_release_from_its_core_configuration(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_archive: MakeArchive,
+    core_member: str,
+    core_json: str | bytes | None,
+    required_build: str,
+) -> None:
+    """apply_spt_release() falls back to ``compatibleTarkovVersion`` for the build.
+
+    The release itself names no build, so the core configuration of its
+    archive has to answer -- in the 4.1 ``SPT_Runtime`` directory or in the
+    4.0 ``SPT`` one. Its trailing component is the build and the change is
+    refused when the installed game has another one; a configuration that
+    names no number, is no object, is no readable text or is missing
+    altogether leaves the build unknown, and then there is nothing to compare
+    and the change goes through.
+    """
+    members: dict[str, str | bytes] = {
+        name: content
+        for name, content in spt_release_members(NEW, BUILD).items()
+        if name != RUNTIME_CORE_CONFIG
+    }
+    if core_json is not None:
+        members[core_member] = core_json
+    spt_release_source.offer(
+        make_archive(members, "zip"), version=NEW, client_build=""
+    )
+
+    if not required_build:
+        assert services.apply_spt_release(spt_game_dir, NEW).version == NEW
+        return
+    with pytest.raises(ClientBuildMismatchError) as error:
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert str(error.value) == (
+        f"SPT {NEW} needs Escape from Tarkov build {required_build}, but your "
+        f"game is build {BUILD}. Change the game version with the official SPT "
+        f"installer from https://sp-mod.com/installer first, then try again."
+    )
 
 
 def _remove_client_exe(exe: Path) -> None:

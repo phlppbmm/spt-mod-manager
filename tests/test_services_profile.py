@@ -260,7 +260,8 @@ def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references
 
     After installing ServerMod and committing a profile that references its
     item ID, remove_mod(path, 'ServerMod') raises ProfileResidueError
-    without reverting or removing any files.
+    without reverting or removing any files, and the mod is still listed as
+    active afterwards.
     """
     item_id = "5c0d1b8b86f7744bb2683cf1"
     _install_server_mod_with_item(clean_repo, install_commit, item_id)
@@ -272,23 +273,6 @@ def test_remove_mod_raises_profile_residue_error_when_a_profile_still_references
     message = str(exc_info.value)
     assert "abc" in message
     assert "item" in message
-
-
-def test_remove_mod_leaves_the_mod_installed_when_it_raises_profile_residue_error(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """The mod remains active after remove_mod raises ProfileResidueError.
-
-    When remove_mod raises ProfileResidueError due to a profile holding
-    residues, the mod is still listed as active by list_mods.
-    """
-    item_id = "5c0d1b8b86f7744bb2683cf2"
-    _install_server_mod_with_item(clean_repo, install_commit, item_id)
-    _commit_profile_with_item(clean_repo, item_id)
-
-    with pytest.raises(ProfileResidueError):
-        services.remove_mod(clean_repo.path, "ServerMod")
-
     active_names = {mod.name for mod in services.list_mods(clean_repo.path)}
     assert "ServerMod" in active_names
 
@@ -455,8 +439,9 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
     """The CLI remove --clean-profiles flag removes residues from the profile before reverting.
 
     After installing ServerMod with an item and committing a profile
-    containing that item, 'sptmod remove ServerMod --clean-profiles' exits 0
-    and leaves the profile with an empty items array.
+    containing that item, 'sptmod remove ServerMod --clean-profiles' exits 0,
+    leaves the profile with an empty items array and names the cleaned
+    profile ID 'abc' on stdout.
     """
     repo = clean_repo_at(fake_game_dir)
     item_id = "5c0d1b8b86f7744bb2683cf7"
@@ -469,25 +454,6 @@ def test_cli_remove_clean_profiles_flag_actually_cleans_the_profile(
     assert result.exit_code == 0
     cleaned = json.loads(profile_path.read_text(encoding="utf-8"))
     assert cleaned["characters"]["pmc"]["Inventory"]["items"] == []
-
-
-def test_cli_remove_clean_profiles_output_mentions_cleaned_profiles(
-    fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, install_commit: InstallCommit
-) -> None:
-    """The CLI remove --clean-profiles output includes the profile ID of cleaned profiles.
-
-    After cleaning a profile with residues, 'sptmod remove ServerMod
-    --clean-profiles' stdout includes the profile ID 'abc'.
-    """
-    repo = clean_repo_at(fake_game_dir)
-    item_id = "5c0d1b8b86f7744bb2683cf9"
-    _install_server_mod_with_item(repo, install_commit, item_id)
-    _commit_profile_with_item(repo, item_id)
-    monkeypatch.chdir(fake_game_dir)
-
-    result = runner.invoke(app, ["remove", "ServerMod", "--clean-profiles", "--yes"])
-
-    assert result.exit_code == 0
     assert "abc" in result.stdout
 
 

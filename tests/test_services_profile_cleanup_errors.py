@@ -25,11 +25,9 @@ from profile_cleanup_corpus import (
 )
 from sptmod.core import game_dir, services
 from sptmod.core.errors import (
-    AmbiguousModError,
     GameRunningError,
     InvalidPathError,
     ModFileWriteError,
-    ModNotFoundError,
     SptmodError,
 )
 from sptmod.core.repo import Repo
@@ -72,29 +70,6 @@ def test_clean_profile_raises_invalid_path_error_for_an_unknown_profile_stem(
         services.clean_profile(clean_repo.path, MOD_NAME, profiles=["ghost"])
 
 
-def test_clean_profile_skips_an_unreadable_profile_and_warns(clean_repo: Repo, install_commit: InstallCommit) -> None:
-    """clean_profile reports unreadable profiles in warnings and continues processing.
-
-    When one profile has invalid JSON and another is valid, clean_profile
-    includes the broken one in result.warnings, skips it, cleans the good one,
-    and returns normally.
-    """
-    install_mod(clean_repo, install_commit)
-    good_path = write_profile(clean_repo, "abc", full_profile())
-    broken_relpath = Path("SPT/user/profiles/broken.json")
-    broken_path = clean_repo.path / broken_relpath
-    broken_path.write_text("{not valid json", encoding="utf-8")
-    clean_repo.commit("chore: broken profile", paths=[broken_relpath])
-    broken_before = broken_path.read_bytes()
-
-    result = services.clean_profile(clean_repo.path, MOD_NAME)
-
-    assert "broken.json" in " ".join(result.warnings)
-    assert broken_path.read_bytes() == broken_before
-    assert good_path.exists()
-    assert "abc" in result.profiles
-
-
 def test_clean_profile_raises_game_running_error_while_the_game_runs(
     clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -111,52 +86,25 @@ def test_clean_profile_raises_game_running_error_while_the_game_runs(
         services.clean_profile(clean_repo.path, MOD_NAME)
 
 
-def test_clean_profile_raises_mod_not_found_for_unknown_name(
-    clean_repo: Repo,
-) -> None:
-    """clean_profile raises ModNotFoundError when the mod name does not exist.
-
-    Calling clean_profile(path, "Ghost") raises ModNotFoundError because no
-    mod by that name has been installed.
-    """
-    with pytest.raises(ModNotFoundError):
-        services.clean_profile(clean_repo.path, "Ghost")
-
-
-def test_clean_profile_raises_ambiguous_mod_error_for_case_variants(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """clean_profile raises AmbiguousModError when multiple case variants exist.
-
-    After installing both "CoolMod" and "coolmod", calling clean_profile(path,
-    "COOLMOD") raises AmbiguousModError.
-    """
-    install_mod(clean_repo, install_commit, name="CoolMod", minute=1)
-    install_commit(clean_repo, "coolmod", minute=2)
-
-    with pytest.raises(AmbiguousModError):
-        services.clean_profile(clean_repo.path, "COOLMOD")
-
-
-def test_clean_profile_write_failure_surfaces_as_sptmod_error(
-    clean_repo: Repo, install_commit: InstallCommit, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_clean_profile_write_failure_surfaces_as_sptmod_error(clean_repo: Repo, install_commit: InstallCommit) -> None:
     """clean_profile raises SptmodError when a write fails and leaves the profile unchanged.
 
-    When os.replace raises OSError, clean_profile wraps it in SptmodError
-    naming the profile file and leaves the original bytes intact.
+    The profiles folder is read-only, so the cleaned document cannot be
+    written back into it. The failure has to reach the caller as a typed
+    sptmod error naming the profile file, with nothing reported as already
+    cleaned and the profile still byte-identical.
     """
     install_mod(clean_repo, install_commit)
     profile_path = write_profile(clean_repo, "abc", full_profile())
     before_bytes = profile_path.read_bytes()
+    profiles_dir = clean_repo.path / "SPT/user/profiles"
+    profiles_dir.chmod(0o555)
 
-    def _raise_replace(*_args: object, **_kwargs: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr("sptmod.core.profile.files.os.replace", _raise_replace)
-
-    with pytest.raises(SptmodError) as exc_info:
-        services.clean_profile(clean_repo.path, MOD_NAME)
+    try:
+        with pytest.raises(SptmodError) as exc_info:
+            services.clean_profile(clean_repo.path, MOD_NAME)
+    finally:
+        profiles_dir.chmod(0o755)
 
     assert "abc.json" in str(exc_info.value)
     assert "Already cleaned" not in str(exc_info.value)

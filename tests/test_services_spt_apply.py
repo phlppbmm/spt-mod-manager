@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from conftest import clean_repo_at
 from fixture_types import InstallCommit, MakeArchive, MakeSptRelease
 from fixtures_spt import (
@@ -28,9 +30,10 @@ from fixtures_spt import (
     write_client_exe,
 )
 from sptmod.core import services
-from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY
+from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY, GameLayout
 from sptmod.core.models import ModFile, Progress
 from sptmod.core.repo import Repo
+from sptmod.core.sptrelease.apply import installed_program_files
 from sptmod.core.sptrelease.client import SptReleaseClient
 from sptmod.core.workspace import game_lock
 
@@ -44,6 +47,15 @@ RELEASE_MEMBERS_KEPT_OUT = (
 )
 
 PROFILE = "SPT_Runtime/user/profiles/abc.json"
+
+# Installed files a version change must leave alone: the server's own caches
+# and logs below SPT_Data, and a file that lies in a subdirectory of the
+# runtime directory instead of directly in it.
+KEPT_INSTALLED_FILES = {
+    "SPT_Runtime/SPT_Data/cache/y": "cache",
+    "SPT_Runtime/SPT_Data/logs/z.log": "log",
+    "SPT_Runtime/plugins/deep.dll": "deep",
+}
 
 
 def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
@@ -59,19 +71,27 @@ def _progress() -> tuple[list[tuple[str, int, str]], Progress]:
 # --- apply_spt_release, the version change itself ------------------------
 
 
+@pytest.mark.parametrize(
+    "asked_version",
+    [pytest.param(NEW, id="exact"), pytest.param(f" {NEW} ", id="surrounding-space")],
+)
 def test_apply_writes_the_release_over_the_installed_program_set(
     spt_game_dir: Path,
     spt_release_source: SptReleaseSource,
     make_spt_release: MakeSptRelease,
+    asked_version: str,
 ) -> None:
     """apply_spt_release() puts the files of the release into the game directory.
 
     Every program member of the archive is on disk with the content of the
     new release afterwards, and the result names the version before and after.
+    The version the caller asks for is matched by its numbers, so a version
+    typed with surrounding spaces -- which neither the CLI nor the RPC layer
+    trims -- reaches the same release.
     """
     offer(spt_release_source, make_spt_release, NEW)
 
-    result = services.apply_spt_release(spt_game_dir, NEW)
+    result = services.apply_spt_release(spt_game_dir, asked_version)
 
     assert (result.previous_version, result.version) == (INSTALLED, NEW)
     assert (spt_game_dir / "SPT_Runtime/SPT_Data/database/x.json").read_text(
@@ -139,6 +159,46 @@ def test_apply_reports_the_files_it_wrote_and_deleted(
     ]
 
 
+def test_apply_deletes_the_loader_and_runtime_files_a_release_stops_shipping(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    make_archive: MakeArchive,
+) -> None:
+    """apply_spt_release() replaces the loader files and the runtime directory too.
+
+    SPT 4.1.1 is in place when 4.1.2 arrives without the Doorstop proxy in the
+    game root and without the server executable directly in the runtime
+    directory. Both belong to the program set a release owns, so both are
+    reported as deleted and are gone afterwards -- a release that drops them
+    must not leave the previous ones behind for the new server to load.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    dropped = ("winhttp.dll", "SPT_Runtime/SPT.Server.exe")
+    spt_release_source.offer(
+        make_archive(
+            {
+                name: content
+                for name, content in spt_release_members(NEWEST, BUILD).items()
+                if name not in dropped
+            },
+            "zip",
+        ),
+        version=NEWEST,
+        client_build=BUILD,
+    )
+    services.apply_spt_release(spt_game_dir, NEW)
+
+    result = services.apply_spt_release(spt_game_dir, NEWEST)
+
+    assert [entry.path.as_posix() for entry in result.files if entry.change == "deleted"] == [
+        "SPT_Runtime/SPT.Server.exe",
+        "winhttp.dll",
+    ]
+    assert not (spt_game_dir / "winhttp.dll").exists()
+    assert not (spt_game_dir / "SPT_Runtime/SPT.Server.exe").exists()
+
+
 def test_apply_deletes_program_files_the_release_no_longer_ships(
     spt_game_dir: Path,
     spt_release_source: SptReleaseSource,
@@ -200,6 +260,50 @@ def test_apply_leaves_configs_mods_and_player_content_untouched(
         if (spt_game_dir / member).exists()
     ] == ["BepInEx/config/BepInEx.cfg"]
     assert [mod.name for mod in services.list_mods(spt_game_dir)] == ["ModA"]
+
+
+def test_apply_replaces_no_installed_file_outside_the_program_set(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    install_commit: InstallCommit,
+) -> None:
+    """apply_spt_release() deletes only installed files the release owns.
+
+    The installation holds, besides one stale program file, the server's cache
+    and log directories, a file in a subdirectory of the runtime directory, a
+    mod's patcher DLL and the game client. Only the stale program file is
+    reported as deleted and gone from disk; everything else keeps its content,
+    because a version change may never take a mod's file, the server's runtime
+    data or Escape from Tarkov itself for part of the SPT program set.
+    """
+    repo = Repo(spt_game_dir)
+    install_commit(repo, "OtherMod", files={"BepInEx/patchers/OtherMod.dll": "other"})
+    stale = spt_game_dir / "SPT_Runtime/SPT_Data/legacy/old.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}", encoding="utf-8")
+    repo.commit("chore: legacy data", paths=[Path("SPT_Runtime/SPT_Data/legacy/old.json")])
+    for name, content in KEPT_INSTALLED_FILES.items():
+        kept = spt_game_dir / name
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        kept.write_text(content, encoding="utf-8")
+    client = (spt_game_dir / "EscapeFromTarkov.exe").read_bytes()
+    offer(spt_release_source, make_spt_release, NEW)
+
+    result = services.apply_spt_release(spt_game_dir, NEW)
+
+    assert [
+        entry.path.as_posix() for entry in result.files if entry.change == "deleted"
+    ] == ["SPT_Runtime/SPT_Data/legacy/old.json"]
+    assert not stale.exists()
+    assert {
+        name: (spt_game_dir / name).read_text(encoding="utf-8")
+        for name in KEPT_INSTALLED_FILES
+    } == KEPT_INSTALLED_FILES
+    assert (spt_game_dir / "BepInEx/patchers/OtherMod.dll").read_text(
+        encoding="utf-8"
+    ) == "other"
+    assert (spt_game_dir / "EscapeFromTarkov.exe").read_bytes() == client
 
 
 def test_apply_stores_the_version_the_installation_now_reports(
@@ -446,3 +550,20 @@ def test_apply_waits_for_an_operation_holding_the_game_directory(
     assert result.version == NEW
     assert result.commit != ""
     assert elapsed >= release_after * 0.5
+
+
+# --- the one program-set question no game directory can ask ---------------
+# Every directory apply_spt_release works on holds its runtime directory --
+# detect_layout refuses one that does not -- so a directory without it is
+# only reachable below the service layer.
+
+
+def test_installed_program_files_of_an_empty_directory_is_empty(tmp_path: Path) -> None:
+    """installed_program_files() returns nothing when no program file is there.
+
+    A directory holding neither the runtime directory nor ``BepInEx`` has
+    nothing a release could replace, so nothing is reported as stale.
+    """
+    layout = GameLayout(root=tmp_path, runtime_dir_name="SPT_Runtime")
+
+    assert installed_program_files(layout) == []

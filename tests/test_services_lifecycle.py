@@ -9,6 +9,7 @@ paths through Typer's ``CliRunner``.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -95,13 +96,21 @@ def test_disabling_twice_is_a_no_op_with_a_notice_and_no_new_commit(
     assert [c.hash for c in clean_repo.log()] == commits_before
 
 
-def test_disable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
-    """disable_mod on a name never installed raises ModNotFoundError without changes.
+@pytest.mark.parametrize(
+    "action",
+    [services.disable_mod, services.enable_mod],
+    ids=["disable_mod", "enable_mod"],
+)
+def test_lifecycle_action_raises_mod_not_found_for_unknown_name(
+    clean_repo: Repo, action: Callable[[Path, str], object]
+) -> None:
+    """Disabling and enabling both raise ModNotFoundError for a name nobody installed.
 
-    Calling disable_mod(path, 'Ghost') raises ModNotFoundError.
+    Nothing is installed, so "Ghost" resolves to no mod; both actions share
+    that name resolution and must refuse before writing a commit.
     """
     with pytest.raises(ModNotFoundError):
-        services.disable_mod(clean_repo.path, "Ghost")
+        action(clean_repo.path, "Ghost")
 
 
 def test_disable_mod_conflict_with_an_unowned_later_change_names_no_mod(
@@ -179,15 +188,6 @@ def test_enable_mod_commit_carries_enabled_trailers_and_mod_is_active_again(
     assert commit.trailers.get("Mod-State") == "enabled"
     active = {mod.name: mod.state for mod in services.list_mods(clean_repo.path)}
     assert active["ModA"] == "enabled"
-
-
-def test_enable_mod_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
-    """enable_mod on a name never installed raises ModNotFoundError.
-
-    Calling enable_mod(path, 'Ghost') raises ModNotFoundError.
-    """
-    with pytest.raises(ModNotFoundError):
-        services.enable_mod(clean_repo.path, "Ghost")
 
 
 def test_enabling_an_active_mod_is_a_no_op_with_a_notice(clean_repo: Repo, install_commit: InstallCommit) -> None:

@@ -1,15 +1,11 @@
-"""Behaviour of the SPT release list and of the path logic ``sptrelease.apply`` builds it on.
+"""Behaviour of the SPT release list.
 
-Covers the version arithmetic (``version_key``, ``compare_versions``,
-``same_version_line``), the file set a release brings and replaces
-(``release_files``, ``installed_program_files``), the client build a release
-needs (``required_client_build``) and ``list_spt_releases`` itself: series
-filtering, order, installed/newer flags, downloadability, an unreadable
-installed version, the client build, a handed release client and an
-unreachable source.
+Covers ``list_spt_releases``: the series filter and the version arithmetic it
+rests on, the order of the listed releases, the installed and newer flags, the
+page, date, download and size of every release, an unreadable installed
+version, the client build, a handed release client and an unreachable source.
 """
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,333 +19,82 @@ from fixtures_spt import (
     NEW,
     NEWEST,
     OLDER,
-    OTHER_BUILD,
     OTHER_SERIES,
     SptReleaseSource,
     offer,
-    spt_release_members,
     unversioned_game_dir,
+    write_client_exe,
 )
 from pe_builder import write_server_exe
 from sptmod.core import services
 from sptmod.core.errors import NotAGameDirError, SptReleaseUnavailableError
-from sptmod.core.game_dir import GameLayout
-from sptmod.core.sptrelease.apply import (
-    compare_versions,
-    installed_program_files,
-    release_files,
-    required_client_build,
-    same_version_line,
-    version_key,
-)
-from sptmod.core.sptrelease.client import SptRelease, SptReleaseClient
+from sptmod.core.sptrelease.client import SptReleaseClient
 
-# What a release writes into a game directory of the 4.1 layout, in the order
-# ``git show --name-status`` lists it.
-RELEASE_TARGETS = (
-    "BepInEx/core/BepInEx.dll",
-    "BepInEx/patchers/spt-prepatch.dll",
-    "BepInEx/plugins/spt/spt-core.dll",
-    "LICENSE-BepInEx.txt",
-    "SPT_Runtime/SPT.Server.exe",
-    "SPT_Runtime/SPT_Data/configs/core.json",
-    "SPT_Runtime/SPT_Data/database/x.json",
-    "doorstop_config.ini",
-    "winhttp.dll",
-)
+# Every release the arithmetic table offers, so each installed version picks
+# its own series out of the same published set.
+PUBLISHED = (OLDER, INSTALLED, NEW, NEWEST, OTHER_SERIES)
+
+# What the 4.1 series looks like from an installation of 4.1.0.
+FROM_4_1_0 = [(NEWEST, False, True), (NEW, False, True), (INSTALLED, True, False)]
 
 
-def _unpack(root: Path, members: Mapping[str, str | bytes]) -> Path:
-    """Write ``members`` below ``root`` the way extracting a release does."""
-    for name, content in members.items():
-        target = root / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = content.encode("utf-8") if isinstance(content, str) else content
-        target.write_bytes(data)
-    return root
-
-
-def _release(client_build: str) -> SptRelease:
-    """Return a published release naming ``client_build``, with no download."""
-    return SptRelease(
-        version=NEW,
-        client_build=client_build,
-        published_at=datetime(2025, 1, 2, tzinfo=UTC),
-        url="https://spt-releases.invalid/tag/4.1.1",
-        download_url="",
-        archive_name="",
-        content_length=None,
-    )
-
-
-# --- version arithmetic --------------------------------------------------
+# --- the installed version the list is read against ----------------------
 
 
 @pytest.mark.parametrize(
-    ("version", "expected"),
+    ("installed_version", "expected_latest", "expected"),
     [
-        ("4.1.2", (4, 1, 2)),
-        ("v4.1.2", (4, 1, 2)),
-        (" 4.1.2 ", (4, 1, 2)),
-        ("4.1", (4, 1, 0)),
-        ("4", (4, 0, 0)),
-        ("4.1.2.3", (4, 1, 2)),
-        ("4.1.x", (4, 1, 0)),
-        ("", (0, 0, 0)),
-    ],
-    ids=[
-        "three-components",
-        "v-prefix",
-        "surrounding-space",
-        "two-components",
-        "one-component",
-        "fourth-component-ignored",
-        "non-numeric-component",
-        "empty",
+        pytest.param("4.1.0", NEWEST, FROM_4_1_0, id="three-components"),
+        pytest.param("v4.1.0", NEWEST, FROM_4_1_0, id="v-prefix"),
+        pytest.param("4.1", NEWEST, FROM_4_1_0, id="two-components"),
+        pytest.param("4.1.0.5", NEWEST, FROM_4_1_0, id="fourth-component-ignored"),
+        pytest.param("4.1.x", NEWEST, FROM_4_1_0, id="non-numeric-component"),
+        pytest.param("4", OLDER, [(OLDER, False, True)], id="one-component"),
+        pytest.param(
+            "4.1.2",
+            NEWEST,
+            [(NEWEST, True, False), (NEW, False, False), (INSTALLED, False, False)],
+            id="newest-installed",
+        ),
+        pytest.param("3.1.2", "", [], id="other-major-series"),
     ],
 )
-def test_version_key_reads_three_padded_numeric_components(
-    version: str, expected: tuple[int, int, int]
+def test_list_reads_the_published_releases_against_the_installed_version(
+    fake_game_dir_runtime: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    installed_version: str,
+    expected_latest: str,
+    expected: list[tuple[str, bool, bool]],
 ) -> None:
-    """version_key() returns the first three components as numbers.
+    """list_spt_releases() lists the installed series only, newest version first.
 
-    A missing or non-numeric component counts as zero, which is what makes an
-    unknown version sort before every published one.
+    The installation reports ``installed_version``; the same five releases are
+    published every time. A version is written as a ``v`` prefix, with fewer
+    or more than three components or with a non-numeric one just as readably
+    as a plain three-component one, because the first three numeric components
+    decide everything: the major and minor pair picks the series -- releases of
+    another minor or another major line need the official installer and are
+    left out -- and the third component says which release is the installed one
+    and which ones are above it.
     """
-    assert version_key(version) == expected
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", installed_version)
+    write_client_exe(fake_game_dir_runtime)
+    clean_repo_at(fake_game_dir_runtime)
+    for version in PUBLISHED:
+        offer(spt_release_source, make_spt_release, version)
 
+    listed = services.list_spt_releases(fake_game_dir_runtime)
 
-@pytest.mark.parametrize(
-    ("left", "right", "expected"),
-    [
-        ("4.1.2", "4.1.1", 1),
-        ("4.1.1", "4.1.2", -1),
-        ("4.1.2", "4.1.2", 0),
-        ("4.1.2", "v4.1.2.9", 0),
-        ("4.1.2", "", 1),
-    ],
-    ids=["newer", "older", "equal", "equal-despite-notation", "against-unknown"],
-)
-def test_compare_versions_orders_by_the_numeric_components(
-    left: str, right: str, expected: int
-) -> None:
-    """compare_versions() answers -1, 0 or 1 for the order of two versions."""
-    assert compare_versions(left, right) == expected
-
-
-@pytest.mark.parametrize(
-    ("left", "right", "expected"),
-    [
-        ("4.1.2", "4.1.0", True),
-        ("4.1.2", "4.2.0", False),
-        ("4.1.2", "3.1.2", False),
-    ],
-    ids=["same-series", "other-minor", "other-major"],
-)
-def test_same_version_line_compares_major_and_minor_only(
-    left: str, right: str, expected: bool
-) -> None:
-    """same_version_line() answers whether two versions share major and minor."""
-    assert same_version_line(left, right) is expected
-
-
-# --- which files a release brings and replaces ---------------------------
-
-
-@pytest.mark.parametrize(
-    "runtime_dir_name", ["SPT_Runtime", "SPT"], ids=["4.1-layout", "4.0-layout"]
-)
-def test_release_files_takes_the_program_set_into_the_installed_runtime_directory(
-    tmp_path: Path, runtime_dir_name: str
-) -> None:
-    """release_files() returns the program members, addressed to the runtime dir in use.
-
-    A release always names its runtime directory ``SPT_Runtime``; an
-    installation of the 4.0 layout takes the same members into ``SPT/``.
-    Player content, mod settings, caches and logs are left in the archive.
-    """
-    unpacked = _unpack(tmp_path / "unpacked", spt_release_members(NEW, BUILD))
-    layout = GameLayout(root=tmp_path / "game", runtime_dir_name=runtime_dir_name)
-
-    files = release_files(unpacked, layout)
-
-    assert [entry.target.as_posix() for entry in files] == sorted(
-        target.replace("SPT_Runtime/", f"{runtime_dir_name}/")
-        for target in RELEASE_TARGETS
-    )
-    assert [entry.source.relative_to(unpacked).as_posix() for entry in files] == sorted(
-        RELEASE_TARGETS
-    )
-
-
-def test_installed_program_files_lists_the_set_a_release_replaces(
-    tmp_path: Path,
-) -> None:
-    """installed_program_files() returns the installed files a release owns.
-
-    The runtime directory's own files, the whole ``SPT_Data`` tree without its
-    caches and logs, SPT's client files below ``BepInEx``, the BepInEx runtime
-    and the loader files of the game root -- but neither the game client, nor
-    a mod, nor a file in a subdirectory of the runtime directory.
-    """
-    root = _unpack(
-        tmp_path / "game",
-        {
-            "SPT_Runtime/SPT.Server.exe": "server",
-            "SPT_Runtime/SPT_Data/configs/core.json": "{}",
-            "SPT_Runtime/SPT_Data/cache/y": "cache",
-            "SPT_Runtime/SPT_Data/logs/z.log": "log",
-            "SPT_Runtime/user/mods/m/package.json": "{}",
-            "SPT_Runtime/plugins/deep.dll": "deep",
-            "BepInEx/core/BepInEx.dll": "core",
-            "BepInEx/patchers/spt-prepatch.dll": "prepatch",
-            "BepInEx/patchers/OtherMod.dll": "other",
-            "BepInEx/plugins/spt/spt-core.dll": "spt-core",
-            "BepInEx/plugins/ModA.dll": "mod",
-            "BepInEx/config/BepInEx.cfg": "config",
-            "winhttp.dll": "loader",
-            "doorstop_config.ini": "loader config",
-            "LICENSE-BepInEx.txt": "licence",
-            "EscapeFromTarkov.exe": "client",
-        },
-    )
-    layout = GameLayout(root=root, runtime_dir_name="SPT_Runtime")
-
-    assert [entry.as_posix() for entry in installed_program_files(layout)] == [
-        "BepInEx/core/BepInEx.dll",
-        "BepInEx/patchers/spt-prepatch.dll",
-        "BepInEx/plugins/spt/spt-core.dll",
-        "LICENSE-BepInEx.txt",
-        "SPT_Runtime/SPT.Server.exe",
-        "SPT_Runtime/SPT_Data/configs/core.json",
-        "doorstop_config.ini",
-        "winhttp.dll",
-    ]
-
-
-def test_installed_program_files_of_an_empty_directory_is_empty(tmp_path: Path) -> None:
-    """installed_program_files() returns nothing when no program file is there.
-
-    A directory holding neither the runtime directory nor ``BepInEx`` has
-    nothing a release could replace, so nothing is reported as stale.
-    """
-    layout = GameLayout(root=tmp_path, runtime_dir_name="SPT_Runtime")
-
-    assert installed_program_files(layout) == []
-
-
-# --- which client build a release needs ----------------------------------
-
-
-def test_required_client_build_takes_the_build_the_release_itself_names(
-    tmp_path: Path,
-) -> None:
-    """required_client_build() prefers the release's own build over the archive.
-
-    The core configuration of the unpacked release names another build; the
-    release entry wins, because it is what the source published.
-    """
-    unpacked = _unpack(tmp_path / "unpacked", spt_release_members(NEW, BUILD))
-
-    assert required_client_build(_release(OTHER_BUILD), unpacked) == OTHER_BUILD
-
-
-@pytest.mark.parametrize(
-    ("core_json", "expected"),
-    [
-        ('{"compatibleTarkovVersion": "0.16.9.40743"}', "40743"),
-        ('{"compatibleTarkovVersion": "0.16.9.x"}', ""),
-        ('{"compatibleTarkovVersion": 40743}', ""),
-        ('{"projectName": "SPT"}', ""),
-        ("not json at all", ""),
-        ("[1, 2]", ""),
-    ],
-    ids=[
-        "build-named",
-        "no-numeric-build",
-        "build-not-a-string",
-        "no-build-field",
-        "unreadable-json",
-        "not-an-object",
-    ],
-)
-def test_required_client_build_reads_the_core_configuration_of_the_release(
-    tmp_path: Path, core_json: str, expected: str
-) -> None:
-    """required_client_build() falls back to ``compatibleTarkovVersion``.
-
-    Its trailing component is the build; a configuration that does not name
-    one leaves the build unknown, which is what makes the comparison optional.
-    """
-    unpacked = _unpack(
-        tmp_path / "unpacked", {"SPT_Runtime/SPT_Data/configs/core.json": core_json}
-    )
-
-    assert required_client_build(_release(""), unpacked) == expected
-
-
-def test_required_client_build_reads_a_core_configuration_of_the_4_0_layout(
-    tmp_path: Path,
-) -> None:
-    """required_client_build() also reads a release that ships ``SPT/`` instead.
-
-    Both runtime directory names are looked at, so a release of the 4.0 series
-    names its build as readably as a 4.1 one.
-    """
-    unpacked = _unpack(
-        tmp_path / "unpacked",
-        {"SPT/SPT_Data/configs/core.json": '{"compatibleTarkovVersion": "0.16.9.40743"}'},
-    )
-
-    assert required_client_build(_release(""), unpacked) == BUILD
-
-
-def test_required_client_build_is_unknown_without_a_readable_configuration(
-    tmp_path: Path,
-) -> None:
-    """required_client_build() answers empty for a missing or undecodable configuration.
-
-    One release ships no core configuration at all, the other one that is no
-    UTF-8 text; neither may be taken for a build number.
-    """
-    missing = _unpack(tmp_path / "missing", {"SPT_Runtime/SPT.Server.exe": "server"})
-    undecodable = _unpack(
-        tmp_path / "undecodable",
-        {"SPT_Runtime/SPT_Data/configs/core.json": b"\xff\xfe\x00binary"},
-    )
-
-    assert required_client_build(_release(""), missing) == ""
-    assert required_client_build(_release(""), undecodable) == ""
+    assert listed.current_version == installed_version
+    assert listed.client_build == BUILD
+    assert listed.latest == expected_latest
+    assert [
+        (entry.version, entry.installed, entry.newer) for entry in listed.releases
+    ] == expected
 
 
 # --- list_spt_releases ---------------------------------------------------
-
-
-def test_list_reports_the_series_of_the_installed_version_newest_first(
-    spt_game_dir: Path,
-    spt_release_source: SptReleaseSource,
-    make_spt_release: MakeSptRelease,
-) -> None:
-    """list_spt_releases() lists only the installed series, newest version first.
-
-    Releases of another series need the official installer, so they are left
-    out; the installed version is marked, everything above it is newer.
-    """
-    for version in (OLDER, INSTALLED, NEW, NEWEST, OTHER_SERIES):
-        offer(spt_release_source, make_spt_release, version)
-
-    listed = services.list_spt_releases(spt_game_dir)
-
-    assert listed.current_version == INSTALLED
-    assert listed.client_build == BUILD
-    assert listed.latest == NEWEST
-    assert [
-        (entry.version, entry.installed, entry.newer) for entry in listed.releases
-    ] == [
-        (NEWEST, False, True),
-        (NEW, False, True),
-        (INSTALLED, True, False),
-    ]
 
 
 def test_list_reports_the_page_and_the_size_of_every_release(

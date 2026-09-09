@@ -8,6 +8,7 @@ browser folder-picker selection back to an absolute, verified path.
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -83,47 +84,49 @@ def test_list_directories_parent_is_none_at_the_filesystem_root() -> None:
     assert result.parent is None
 
 
-def test_list_directories_raises_invalid_path_error_for_a_nonexistent_path(
-    tmp_path: Path,
+def _missing_path(root: Path) -> Path:
+    """Return a path below ``root`` that was never created."""
+    return root / "does-not-exist"
+
+
+def _a_file(root: Path) -> Path:
+    """Return a plain file below ``root``."""
+    target = root / "not-a-directory.txt"
+    target.write_text("content", encoding="utf-8")
+    return target
+
+
+def _unreadable_directory(root: Path) -> Path:
+    """Return a directory below ``root`` nobody may read."""
+    target = root / "no-access"
+    target.mkdir()
+    target.chmod(0o000)
+    return target
+
+
+@pytest.mark.parametrize(
+    "build_target",
+    [_missing_path, _a_file, _unreadable_directory],
+    ids=["missing", "file", "unreadable"],
+)
+def test_list_directories_raises_invalid_path_error_for_an_unusable_path(
+    tmp_path: Path, build_target: Callable[[Path], Path]
 ) -> None:
-    """list_directories raises InvalidPathError when the path does not exist.
+    """list_directories raises InvalidPathError for a path it cannot list.
 
-    Passing a path that doesn't exist raises InvalidPathError.
+    A path that does not exist, one that is a file instead of a directory and
+    a directory nobody may read are all reported the same way, because a
+    folder picker has to say "this is not a folder you can open" rather than
+    let an operating system error through.
     """
-    with pytest.raises(InvalidPathError):
-        services.list_directories(str(tmp_path / "does-not-exist"))
+    target = build_target(tmp_path)
 
-
-def test_list_directories_raises_invalid_path_error_for_a_file(
-    tmp_path: Path,
-) -> None:
-    """list_directories raises InvalidPathError when the path is a file.
-
-    Passing a file instead of a directory raises InvalidPathError.
-    """
-    a_file = tmp_path / "not-a-directory.txt"
-    a_file.write_text("content", encoding="utf-8")
-
-    with pytest.raises(InvalidPathError):
-        services.list_directories(str(a_file))
-
-
-def test_list_directories_raises_invalid_path_error_for_permission_denied(
-    tmp_path: Path,
-) -> None:
-    """list_directories raises InvalidPathError when a directory has no read permission.
-
-    A directory with mode 0o000 raises InvalidPathError when passed to
-    list_directories.
-    """
-    unreadable = tmp_path / "no-access"
-    unreadable.mkdir()
-    os.chmod(unreadable, 0o000)
     try:
         with pytest.raises(InvalidPathError):
-            services.list_directories(str(unreadable))
+            services.list_directories(str(target))
     finally:
-        os.chmod(unreadable, 0o755)
+        if target.exists():
+            target.chmod(0o755)
 
 
 # --------------------------------------------------------------------------

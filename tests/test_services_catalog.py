@@ -16,16 +16,15 @@ from typer.testing import CliRunner
 from conftest import clean_repo_at, forge_trailers
 from fixture_types import InstallCommit
 from forge_json import mod_json_full, owner_json, page_envelope
-from sptmod.cli import EXIT_CODES, app
+from sptmod.cli import app
 from sptmod.core import services
 from sptmod.core.errors import CatalogUnavailableError, ForgeUnavailableError
-from sptmod.core.forge.catalog import Catalog, SyncResult
+from sptmod.core.forge.catalog import Catalog, CatalogEntry, SyncResult
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 
 runner = CliRunner()
 
-# RED contract: ForgeUnavailableError is not yet in cli.EXIT_CODES. Pinned
-# here so the CLI test fails clearly against the stub until it is wired.
+# ForgeUnavailableError's own CLI exit code; asserted only here.
 _FORGE_UNAVAILABLE_EXIT_CODE = 14
 
 
@@ -178,15 +177,35 @@ def test_search_catalog_matches_query_against_name_and_author(
     assert [entry.mod.name for entry in results] == ["Alpha Mod"]
 
 
-def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
+def _search_compatible(path: Path, db_path: Path) -> list[CatalogEntry]:
+    """Search the whole catalog, keeping only mods the game directory can run."""
+    return services.search_catalog(path, "", compatible_only=True, db_path=db_path)
+
+
+def _browse_compatible(path: Path, db_path: Path) -> list[CatalogEntry]:
+    """Browse the whole catalog, keeping only mods the game directory can run."""
+    return services.browse_catalog(path, "all", compatible_only=True, db_path=db_path)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [_search_compatible, _browse_compatible],
+    ids=["search_catalog", "browse_catalog"],
+)
+def test_compatible_only_drops_mods_the_installed_spt_version_cannot_run(
     fake_game_dir: Path,
     db_path: Path,
     client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
+    call: Callable[[Path, Path], list[CatalogEntry]],
 ) -> None:
-    """If search_catalog's body is `pass`, this fails: Beta Mod (^3.8.0, not
-    compatible with core.json's sptVersion 4.1.0) would not be dropped."""
-    clean_repo_at(fake_game_dir)  # fake_game_dir's core.json sptVersion is "4.1.0"
+    """Searching and browsing drop an incompatible mod the same way.
+
+    fake_game_dir's core.json names SPT 4.1.0, so Beta Mod's only version
+    (``^3.8.0``) does not fit, while Alpha Mod's ``^4.0.0`` does. Both entry
+    points share the compatibility filter, so both have to hide Beta Mod.
+    """
+    clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
         db_path,
@@ -198,7 +217,7 @@ def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
         ],
     )
 
-    results = services.search_catalog(fake_game_dir, "", compatible_only=True, db_path=db_path)
+    results = call(fake_game_dir, db_path)
 
     assert [entry.mod.name for entry in results] == ["Alpha Mod"]
 
@@ -206,42 +225,43 @@ def test_search_catalog_compatible_only_filters_by_the_game_dirs_spt_version(
 # --- browse_catalog ---------------------------------------------------------
 
 
-def test_browse_catalog_all_returns_every_cached_mod_ordered_by_name(
+@pytest.mark.parametrize(
+    ("browse_filter", "expected"),
+    [
+        pytest.param(
+            "all",
+            [
+                ("Alpha Mod", "installed"),
+                ("Beta Mod", "available"),
+                ("Gamma Mod", "update_available"),
+            ],
+            id="all",
+        ),
+        pytest.param(
+            "installed",
+            [("Alpha Mod", "installed"), ("Gamma Mod", "update_available")],
+            id="installed",
+        ),
+        pytest.param("available", [("Beta Mod", "available")], id="available"),
+    ],
+)
+def test_browse_catalog_filter_selects_the_entries_of_that_list(
     fake_game_dir: Path,
     db_path: Path,
     client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     install_commit: InstallCommit,
+    browse_filter: services.BrowseFilter,
+    expected: list[tuple[str, str]],
 ) -> None:
-    """If browse_catalog's body is `pass`, this fails: returns None instead of
-    both cached mods ordered by name."""
-    repo = clean_repo_at(fake_game_dir)
-    client = client_factory()
-    _seed(
-        db_path,
-        client,
-        respx_router,
-        [
-            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
-            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
-        ],
-    )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
+    """browse_catalog returns the entries of one frontend list, ordered by name.
 
-    results = services.browse_catalog(fake_game_dir, "all", db_path=db_path)
-
-    assert [entry.mod.name for entry in results] == ["Alpha Mod", "Beta Mod"]
-
-
-def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
-    fake_game_dir: Path,
-    db_path: Path,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-    install_commit: InstallCommit,
-) -> None:
-    """If browse_catalog's body is `pass`, this fails: Beta Mod (never
-    installed) would not be excluded from the "installed" filter."""
+    The cache holds three mods: Alpha Mod is installed at the cached version,
+    Gamma Mod is installed at an older one than the cache holds, and Beta Mod
+    was never installed. ``all`` keeps every one of them, ``installed`` keeps
+    the two that match an active mod -- including the one with an update
+    waiting -- and ``available`` keeps only the rest.
+    """
     repo = clean_repo_at(fake_game_dir)
     client = client_factory()
     _seed(
@@ -265,62 +285,9 @@ def test_browse_catalog_installed_filter_keeps_installed_and_update_available(
         **forge_trailers("3"),
     )
 
-    results = services.browse_catalog(fake_game_dir, "installed", db_path=db_path)
+    results = services.browse_catalog(fake_game_dir, browse_filter, db_path=db_path)
 
-    by_name = {entry.mod.name: entry.state for entry in results}
-    assert by_name == {"Alpha Mod": "installed", "Gamma Mod": "update_available"}
-
-
-def test_browse_catalog_available_filter_keeps_only_non_installed_mods(
-    fake_game_dir: Path,
-    db_path: Path,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-    install_commit: InstallCommit,
-) -> None:
-    """If browse_catalog's body is `pass`, this fails: the installed Alpha Mod
-    would not be excluded from the "available" filter."""
-    repo = clean_repo_at(fake_game_dir)
-    client = client_factory()
-    _seed(
-        db_path,
-        client,
-        respx_router,
-        [
-            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
-            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
-        ],
-    )
-    install_commit(repo, "Alpha Mod", "1.0.0", mod_type="server", **forge_trailers("1"))
-
-    results = services.browse_catalog(fake_game_dir, "available", db_path=db_path)
-
-    assert [entry.mod.name for entry in results] == ["Beta Mod"]
-
-
-def test_browse_catalog_compatible_only_drops_incompatible_mods(
-    fake_game_dir: Path,
-    db_path: Path,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-) -> None:
-    """If browse_catalog's body is `pass`, this fails: Beta Mod (^3.8.0) would
-    not be dropped for the game dir's sptVersion 4.1.0."""
-    clean_repo_at(fake_game_dir)
-    client = client_factory()
-    _seed(
-        db_path,
-        client,
-        respx_router,
-        [
-            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
-            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
-        ],
-    )
-
-    results = services.browse_catalog(fake_game_dir, "all", compatible_only=True, db_path=db_path)
-
-    assert [entry.mod.name for entry in results] == ["Alpha Mod"]
+    assert [(entry.mod.name, entry.state) for entry in results] == expected
 
 
 def test_browse_catalog_hides_versions_that_are_not_installable(
@@ -417,8 +384,7 @@ def test_cli_sync_maps_forge_unavailable_to_its_own_exit_code(
 ) -> None:
     """Pins the exit-code contract for ForgeUnavailableError: it must get its
     own code (14), not fall through to GENERIC_EXIT_CODE (1) or crash
-    unhandled. Fails both while sync_catalog is a stub and while
-    ForgeUnavailableError is absent from cli.EXIT_CODES.
+    unhandled.
 
     Zeroes out the retry backoff so the CLI's un-injected default
     ForgeClient does not spend real wall-clock time retrying.
@@ -431,7 +397,6 @@ def test_cli_sync_maps_forge_unavailable_to_its_own_exit_code(
 
     result = runner.invoke(app, ["sync"])
 
-    assert EXIT_CODES.get(ForgeUnavailableError) == _FORGE_UNAVAILABLE_EXIT_CODE
     assert result.exit_code == _FORGE_UNAVAILABLE_EXIT_CODE
 
 

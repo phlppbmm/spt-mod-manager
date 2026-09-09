@@ -27,22 +27,27 @@ from sptmod.core.repo import Repo
 # --- status: runtime data is left out of the report entirely ----------------
 
 
-def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
-    clean_repo: Repo, install_commit: InstallCommit
+@pytest.mark.parametrize("mod_dir", ["BepInEx/plugins", "BepInEx/patchers"], ids=["plugins-dir", "patchers-dir"])
+def test_status_ignores_runtime_data_in_a_managed_client_mod_dir(
+    clean_repo: Repo, install_commit: InstallCommit, mod_dir: str
 ) -> None:
     """status() omits untracked files under an active mod's directory from the report.
 
-    Untracked BepInEx/plugins/ClientMod/EditorDefaults.json and nested cache files
-    written by the game while the mod was active result in an empty StatusReport.
+    The mod wrote an ``EditorDefaults.json`` next to its DLL, a nested
+    ``cache/nested.json`` and a binary ``cache.bin`` while the game ran. None
+    of them was ever tracked, and none of them may show up as a manual mod or
+    as untracked content, whether the mod lives in the plugins or in the
+    patchers directory: the report has to stay empty.
     """
     install_commit(
         clean_repo,
         "ClientMod",
-        files={"BepInEx/plugins/ClientMod/ClientMod.dll": "v1"},
+        files={f"{mod_dir}/ClientMod/ClientMod.dll": "v1"},
     )
-    runtime_file = clean_repo.path / "BepInEx/plugins/ClientMod/EditorDefaults.json"
-    runtime_file.write_text("generated while playing", encoding="utf-8")
-    nested = clean_repo.path / "BepInEx/plugins/ClientMod/cache/nested.json"
+    mod_path = clean_repo.path / mod_dir / "ClientMod"
+    (mod_path / "EditorDefaults.json").write_text("generated while playing", encoding="utf-8")
+    (mod_path / "cache.bin").write_bytes(b"binary cache data")
+    nested = mod_path / "cache/nested.json"
     nested.parent.mkdir(parents=True)
     nested.write_text("nested runtime data", encoding="utf-8")
 
@@ -51,7 +56,13 @@ def test_status_ignores_runtime_data_in_a_managed_client_plugin_dir(
     assert report == services.StatusReport(spt_version="4.1.0")
 
 
-@pytest.mark.parametrize("game_dir_fixture", ["fake_game_dir", "fake_game_dir_runtime"])
+@pytest.mark.parametrize(
+    "game_dir_fixture",
+    [
+        pytest.param("fake_game_dir", id="spt-4.0-layout"),
+        pytest.param("fake_game_dir_runtime", id="spt-4.1-layout"),
+    ],
+)
 def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
     game_dir_fixture: str, request: pytest.FixtureRequest, install_commit: InstallCommit
 ) -> None:
@@ -72,28 +83,6 @@ def test_status_ignores_runtime_data_in_a_managed_server_mod_dir(
     nested.write_text("nested runtime data", encoding="utf-8")
 
     report = services.status(game_dir_path)
-
-    assert not report.manual_mods
-    assert not report.other_untracked
-
-
-def test_status_tolerates_runtime_data_in_a_managed_patcher_dir(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """status() leaves untracked files under a patcher mod directory out of the report.
-
-    BepInEx/patchers/PatchMod/cache.bin (untracked runtime data) results in an empty
-    report with no manual_mods or other_untracked entries.
-    """
-    install_commit(
-        clean_repo,
-        "PatchMod",
-        files={"BepInEx/patchers/PatchMod/PatchMod.dll": "v1"},
-    )
-    runtime_file = clean_repo.path / "BepInEx/patchers/PatchMod/cache.bin"
-    runtime_file.write_bytes(b"binary cache data")
-
-    report = services.status(clean_repo.path)
 
     assert not report.manual_mods
     assert not report.other_untracked
@@ -294,67 +283,48 @@ def test_runtime_data_stays_owned_after_a_snapshot_commit(
 
 
 @pytest.mark.parametrize(
-    "action",
-    [services.remove_mod, services.disable_mod],
-    ids=["remove_mod", "disable_mod"],
+    ("action", "mod_dir"),
+    [
+        pytest.param(services.remove_mod, "BepInEx/plugins", id="remove_mod-plugins"),
+        pytest.param(services.disable_mod, "BepInEx/plugins", id="disable_mod-plugins"),
+        pytest.param(services.remove_mod, "BepInEx/patchers", id="remove_mod-patchers"),
+        pytest.param(services.disable_mod, "BepInEx/patchers", id="disable_mod-patchers"),
+    ],
 )
 def test_removing_or_disabling_deletes_runtime_data_and_the_now_empty_directory(
     action: Callable[[Path, str], object],
     clean_repo: Repo,
     install_commit: InstallCommit,
+    mod_dir: str,
 ) -> None:
-    """remove_mod and disable_mod delete both tracked files and runtime data completely.
+    """remove_mod and disable_mod delete tracked files and runtime data alike.
 
-    Calling remove_mod or disable_mod on ClientMod deletes the entire
-    BepInEx/plugins/ClientMod directory including tracked ClientMod.dll and untracked
-    Editor.json and nested cache files.
+    The mod's directory holds two tracked files and, next to them, a generated
+    JSON file, a binary cache and two files in subdirectories the mod created
+    while the game ran. Removing or disabling the mod takes the whole
+    directory with it, while the plugins or patchers directory it lived in
+    stays, because other mods live there too.
     """
     install_commit(
         clean_repo,
         "ClientMod",
         files={
-            "BepInEx/plugins/ClientMod/ClientMod.dll": "v1",
-            "BepInEx/plugins/ClientMod/sub/tracked.json": "tracked content",
+            f"{mod_dir}/ClientMod/ClientMod.dll": "v1",
+            f"{mod_dir}/ClientMod/sub/tracked.json": "tracked content",
         },
     )
-    runtime_file = clean_repo.path / "BepInEx/plugins/ClientMod/Editor.json"
-    runtime_file.write_text("generated", encoding="utf-8")
-    nested_runtime = clean_repo.path / "BepInEx/plugins/ClientMod/sub/other/leftover.txt"
+    mod_path = clean_repo.path / mod_dir / "ClientMod"
+    (mod_path / "Editor.json").write_text("generated", encoding="utf-8")
+    (mod_path / "cache.bin").write_bytes(b"binary cache data")
+    (mod_path / "sub/nested.bin").write_bytes(b"nested cache data")
+    nested_runtime = mod_path / "sub/other/leftover.txt"
     nested_runtime.parent.mkdir(parents=True)
     nested_runtime.write_text("nested leftover", encoding="utf-8")
 
     action(clean_repo.path, "ClientMod")
 
-    assert not (clean_repo.path / "BepInEx/plugins/ClientMod").exists()
-    assert (clean_repo.path / "BepInEx/plugins").is_dir()
-
-
-@pytest.mark.parametrize(
-    "action",
-    [services.remove_mod, services.disable_mod],
-    ids=["remove_mod", "disable_mod"],
-)
-def test_removing_or_disabling_clears_a_patcher_dir_but_keeps_the_patchers_root(
-    action: Callable[[Path, str], object],
-    clean_repo: Repo,
-    install_commit: InstallCommit,
-) -> None:
-    """remove_mod and disable_mod clear patcher mod dirs but preserve BepInEx/patchers."""
-    install_commit(
-        clean_repo,
-        "PatchMod",
-        files={"BepInEx/patchers/PatchMod/PatchMod.dll": "v1"},
-    )
-    runtime_file = clean_repo.path / "BepInEx/patchers/PatchMod/cache.bin"
-    runtime_file.write_bytes(b"binary cache data")
-    nested_runtime = clean_repo.path / "BepInEx/patchers/PatchMod/sub/nested.bin"
-    nested_runtime.parent.mkdir(parents=True)
-    nested_runtime.write_bytes(b"nested cache data")
-
-    action(clean_repo.path, "PatchMod")
-
-    assert not (clean_repo.path / "BepInEx/patchers/PatchMod").exists()
-    assert (clean_repo.path / "BepInEx/patchers").is_dir()
+    assert not mod_path.exists()
+    assert (clean_repo.path / mod_dir).is_dir()
 
 
 def test_enable_mod_after_disable_restores_only_the_recorded_files(

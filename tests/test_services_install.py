@@ -25,7 +25,6 @@ from sptmod.core.errors import (
     ModFileWriteError,
 )
 from sptmod.core.game_dir import SPT_VERSION_CONFIG_KEY, detect_layout
-from sptmod.core.models import MOD_TRAILER_KEYS
 from sptmod.core.modmeta import InvalidMetadataError
 from sptmod.core.repo import Repo
 
@@ -101,7 +100,7 @@ def test_server_only_install_returns_mod_info_from_package_json(clean_repo: Repo
 def test_server_only_install_commit_has_complete_and_correct_trailers(
     clean_repo: Repo, make_archive: MakeArchive
 ) -> None:
-    """The install commit carries all MOD_TRAILER_KEYS with values and empty Forge ids.
+    """The install commit carries every mod trailer with its value and empty Forge ids.
 
     The commit subject is "mod: CoolMod 1.2.3"; trailers include Mod, Mod-Version,
     Mod-Type, Mod-Author, Mod-SPT, Mod-Source, Mod-State; Forge-Id and Guid empty.
@@ -124,7 +123,6 @@ def test_server_only_install_commit_has_complete_and_correct_trailers(
 
     commit = clean_repo.log()[0]
     assert commit.subject == "mod: CoolMod 1.2.3"
-    assert set(MOD_TRAILER_KEYS).issubset(commit.trailers.keys())
     assert commit.trailers["Mod"] == "CoolMod"
     assert commit.trailers["Mod-Version"] == "1.2.3"
     assert commit.trailers["Mod-Type"] == "server"
@@ -452,9 +450,9 @@ def test_hybrid_real_corpus_shape_never_silently_drops_the_server_half(
 ) -> None:
     """Real-corpus shape (SAIN, Tyfon-UIFixes, WTT-CommonLib): a server mod
     folder below ``SPT_Runtime/user/mods/`` (no ``package.json``) next to a
-    ``BepInEx/plugins`` client tree. The install must either type the mod
-    ``hybrid`` and copy both trees, or fail outright -- it must never silently
-    install only the client half.
+    ``BepInEx/plugins`` client tree. The install types the mod ``hybrid``
+    and copies both trees; it must never silently install only the client
+    half.
     """
     archive = make_archive(
         {
@@ -464,10 +462,7 @@ def test_hybrid_real_corpus_shape_never_silently_drops_the_server_half(
         "zip",
     )
 
-    try:
-        result = services.install_from_archive(clean_repo.path, archive)
-    except ArchiveError:
-        return
+    result = services.install_from_archive(clean_repo.path, archive)
 
     assert result.mod.mod_type == "hybrid"
     assert (clean_repo.path / "SPT/user/mods/ServerPart/ServerPart.dll").is_file()

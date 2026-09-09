@@ -795,41 +795,32 @@ def test_cli_update_check_never_prompts(
     assert "CoolMod" in result.stdout
 
 
-def test_cli_update_without_yes_prompts_and_cancels_on_no(
-    clean_repo: Repo,
-    isolated_default_db_path: Path,
-    respx_router: respx.MockRouter,
-    install_commit: InstallCommit,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`sptmod update` prompts and cancels when the user answers 'no' (no new commit).
-
-    With input='n\\n', `sptmod update` exits 0 and the repo's commit count remains
-    unchanged; the update is not applied.
-    """
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
-    _mock_updates(respx_router, _available_update_data("https://dl.example/coolmod-2.0.0.zip", 1))
-    commits_before = len(clean_repo.log())
-    monkeypatch.chdir(clean_repo.path)
-
-    result = cli_runner.invoke(cli_app, ["update"], input="n\n")
-
-    assert result.exit_code == 0
-    assert len(clean_repo.log()) == commits_before
-
-
-def test_cli_update_without_yes_prompts_and_applies_on_yes(
+@pytest.mark.parametrize(
+    ("argv", "stdin", "expected_new_commits"),
+    [
+        pytest.param(["update"], "n\n", 0, id="prompt-no"),
+        pytest.param(["update"], "y\n", 1, id="prompt-yes"),
+        pytest.param(["update", "--yes"], "", 1, id="yes-flag"),
+    ],
+)
+def test_cli_update_applies_only_when_the_user_agrees(
     clean_repo: Repo,
     isolated_default_db_path: Path,
     respx_router: respx.MockRouter,
     install_commit: InstallCommit,
     make_archive: MakeArchive,
     monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    stdin: str,
+    expected_new_commits: int,
 ) -> None:
-    """`sptmod update` prompts and applies the update when the user answers 'yes'.
+    """`sptmod update` asks before it changes anything, and ``--yes`` skips the question.
 
-    With input='y\\n', `sptmod update` exits 0 and a new commit is added (mod updated
-    from 1.0.0 to 2.0.0).
+    An update from CoolMod 1.0.0 to 2.0.0 is offered. Answering "n" leaves the
+    history as it was and never fetches the archive, answering "y" downloads
+    it and adds the update commit, and ``--yes`` does the same with empty
+    stdin -- if the flag did not skip the prompt, the prompt would hit EOF and
+    abort instead.
     """
     install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
     new_archive = make_archive(
@@ -837,49 +828,19 @@ def test_cli_update_without_yes_prompts_and_applies_on_yes(
         "zip",
     )
     body = new_archive.read_bytes()
-    link = "https://dl.example/coolmod-2.0.0-yes.zip"
+    link = "https://dl.example/coolmod-2.0.0.zip"
     _mock_updates(respx_router, _available_update_data(link, len(body)))
-    respx_router.get(link).mock(
+    download = respx_router.get(link).mock(
         return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
     )
     commits_before = len(clean_repo.log())
     monkeypatch.chdir(clean_repo.path)
 
-    result = cli_runner.invoke(cli_app, ["update"], input="y\n")
+    result = cli_runner.invoke(cli_app, argv, input=stdin)
 
     assert result.exit_code == 0
-    assert len(clean_repo.log()) == commits_before + 1
-
-
-def test_cli_update_yes_flag_applies_without_prompting(
-    clean_repo: Repo,
-    isolated_default_db_path: Path,
-    respx_router: respx.MockRouter,
-    install_commit: InstallCommit,
-    make_archive: MakeArchive,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If --yes does not exist yet or does not skip the prompt, this fails:
-    either Typer rejects the unknown option, or empty stdin makes the prompt
-    hit EOF and abort instead of applying."""
-    install_commit(clean_repo, "CoolMod", "1.0.0", mod_type="server", **forge_trailers("10"))
-    new_archive = make_archive(
-        {"SPT/user/mods/CoolMod/package.json": json.dumps({"name": "CoolMod", "version": "2.0.0", "author": "Acme"})},
-        "zip",
-    )
-    body = new_archive.read_bytes()
-    link = "https://dl.example/coolmod-2.0.0-flag.zip"
-    _mock_updates(respx_router, _available_update_data(link, len(body)))
-    respx_router.get(link).mock(
-        return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
-    )
-    commits_before = len(clean_repo.log())
-    monkeypatch.chdir(clean_repo.path)
-
-    result = cli_runner.invoke(cli_app, ["update", "--yes"], input="")
-
-    assert result.exit_code == 0
-    assert len(clean_repo.log()) == commits_before + 1
+    assert len(clean_repo.log()) == commits_before + expected_new_commits
+    assert download.call_count == expected_new_commits
 
 
 def test_update_mod_says_which_file_it_could_not_replace_and_commits_nothing(

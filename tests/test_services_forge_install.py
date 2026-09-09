@@ -391,159 +391,74 @@ def _seed_simple_catalog(
         cat.sync(client, full=True)
 
 
-def test_install_from_archive_forge_match_sets_ids_on_unambiguous_match(
+def _cached_mod(mod_id: int, slug: str, owner_name: str, version_id: int, version: str) -> JsonDict:
+    """One cached mod named CoolMod with exactly one published version."""
+    return mod_json_full(
+        id=mod_id,
+        name="CoolMod",
+        slug=slug,
+        owner=owner_json(id=mod_id * 10, name=owner_name),
+        versions=[
+            {
+                "id": version_id,
+                "version": version,
+                "spt_version_constraint": SPT_CONSTRAINT,
+                "downloads": 1,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("catalog_seed", "archive_version", "expected_ids"),
+    [
+        pytest.param(
+            [_cached_mod(401, "coolmod", "Alice", 4011, "1.2.3")],
+            "1.2.3",
+            ("401", "4011"),
+            id="unambiguous-match",
+        ),
+        pytest.param(
+            [_cached_mod(403, "coolmod", "Alice", 4031, "1.2.3")],
+            "9.9.9",
+            ("", ""),
+            id="version-not-cached",
+        ),
+        pytest.param(
+            [
+                _cached_mod(501, "coolmod-a", "Alice", 5011, "1.2.3"),
+                _cached_mod(502, "coolmod-b", "Bob", 5021, "1.2.3"),
+            ],
+            "1.2.3",
+            ("", ""),
+            id="ambiguous-name",
+        ),
+        pytest.param(None, "1.2.3", ("", ""), id="no-catalog-file"),
+    ],
+)
+def test_install_from_archive_forge_match_sets_ids_only_on_one_clear_hit(
     clean_repo: Repo,
     client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
     db_path: Path,
     make_archive: MakeArchive,
+    catalog_seed: list[JsonDict] | None,
+    archive_version: str,
+    expected_ids: tuple[str, str],
 ) -> None:
-    """install_from_archive with forge_match=True sets forge IDs on unambiguous name+version.
+    """install_from_archive stamps Forge ids only when the cache names one version.
 
-    When CoolMod 1.2.3 matches exactly one cached mod (id=401, version_id=4011),
-    the result has forge_id='401' and forge_version_id='4011'.
+    Exactly one cached mod carrying exactly one matching version is a hit and
+    its ids are written into the install commit. A version the cache does not
+    hold, two cached mods of the same name, and a catalog file that was never
+    created all leave the ids empty rather than guessing, because a wrong id
+    would link the installed mod to somebody else's Forge entry.
     """
-    _seed_simple_catalog(
-        client_factory,
-        respx_router,
-        db_path,
-        [
-            mod_json_full(
-                id=401,
-                name="CoolMod",
-                slug="coolmod",
-                owner=owner_json(id=4010, name="Alice"),
-                versions=[
-                    {
-                        "id": 4011,
-                        "version": "1.2.3",
-                        "spt_version_constraint": SPT_CONSTRAINT,
-                        "downloads": 1,
-                        "published_at": "2025-01-02T00:00:00Z",
-                    }
-                ],
-            )
-        ],
-    )
-    archive = package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
+    if catalog_seed is not None:
+        _seed_simple_catalog(client_factory, respx_router, db_path, catalog_seed)
+    archive = package_archive(make_archive, "CoolMod", "CoolMod", archive_version)
 
     result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
 
-    assert result.mod.forge_id == "401"
-    assert result.mod.forge_version_id == "4011"
-
-
-def test_install_from_archive_forge_match_leaves_ids_empty_when_the_version_is_unknown(
-    clean_repo: Repo,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-    db_path: Path,
-    make_archive: MakeArchive,
-) -> None:
-    """One mod matches the name unambiguously, but the installed archive's
-    version has no matching cached version at all: `_catalog_match`'s `if
-    len(versions) != 1: return "", ""` guard, distinct from the len(mods)
-    ambiguity above. If that guard were removed (IndexError on
-    versions[0]), this fails."""
-    _seed_simple_catalog(
-        client_factory,
-        respx_router,
-        db_path,
-        [
-            mod_json_full(
-                id=403,
-                name="CoolMod",
-                slug="coolmod",
-                owner=owner_json(id=4030, name="Alice"),
-                versions=[
-                    {
-                        "id": 4031,
-                        "version": "1.2.3",
-                        "spt_version_constraint": SPT_CONSTRAINT,
-                        "downloads": 1,
-                        "published_at": "2025-01-02T00:00:00Z",
-                    }
-                ],
-            )
-        ],
-    )
-    archive = package_archive(make_archive, "CoolMod", "CoolMod", "9.9.9")
-
-    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
-
-    assert result.mod.forge_id == ""
-    assert result.mod.forge_version_id == ""
-
-
-def test_install_from_archive_forge_match_leaves_ids_empty_on_ambiguous_match(
-    clean_repo: Repo,
-    client_factory: Callable[..., ForgeClient],
-    respx_router: respx.MockRouter,
-    db_path: Path,
-    make_archive: MakeArchive,
-) -> None:
-    """install_from_archive with forge_match=True leaves forge IDs empty on ambiguous match.
-
-    When CoolMod 1.2.3 matches multiple cached mods (ids 501 and 502, both named CoolMod),
-    the result has forge_id='' and forge_version_id=''.
-    """
-    _seed_simple_catalog(
-        client_factory,
-        respx_router,
-        db_path,
-        [
-            mod_json_full(
-                id=501,
-                name="CoolMod",
-                slug="coolmod-a",
-                owner=owner_json(id=5010, name="Alice"),
-                versions=[
-                    {
-                        "id": 5011,
-                        "version": "1.2.3",
-                        "spt_version_constraint": SPT_CONSTRAINT,
-                        "downloads": 1,
-                        "published_at": "2025-01-02T00:00:00Z",
-                    }
-                ],
-            ),
-            mod_json_full(
-                id=502,
-                name="CoolMod",
-                slug="coolmod-b",
-                owner=owner_json(id=5020, name="Bob"),
-                versions=[
-                    {
-                        "id": 5021,
-                        "version": "1.2.3",
-                        "spt_version_constraint": SPT_CONSTRAINT,
-                        "downloads": 1,
-                        "published_at": "2025-01-02T00:00:00Z",
-                    }
-                ],
-            ),
-        ],
-    )
-    archive = package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
-
-    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
-
-    assert result.mod.forge_id == ""
-    assert result.mod.forge_version_id == ""
-
-
-def test_install_from_archive_forge_match_leaves_ids_empty_when_no_match(
-    clean_repo: Repo, db_path: Path, make_archive: MakeArchive
-) -> None:
-    """When db_path points to a non-existent catalog file, forge_match still
-    returns empty Forge IDs without raising an exception (no-op lookup).
-    """
-    # db_path points at a file that has never been created: the catalog cache
-    # does not exist yet, which install_from_archive's docstring says makes
-    # the lookup a no-op.
-    archive = package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
-
-    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
-
-    assert result.mod.forge_id == ""
-    assert result.mod.forge_version_id == ""
+    assert (result.mod.forge_id, result.mod.forge_version_id) == expected_ids

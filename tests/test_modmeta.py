@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from sptmod.core.models import (
-    MOD_TRAILER_KEYS,
     CommitInfo,
     ModInfo,
     ModState,
@@ -24,6 +23,7 @@ from sptmod.core.modmeta import (
     read_package_json,
     version_matches,
 )
+from sptmod.core.repo import Repo
 
 
 def _write_package_json(mod_dir: Path, content: dict[str, object]) -> None:
@@ -158,61 +158,32 @@ def test_read_package_json_non_object_json_raises(tmp_path: Path) -> None:
 # --- meta_from_dll -------------------------------------------------------
 
 
-def test_meta_from_dll_uses_stem_as_default_name(tmp_path: Path) -> None:
-    """meta_from_dll uses DLL filename stem as mod name when no override given.
+@pytest.mark.parametrize(
+    ("kwargs", "expected_name", "expected_version"),
+    [
+        pytest.param({}, "AmandsCoolMod", "", id="stem-as-name"),
+        pytest.param({"name": "OverriddenName"}, "OverriddenName", "", id="explicit-name-wins"),
+        pytest.param({"version": "1.2.3"}, "AmandsCoolMod", "1.2.3", id="explicit-version"),
+    ],
+)
+def test_meta_from_dll_derives_name_and_version(
+    tmp_path: Path, kwargs: dict[str, str], expected_name: str, expected_version: str
+) -> None:
+    """meta_from_dll falls back to the DLL stem and empty version unless overridden.
 
-    Creates dll_path (AmandsCoolMod.dll) with no name override. Returns ModMeta
-    with name="AmandsCoolMod" (stem only, not full filename) and version="".
+    Creates AmandsCoolMod.dll and calls meta_from_dll with no override
+    ("stem-as-name": name is the stem, version stays empty), with name=
+    "OverriddenName" ("explicit-name-wins": the override replaces the stem) and
+    with version="1.2.3" ("explicit-version": the override reaches ModMeta.version).
+    Asserted because the DLL fallback is the only metadata source for client-only mods.
     """
     dll_path = tmp_path / "AmandsCoolMod.dll"
     dll_path.write_bytes(b"binary")
 
-    meta = meta_from_dll(dll_path)
+    meta = meta_from_dll(dll_path, **kwargs)
 
-    assert meta.name == "AmandsCoolMod"
-    assert meta.version == ""
-
-
-def test_meta_from_dll_explicit_name_overrides_stem(tmp_path: Path) -> None:
-    """meta_from_dll name parameter overrides DLL filename stem.
-
-    Creates AmandsCoolMod.dll but passes name="OverriddenName". Returns ModMeta
-    with name="OverriddenName", not "AmandsCoolMod".
-    """
-    dll_path = tmp_path / "AmandsCoolMod.dll"
-    dll_path.write_bytes(b"binary")
-
-    meta = meta_from_dll(dll_path, name="OverriddenName")
-
-    assert meta.name == "OverriddenName"
-
-
-def test_meta_from_dll_uses_version_override(tmp_path: Path) -> None:
-    """meta_from_dll version parameter sets ModMeta.version field.
-
-    Creates AmandsCoolMod.dll and passes version="1.2.3". Returns ModMeta with
-    version="1.2.3".
-    """
-    dll_path = tmp_path / "AmandsCoolMod.dll"
-    dll_path.write_bytes(b"binary")
-
-    meta = meta_from_dll(dll_path, version="1.2.3")
-
-    assert meta.version == "1.2.3"
-
-
-def test_meta_from_dll_no_version_override_is_empty(tmp_path: Path) -> None:
-    """meta_from_dll without version parameter leaves version field empty.
-
-    Creates AmandsCoolMod.dll with no version override. Returns ModMeta with
-    version="" (empty string).
-    """
-    dll_path = tmp_path / "AmandsCoolMod.dll"
-    dll_path.write_bytes(b"binary")
-
-    meta = meta_from_dll(dll_path)
-
-    assert meta.version == ""
+    assert meta.name == expected_name
+    assert meta.version == expected_version
 
 
 # --- build_trailers / mod_info_from_commit -------------------------------
@@ -234,17 +205,33 @@ _SAMPLE_MOD_INFO = ModInfo(
 )
 
 
-def test_build_trailers_contains_all_keys_in_order() -> None:
-    """build_trailers returns dict with all MOD_TRAILER_KEYS in exact order.
+def test_build_trailers_writes_the_trailer_block_in_the_documented_order(initialized_repo: Repo) -> None:
+    """A commit written from build_trailers carries its trailer keys in a fixed order.
 
-    Calls build_trailers(_SAMPLE_MOD_INFO). Resulting dict keys must be
-    identical to MOD_TRAILER_KEYS (both keys and order match).
+    Commits the trailers of a fully populated ModInfo with Repo.commit and reads them
+    back with Repo.log, so the assertion sees the order the trailer block really has in
+    the commit message. The expected list is hardcoded rather than derived from
+    MOD_TRAILER_KEYS: the layout of the trailer block is part of the on-disk format the
+    Rust port must reproduce, so reordering the keys has to fail here.
     """
-    mod_info = _SAMPLE_MOD_INFO
+    mod_dir = initialized_repo.path / "SPT" / "user" / "mods" / "SAIN"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "plugin.dll").write_bytes(b"content")
 
-    trailers = build_trailers(mod_info)
+    initialized_repo.commit("mod: SAIN 3.2.1", trailers=build_trailers(_SAMPLE_MOD_INFO))
 
-    assert list(trailers.keys()) == list(MOD_TRAILER_KEYS)
+    assert list(initialized_repo.log()[0].trailers) == [
+        "Mod",
+        "Mod-Version",
+        "Mod-Type",
+        "Mod-Author",
+        "Mod-SPT",
+        "Mod-Source",
+        "Mod-Forge-Id",
+        "Mod-Forge-Version-Id",
+        "Mod-Guid",
+        "Mod-State",
+    ]
 
 
 def test_build_trailers_maps_field_values() -> None:
@@ -420,41 +407,53 @@ def test_build_trailers_roundtrips_with_variant_fields(mod_info: ModInfo) -> Non
 @pytest.mark.parametrize(
     ("version", "range_spec"),
     [
-        ("1.2.3", "1.2.3"),
-        ("1.2.3", "v1.2.3"),
-        ("1.2.3", "^1.2.0"),
-        ("1.9.9", "^1.2.0"),
-        ("1.2.3", "~1.2.0"),
-        ("1.2.9", "~1.2.0"),
-        ("1.2.3", ">=1.2.3"),
-        ("1.3.0", ">=1.2.3"),
-        ("1.2.4", ">1.2.3"),
-        ("1.2.3", "<=1.2.3"),
-        ("1.2.2", "<=1.2.3"),
-        ("1.2.2", "<1.2.3"),
-        ("1.2.3", "*"),
-        ("0.0.1", "*"),
-        ("999.999.999", "*"),
-        ("1.5.9", "1.x"),
-        ("1.9.9", "1.x"),
-        ("1.2.3", "1.2.x"),
-        ("1.2.9", "1.2.x"),
-        ("1.5.0", "1.x"),
-        ("1.0.0", ">=1.0.0 <2.0.0"),
-        ("1.0.0", ""),
-        ("0.0.1", ""),
-        ("1.5.0", "1"),
-        ("1.0.0", "1"),
-        ("1.5.3", "1"),
-        ("1.5.3", "1.5"),
+        pytest.param("1.2.3", "1.2.3", id="exact-match"),
+        pytest.param("1.2.3", "v1.2.3", id="leading-v-on-range"),
+        pytest.param("1.2.3", "^1.2.0", id="caret-lower-bound"),
+        pytest.param("1.9.9", "^1.2.0", id="caret-below-upper-bound"),
+        pytest.param("1.2.3", "~1.2.0", id="tilde-lower-bound"),
+        pytest.param("1.2.9", "~1.2.0", id="tilde-below-upper-bound"),
+        pytest.param("1.2.3", ">=1.2.3", id="at-least-equal"),
+        pytest.param("1.3.0", ">=1.2.3", id="at-least-greater"),
+        pytest.param("1.2.4", ">1.2.3", id="greater-than"),
+        pytest.param("1.2.3", "<=1.2.3", id="at-most-equal"),
+        pytest.param("1.2.2", "<=1.2.3", id="at-most-smaller"),
+        pytest.param("1.2.2", "<1.2.3", id="less-than"),
+        pytest.param("1.2.3", "*", id="star-any"),
+        pytest.param("0.0.1", "*", id="star-lowest"),
+        pytest.param("999.999.999", "*", id="star-highest"),
+        pytest.param("1.5.9", "1.x", id="minor-wildcard"),
+        pytest.param("1.9.9", "1.x", id="minor-wildcard-high-minor"),
+        pytest.param("1.2.3", "1.2.x", id="patch-wildcard"),
+        pytest.param("1.2.9", "1.2.x", id="patch-wildcard-high-patch"),
+        pytest.param("1.5.0", "1.x", id="minor-wildcard-zero-patch"),
+        pytest.param("1.0.0", ">=1.0.0 <2.0.0", id="two-comparators-lower-bound"),
+        pytest.param("1.0.0", "", id="empty-range-any"),
+        pytest.param("0.0.1", "", id="empty-range-lowest"),
+        pytest.param("1.5.0", "1", id="bare-major"),
+        pytest.param("1.0.0", "1", id="bare-major-zero-minor"),
+        pytest.param("1.5.3", "1", id="bare-major-with-patch"),
+        pytest.param("1.5.3", "1.5", id="bare-major-minor"),
+        pytest.param("v1.2.3", "1.2.3", id="leading-v-on-version"),
+        pytest.param("1.5.0", "1.X", id="uppercase-x-wildcard"),
+        pytest.param("1.2.3", "=1.2.3", id="bare-equals"),
+        pytest.param("5.3.1", "^x", id="caret-without-numeric-parts"),
+        pytest.param("0.0.0", "^x", id="caret-without-numeric-parts-zero-version"),
+        # npm caret semantics: the upper bound comes from the first explicitly
+        # given non-zero part, so omitted parts act as wildcards.
+        pytest.param("0.0.5", "^0.0", id="caret-0-0"),  # ^0.0 := >=0.0.0 <0.1.0
+        pytest.param("0.5.0", "^0", id="caret-0"),  # ^0 := >=0.0.0 <1.0.0
+        pytest.param("0.5.0", "^0.x", id="caret-0-x"),  # ^0.x := >=0.0.0 <1.0.0
     ],
 )
 def test_version_matches_true_cases(version: str, range_spec: str) -> None:
     """version_matches returns True for versions satisfying range specifications.
 
-    Parametrized with 27 cases including exact matches (1.2.3), semver ranges
-    (^1.2.0, ~1.2.0), comparators (>=, <, <=, >), wildcards (1.x, *), multi-part
-    ranges (>=1.0.0 <2.0.0), and edge cases (empty range, bare major version).
+    Covers exact matches (1.2.3), a leading "v" on either argument, semver ranges
+    (^1.2.0, ~1.2.0), comparators (>=, <, <=, >, bare =), wildcards (1.x, 1.X, *,
+    ^x), multi-part ranges (>=1.0.0 <2.0.0), caret ranges with omitted/zero leading
+    parts, and edge cases (empty range, bare major version). Asserted because these
+    ranges come verbatim from mod package.json files.
     """
     assert version_matches(version, range_spec) is True
 
@@ -462,97 +461,63 @@ def test_version_matches_true_cases(version: str, range_spec: str) -> None:
 @pytest.mark.parametrize(
     ("version", "range_spec"),
     [
-        ("1.3.0", "1.2.3"),
-        ("2.0.0", "^1.2.0"),
-        ("1.3.0", "~1.2.0"),
-        ("1.2.2", ">=1.2.3"),
-        ("1.2.3", ">1.2.3"),
-        ("1.2.4", "<=1.2.3"),
-        ("1.2.3", "<1.2.3"),
-        ("2.0.0", "1.x"),
-        ("1.3.0", "1.2.x"),
-        ("2.0.0", ">=1.0.0 <2.0.0"),
-        ("2.0.1", ">=1.0.0 <2.0.0"),
-        ("2.0.0", "1"),
-        ("1.6.0", "1.5"),
+        pytest.param("1.3.0", "1.2.3", id="exact-mismatch"),
+        pytest.param("2.0.0", "^1.2.0", id="caret-upper-bound"),
+        pytest.param("1.3.0", "~1.2.0", id="tilde-upper-bound"),
+        pytest.param("1.2.2", ">=1.2.3", id="at-least-violated"),
+        pytest.param("1.2.3", ">1.2.3", id="greater-than-violated"),
+        pytest.param("1.2.4", "<=1.2.3", id="at-most-violated"),
+        pytest.param("1.2.3", "<1.2.3", id="less-than-violated"),
+        pytest.param("2.0.0", "1.x", id="minor-wildcard-wrong-major"),
+        pytest.param("1.3.0", "1.2.x", id="patch-wildcard-wrong-minor"),
+        pytest.param("2.0.0", ">=1.0.0 <2.0.0", id="two-comparators-upper-bound"),
+        pytest.param("2.0.1", ">=1.0.0 <2.0.0", id="two-comparators-above-upper-bound"),
+        pytest.param("2.0.0", "1", id="bare-major-mismatch"),
+        pytest.param("1.6.0", "1.5", id="bare-major-minor-mismatch"),
+        pytest.param("1.2.4", "=1.2.3", id="bare-equals-mismatch"),
+        pytest.param("2.0.0", "1.X", id="uppercase-x-wildcard-miss"),
+        pytest.param("0.1.0", "^0.0", id="caret-0-0-upper-bound"),
+        pytest.param("1.0.0", "^0", id="caret-0-upper-bound"),
+        pytest.param("1.0.0", "^0.x", id="caret-0-x-upper-bound"),
     ],
 )
 def test_version_matches_false_cases(version: str, range_spec: str) -> None:
     """version_matches returns False for versions outside specified ranges.
 
-    Parametrized with 13 rejection cases: exact mismatch (1.3.0 vs 1.2.3), caret
-    overflow (2.0.0 vs ^1.2.0), tilde overflow (1.3.0 vs ~1.2.0), comparator
-    violations, wildcard mismatches (2.0.0 vs 1.x), and multi-part range boundary
-    violations (2.0.0/2.0.1 vs >=1.0.0 <2.0.0).
+    Covers exact mismatch (1.3.0 vs 1.2.3), bare = mismatch, caret overflow (2.0.0
+    vs ^1.2.0), tilde overflow (1.3.0 vs ~1.2.0), comparator violations, wildcard
+    mismatches (2.0.0 vs 1.x and 1.X), multi-part range boundary violations
+    (2.0.0/2.0.1 vs >=1.0.0 <2.0.0) and the npm caret upper bounds for ranges with
+    omitted/zero leading parts. Asserted so an incompatible mod is never accepted.
     """
     assert version_matches(version, range_spec) is False
-
-
-def test_version_matches_leading_v_on_the_version_argument() -> None:
-    """version_matches strips leading 'v' from version argument before comparing.
-
-    Calls version_matches("v1.2.3", "1.2.3") and expects True (leading v is
-    discarded, then 1.2.3 matches 1.2.3 exactly).
-    """
-    assert version_matches("v1.2.3", "1.2.3") is True
-
-
-@pytest.mark.parametrize(
-    "range_spec",
-    [
-        "1.0.0 || 2.0.0",
-        "1.0.0 - 2.0.0",
-        "1.2.3-beta",
-        "1.2.3+build.1",
-    ],
-)
-def test_version_matches_unsupported_range_syntax_raises(range_spec: str) -> None:
-    """Unsupported npm range syntax (||, -, prerelease, build) raises error."""
-    with pytest.raises(UnsupportedRangeError):
-        version_matches("1.2.3", range_spec)
-
-
-def test_version_matches_non_numeric_version_raises() -> None:
-    """Non-numeric version string raises UnsupportedRangeError."""
-    with pytest.raises(UnsupportedRangeError):
-        version_matches("not-a-version", "1.2.3")
-
-
-# --- caret ranges with omitted/zero leading parts (npm semantics) -----------
-#
-# Caret upper bounds are determined from the first explicitly given non-zero
-# part, allowing omitted parts to act as wildcards. ^0.0 allows <0.1.0, ^0
-# allows <1.0.0, and ^0.x treats the wildcard as omitted and also allows <1.0.0.
 
 
 @pytest.mark.parametrize(
     ("version", "range_spec"),
     [
-        ("0.0.5", "^0.0"),  # npm: ^0.0 := >=0.0.0 <0.1.0
-        ("0.5.0", "^0"),  # npm: ^0 := >=0.0.0 <1.0.0
-        ("0.5.0", "^0.x"),  # npm: ^0.x := >=0.0.0 <1.0.0
+        pytest.param("1.2.3", "1.0.0 || 2.0.0", id="or-operator"),
+        pytest.param("1.2.3", "1.0.0 - 2.0.0", id="hyphen-range"),
+        pytest.param("1.2.3", "1.2.3-beta", id="prerelease-range"),
+        pytest.param("1.2.3", "1.2.3+build.1", id="build-metadata-range"),
+        pytest.param("not-a-version", "1.2.3", id="non-numeric-version"),
+        pytest.param("1.2.3-beta", "1.2.3", id="prerelease-version"),
+        pytest.param("v", "1.2.3", id="bare-v-as-version"),
+        pytest.param("1.2.3", "v", id="bare-v-as-range-token"),
+        pytest.param("x", "1.2.3", id="bare-wildcard-version"),
     ],
 )
-def test_version_matches_caret_omitted_leading_parts_true(version: str, range_spec: str) -> None:
-    """Caret with leading zero and omitted parts follows npm semantics."""
-    assert version_matches(version, range_spec) is True
+def test_version_matches_unsupported_input_raises(version: str, range_spec: str) -> None:
+    """version_matches raises UnsupportedRangeError for input it cannot decide.
 
-
-@pytest.mark.parametrize(
-    ("version", "range_spec"),
-    [
-        ("0.1.0", "^0.0"),  # outside npm's <0.1.0 upper bound
-        ("1.0.0", "^0"),  # outside npm's <1.0.0 upper bound
-        ("1.0.0", "^0.x"),  # outside npm's <1.0.0 upper bound
-    ],
-)
-def test_version_matches_caret_omitted_leading_parts_false(version: str, range_spec: str) -> None:
-    """version_matches rejects versions outside caret bounds (npm semantics).
-
-    Tests: "0.1.0" vs "^0.0" (outside <0.1.0), "1.0.0" vs "^0" (outside <1.0.0),
-    "1.0.0" vs "^0.x" (outside <1.0.0). Each must return False per npm caret rules.
+    Covers npm range syntax the parser does not implement (||, hyphen ranges,
+    prerelease and build-metadata ranges) and version arguments that carry no
+    comparable numeric parts (non-numeric text, a prerelease suffix, a bare "v" on
+    either side, a bare wildcard). Asserted because guessing a match here would
+    silently install an incompatible mod.
     """
-    assert version_matches(version, range_spec) is False
+    with pytest.raises(UnsupportedRangeError):
+        version_matches(version, range_spec)
 
 
 # --- review coverage gaps (expected to already pass) -------------------------
@@ -575,71 +540,3 @@ def test_read_package_json_dependencies_skips_non_string_ranges(
     meta = read_package_json(mod_dir)
 
     assert meta.dependencies == {"A": "^1.0.0"}
-
-
-def test_version_matches_uppercase_x_wildcard() -> None:
-    """version_matches treats uppercase X as wildcard identical to lowercase x.
-
-    Tests version_matches("1.5.0", "1.X") returns True and version_matches("2.0.0",
-    "1.X") returns False, proving uppercase X wildcards work like lowercase x.
-    """
-    assert version_matches("1.5.0", "1.X") is True
-    assert version_matches("2.0.0", "1.X") is False
-
-
-def test_version_matches_prerelease_version_argument_raises() -> None:
-    """Prerelease version argument (e.g., 1.2.3-beta) raises error."""
-    with pytest.raises(UnsupportedRangeError):
-        version_matches("1.2.3-beta", "1.2.3")
-
-
-# --- edge cases in the numeric-part / comparator / caret parsing -----------
-
-
-@pytest.mark.parametrize(
-    ("version", "range_spec"),
-    [("v", "1.2.3"), ("1.2.3", "v")],
-    ids=["bare-v-as-version", "bare-v-as-range-token"],
-)
-def test_version_matches_bare_v_with_nothing_after_it_raises(version: str, range_spec: str) -> None:
-    """Bare 'v' without numeric parts raises UnsupportedRangeError."""
-    with pytest.raises(UnsupportedRangeError):
-        version_matches(version, range_spec)
-
-
-def test_version_matches_bare_equals_comparator_true() -> None:
-    """version_matches treats bare = as exact-match comparator (success case).
-
-    version_matches("1.2.3", "=1.2.3") returns True (= prefix means exact match).
-    """
-    assert version_matches("1.2.3", "=1.2.3") is True
-
-
-def test_version_matches_bare_equals_comparator_false() -> None:
-    """version_matches treats bare = as exact-match comparator (failure case).
-
-    version_matches("1.2.4", "=1.2.3") returns False (exact match required).
-    """
-    assert version_matches("1.2.4", "=1.2.3") is False
-
-
-def test_version_matches_caret_with_no_numeric_parts_matches_everything() -> None:
-    """version_matches with ^x (no numeric parts) matches any version.
-
-    Caret with no numeric parts reduces to an unconstrained range. version_matches
-    ("5.3.1", "^x") and version_matches("0.0.0", "^x") both return True.
-    """
-    # "^x" reduces to zero numeric parts, which _token_matches treats the
-    # same as an unconstrained caret range.
-    assert version_matches("5.3.1", "^x") is True
-    assert version_matches("0.0.0", "^x") is True
-
-
-def test_version_matches_bare_wildcard_version_argument_raises() -> None:
-    """version_matches raises UnsupportedRangeError when version is bare 'x'.
-
-    Calling version_matches("x", "1.2.3") raises UnsupportedRangeError because
-    the version argument cannot be a bare wildcard.
-    """
-    with pytest.raises(UnsupportedRangeError):
-        version_matches("x", "1.2.3")

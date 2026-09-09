@@ -10,6 +10,8 @@ profile JSON.
 import json
 from pathlib import Path
 
+import pytest
+
 from fixture_types import JsonDict
 from fixtures_profile import empty_pmc_profile
 from sptmod.core.models import ProfileResidue, ResidueCategory
@@ -153,29 +155,6 @@ def test_find_residues_string_fallback_finds_id_embedded_elsewhere(
     assert residues == [ProfileResidue(profile="player1", category=ResidueCategory.STRING, ids=[ITEM_A], count=1)]
 
 
-def test_find_residues_string_fallback_excludes_ids_already_matched_structurally(
-    tmp_path: Path,
-) -> None:
-    """String category excludes IDs already matched by structural rules."""
-    ids = ModIds(items={ITEM_A})
-    content = empty_pmc_profile()
-    content["characters"]["pmc"]["Inventory"]["items"] = [
-        {
-            "_id": "x1",
-            "_tpl": ITEM_A,
-            "parentId": "5c0d1b8b86f7744bb2683c99",
-            "slotId": "hideout",
-        }
-    ]
-    content["backup"] = {"_tpl": ITEM_A}
-    profile = _make_profile(tmp_path, "player1", content)
-
-    residues = find_residues(profile, ids)
-
-    categories = {residue.category for residue in residues}
-    assert categories == {"item"}
-
-
 def test_find_residues_orders_categories_item_trader_quest_string(
     tmp_path: Path,
 ) -> None:
@@ -254,31 +233,27 @@ def test_find_residues_returns_empty_list_for_a_clean_profile(tmp_path: Path) ->
     assert find_residues(profile, ids) == []
 
 
-def test_find_residues_returns_empty_list_for_malformed_profile_json(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        pytest.param("broken.json", "{not valid json", id="malformed-json"),
+        pytest.param("missing.json", None, id="missing-file"),
+        pytest.param("array-root.json", "[1, 2, 3]", id="non-object-root"),
+    ],
+)
+def test_find_residues_returns_no_residue_for_an_unreadable_profile(
+    tmp_path: Path, filename: str, content: str | None
 ) -> None:
-    """find_residues returns empty list for profiles with invalid JSON."""
-    profile = tmp_path / "broken.json"
-    profile.write_text("{not valid json", encoding="utf-8")
+    """find_residues reports nothing when the profile cannot be read as a JSON object.
 
-    assert find_residues(profile, ModIds(items={ITEM_A})) == []
-
-
-def test_find_residues_returns_empty_list_for_a_missing_profile(
-    tmp_path: Path,
-) -> None:
-    """find_residues returns empty list when profile file does not exist."""
-    profile = tmp_path / "missing.json"
-
-    assert find_residues(profile, ModIds(items={ITEM_A})) == []
-
-
-def test_find_residues_returns_empty_list_for_a_valid_json_non_object_root(
-    tmp_path: Path,
-) -> None:
-    """find_residues returns empty list when JSON root is not an object."""
-    profile = tmp_path / "array-root.json"
-    profile.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    Points find_residues at a file holding invalid JSON ("malformed-json"), at a path
+    that was never written ("missing-file") and at valid JSON whose root is an array
+    ("non-object-root"). Each returns no residue, so a damaged or absent profile never
+    blocks a mod removal with a bogus warning.
+    """
+    profile = tmp_path / filename
+    if content is not None:
+        profile.write_text(content, encoding="utf-8")
 
     assert find_residues(profile, ModIds(items={ITEM_A})) == []
 

@@ -2,8 +2,11 @@
 
 Covers the match variants and non-dict tolerance of the repeatable-quest,
 task-counter, hideout-production, insured-item, insurance, dialogue,
-userbuild and hideout-area categories, including the "no hit leaves no
-residue" case for each of them.
+userbuild and hideout-area categories. The "populated container without a
+matching id yields no residue" case is covered for every category by
+``test_find_residues_missing_or_wrong_type_container_yields_no_residue`` in
+``test_profile_categories.py``, whose fixture fills every container with
+unrelated ids.
 """
 
 import json
@@ -134,52 +137,35 @@ def test_find_residues_repeatable_quest_skips_non_dict_groups_and_entries(
     ]
 
 
-def test_find_residues_repeatable_quest_no_hit_leaves_no_residue(
-    tmp_path: Path,
-) -> None:
-    """No repeatable-quest residue when entry IDs and traders don't match."""
-    ids = ModIds(quests={QUEST_ID}, traders={TRADER_ID})
-    content = _pmc_with_repeatable([{"_id": "other", "templateId": "other", "traderId": "other-trader"}])
-    profile = _make_profile(tmp_path, "player1", content)
-
-    assert find_residues(profile, ids) == []
-
-
 # --------------------------------------------------------------------------
 # find_residues -- task-counter and hideout-production: key vs. nested field
 # --------------------------------------------------------------------------
 
 
-def test_find_residues_task_counter_matches_by_key(tmp_path: Path) -> None:
-    """Task-counter category matches when the dict key is a mod quest ID."""
+@pytest.mark.parametrize(
+    "counters",
+    [
+        pytest.param(
+            {QUEST_ID: {"id": QUEST_ID, "type": "Counter", "value": 1, "sourceId": "other"}},
+            id="by-key",
+        ),
+        pytest.param(
+            {"cond1": {"id": "cond1", "type": "Counter", "value": 1, "sourceId": QUEST_ID}},
+            id="by-source-id",
+        ),
+    ],
+)
+def test_find_residues_task_counter_matches_key_or_source_id(tmp_path: Path, counters: JsonDict) -> None:
+    """Task-counter matches a mod quest id in the dict key or in an entry's sourceId.
+
+    Writes TaskConditionCounters holding the mod quest id once as the dict key
+    ("by-key") and once only in the entry's sourceId field ("by-source-id"). Both
+    report a single task-counter residue for the PMC character, because SPT stores
+    live quest counters under either shape and both keep a removed quest alive.
+    """
     ids = ModIds(quests={QUEST_ID})
     content = empty_pmc_profile()
-    content["characters"]["pmc"]["TaskConditionCounters"] = {
-        QUEST_ID: {"id": QUEST_ID, "type": "Counter", "value": 1, "sourceId": "other"}
-    }
-    profile = _make_profile(tmp_path, "player1", content)
-
-    residues = find_residues(profile, ids)
-
-    assert residues == [
-        ProfileResidue(
-            profile="player1",
-            category=ResidueCategory.TASK_COUNTER,
-            ids=[QUEST_ID],
-            count=1,
-            character="pmc",
-            path="/characters/pmc/TaskConditionCounters",
-        )
-    ]
-
-
-def test_find_residues_task_counter_matches_by_source_id(tmp_path: Path) -> None:
-    """Task-counter also matches when entry's sourceId field references a mod quest."""
-    ids = ModIds(quests={QUEST_ID})
-    content = empty_pmc_profile()
-    content["characters"]["pmc"]["TaskConditionCounters"] = {
-        "cond1": {"id": "cond1", "type": "Counter", "value": 1, "sourceId": QUEST_ID}
-    }
+    content["characters"]["pmc"]["TaskConditionCounters"] = counters
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -208,34 +194,24 @@ def test_find_residues_task_counter_tolerates_a_non_dict_value_and_no_hit(
     assert find_residues(profile, ids) == []
 
 
-def test_find_residues_hideout_production_matches_by_key(tmp_path: Path) -> None:
-    """Hideout-production category matches when the Production dict key is a recipe ID."""
+@pytest.mark.parametrize(
+    "production",
+    [
+        pytest.param({RECIPE_ID: {"Progress": 0}}, id="by-key"),
+        pytest.param({"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}, id="by-recipe-id"),
+    ],
+)
+def test_find_residues_hideout_production_matches_key_or_recipe_id(tmp_path: Path, production: JsonDict) -> None:
+    """Hideout-production matches a mod recipe id in the Production key or in recipeId.
+
+    Writes Hideout.Production holding the mod recipe id once as the dict key
+    ("by-key") and once only in the entry's recipeId field ("by-recipe-id"). Both
+    report a single hideout-production residue for the PMC character, because a
+    running production of a removed recipe is what breaks the hideout screen.
+    """
     ids = ModIds(recipes={RECIPE_ID})
     content = empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {"Production": {RECIPE_ID: {"Progress": 0}}}
-    profile = _make_profile(tmp_path, "player1", content)
-
-    residues = find_residues(profile, ids)
-
-    assert residues == [
-        ProfileResidue(
-            profile="player1",
-            category=ResidueCategory.HIDEOUT_PRODUCTION,
-            ids=[RECIPE_ID],
-            count=1,
-            character="pmc",
-            path="/characters/pmc/Hideout/Production",
-        )
-    ]
-
-
-def test_find_residues_hideout_production_matches_by_recipe_id(
-    tmp_path: Path,
-) -> None:
-    """Hideout-production also matches when entry's recipeId field is a mod recipe."""
-    ids = ModIds(recipes={RECIPE_ID})
-    content = empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {"Production": {"prod1": {"recipeId": RECIPE_ID, "Progress": 0}}}
+    content["characters"]["pmc"]["Hideout"] = {"Production": production}
     profile = _make_profile(tmp_path, "player1", content)
 
     residues = find_residues(profile, ids)
@@ -529,23 +505,6 @@ def test_find_residues_dialogue_matches_message_by_item_when_template_id_is_miss
     ]
 
 
-def test_find_residues_dialogue_no_hit_leaves_no_residue(tmp_path: Path) -> None:
-    """No dialogue residue when trader keys and message IDs/items don't match."""
-    ids = ModIds(traders={TRADER_ID}, items={ITEM_A}, quests={QUEST_ID})
-    content = empty_pmc_profile()
-    content["dialogues"] = {
-        "unrelated-trader": {
-            "_id": "unrelated-trader",
-            "messages": [
-                {"_id": "m1", "templateId": "unrelated", "items": {}},
-            ],
-        }
-    }
-    profile = _make_profile(tmp_path, "player1", content)
-
-    assert find_residues(profile, ids) == []
-
-
 # --------------------------------------------------------------------------
 # find_residues -- userbuild: nested _tpl in weapon, equipment and magazine builds
 # --------------------------------------------------------------------------
@@ -576,20 +535,6 @@ def test_find_residues_userbuild_matches_all_three_build_lists(tmp_path: Path, b
             path="/userbuilds",
         )
     ]
-
-
-def test_find_residues_userbuild_no_hit_leaves_no_residue(tmp_path: Path) -> None:
-    """No userbuild residue when build items don't reference mod items."""
-    ids = ModIds(items={ITEM_A})
-    content = empty_pmc_profile()
-    content["userbuilds"] = {
-        "weaponBuilds": [{"Id": "b1", "Name": "Build", "Items": [{"_id": "i1", "_tpl": ITEM_B}]}],
-        "equipmentBuilds": [],
-        "magazineBuilds": [],
-    }
-    profile = _make_profile(tmp_path, "player1", content)
-
-    assert find_residues(profile, ids) == []
 
 
 # --------------------------------------------------------------------------
@@ -631,15 +576,3 @@ def test_find_residues_hideout_area_matches_a_nested_tpl_below_slots(
             path="/characters/pmc/Hideout/Areas",
         )
     ]
-
-
-def test_find_residues_hideout_area_no_hit_leaves_no_residue(
-    tmp_path: Path,
-) -> None:
-    """No hideout-area residue when slots don't hold mod items."""
-    ids = ModIds(items={ITEM_A})
-    content = empty_pmc_profile()
-    content["characters"]["pmc"]["Hideout"] = {"Areas": [{"type": 0, "slots": [{"locationIndex": 0}]}]}
-    profile = _make_profile(tmp_path, "player1", content)
-
-    assert find_residues(profile, ids) == []

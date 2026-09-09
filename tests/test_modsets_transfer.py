@@ -193,16 +193,28 @@ def test_import_mod_set_with_both_set_file_and_content_raises_invalid_metadata_e
 # --- bad code / unreadable file ----------------------------------------------
 
 
-def test_import_mod_set_with_a_damaged_share_code_raises_invalid_metadata_error(
-    tmp_path: Path, mod_set_store: Path
-) -> None:
-    """If the decode/decompress errors were not caught, this fails: a
-    binascii.Error or zlib.error propagates instead of InvalidMetadataError."""
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("SPTMODSET1-not-valid-base64!!!", id="damaged-share-code"),
+        pytest.param("not a mod set at all", id="neither-json-nor-share-code"),
+        pytest.param("{not valid json", id="invalid-json"),
+    ],
+)
+def test_import_mod_set_rejects_undecodable_content(tmp_path: Path, mod_set_store: Path, content: str) -> None:
+    """Content that is neither a readable share code nor readable JSON is refused.
+
+    Passes a share code whose payload is not decodable base64 ("damaged-share-code"),
+    a string that carries neither the share-code prefix nor JSON punctuation
+    ("neither-json-nor-share-code") and text that starts like JSON but does not parse
+    ("invalid-json"). Each raises InvalidMetadataError instead of letting a
+    binascii.Error, zlib.error or json.JSONDecodeError escape to the user.
+    """
     game_dir = tmp_path / "game"
     game_dir.mkdir()
 
     with pytest.raises(InvalidMetadataError):
-        services.import_mod_set(game_dir, content="SPTMODSET1-not-valid-base64!!!", store_path=mod_set_store)
+        services.import_mod_set(game_dir, content=content, store_path=mod_set_store)
 
 
 def test_import_mod_set_from_a_missing_file_raises_invalid_metadata_error(
@@ -215,19 +227,6 @@ def test_import_mod_set_from_a_missing_file_raises_invalid_metadata_error(
 
     with pytest.raises(InvalidMetadataError):
         services.import_mod_set(game_dir, set_file=tmp_path / "no-such-file.json", store_path=mod_set_store)
-
-
-def test_import_mod_set_content_that_is_neither_json_nor_a_share_code_raises_invalid_metadata_error(
-    tmp_path: Path, mod_set_store: Path
-) -> None:
-    """If the fallback shape check were dropped, this fails: a garbled string
-    would silently reach the JSON parser instead of a clear
-    InvalidMetadataError."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-
-    with pytest.raises(InvalidMetadataError):
-        services.import_mod_set(game_dir, content="not a mod set at all", store_path=mod_set_store)
 
 
 # --- a mod set exported as export_mods' unrelated {"mods": [...]} format ----
@@ -278,16 +277,6 @@ def test_import_mod_set_rejects_a_malformed_mod_set_shape(
 
     with pytest.raises(InvalidMetadataError):
         services.import_mod_set(game_dir, content=content, store_path=mod_set_store)
-
-
-def test_import_mod_set_rejects_content_that_is_not_valid_json(tmp_path: Path, mod_set_store: Path) -> None:
-    """If the JSON parse error were not caught, this fails: a
-    json.JSONDecodeError propagates instead of InvalidMetadataError."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-
-    with pytest.raises(InvalidMetadataError):
-        services.import_mod_set(game_dir, content="{not valid json", store_path=mod_set_store)
 
 
 # --- a file that holds no text ----------------------------------------------

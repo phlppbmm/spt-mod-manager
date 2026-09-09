@@ -81,10 +81,14 @@ def _dir_size(path: Path) -> int:
 
 
 def test_max_bytes_default_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """max_bytes() returns DEFAULT_MAX_BYTES when environment variable is unset."""
+    """max_bytes() allows 20 GiB when the environment variable is unset.
+
+    Unsets SPTMOD_DOWNLOAD_CACHE_MAX_GB and asserts the literal 20 * 1024**3, the
+    documented default cache budget a user gets without configuring anything.
+    """
     monkeypatch.delenv(CacheEnv.MAX_GB, raising=False)
 
-    assert cache.max_bytes() == DEFAULT_MAX_BYTES
+    assert cache.max_bytes() == 20 * 1024**3
 
 
 @pytest.mark.parametrize(
@@ -635,7 +639,7 @@ def test_sweep_evicts_oldest_last_use_entries_first_until_under_the_cap(
     os.utime(cache_dir / "b", (now - 200, now - 200))
     os.utime(cache_dir / "c", (now - 100, now - 100))
     # Room for exactly the newest entry: both older ones must go.
-    monkeypatch.setattr(cache, "max_bytes", lambda: c_size)
+    monkeypatch.setenv(CacheEnv.MAX_GB, str(c_size / 1024**3))
 
     freed = cache.sweep(cache_dir=cache_dir)
 
@@ -650,7 +654,7 @@ def test_sweep_never_evicts_the_keep_key_however_large_the_cache_is(
 ) -> None:
     """sweep(keep_key="a") protects entry a from eviction regardless of cap.
 
-    With cap=1 (below all entries), keep_key="a" prevents a's eviction even
+    With a one-byte cap (below all entries), keep_key="a" prevents a's eviction even
     though it's 80 bytes; b (10 bytes, 200s old) and c (10 bytes, 100s old)
     are evicted instead to stay under the cap, leaving a intact.
     """
@@ -664,7 +668,7 @@ def test_sweep_never_evicts_the_keep_key_however_large_the_cache_is(
     os.utime(cache_dir / "b", (now - 200, now - 200))
     os.utime(cache_dir / "c", (now - 100, now - 100))
     # A cap far below even the protected entry alone: b and c must still go.
-    monkeypatch.setattr(cache, "max_bytes", lambda: 1)
+    monkeypatch.setenv(CacheEnv.MAX_GB, str(1 / 1024**3))
 
     freed = cache.sweep(keep_key="a", cache_dir=cache_dir)
 
@@ -679,9 +683,10 @@ def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
 ) -> None:
     """sweep() skips unevictable entries and continues with others.
 
-    Entry a (oldest, 300s) is read-only (0o000) and cannot be deleted; sweep()
-    skips it and evicts b (200s) instead, freeing b_size bytes despite a
-    remaining; this ensures permission errors don't block eviction of others.
+    With a one-byte cap everything is over budget. Entry a (oldest, 300s) is
+    read-only (0o000) and cannot be deleted; sweep() skips it and evicts b (200s)
+    instead, freeing b_size bytes despite a remaining; this ensures permission
+    errors don't block eviction of others.
     """
     _write_entry(cache_dir, "a", "a.zip", b"1" * 30)
     _write_entry(cache_dir, "b", "b.zip", b"2" * 20)
@@ -691,7 +696,7 @@ def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
     os.utime(cache_dir / "b", (now - 200, now - 200))
     # 'a' is the oldest (evicted first) but cannot actually be removed.
     os.chmod(cache_dir / "a", 0o000)
-    monkeypatch.setattr(cache, "max_bytes", lambda: 0)
+    monkeypatch.setenv(CacheEnv.MAX_GB, str(1 / 1024**3))
 
     try:
         freed = cache.sweep(cache_dir=cache_dir)
@@ -703,23 +708,20 @@ def test_sweep_skips_an_entry_it_cannot_remove_and_still_evicts_the_rest(
     assert not (cache_dir / "b").exists()
 
 
-def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails(
-    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """keep() raises ArchiveError with filename when os.replace() fails.
+def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails(cache_dir: Path) -> None:
+    """keep() reports a failed publish in plain language and keeps the download.
 
-    When keep(state, "mod.zip", "k20") calls os.replace() and it raises
-    OSError("disk full"), an ArchiveError is raised with "mod.zip" in the
-    message but no git/VCS language; the work file remains for release() to
-    hand back for resume.
+    A non-empty directory occupies the path the finished archive must take, so the
+    publishing rename fails the way a full or read-only disk would. keep() raises
+    ArchiveError naming "mod.zip" without git vocabulary, the cache holds no entry
+    for the key, and release() hands the unfinished download back so the next claim
+    resumes at the bytes already fetched instead of downloading them twice.
     """
     state = cache.claim("k20", None, "http://x", cache_dir)
     state.work.write_bytes(b"full-archive-content")
-
-    def failing_replace(*args: object, **kwargs: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", failing_replace)
+    blocked = cache_dir / "k20" / "mod.zip"
+    blocked.mkdir(parents=True)
+    (blocked / "occupant").write_bytes(b"x")
 
     with pytest.raises(ArchiveError) as excinfo:
         cache.keep(state, "mod.zip", "k20", cache_dir)
@@ -728,10 +730,9 @@ def test_keep_raises_archive_error_naming_the_file_when_the_publish_rename_fails
     assert "mod.zip" in message
     for word in ("git", "commit", "repository", "revert", "cherry"):
         assert word not in message.lower()
-    # The failed publish leaves the unfinished download in place, so a
-    # subsequent ``release`` can still hand it back for resume.
-    assert state.work.read_bytes() == b"full-archive-content"
-    assert not (cache_dir / "k20" / "mod.zip").exists()
+    assert cache.find("k20", cache_dir=cache_dir) is None
+    cache.release(state, "k20", cache_dir)
+    assert cache.claim("k20", None, "http://x", cache_dir).offset == len(b"full-archive-content")
 
 
 # --- clear -----------------------------------------------------------------

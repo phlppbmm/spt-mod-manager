@@ -243,35 +243,35 @@ def test_collect_mod_ids_recipes_from_a_plain_list_below_hideout(
     assert result.recipes == {RECIPE_ID}
 
 
-def test_collect_mod_ids_achievements_from_achievements_json_uses_id_field(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """Achievement IDs use the 'id' field (not '_id') from achievements.json."""
-    files = {
-        "SPT/user/mods/ServerMod/db/templates/achievements.json": json.dumps(
-            [{"id": ACHIEVEMENT_ID, "imageUrl": "x.png"}]
+@pytest.mark.parametrize(
+    ("db_path", "payload"),
+    [
+        pytest.param(
+            "db/templates/achievements.json",
+            [{"id": ACHIEVEMENT_ID, "imageUrl": "x.png"}],
+            id="templates-achievements-json",
         ),
-    }
+        pytest.param("db/achievement/custom.json", [{"id": ACHIEVEMENT_ID}], id="achievement-path-segment"),
+    ],
+)
+def test_collect_mod_ids_reads_achievement_ids_from_the_id_field(
+    clean_repo: Repo, install_commit: InstallCommit, db_path: str, payload: list[dict[str, str]]
+) -> None:
+    """collect_mod_ids takes achievement ids from the "id" field, not from "_id".
+
+    Commits a server mod whose db tree carries the achievement once as
+    templates/achievements.json ("templates-achievements-json") and once as a file
+    below an achievement/ path segment ("achievement-path-segment"). Both report the
+    id under achievements and nothing under items, so an achievement id is never
+    mistaken for an item template.
+    """
+    files = {f"SPT/user/mods/ServerMod/{db_path}": json.dumps(payload)}
     commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
 
     result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
 
     assert result.achievements == {ACHIEVEMENT_ID}
     assert result.items == set()
-
-
-def test_collect_mod_ids_achievements_from_an_achievement_path_segment(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """Achievement IDs extracted from files below achievement/ or achievements/ path."""
-    files = {
-        "SPT/user/mods/ServerMod/db/achievement/custom.json": json.dumps([{"id": ACHIEVEMENT_ID}]),
-    }
-    commit_hash = install_commit(clean_repo, "ServerMod", mod_type="server", files=files)
-
-    result = collect_mod_ids(clean_repo, commit_hash, detect_layout(clean_repo.path))
-
-    assert result.achievements == {ACHIEVEMENT_ID}
 
 
 # --------------------------------------------------------------------------

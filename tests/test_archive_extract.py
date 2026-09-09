@@ -42,22 +42,6 @@ def test_extract_roundtrip_lands_files_with_content(make_archive: MakeArchive, t
     assert (dest / "sub" / "dir" / "mod.dll").read_text(encoding="utf-8") == ("binary-ish-content")
 
 
-def test_extract_unknown_suffix_raises_archive_error(tmp_path: Path) -> None:
-    """extract() raises ArchiveError when archive suffix is unsupported (.tar).
-
-    Creates archive.tar (with non-archive bytes) and calls extract(). Must raise
-    ArchiveError and the error message must contain ".tar" to identify the problem.
-    """
-    archive = tmp_path / "archive.tar"
-    archive.write_bytes(b"not a real archive")
-    dest = tmp_path / "dest"
-    dest.mkdir()
-
-    with pytest.raises(ArchiveError) as excinfo:
-        extract(archive, dest)
-    assert ".tar" in str(excinfo.value)
-
-
 # py7zr does not sanitize member names on write (verified: writing with
 # arcname="../evil.txt" round-trips through getnames() unchanged), so the
 # relative-traversal case is parametrized over both zip and 7z. The

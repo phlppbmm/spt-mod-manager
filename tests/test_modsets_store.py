@@ -324,112 +324,53 @@ def _write_store(store: Path, key: str, game_entry: object) -> None:
 
 
 @pytest.mark.parametrize(
-    "content",
+    ("raw_content", "game_entry"),
     [
-        "not json at all",
-        json.dumps([1, 2, 3]),
-        json.dumps({"version": 1, "games": "not-a-dict"}),
-    ],
-    ids=["invalid-json", "document-is-a-list", "games-is-not-a-dict"],
-)
-def test_list_mod_sets_raises_invalid_metadata_error_for_a_malformed_document(
-    tmp_path: Path, mod_set_store: Path, content: str
-) -> None:
-    """If the shape guard were dropped, this fails: a TypeError/AttributeError
-    propagates, or garbage is silently read back as an empty overview, instead
-    of InvalidMetadataError naming the store file."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-    mod_set_store.write_text(content, encoding="utf-8")
-
-    with pytest.raises(InvalidMetadataError, match=re.escape(str(mod_set_store))):
-        services.list_mod_sets(game_dir, store_path=mod_set_store)
-
-
-@pytest.mark.parametrize(
-    "game_entry",
-    ["not-an-object"],
-    ids=["game-entry-not-an-object"],
-)
-def test_list_mod_sets_raises_invalid_metadata_error_for_a_malformed_game_entry(
-    tmp_path: Path, mod_set_store: Path, game_entry: object
-) -> None:
-    """If the per-game-directory shape guard were dropped, this fails: an
-    AttributeError propagates instead of InvalidMetadataError naming the file."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-    key = str(game_dir.resolve())
-    _write_store(mod_set_store, key, game_entry)
-
-    with pytest.raises(InvalidMetadataError, match=re.escape(str(mod_set_store))):
-        services.list_mod_sets(game_dir, store_path=mod_set_store)
-
-
-@pytest.mark.parametrize(
-    "sets_value",
-    ["not-a-list"],
-    ids=["sets-not-a-list"],
-)
-def test_list_mod_sets_raises_invalid_metadata_error_when_sets_is_not_a_list(
-    tmp_path: Path, mod_set_store: Path, sets_value: object
-) -> None:
-    """If the list guard were dropped, this fails: iterating a string yields
-    per-character entries instead of raising InvalidMetadataError."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-    key = str(game_dir.resolve())
-    _write_store(mod_set_store, key, {"sets": sets_value, "bindings": {}})
-
-    with pytest.raises(InvalidMetadataError, match=re.escape(str(mod_set_store))):
-        services.list_mod_sets(game_dir, store_path=mod_set_store)
-
-
-@pytest.mark.parametrize(
-    "set_item",
-    [
-        "not-an-object",
-        {"created_at": ""},
-        {"name": "Fika night", "entries": "not-a-list"},
-        {"name": "Fika night", "entries": ["not-an-object"]},
-        {"name": "Fika night", "entries": [{"name": 42}]},
-    ],
-    ids=[
-        "set-not-an-object",
-        "set-has-no-name",
-        "entries-not-a-list",
-        "entry-not-an-object",
-        "entry-name-wrong-type",
+        pytest.param("not json at all", None, id="invalid-json"),
+        pytest.param(json.dumps([1, 2, 3]), None, id="document-is-a-list"),
+        pytest.param(json.dumps({"version": 1, "games": "not-a-dict"}), None, id="games-not-a-dict"),
+        pytest.param(None, "not-an-object", id="game-entry-not-an-object"),
+        pytest.param(None, {"sets": "not-a-list", "bindings": {}}, id="sets-not-a-list"),
+        pytest.param(None, {"sets": ["not-an-object"], "bindings": {}}, id="set-not-an-object"),
+        pytest.param(None, {"sets": [{"created_at": ""}], "bindings": {}}, id="set-has-no-name"),
+        pytest.param(
+            None,
+            {"sets": [{"name": "Fika night", "entries": "not-a-list"}], "bindings": {}},
+            id="entries-not-a-list",
+        ),
+        pytest.param(
+            None,
+            {"sets": [{"name": "Fika night", "entries": ["not-an-object"]}], "bindings": {}},
+            id="entry-not-an-object",
+        ),
+        pytest.param(
+            None,
+            {"sets": [{"name": "Fika night", "entries": [{"name": 42}]}], "bindings": {}},
+            id="entry-name-wrong-type",
+        ),
+        pytest.param(None, {"sets": [], "bindings": "not-a-dict"}, id="bindings-not-a-dict"),
+        pytest.param(None, {"sets": [], "bindings": {"profile-1": 42}}, id="binding-value-not-a-string"),
     ],
 )
-def test_list_mod_sets_raises_invalid_metadata_error_for_a_malformed_set(
-    tmp_path: Path, mod_set_store: Path, set_item: object
+def test_list_mod_sets_raises_invalid_metadata_error_for_a_malformed_store(
+    tmp_path: Path, mod_set_store: Path, raw_content: str | None, game_entry: object
 ) -> None:
-    """If any of these shape guards were dropped, this fails: garbage values
-    survive into a ModSet/ModSetEntry, or an exception other than
-    InvalidMetadataError propagates."""
+    """A store file of the wrong shape is rejected with InvalidMetadataError naming it.
+
+    Writes the store either verbatim (``raw_content``: unparsable text, a JSON list as
+    root, a non-dict "games" value) or as a valid document whose game entry carries the
+    malformation (``game_entry``: a non-object entry, a non-list "sets", a set that is
+    not an object or has no name, non-list/non-object/wrongly-typed entries, a non-dict
+    "bindings" and a non-string binding target). Each must raise InvalidMetadataError
+    naming the store path; without the shape guards a TypeError or AttributeError would
+    escape, or garbage would survive into a ModSet the user then applies.
+    """
     game_dir = tmp_path / "game"
     game_dir.mkdir()
-    key = str(game_dir.resolve())
-    _write_store(mod_set_store, key, {"sets": [set_item], "bindings": {}})
-
-    with pytest.raises(InvalidMetadataError, match=re.escape(str(mod_set_store))):
-        services.list_mod_sets(game_dir, store_path=mod_set_store)
-
-
-@pytest.mark.parametrize(
-    "bindings_value",
-    ["not-a-dict", {"profile-1": 42}],
-    ids=["bindings-not-a-dict", "binding-value-not-a-string"],
-)
-def test_list_mod_sets_raises_invalid_metadata_error_for_malformed_bindings(
-    tmp_path: Path, mod_set_store: Path, bindings_value: object
-) -> None:
-    """If the bindings shape guards were dropped, this fails: an
-    AttributeError/TypeError propagates instead of InvalidMetadataError."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-    key = str(game_dir.resolve())
-    _write_store(mod_set_store, key, {"sets": [], "bindings": bindings_value})
+    if raw_content is None:
+        _write_store(mod_set_store, str(game_dir.resolve()), game_entry)
+    else:
+        mod_set_store.write_text(raw_content, encoding="utf-8")
 
     with pytest.raises(InvalidMetadataError, match=re.escape(str(mod_set_store))):
         services.list_mod_sets(game_dir, store_path=mod_set_store)
@@ -508,37 +449,44 @@ def test_a_failed_write_leaves_the_previously_saved_document_intact(
 # --- game entries missing a "sets" or "bindings" key are tolerated ----------
 
 
-def test_a_game_entry_with_no_sets_key_reports_an_empty_set_list(tmp_path: Path, mod_set_store: Path) -> None:
-    """If the missing-key default were dropped, this fails: reading the
-    entry's absent 'sets' key would raise instead of yielding an empty list."""
-    game_dir = tmp_path / "game"
-    game_dir.mkdir()
-    key = str(game_dir.resolve())
-    _write_store(mod_set_store, key, {"bindings": {"profile-1": "Fika night"}})
-
-    overview = services.list_mod_sets(game_dir, store_path=mod_set_store)
-
-    assert not overview.sets
-    assert overview.bindings == [services.ProfileBinding(profile_id="profile-1", set_name="Fika night")]
+_NO_ENTRIES: list[object] = []
 
 
-def test_a_game_entry_with_no_bindings_key_reports_an_empty_binding_list(
-    tmp_path: Path, mod_set_store: Path
+@pytest.mark.parametrize(
+    ("game_entry", "expected_set_names", "expected_bindings"),
+    [
+        pytest.param(
+            {"bindings": {"profile-1": "Fika night"}},
+            [],
+            [services.ProfileBinding(profile_id="profile-1", set_name="Fika night")],
+            id="no-sets-key",
+        ),
+        pytest.param(
+            {"sets": [{"name": "Fika night", "created_at": "", "entries": _NO_ENTRIES}]},
+            ["Fika night"],
+            [],
+            id="no-bindings-key",
+        ),
+    ],
+)
+def test_a_game_entry_missing_a_key_reports_that_half_as_empty(
+    tmp_path: Path,
+    mod_set_store: Path,
+    game_entry: object,
+    expected_set_names: list[str],
+    expected_bindings: list[services.ProfileBinding],
 ) -> None:
-    """If the missing-key default were dropped, this fails: reading the
-    entry's absent 'bindings' key would raise instead of yielding an empty
-    list."""
+    """A game entry without a "sets" or "bindings" key still reads back the other half.
+
+    Writes a store whose game entry omits "sets" ("no-sets-key") or "bindings"
+    ("no-bindings-key"). list_mod_sets reports the omitted half as empty and the present
+    half intact, so a store written by an older version stays readable.
+    """
     game_dir = tmp_path / "game"
     game_dir.mkdir()
-    key = str(game_dir.resolve())
-    entries: list[object] = []
-    _write_store(
-        mod_set_store,
-        key,
-        {"sets": [{"name": "Fika night", "created_at": "", "entries": entries}]},
-    )
+    _write_store(mod_set_store, str(game_dir.resolve()), game_entry)
 
     overview = services.list_mod_sets(game_dir, store_path=mod_set_store)
 
-    assert [item.name for item in overview.sets] == ["Fika night"]
-    assert not overview.bindings
+    assert [item.name for item in overview.sets] == expected_set_names
+    assert overview.bindings == expected_bindings

@@ -16,6 +16,7 @@ import respx
 from fixture_types import ClientFactory
 from sptmod.core.errors import ArchiveError, ForgeUnavailableError
 from sptmod.core.forge import cache
+from sptmod.core.forge.cache import CacheEnv
 from sptmod.core.forge.client import DEFAULT_CHUNK_SIZE
 from sptmod.core.forge.download import CACHE_HIT_MESSAGE, DOWNLOAD_STEP, download_cached
 
@@ -429,36 +430,24 @@ def test_expected_length_none_reuses_the_cached_file_without_any_http_call(
 
 
 def test_a_failed_publish_rename_raises_and_leaves_a_resumable_part(
-    client_factory: ClientFactory, cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+    client_factory: ClientFactory, cache_dir: Path
 ) -> None:
-    """download_cached() raises ArchiveError on publish (final rename) failure but preserves .part.
+    """download_cached() raises ArchiveError on a failed publish but preserves the .part.
 
-    A download completes successfully, but os.replace() to finalize the file (move from
-    temp to archive name) fails with OSError("disk full"). The function raises ArchiveError,
-    but the partial file (53.part) and metadata (53.part.json) remain, allowing a subsequent
-    call to resume from that offset.
+    The download itself succeeds, but a non-empty directory occupies the path the
+    finished archive must take, so the publishing rename fails the way a full or
+    read-only disk would. The call raises ArchiveError while the partial file
+    (53.part) and its metadata (53.part.json) survive, so a later call resumes from
+    that offset instead of downloading the body a second time.
     """
     body = b"body-for-publish-failure-test"
-    real_replace = os.replace
-
-    def failing_replace(
-        src: str | os.PathLike[str],
-        dst: str | os.PathLike[str],
-        *,
-        src_dir_fd: int | None = None,
-        dst_dir_fd: int | None = None,
-    ) -> None:
-        # Only the final publish rename (to the plain archive name) fails;
-        # the ".part"/".part.json" renames the resume machinery performs
-        # must keep working, or the interrupted download couldn't recover.
-        if ".part" not in Path(dst).suffixes:
-            raise OSError("disk full")
-        real_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+    blocked = cache_dir / "53" / "mod-archive.zip"
+    blocked.mkdir(parents=True)
+    (blocked / "occupant").write_bytes(b"x")
 
     with respx.mock() as router:
         route = router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=body))
         client = client_factory()
-        monkeypatch.setattr(os, "replace", failing_replace)
 
         with pytest.raises(ArchiveError):
             download_cached(
@@ -516,9 +505,9 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
     """download_cached() triggers cache sweep after successful download to enforce size cap.
 
     An old entry (old-key, 5000 bytes, mtime 100k seconds ago) and a new download (new-key,
-    100 bytes) exist. max_bytes is capped at len(new_body) + 68 bytes. After the new download
-    completes, sweep() runs and evicts the oldest entry (old-key) to stay under the cap,
-    leaving only new-key in the cache.
+    100 bytes) exist. SPTMOD_DOWNLOAD_CACHE_MAX_GB caps the cache at len(new_body) + 68
+    bytes. After the new download completes, sweep() runs and evicts the oldest entry
+    (old-key) to stay under the cap, leaving only new-key in the cache.
     """
     old_entry = cache_dir / "old-key"
     old_entry.mkdir()
@@ -531,7 +520,7 @@ def test_a_completed_download_triggers_a_sweep_that_evicts_older_entries(
     os.utime(old_entry, (old_time, old_time))
 
     new_body = b"N" * 100
-    monkeypatch.setattr(cache, "max_bytes", lambda: len(new_body) + 68)
+    monkeypatch.setenv(CacheEnv.MAX_GB, str((len(new_body) + 68) / 1024**3))
 
     with respx.mock() as router:
         router.get(DOWNLOAD_URL).mock(return_value=httpx.Response(200, content=new_body))

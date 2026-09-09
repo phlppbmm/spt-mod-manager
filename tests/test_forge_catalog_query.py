@@ -166,76 +166,38 @@ def test_find_by_slug_returns_none_when_no_slug_matches(
     assert catalog.find_by_slug(slug) is None
 
 
-def test_search_matches_name_case_insensitively(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
+@pytest.mark.parametrize(
+    ("query", "compatible_with", "expected"),
+    [
+        pytest.param("ALPHA", None, [(1, "Alpha Mod")], id="name-case-insensitive"),
+        pytest.param("bob", None, [(2, "Beta Mod")], id="author-case-insensitive"),
+        pytest.param("", None, [(1, "Alpha Mod"), (2, "Beta Mod"), (3, "Gamma Mod")], id="empty-query-all"),
+        pytest.param("no-such-mod-anywhere", None, [], id="no-match"),
+        pytest.param("mod", "3.8.5", [(1, "Alpha Mod"), (2, "Beta Mod")], id="spt-compat-filter"),
+    ],
+)
+def test_search_filters_the_cached_mods(
+    catalog: Catalog,
+    client_factory: ClientFactory,
+    respx_router: respx.MockRouter,
+    query: str,
+    compatible_with: str | None,
+    expected: list[tuple[int, str]],
 ) -> None:
-    """search("ALPHA") returns [Alpha Mod(id=1)] via case-insensitive name match."""
-    _seed_search_mods(client_factory, respx_router, catalog)
+    """search matches name and author case-insensitively and honours the SPT filter.
 
-    results = catalog.search("ALPHA")
-
-    assert [m.id for m in results] == [1]
-
-
-def test_search_matches_author_case_insensitively(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """search("bob") finds Beta Mod (id=2) despite author "Bob" case mismatch.
-
-    The search query applies to author names with case-insensitive matching,
-    ensuring that lowercase "bob" locates the mod owned by "Bob".
+    Against the three cached mods (Alpha/Alice and Beta/Bob for SPT 3.8, Gamma/Carol
+    for 4.0): "ALPHA" finds the mod by name regardless of case; "bob" finds Beta by
+    its author; the empty query returns every mod ordered by name rather than an
+    error; a query nothing matches returns an empty list instead of None; and
+    compatible_with="3.8.5" drops Gamma. Asserted so no user can pick an
+    incompatible mod out of a search result.
     """
     _seed_search_mods(client_factory, respx_router, catalog)
 
-    results = catalog.search("bob")
+    results = catalog.search(query, compatible_with=compatible_with)
 
-    assert [m.id for m in results] == [2]
-
-
-def test_search_with_empty_query_returns_every_mod_ordered_by_name(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """search("") returns all three cached mods sorted by name, not an error.
-
-    Empty query returns ["Alpha Mod", "Beta Mod", "Gamma Mod"] in alphabetical
-    order, distinguishing "no filter" from "error" and preventing crashes on
-    empty user input.
-    """
-    _seed_search_mods(client_factory, respx_router, catalog)
-
-    results = catalog.search("")
-
-    assert [m.name for m in results] == ["Alpha Mod", "Beta Mod", "Gamma Mod"]
-
-
-def test_search_with_no_match_returns_empty_list(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """search("no-such-mod-anywhere") returns [] not None, preventing display bugs.
-
-    With three mods cached (Alpha, Beta, Gamma), a query matching nothing
-    returns an empty list instead of None or raising, ensuring safe UI rendering
-    without None-checks.
-    """
-    _seed_search_mods(client_factory, respx_router, catalog)
-
-    assert catalog.search("no-such-mod-anywhere") == []
-
-
-def test_search_compatible_with_excludes_mods_without_a_compatible_version(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """search("mod", compatible_with="3.8.5") excludes Gamma (4.0 only), returns [1, 2].
-
-    With Alpha and Beta both 3.8-compatible and Gamma only 4.0-compatible, the
-    SPT version filter narrows search results, not just direct lookups, ensuring
-    users cannot install incompatible versions from search.
-    """
-    _seed_search_mods(client_factory, respx_router, catalog)
-
-    results = catalog.search("mod", compatible_with="3.8.5")
-
-    assert [m.id for m in results] == [1, 2]
+    assert [(mod.id, mod.name) for mod in results] == expected
 
 
 def _seed_versions_for_resolve(
@@ -403,39 +365,36 @@ def test_resolve_version_by_name_case_insensitive(
     assert version.version == "2.0.0"
 
 
-def test_resolve_version_raises_for_unknown_mod(catalog: Catalog) -> None:
-    """An empty cache looking up a nonexistent mod id raises
-    NoCompatibleVersionError, not KeyError or returning None; this prevents
-    callers from handling lookup failure as an exception-free miss.
-    """
-    with pytest.raises(NoCompatibleVersionError):
-        catalog.resolve_version(99999)
-
-
-def test_resolve_version_raises_for_unknown_wanted_version(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
+@pytest.mark.parametrize(
+    ("mod_id_or_name", "wanted", "spt_version", "seeded"),
+    [
+        pytest.param(99999, None, None, False, id="unknown-mod"),
+        pytest.param(1, "9.9.9", None, True, id="unknown-wanted-version"),
+        pytest.param(1, None, "5.0.0", True, id="no-spt-compatible-version"),
+    ],
+)
+def test_resolve_version_raises_when_nothing_fits(
+    catalog: Catalog,
+    client_factory: ClientFactory,
+    respx_router: respx.MockRouter,
+    mod_id_or_name: int | str,
+    wanted: str | None,
+    spt_version: str | None,
+    seeded: bool,
 ) -> None:
-    """When three versions are cached but wanted="9.9.9" is not among them,
-    resolve_version raises NoCompatibleVersionError; this prevents callers from
-    accidentally getting a different version as a fallback.
+    """resolve_version raises NoCompatibleVersionError instead of guessing a version.
+
+    "unknown-mod" looks up an id no cache holds; "unknown-wanted-version" asks for
+    9.9.9 while only the seeded versions are cached; "no-spt-compatible-version" asks
+    for SPT 5.0.0 while the cached versions cover 3.8, 3.9 and 4.0. Each must raise
+    rather than return None or fall back to a different version, because a silent
+    fallback installs a mod the user did not choose.
     """
-    _seed_versions_for_resolve(client_factory, respx_router, catalog)
+    if seeded:
+        _seed_versions_for_resolve(client_factory, respx_router, catalog)
 
     with pytest.raises(NoCompatibleVersionError):
-        catalog.resolve_version(1, wanted="9.9.9")
-
-
-def test_resolve_version_raises_when_no_version_is_compatible(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """With versions for SPT 3.8, 3.9, and 4.0, requesting SPT 5.0.0 raises
-    NoCompatibleVersionError; this ensures version mismatches fail rather than
-    returning the newest version regardless of compatibility.
-    """
-    _seed_versions_for_resolve(client_factory, respx_router, catalog)
-
-    with pytest.raises(NoCompatibleVersionError):
-        catalog.resolve_version(1, spt_version="5.0.0")
+        catalog.resolve_version(mod_id_or_name, wanted=wanted, spt_version=spt_version)
 
 
 def _sync_single_mod_with_versions(
@@ -641,27 +600,31 @@ def test_resolve_version_error_names_the_spt_version(
     assert str(error.value) == "No version of 'Boss Notifier' supports SPT 4.1.3."
 
 
-def test_get_description_returns_none_for_an_unknown_mod(catalog: Catalog) -> None:
-    """get_description(99999) returns None not raising for unknown mod.
-
-    Empty cache lookup returns None to distinguish "not found" from error,
-    preventing unhandled exceptions in description display paths.
-    """
-    assert catalog.get_description(99999) is None
-
-
-def test_get_description_returns_none_before_a_description_is_stored(
-    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
+@pytest.mark.parametrize(
+    ("mod_id", "seeded"),
+    [
+        pytest.param(99999, False, id="unknown-mod"),
+        pytest.param(1, True, id="synced-but-not-stored"),
+    ],
+)
+def test_get_description_returns_none_when_none_was_stored(
+    catalog: Catalog,
+    client_factory: ClientFactory,
+    respx_router: respx.MockRouter,
+    mod_id: int,
+    seeded: bool,
 ) -> None:
-    """get_description(1) returns None after sync but before store_description.
+    """get_description returns None rather than raising when no description is stored.
 
-    Sync populates mod metadata but not descriptions; get_description returns
-    None until store_description is called, indicating descriptions are fetched
-    separately from the main sync.
+    "unknown-mod" queries an empty cache; "synced-but-not-stored" queries a mod a sync
+    put into the cache before any store_description call, since sync carries metadata
+    but not descriptions. Both return None so a description panel can render a miss
+    without an exception.
     """
-    _seed_search_mods(client_factory, respx_router, catalog)
+    if seeded:
+        _seed_search_mods(client_factory, respx_router, catalog)
 
-    assert catalog.get_description(1) is None
+    assert catalog.get_description(mod_id) is None
 
 
 @pytest.mark.parametrize("stamp", ["2025-06-01T00:00:00Z", None], ids=["stamped", "unstamped"])

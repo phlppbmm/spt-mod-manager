@@ -82,7 +82,7 @@ min-similarity-lines = 24
 
 [tool.pylint.format]
 max-line-length = 119
-max-module-lines = 1000      # src/sptmod/cli.py, the longest module in the tree
+max-module-lines = 900       # tests/test_services_update.py, the longest module in the tree
 
 [dependency-groups]
 build = ["pyinstaller>=6"]

@@ -35,6 +35,23 @@ pytestmark = pytest.mark.timeout(5)
 # --------------------------------------------------------------------------
 
 
+# A stub process that ignores the friendly request to close: it installs the
+# handler first and only then writes the ready file named on its command line,
+# so a test that waits for that file knows the next SIGTERM is ignored. Only a
+# kill ends it, which is what makes the escalation observable without waiting
+# out a real terminate timeout.
+DEAF_STUB_SCRIPT = f"""#!{sys.executable}
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write("ready")
+time.sleep(30)
+"""
+
+
 NOTHING_STARTED = "sptmod did not start a game here, so there is nothing to close."
 NOTHING_LEFT = "Nothing sptmod started here is still running."
 SERVER_STAYS_UP = "The SPT server was already running before sptmod, so it stays up."
@@ -442,43 +459,28 @@ def test_stop_game_ignores_a_watcher_whose_start_time_no_longer_matches(
     assert process.poll() is None  # still running -- it was correctly left alone
 
 
-def test_stop_game_kills_a_survivor_that_does_not_react_to_terminate(
+def test_stop_game_kills_a_server_that_ignores_the_request_to_close(
     tmp_path: Path,
-    spawn_sleeper: SpawnSleeper,
-    monkeypatch: pytest.MonkeyPatch,
+    spawn_process: SpawnProcess,
 ) -> None:
-    """stop_game escalates to SIGKILL when a process ignores SIGTERM.
+    """stop_game kills a process that survives the friendly request to close.
 
-    psutil.wait_procs is monkeypatched to report the process still alive after
-    terminate (10s TERMINATE_TIMEOUT); stop_game then calls kill(). Without this
-    patch, the 10s real wait would exceed the test timeout. Patch proves the
-    kill path is reached and the process exits.
+    A stub process of the test's own making ignores SIGTERM and announces that
+    it does so by writing its ready file; it is recorded as the server sptmod
+    started. stop_game is given a short ``terminate_timeout``, so the wait for
+    a voluntary exit is over quickly and the kill that follows is the only way
+    the process can end. It reports the server stopped and the process is gone
+    afterwards, which pins the escalation from terminate to kill.
     """
-    # TERMINATE_TIMEOUT (10s) is a module constant, not an injected parameter
-    # of stop_game/watch_game, so there is no public way to reach the
-    # "kill the survivor" branch inside the pytest-timeout budget without
-    # actually waiting out that timeout. psutil.wait_procs is the external
-    # collaborator _terminate relies on to decide who survived; forcing it to
-    # report "still alive" simulates a process that ignored terminate()
-    # without slowing the test down, and the assertions below still verify
-    # what the SUT did (killed the process), not what this monkeypatch wrote.
-    process = spawn_sleeper()
+    stub = tmp_path / "deaf-stub.py"
+    stub.write_text(DEAF_STUB_SCRIPT, encoding="utf-8")
+    ready_file = tmp_path / "deaf-stub.ready"
+    process = spawn_process([sys.executable, str(stub), str(ready_file)])
+    wait_until(ready_file.is_file)
     started_at = psutil.Process(process.pid).create_time()
     write_launch_state(tmp_path, server=process_ref(process.pid, started_at, started_by_sptmod=True))
-    real_wait_procs = psutil.wait_procs
 
-    def _report_still_alive(
-        procs: list[psutil.Process], timeout: float | None = None
-    ) -> tuple[list[psutil.Process], list[psutil.Process]]:
-        # The stand-in answers at once; the name stays because the call site
-        # passes the timeout by keyword.
-        del timeout
-        gone, _ = real_wait_procs(procs, timeout=0)
-        return gone, procs
-
-    monkeypatch.setattr(psutil, "wait_procs", _report_still_alive)
-
-    result = stop_game(tmp_path)
+    result = stop_game(tmp_path, terminate_timeout=0.2)
 
     assert result.server_stopped is True
     process.wait(timeout=4)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sptmod.core import game_dir
-from sptmod.core.launch.process import live_ref, running_pid, terminate
+from sptmod.core.launch.process import TERMINATE_TIMEOUT, live_ref, running_pid, terminate
 from sptmod.core.launch.state import CLIENT_MODE, LaunchState, ProcessRef, clear_state, read_state
 
 
@@ -65,7 +65,7 @@ def launch_status(path: Path) -> LaunchStatus:
         and live_ref(state.server) is not None,
         client_stoppable=_live_client(state) is not None,
     )
-def stop_game(path: Path) -> StopResult:
+def stop_game(path: Path, *, terminate_timeout: float = TERMINATE_TIMEOUT) -> StopResult:
     """Close the game and the SPT server sptmod started at ``path``.
 
     Closes the watcher first so it cannot act on a half-stopped installation,
@@ -77,15 +77,20 @@ def stop_game(path: Path) -> StopResult:
     answering when the launch began included. A game played on another
     player's server closes alone: the server there belongs to that player and
     was never noted here.
+
+    Args:
+        path: The game directory.
+        terminate_timeout: Seconds a process has to close on its own before it
+            is killed.
     """
     state = read_state(path)
     if state.watcher is not None:
-        terminate(state.watcher)
-    client_stopped = _stop_client(state)
+        terminate(state.watcher, terminate_timeout)
+    client_stopped = _stop_client(state, terminate_timeout)
     server_stopped = (
         state.server is not None
         and state.server_started_by_sptmod
-        and terminate(state.server)
+        and terminate(state.server, terminate_timeout)
     )
     clear_state(path)
     still_playing = any(
@@ -103,15 +108,17 @@ def stop_game(path: Path) -> StopResult:
     )
 
 
-def _stop_client(state: LaunchState) -> bool:
+def _stop_client(state: LaunchState, terminate_timeout: float) -> bool:
     """Close the game of one launch, whichever of its processes still runs.
 
     Both the process the launch started and the game that was adopted from it
     are asked to close, because the game can leave the tree of a wrapper that
     is still alive; neither closes the other.
     """
-    spawned = state.client is not None and terminate(state.client)
-    adopted = state.adopted_client is not None and terminate(state.adopted_client)
+    spawned = state.client is not None and terminate(state.client, terminate_timeout)
+    adopted = state.adopted_client is not None and terminate(
+        state.adopted_client, terminate_timeout
+    )
     return spawned or adopted
 
 

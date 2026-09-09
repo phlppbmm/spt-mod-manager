@@ -10,7 +10,7 @@ from typing import Final
 import psutil
 
 from sptmod.core import game_dir
-from sptmod.core.launch.process import running_ref, terminate
+from sptmod.core.launch.process import TERMINATE_TIMEOUT, running_ref, terminate
 from sptmod.core.launch.state import (
     CLIENT_MODE,
     LaunchState,
@@ -29,6 +29,7 @@ def watch_game(
     *,
     poll_seconds: float = WATCH_POLL_SECONDS,
     grace_seconds: float = WATCH_GRACE_SECONDS,
+    terminate_timeout: float = TERMINATE_TIMEOUT,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
@@ -50,6 +51,8 @@ def watch_game(
         path: The game directory.
         poll_seconds: Seconds between two looks at the process table.
         grace_seconds: Seconds the game has to show up after the launch.
+        terminate_timeout: Seconds the server has to close on its own before it
+            is killed.
         sleep: Sleep function, injected for testing.
         clock: Monotonic clock, injected for testing.
     """
@@ -70,7 +73,7 @@ def watch_game(
             f"and no game appeared within {int(grace_seconds)} seconds.",
         )
         _log_process_table(path)
-        _stop_watched_server(path, state)
+        _stop_watched_server(path, state, terminate_timeout)
         with suppress(OSError):
             write_state(path, replace(state, failure=CLIENT_NEVER_STARTED))
         return
@@ -79,7 +82,7 @@ def watch_game(
         state = _adopt(path, state, client)
         sleep(poll_seconds)
     log(path, "The game and the process the launch started are both gone.")
-    _stop_watched_server(path, state)
+    _stop_watched_server(path, state, terminate_timeout)
     clear_state(path)
 
 
@@ -164,7 +167,7 @@ def _adopted_client(recorded: ProcessRef) -> ProcessRef | None:
     return found
 
 
-def _stop_watched_server(path: Path, state: LaunchState) -> None:
+def _stop_watched_server(path: Path, state: LaunchState, terminate_timeout: float) -> None:
     """Close the server of one launch when that launch asked for it."""
     if state.mode == CLIENT_MODE:
         log(
@@ -178,7 +181,7 @@ def _stop_watched_server(path: Path, state: LaunchState) -> None:
         and state.server_started_by_sptmod
         and state.server is not None
     ):
-        terminate(state.server)
+        terminate(state.server, terminate_timeout)
         log(path, "The SPT server was closed.")
         return
     log(path, "The SPT server was left running.")

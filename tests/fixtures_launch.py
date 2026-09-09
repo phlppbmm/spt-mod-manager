@@ -122,8 +122,9 @@ def kill_launchable_processes(root: Path) -> None:
                     child.kill()
             process.kill()
             processes.append(process)
-    if processes:
-        psutil.wait_procs(processes, timeout=2)
+    for process in processes:
+        with suppress(psutil.Error):
+            process.wait(timeout=2)
 
 
 @pytest.fixture

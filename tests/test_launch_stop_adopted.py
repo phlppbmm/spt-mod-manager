@@ -6,8 +6,10 @@ reachable through the ``adopted_client`` entry the watcher wrote into the
 launch state file. These tests drive ``stop_game`` and ``launch_status``
 against that entry with real throwaway processes -- two independent ones, one
 recorded as the process the launch started and one recorded as the game --
-which is the shape the state file has in that situation. No test starts a real
-SPT server or game.
+which is the shape the state file has in that situation. The entry carries the
+number of the process the game was found below, and is only read back when
+that number is the one this launch recorded, so every state file here names it.
+No test starts a real SPT server or game.
 """
 
 import json
@@ -51,18 +53,26 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 4.0) -> None:
     raise AssertionError("condition was never met")
 
 
-def _live_ref(process: subprocess.Popen[bytes]) -> dict[str, Any]:
-    """Note a running process the way a launch does: number and real start time."""
-    return process_ref(process.pid, psutil.Process(process.pid).create_time())
+def _live_ref(process: subprocess.Popen[bytes], *, descendant_of: int | None = None) -> dict[str, Any]:
+    """Note a running process the way a launch does: number and real start time.
+
+    ``descendant_of`` is passed on for the noted game, which is the process the
+    watcher found it below -- the answer that makes the note readable at all.
+    """
+    return process_ref(process.pid, psutil.Process(process.pid).create_time(), descendant_of=descendant_of)
 
 
-def _gone_ref(spawn: SpawnSleeper) -> dict[str, Any]:
-    """Note a process, then end it: the program a launch started and lost."""
+def _gone_ref(spawn: SpawnSleeper, *, descendant_of: int | None = None) -> dict[str, Any]:
+    """Note a process, then end it: the program a launch started and lost.
+
+    ``descendant_of`` is passed on for a noted game that has ended as well,
+    which without that answer would not be read back at all.
+    """
     process = spawn()
     started_at = psutil.Process(process.pid).create_time()
     process.kill()
     process.wait(timeout=4)
-    return process_ref(process.pid, started_at)
+    return process_ref(process.pid, started_at, descendant_of=descendant_of)
 
 
 def _state_file(root: Path) -> Path:
@@ -82,11 +92,12 @@ def test_stop_game_closes_the_game_that_outlived_the_process_it_started(
     nothing can reach and a stop button that does nothing.
     """
     game = spawn_sleeper()
+    launched = _gone_ref(spawn_sleeper)
     write_launch_state(
         tmp_path,
         profile_id="p",
-        client=_gone_ref(spawn_sleeper),
-        adopted_client=_live_ref(game),
+        client=launched,
+        adopted_client=_live_ref(game, descendant_of=launched["pid"]),
     )
 
     result = stop_game(tmp_path)
@@ -116,11 +127,12 @@ def test_stop_game_closes_what_the_noted_game_itself_started(
     game = spawn_process([sys.executable, "-c", script])
     _wait_until(child_pid_file.exists)
     child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    launched = _gone_ref(spawn_sleeper)
     write_launch_state(
         tmp_path,
         profile_id="p",
-        client=_gone_ref(spawn_sleeper),
-        adopted_client=_live_ref(game),
+        client=launched,
+        adopted_client=_live_ref(game, descendant_of=launched["pid"]),
     )
 
     result = stop_game(tmp_path)
@@ -142,17 +154,53 @@ def test_stop_game_leaves_a_noted_game_whose_start_time_no_longer_matches(
     worse than leaving a game open.
     """
     stranger = spawn_sleeper()
+    launched = _gone_ref(spawn_sleeper)
     write_launch_state(
         tmp_path,
         profile_id="p",
-        client=_gone_ref(spawn_sleeper),
-        adopted_client=process_ref(stranger.pid, 1.0),
+        client=launched,
+        adopted_client=process_ref(stranger.pid, 1.0, descendant_of=launched["pid"]),
     )
 
     result = stop_game(tmp_path)
 
     assert result == StopResult(False, False, NOTHING_LEFT)
     assert stranger.poll() is None  # still running -- it was correctly left alone
+
+
+@pytest.mark.parametrize(
+    "descendant_of",
+    [
+        pytest.param(None, id="written-before-the-answer-existed"),
+        pytest.param(1, id="naming-a-process-this-launch-never-started"),
+    ],
+)
+def test_stop_game_leaves_a_noted_game_it_cannot_attribute_to_this_launch(
+    tmp_path: Path, spawn_sleeper: SpawnSleeper, descendant_of: int | None
+) -> None:
+    """A noted game is only closed when the note says it came from this launch.
+
+    The state file notes a running game either without naming the process it
+    was found below -- what an older sptmod wrote, which went by the game's
+    name alone -- or naming a process this launch never started. stop_game must
+    report nothing closed, leave that game running and still finish without
+    complaint, because a state file from before the update must not fail a
+    stop, and a game left open is recoverable where closing a stranger's raid
+    is not.
+    """
+    game = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        profile_id="p",
+        client=_gone_ref(spawn_sleeper),
+        adopted_client=_live_ref(game, descendant_of=descendant_of),
+    )
+
+    result = stop_game(tmp_path)
+
+    assert result == StopResult(False, False, NOTHING_LEFT)
+    assert game.poll() is None
+    assert not _state_file(tmp_path).exists()
 
 
 def test_stop_game_reports_nothing_left_when_both_noted_processes_are_gone(
@@ -165,11 +213,12 @@ def test_stop_game_reports_nothing_left_when_both_noted_processes_are_gone(
     running rather than report a game it did not close, and still drop the
     state file so the next launch starts from nothing.
     """
+    launched = _gone_ref(spawn_sleeper)
     write_launch_state(
         tmp_path,
         profile_id="p",
-        client=_gone_ref(spawn_sleeper),
-        adopted_client=_gone_ref(spawn_sleeper),
+        client=launched,
+        adopted_client=_gone_ref(spawn_sleeper, descendant_of=launched["pid"]),
     )
 
     result = stop_game(tmp_path)
@@ -189,11 +238,12 @@ def test_launch_status_reports_the_noted_game_as_running_and_stoppable(
     would strand the player with a game the manager can in fact still close.
     """
     game = spawn_sleeper()
+    launched = _gone_ref(spawn_sleeper)
     write_launch_state(
         tmp_path,
         profile_id="p",
-        client=_gone_ref(spawn_sleeper),
-        adopted_client=_live_ref(game),
+        client=launched,
+        adopted_client=_live_ref(game, descendant_of=launched["pid"]),
     )
 
     status = launch_status(tmp_path)

@@ -18,7 +18,7 @@ import psutil
 import pytest
 
 from fixture_types import JsonDict, SpawnProcess, SpawnSleeper
-from sptmod.core.game_dir import detect_layout
+from sptmod.core.game_dir import CLIENT_EXE_NAME, detect_layout
 from sptmod.core.launch import LAUNCH_STATE_FILE_NAME
 from sptmod.core.models import Json
 from sptmod.core.repo import Repo
@@ -311,6 +311,33 @@ def spawn_sleeper(spawn_process: SpawnProcess) -> SpawnSleeper:
     return _spawn
 
 
+@pytest.fixture
+def client_executable(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A copy of ``sleep`` carrying the game's own file name.
+
+    Started, it is what ``game_dir.game_processes`` classifies as a client,
+    because the real scan goes by the process name -- so the watcher and the
+    launch state can be driven against a genuine process table without
+    monkeypatching it and without ever touching the real game. The path is a
+    fixture of its own so a test can also have another process start it.
+    """
+    sleep_bin = shutil.which("sleep")
+    assert sleep_bin is not None
+    executable = tmp_path_factory.mktemp("game") / CLIENT_EXE_NAME
+    shutil.copy(sleep_bin, executable)
+    return executable
+
+
+@pytest.fixture
+def spawn_client(client_executable: Path, spawn_process: SpawnProcess) -> SpawnSleeper:
+    """Factory spawning throwaway processes the real name scan reports as the game."""
+
+    def _spawn() -> subprocess.Popen[bytes]:
+        return spawn_process([str(client_executable), "30"])
+
+    return _spawn
+
+
 def write_launch_state(
     root: Path,
     *,
@@ -344,14 +371,25 @@ def write_launch_state(
     (root / LAUNCH_STATE_FILE_NAME).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def process_ref(pid: int, started_at: float, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
+def process_ref(
+    pid: int,
+    started_at: float,
+    *,
+    started_by_sptmod: bool | None = None,
+    descendant_of: int | None = None,
+) -> dict[str, Any]:
     """Build a process reference dict for the launch state file.
 
     Returns a dict with pid and started_at (float timestamp); if started_by_sptmod
     is not None, it is also included. This object is assigned to server, client, or
-    watcher fields in the state file.
+    watcher fields in the state file. ``descendant_of`` is the extra answer an
+    ``adopted_client`` entry carries: the process the launch started, below
+    which the noted game was found. Without it the entry is not read back at
+    all, so every state file that notes a game has to name it.
     """
     payload: dict[str, Any] = {"pid": pid, "started_at": started_at}
     if started_by_sptmod is not None:
         payload["started_by_sptmod"] = started_by_sptmod
+    if descendant_of is not None:
+        payload["descendant_of"] = descendant_of
     return payload

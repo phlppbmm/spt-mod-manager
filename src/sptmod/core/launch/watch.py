@@ -10,7 +10,7 @@ from typing import Final
 import psutil
 
 from sptmod.core import game_dir
-from sptmod.core.launch.process import TERMINATE_TIMEOUT, running_ref, terminate
+from sptmod.core.launch.process import TERMINATE_TIMEOUT, live_ref, running_ref, terminate
 from sptmod.core.launch.state import (
     CLIENT_MODE,
     LaunchState,
@@ -154,17 +154,35 @@ def _adopt(path: Path, state: LaunchState, client: ProcessRef) -> LaunchState:
 def _adopted_client(recorded: ProcessRef) -> ProcessRef | None:
     """Return the running game that belongs to the launch of ``recorded``.
 
-    Only a game that began no earlier than the process the launch started can
-    have come from it; an older one was there before and belongs to somebody
-    else. A start time of ``0.0`` could not be read at spawn time and orders
-    nothing, so nothing is adopted then.
+    Only a game below the process the launch started came from it. A game that
+    hangs off something else, however plainly it is a game, belongs to somebody
+    else and is never adopted, because what is adopted here is closed later.
+    That is why the process the launch started must still be alive and be that
+    same process: once it is gone, nothing can be attributed to it any more and
+    the game is left to the player. Every candidate is cross-checked by start
+    time as well, so a process number handed out again names nobody. Of several
+    games below the process the youngest is the one this launch is playing.
     """
-    if recorded.started_at <= 0.0:
+    if live_ref(recorded) is None:
         return None
-    found = running_ref(game_dir.game_processes(), "client")
-    if found is None or found.started_at < recorded.started_at:
+    try:
+        wrapper = psutil.Process(recorded.pid)
+        descendants = {
+            child.pid: child.create_time() for child in wrapper.children(recursive=True)
+        }
+    except psutil.Error:
         return None
-    return found
+    candidates = [
+        process
+        for process in game_dir.game_processes()
+        if process.kind == "client"
+        and descendants.get(process.pid) == process.started_at
+        and process.started_at >= recorded.started_at
+    ]
+    if not candidates:
+        return None
+    youngest = max(candidates, key=lambda process: process.started_at)
+    return ProcessRef(pid=youngest.pid, started_at=youngest.started_at)
 
 
 def _stop_watched_server(path: Path, state: LaunchState, terminate_timeout: float) -> None:

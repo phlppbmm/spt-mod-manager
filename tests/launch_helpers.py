@@ -1,8 +1,9 @@
 """Helpers shared by the launch test modules.
 
-Holds the two respx routes every launch test sets up, the progress capture and
-the poll-until helper, so ``test_launch.py`` and its siblings each import them
-instead of carrying their own copy.
+Holds the two respx routes every launch test sets up, the progress capture,
+the poll-until helper and the fake clock the watcher tests drive, so
+``test_launch.py`` and its siblings each import them instead of carrying their
+own copy.
 """
 
 import time
@@ -55,3 +56,31 @@ def wait_until(predicate: Callable[[], bool], timeout: float = 4.0) -> None:
             return
         time.sleep(0.02)
     raise AssertionError("condition was never met")
+
+
+def ticking(on_tick: Callable[[int], None]) -> tuple[Callable[[float], None], Callable[[], float]]:
+    """Return a sleep/clock pair that moves a fake clock instead of waiting.
+
+    Injected into ``watch_game`` so a test that watches a game never waits on a
+    real clock. ``on_tick`` receives the number of the sleep that just
+    happened, which is where a test reads the state file and where it starts or
+    ends its throwaway processes.
+    """
+    now = 0.0
+    tick = 0
+
+    def _sleep(seconds: float) -> None:
+        nonlocal now, tick
+        tick += 1
+        now += seconds
+        on_tick(tick)
+
+    def _clock() -> float:
+        return now
+
+    return _sleep, _clock
+
+
+def no_tick(_tick: int) -> None:
+    """Ignore the tick count: for a watch that starts and ends no process."""
+    return None

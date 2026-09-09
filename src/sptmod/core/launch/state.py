@@ -70,14 +70,15 @@ def read_state(path: Path) -> LaunchState:
     server = payload.get("server")
     failure = payload.get("failure")
     mode = payload.get("mode")
+    client = _reference(payload.get("client"))
     return LaunchState(
         profile_id=profile_id if isinstance(profile_id, str) else "",
         stop_server_on_exit=payload.get("stop_server_on_exit") is not False,
         server=_reference(server),
         server_started_by_sptmod=isinstance(server, dict)
         and server.get("started_by_sptmod") is True,
-        client=_reference(payload.get("client")),
-        adopted_client=_reference(payload.get("adopted_client")),
+        client=client,
+        adopted_client=_adopted_reference(payload.get("adopted_client"), client),
         watcher=_reference(payload.get("watcher")),
         failure=failure if isinstance(failure, str) else "",
         mode=mode if isinstance(mode, str) else "",
@@ -95,6 +96,20 @@ def _reference(value: Json) -> ProcessRef | None:
     if not isinstance(started_at, int | float) or isinstance(started_at, bool):
         return None
     return ProcessRef(pid=pid, started_at=float(started_at))
+def _adopted_reference(value: Json, client: ProcessRef | None) -> ProcessRef | None:
+    """Read the adopted game, ``None`` unless it hangs off ``client``.
+
+    The adopted game is closed later, so it is only read back when the file
+    says which process the launch started it was found below and that is the
+    process this launch remembers. A note without that answer -- one written by
+    an older version, which adopted by name alone -- is dropped rather than
+    trusted: the game is then left running, which is the harmless direction.
+    """
+    if client is None or not isinstance(value, dict):
+        return None
+    if value.get("descendant_of") != client.pid:
+        return None
+    return _reference(value)
 def write_state(path: Path, state: LaunchState) -> None:
     """Write the launch state of ``path`` in one piece.
 
@@ -105,11 +120,14 @@ def write_state(path: Path, state: LaunchState) -> None:
         "profile_id": state.profile_id,
         "stop_server_on_exit": state.stop_server_on_exit,
         "client": _reference_payload(state.client),
-        "adopted_client": _reference_payload(state.adopted_client),
         "watcher": _reference_payload(state.watcher),
         "failure": state.failure,
         "mode": state.mode,
     }
+    adopted_client = _reference_payload(state.adopted_client)
+    if adopted_client is not None and state.client is not None:
+        adopted_client["descendant_of"] = state.client.pid
+    payload["adopted_client"] = adopted_client
     server = _reference_payload(state.server)
     if server is not None:
         server["started_by_sptmod"] = state.server_started_by_sptmod

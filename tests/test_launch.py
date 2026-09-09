@@ -53,31 +53,17 @@ def _free_route(router: respx.MockRouter) -> respx.Route:
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("", []),
-        ("   ", []),
-        ("plain", ["plain"]),
-        ("A=1 B=2", ["A=1", "B=2"]),
-        ("  A=1   B=2  ", ["A=1", "B=2"]),
-        ('-Arg="x y"', ["-Arg=x y"]),
-        ('X="a b" -flag', ["X=a b", "-flag"]),
-        ('A="incomplete', ["A=incomplete"]),
-    ],
-)
-def test_tokenize_launch_settings(text: str, expected: list[str]) -> None:
-    """Tokenization of launch settings splits on whitespace and handles quoted values.
-
-    Parameterized cases cover empty input, unquoted tokens, quoted tokens with
-    embedded spaces, and unclosed quotes (which end at the string end).
-    """
-    assert tokenize_launch_settings(text) == expected
-
-
-@pytest.mark.parametrize(
-    "text,expected",
-    [
+        pytest.param("", [], id="empty-settings"),
+        pytest.param("   ", [], id="whitespace-only"),
+        pytest.param("plain", ["plain"], id="plain-token"),
+        pytest.param("A=1 B=2", ["A=1", "B=2"], id="two-assignments"),
+        pytest.param("  A=1   B=2  ", ["A=1", "B=2"], id="surrounding-whitespace"),
         pytest.param("A='a b'", ["A=a b"], id="single-quoted-value-with-a-space"),
         pytest.param("'a b' 'c d'", ["a b", "c d"], id="two-single-quoted-tokens"),
         pytest.param("A='incomplete", ["A=incomplete"], id="unterminated-single-quote"),
+        pytest.param('-Arg="x y"', ["-Arg=x y"], id="double-quoted-value-with-a-space"),
+        pytest.param('X="a b" -flag', ["X=a b", "-flag"], id="double-quoted-value-then-a-flag"),
+        pytest.param('A="incomplete', ["A=incomplete"], id="unterminated-double-quote"),
         pytest.param('A=\\"x', ['A="x'], id="escaped-double-quote-outside-quotes"),
         pytest.param("A=\\'x", ["A='x"], id="escaped-single-quote-outside-quotes"),
         pytest.param('A="a\\"b"', ['A=a"b'], id="escaped-double-quote-inside-a-quoted-run"),
@@ -90,10 +76,13 @@ def test_tokenize_launch_settings(text: str, expected: list[str]) -> None:
         pytest.param('A=\'a "b" c\'', ['A=a "b" c'], id="double-quotes-inside-a-single-quoted-run"),
     ],
 )
-def test_tokenize_launch_settings_quoting(text: str, expected: list[str]) -> None:
+def test_tokenize_launch_settings(text: str, expected: list[str]) -> None:
     """Tokenization matches the quoting rules of the official launcher.
 
-    Both quote characters open a run that ends at the same character, a
+    Settings that are empty or all whitespace yield no token at all, and tokens
+    are otherwise split on whitespace however much of it surrounds them.
+    Both quote characters protect whitespace and open a run that ends at the
+    same character, whether or not a further token follows it; a
     backslash keeps the following quote as text, an unterminated run reaches
     the end of the settings and an empty run still yields a token. A backslash
     that stands before anything else -- a Windows path, which these settings

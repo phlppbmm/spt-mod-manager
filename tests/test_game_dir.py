@@ -20,6 +20,7 @@ from fixture_types import SpawnProcess
 from sptmod.core.errors import GameRunningError, NotAGameDirError
 from sptmod.core.game_dir import (
     PROCESS_SCAN_ENV,
+    SERVER_LINUX_NAME,
     GameProcess,
     GameProcessKind,
     ProcessSighting,
@@ -195,29 +196,6 @@ def test_ensure_game_not_running_passes_when_no_processes(
     ensure_game_not_running()  # must not raise
 
 
-def test_ensure_game_not_running_raises_when_processes_found(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """GameRunningError is raised when game processes are detected."""
-    monkeypatch.setattr(
-        "sptmod.core.game_dir.running_game_processes",
-        lambda: ["SPT.Server.exe"],
-    )
-
-    with pytest.raises(GameRunningError):
-        ensure_game_not_running()
-
-
-def test_running_game_processes_scans_the_real_process_table_without_crashing() -> None:
-    """Exercises the real, non-monkeypatched implementation: this sandboxed
-    test environment never runs SPT.Server or EscapeFromTarkov, so none of
-    the real processes on this machine are ever reported."""
-    names = running_game_processes()
-
-    assert isinstance(names, list)
-    assert all(is_game_process_name(name) for name in names)
-
-
 class _VanishedProcess:
     """A stand-in for a real ``psutil.Process`` that died mid-scan."""
 
@@ -252,22 +230,6 @@ class _SecretiveProcess:
     def cmdline(self) -> list[str]:
         """Refuse the command line the way the operating system does."""
         raise psutil.AccessDenied(pid=999998)
-
-
-def test_running_game_processes_skips_a_process_that_vanishes_mid_scan(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``psutil.process_iter()`` is the real OS process-table boundary this
-    module reads (mirroring how the test suite mocks the HTTP/subprocess
-    boundaries elsewhere); a process that exits between being listed and
-    ``.name()`` being called on it raises a genuine ``psutil.Error``, which
-    ``running_game_processes`` must swallow rather than propagate."""
-    monkeypatch.setattr(
-        "sptmod.core.game_dir.psutil.process_iter",
-        lambda: iter([_VanishedProcess()]),
-    )
-
-    assert running_game_processes() == []
 
 
 def test_ensure_game_not_running_message_names_the_processes(
@@ -395,7 +357,14 @@ def test_game_processes_reports_server_and_client_with_pid_and_started_at(
 def test_game_processes_skips_a_process_that_vanishes_mid_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Processes that die mid-scan (before name() is called) are silently skipped."""
+    """Processes that die mid-scan (before name() is called) are silently skipped.
+
+    ``psutil.process_iter()`` is the real OS process-table boundary this module
+    reads (mirroring how the test suite mocks the HTTP/subprocess boundaries
+    elsewhere); a process that exits between being listed and ``.name()`` being
+    called on it raises a genuine ``psutil.Error``, which ``game_processes``
+    must swallow rather than propagate.
+    """
     monkeypatch.setattr(
         "sptmod.core.game_dir.psutil.process_iter",
         lambda: iter([_VanishedProcess()]),
@@ -566,21 +535,27 @@ def test_spt_process_sightings_skips_processes_it_cannot_read(
     assert not spt_process_sightings()
 
 
-def test_spt_process_sightings_scans_the_real_process_table_without_crashing() -> None:
-    """spt_process_sightings() runs against the real, unpatched process table.
+def test_spt_process_sightings_reports_a_real_process_named_like_the_server(
+    tmp_path: Path,
+    spawn_process: SpawnProcess,
+) -> None:
+    """spt_process_sightings() finds a real process named like the SPT server.
 
-    Exercises the real psutil scan the way the launch log calls it, on a
-    machine whose process table the test does not control. The scan must walk
-    it end to end without raising and hand back readable entries, whatever it
-    finds.
+    A copy of ``sleep`` under the server's file name is started, so the real,
+    unpatched psutil scan the launch log calls has to walk the process table of
+    this machine end to end and report that process with its number, its name
+    and the program it was started from.
     """
-    sightings = spt_process_sightings()
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    fake_server = tmp_path / SERVER_LINUX_NAME
+    shutil.copy(sleep, fake_server)
+    process = spawn_process([str(fake_server), "30"])
 
-    assert isinstance(sightings, list)
-    for sighting in sightings:
-        assert sighting.pid > 0
-        assert isinstance(sighting.name, str)
-        assert isinstance(sighting.command, str)
+    assert (
+        ProcessSighting(pid=process.pid, name=SERVER_LINUX_NAME, command=str(fake_server))
+        in spt_process_sightings()
+    )
 
 
 # --- SPTMOD_PROCESS_SCAN -------------------------------------------------------

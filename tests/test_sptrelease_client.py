@@ -33,7 +33,7 @@ RELEASE_ENV_VAR = "SPTMOD_SPT_RELEASE_URL"
 
 @pytest.fixture
 def fake_router() -> Iterator[respx.MockRouter]:
-    """A respx router bound to ``FAKE_RELEASES_URL``, never the real GitHub host."""
+    """A respx router for the release client; every request is intercepted, none reaches GitHub."""
     with respx.mock(assert_all_called=False) as router:
         yield router
 
@@ -43,51 +43,65 @@ def fake_router() -> Iterator[respx.MockRouter]:
 # --------------------------------------------------------------------------
 
 
-def test_spt_releases_url_returns_default_when_env_var_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """spt_releases_url() falls back to DEFAULT_RELEASES_URL when the env var is unset."""
-    monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
-
-    assert spt_releases_url() == DEFAULT_RELEASES_URL
-
-
-def test_spt_releases_url_returns_default_when_env_var_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """spt_releases_url() falls back to DEFAULT_RELEASES_URL when the env var is set but empty."""
-    monkeypatch.setenv(RELEASE_ENV_VAR, "")
-
-    assert spt_releases_url() == DEFAULT_RELEASES_URL
-
-
-def test_spt_releases_url_returns_env_var_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """spt_releases_url() returns the env var's value when it is set and non-empty."""
-    monkeypatch.setenv(RELEASE_ENV_VAR, "https://mirror.invalid/releases")
-
-    assert spt_releases_url() == "https://mirror.invalid/releases"
-
-
-def test_client_uses_env_var_as_base_url_when_no_explicit_base_url_is_given(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        pytest.param(None, DEFAULT_RELEASES_URL, id="env-unset"),
+        pytest.param("", DEFAULT_RELEASES_URL, id="env-empty"),
+        pytest.param("https://mirror.invalid/releases", "https://mirror.invalid/releases", id="env-set"),
+    ],
+)
+def test_spt_releases_url_reads_the_environment(
+    monkeypatch: pytest.MonkeyPatch, env_value: str | None, expected: str
 ) -> None:
-    """SptReleaseClient() with no explicit base_url uses SPTMOD_SPT_RELEASE_URL."""
-    monkeypatch.setenv(RELEASE_ENV_VAR, FAKE_RELEASES_URL)
+    """spt_releases_url() returns the env var when it names a URL, the default otherwise.
 
-    with SptReleaseClient() as client:
-        assert client.base_url == FAKE_RELEASES_URL
+    SPTMOD_SPT_RELEASE_URL is unset, set to the empty string, or set to a mirror
+    address; the first two fall back to DEFAULT_RELEASES_URL because an empty
+    variable names no host, the third wins so a mirror needs no code change.
+    """
+    if env_value is None:
+        monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(RELEASE_ENV_VAR, env_value)
+
+    assert spt_releases_url() == expected
 
 
-def test_client_uses_default_base_url_when_env_var_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SptReleaseClient() with no explicit base_url and no env var uses DEFAULT_RELEASES_URL."""
-    monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
+@pytest.mark.parametrize(
+    ("env_value", "base_url", "asked_url"),
+    [
+        pytest.param(FAKE_RELEASES_URL, None, FAKE_RELEASES_URL, id="env-var-used"),
+        pytest.param(None, None, DEFAULT_RELEASES_URL, id="default-used"),
+        pytest.param(
+            "https://env.invalid/releases", FAKE_RELEASES_URL, FAKE_RELEASES_URL, id="explicit-argument-wins"
+        ),
+    ],
+)
+def test_the_client_asks_the_host_the_precedence_rules_pick(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_router: respx.MockRouter,
+    env_value: str | None,
+    base_url: str | None,
+    asked_url: str,
+) -> None:
+    """releases() sends its request to the URL the precedence rules select.
 
-    with SptReleaseClient() as client:
-        assert client.base_url == DEFAULT_RELEASES_URL
+    The environment names a URL and no argument is given, neither names one, or
+    both do; the route registered on the expected host is the one that records a
+    call, so the precedence (argument > env var > default) is asserted through
+    the request the client really sends.
+    """
+    if env_value is None:
+        monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(RELEASE_ENV_VAR, env_value)
 
+    route = fake_router.get(asked_url).mock(return_value=httpx.Response(200, json=[]))
+    with SptReleaseClient(base_url) as client:
+        client.releases()
 
-def test_explicit_base_url_wins_over_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit base_url argument takes precedence over SPTMOD_SPT_RELEASE_URL."""
-    monkeypatch.setenv(RELEASE_ENV_VAR, "https://env.invalid/releases")
-
-    with SptReleaseClient(base_url=FAKE_RELEASES_URL) as client:
-        assert client.base_url == FAKE_RELEASES_URL
+    assert route.call_count == 1
 
 
 # --------------------------------------------------------------------------

@@ -32,27 +32,27 @@ from sptmod.core.repo import Repo
 # ============================================================================
 
 
-def test_detect_layout_accepts_runtime_only(tmp_path: Path) -> None:
-    """SPT_Runtime alone (4.1+ layout) is a valid, unambiguous game directory."""
+@pytest.mark.parametrize(
+    "runtime_dir_name",
+    [
+        pytest.param("SPT_Runtime", id="spt-runtime-4.1"),
+        pytest.param("SPT", id="spt-4.0"),
+    ],
+)
+def test_detect_layout_accepts_one_runtime_directory(tmp_path: Path, runtime_dir_name: str) -> None:
+    """Either runtime directory alone is a valid, unambiguous game directory.
+
+    Only SPT_Runtime (the 4.1+ layout) or only SPT (the 4.0 layout) exists next
+    to BepInEx; detect_layout names that directory as the runtime and warns
+    about nothing, because there is nothing to choose between.
+    """
     root = tmp_path / "game"
-    (root / "SPT_Runtime").mkdir(parents=True)
+    (root / runtime_dir_name).mkdir(parents=True)
     (root / "BepInEx").mkdir(parents=True)
 
     layout = detect_layout(root)
 
-    assert layout.runtime_dir_name == "SPT_Runtime"
-    assert layout.warning == ""
-
-
-def test_detect_layout_accepts_spt_only(tmp_path: Path) -> None:
-    """SPT alone (4.0 layout) is a valid, unambiguous game directory."""
-    root = tmp_path / "game"
-    (root / "SPT").mkdir(parents=True)
-    (root / "BepInEx").mkdir(parents=True)
-
-    layout = detect_layout(root)
-
-    assert layout.runtime_dir_name == "SPT"
+    assert layout.runtime_dir_name == runtime_dir_name
     assert layout.warning == ""
 
 
@@ -194,19 +194,6 @@ def test_is_game_program_path_classifies_the_spt_program_set(entry: str, expecte
 # ============================================================================
 
 
-def test_read_client_build_returns_the_second_to_last_dash_and_dot_component(
-    tmp_path: Path,
-) -> None:
-    """read_client_build() splits ProductVersion on both '.' and '-' and
-    returns the second-to-last component: '0.16.9.5-40743.36018' is build
-    '40743', the value SPT compares an installation's client build against.
-    """
-    exe = tmp_path / "EscapeFromTarkov.exe"
-    exe.write_bytes(build_synthetic_exe_multi([("ProductVersion", "0.16.9.5-40743.36018")]))
-
-    assert read_client_build(exe) == "40743"
-
-
 def test_read_client_build_prefers_product_version_over_file_version(
     tmp_path: Path,
 ) -> None:
@@ -226,12 +213,23 @@ def test_read_client_build_prefers_product_version_over_file_version(
     assert read_client_build(exe) == "40743"
 
 
-def test_read_client_build_falls_back_to_file_version_when_no_product_version(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "version_key",
+    [
+        pytest.param("ProductVersion", id="product-version"),
+        pytest.param("FileVersion", id="falls-back-to-file-version"),
+    ],
+)
+def test_read_client_build_returns_the_second_to_last_dash_and_dot_component(
+    tmp_path: Path, version_key: str
 ) -> None:
-    """Without a ProductVersion string, read_client_build() reads FileVersion instead."""
+    """read_client_build() splits the version on both '.' and '-' and returns the
+    second-to-last component: '0.16.9.5-40743.36018' is build '40743', the value
+    SPT compares an installation's client build against. It reads ProductVersion,
+    and FileVersion when the executable carries no ProductVersion.
+    """
     exe = tmp_path / "EscapeFromTarkov.exe"
-    exe.write_bytes(build_synthetic_exe_multi([("FileVersion", "0.16.9.5-40743.36018")]))
+    exe.write_bytes(build_synthetic_exe_multi([(version_key, "0.16.9.5-40743.36018")]))
 
     assert read_client_build(exe) == "40743"
 
@@ -294,23 +292,6 @@ def test_init_on_runtime_layout_tracks_the_whitelist_profile_and_program_files(
         Path("SPT_Runtime/SPT.Server.exe"),
         Path("SPT_Runtime/SPT_Data/configs/core.json"),
     }
-
-
-def test_init_on_runtime_layout_ignored_dummies_are_absent_from_the_commit(
-    fake_game_dir_runtime: Path,
-) -> None:
-    """Ignored paths (logs, backups, game data) are not committed."""
-    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", "4.1.2")
-
-    result = services.init_game_dir(fake_game_dir_runtime)
-
-    committed = {f.path for f in Repo(fake_game_dir_runtime).show_files(result.commit)}
-    ignored = {
-        Path("SPT_Runtime/user/logs/x.log"),
-        Path("EscapeFromTarkov_Data/foo"),
-        Path("SPT_Runtime/user/profiles/backups/old.json"),
-    }
-    assert committed.isdisjoint(ignored)
 
 
 def test_install_from_archive_translates_the_spt_prefix_to_the_runtime_dir(

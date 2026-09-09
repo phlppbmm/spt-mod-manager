@@ -2,16 +2,20 @@
 remembered state and the process table, which of the two wins, and how it
 treats a state file whose content is malformed.
 
-No test starts a real SPT server or game: every process here is either a
-scan result invented by the test or a number ``game_dir.process_alive`` is
-made to answer for.
+No test starts a real SPT server or game: every process here is either a scan
+result invented by the test or a throwaway process the test spawned itself,
+noted with its real number and start time so the liveness check runs for real.
 """
 
 import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
+import psutil
 import pytest
 
+from fixture_types import SpawnSleeper
 from fixtures_launch import process_ref, write_launch_state
 from sptmod.core import game_dir
 from sptmod.core.game_dir import GameProcess
@@ -24,14 +28,22 @@ from sptmod.core.launch import (
 pytestmark = pytest.mark.timeout(5)
 
 
-def _process_alive(_pid: int, _started_at: float) -> bool:
-    """Stand in for ``game_dir.process_alive`` reporting a running process."""
-    return True
+def _live_ref(process: subprocess.Popen[bytes], *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
+    """Note a running process the way a launch does: number and real start time."""
+    return process_ref(
+        process.pid,
+        psutil.Process(process.pid).create_time(),
+        started_by_sptmod=started_by_sptmod,
+    )
 
 
-def _process_gone(_pid: int, _started_at: float) -> bool:
-    """Stand in for ``game_dir.process_alive`` reporting a finished process."""
-    return False
+def _gone_ref(spawn: SpawnSleeper, *, started_by_sptmod: bool | None = None) -> dict[str, Any]:
+    """Note a process, then end it: the program a launch started and lost."""
+    process = spawn()
+    started_at = psutil.Process(process.pid).create_time()
+    process.kill()
+    process.wait(timeout=4)
+    return process_ref(process.pid, started_at, started_by_sptmod=started_by_sptmod)
 
 
 # --------------------------------------------------------------------------
@@ -53,24 +65,26 @@ def test_launch_status_reports_nothing_with_no_state_and_no_processes(
 
 
 def test_launch_status_reports_alive_processes_from_the_state_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """launch_status extracts running process pids from state file when alive.
 
-    State file records profile "profile-a" with server pid 111 and client pid 222,
-    both started at epoch times 1.0 and 2.0. process_alive returns True for both;
-    launch_status returns LaunchStatus reporting both running with the profile_id.
+    State file records profile "profile-a" with two throwaway processes the test
+    started, each noted with its real number and start time, the server as one
+    sptmod started itself; launch_status returns LaunchStatus reporting both
+    running and stoppable with the profile_id.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
+    server = spawn_sleeper()
+    client = spawn_sleeper()
     write_launch_state(
         tmp_path,
         profile_id="profile-a",
-        server=process_ref(111, 1.0, started_by_sptmod=True),
-        client=process_ref(222, 2.0),
+        server=_live_ref(server, started_by_sptmod=True),
+        client=_live_ref(client),
     )
 
     assert launch_status(tmp_path) == LaunchStatus(
-        True, True, 111, 222, "profile-a", server_stoppable=True, client_stoppable=True
+        True, True, server.pid, client.pid, "profile-a", server_stoppable=True, client_stoppable=True
     )
 
 
@@ -79,11 +93,10 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
 ) -> None:
     """launch_status scans running processes when state file is absent.
 
-    No state file exists; process_alive always returns False (so state fallback
-    doesn't help). game_processes scan finds SPT.Server.Linux (pid 333) and
-    EscapeFromTarkov.exe (pid 444). Result reports both running, profile_id empty.
+    No state file exists, so nothing is recorded to fall back on. game_processes
+    scan finds SPT.Server.Linux (pid 333) and EscapeFromTarkov.exe (pid 444).
+    Result reports both running, neither stoppable, profile_id empty.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
@@ -99,23 +112,22 @@ def test_launch_status_falls_back_to_the_scanned_process_table(
 
 
 def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, spawn_sleeper: SpawnSleeper, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """launch_status falls back to scanned game name when recorded pid dies.
+    """launch_status falls back to scanned game name when recorded pid died.
 
-    State file records client pid 222 (dead per process_alive check); scan finds
+    State file records a client the test started and ended again; scan finds
     EscapeFromTarkov.exe at pid 444 (real game running after wrapper exited).
     launch_status returns the scanned pid (444), not the stale recorded one.
     """
     # The Linux case: the process the launch spawned was only the wrapper and
     # is gone, while the game itself still runs under its own name.
-    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     monkeypatch.setattr(
         game_dir,
         "game_processes",
         lambda: [GameProcess(pid=444, name="EscapeFromTarkov.exe", kind="client", started_at=10.0)],
     )
-    write_launch_state(tmp_path, profile_id="profile-a", client=process_ref(222, 2.0))
+    write_launch_state(tmp_path, profile_id="profile-a", client=_gone_ref(spawn_sleeper))
 
     status = launch_status(tmp_path)
 
@@ -124,20 +136,19 @@ def test_launch_status_reports_the_scanned_game_when_the_recorded_pid_is_dead(
 
 
 def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, spawn_sleeper: SpawnSleeper
 ) -> None:
     """launch_status preserves profile_id from state even when all processes died.
 
-    State file records profile "stale-profile" with pids 1 and 2 (both dead per
-    process_alive check) and no scan results. Result shows both_running false
-    with pids 0, but profile_id="stale-profile" is retained.
+    State file records profile "stale-profile" with two processes the test
+    started and ended again, and no scan reports anything. Result shows nothing
+    running with pids 0, but profile_id="stale-profile" is retained.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_gone)
     write_launch_state(
         tmp_path,
         profile_id="stale-profile",
-        server=process_ref(1, 1.0, started_by_sptmod=True),
-        client=process_ref(2, 2.0),
+        server=_gone_ref(spawn_sleeper, started_by_sptmod=True),
+        client=_gone_ref(spawn_sleeper),
     )
 
     assert launch_status(tmp_path) == LaunchStatus(
@@ -146,22 +157,22 @@ def test_launch_status_keeps_the_recorded_profile_id_even_when_stale(
 
 
 def test_launch_status_prefers_the_recorded_pid_over_a_scanned_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, spawn_sleeper: SpawnSleeper, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """launch_status returns recorded pid from state, not scan, when both present.
 
-    State file records server pid 111 (alive per process_alive); scan simultaneously
-    finds SPT.Server.Linux at pid 999. Result server_pid is 111, not 999.
+    State file records a running server the test started; the scan simultaneously
+    finds SPT.Server.Linux at pid 999. Result server_pid is the recorded one.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
+    server = spawn_sleeper()
     monkeypatch.setattr(
         game_dir,
         "game_processes",
         lambda: [GameProcess(pid=999, name="SPT.Server.Linux", kind="server", started_at=1.0)],
     )
-    write_launch_state(tmp_path, server=process_ref(111, 1.0, started_by_sptmod=True))
+    write_launch_state(tmp_path, server=_live_ref(server, started_by_sptmod=True))
 
-    assert launch_status(tmp_path).server_pid == 111
+    assert launch_status(tmp_path).server_pid == server.pid
 
 
 # --------------------------------------------------------------------------
@@ -185,33 +196,57 @@ def test_launch_status_treats_a_non_object_state_file_as_nothing_running(
     )
 
 
-@pytest.mark.parametrize("bad_pid", ["111", -1, 0, True])
+@pytest.mark.parametrize(
+    "bad_pid",
+    ["111", -1, 0, True],
+    ids=["pid-is-a-string", "negative-pid", "zero-pid", "pid-is-a-bool"],
+)
 def test_launch_status_ignores_a_state_entry_with_an_unusable_pid(
-    tmp_path: Path, bad_pid: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, bad_pid: object, spawn_sleeper: SpawnSleeper
 ) -> None:
     """launch_status skips server entry with invalid pid (string, negative, zero, bool).
 
     State server entry has pid="111" (string), or -1, or 0, or True instead of
-    positive int. launch_status detects type/value violation and skips the entry,
-    returning server_running=False.
+    positive int, while the client entry names a process the test really started.
+    launch_status reports the client running, so the state file was read, and
+    server_running=False, so only the unusable entry was dropped.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
-    write_launch_state(tmp_path, server={"pid": bad_pid, "started_at": 1.0})
+    client = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        server={"pid": bad_pid, "started_at": 1.0},
+        client=_live_ref(client),
+    )
 
-    assert launch_status(tmp_path).server_running is False
+    status = launch_status(tmp_path)
+
+    assert status.server_running is False
+    assert status.client_running is True
 
 
-@pytest.mark.parametrize("bad_started_at", ["1.0", True])
+@pytest.mark.parametrize(
+    "bad_started_at",
+    ["1.0", True],
+    ids=["started-at-is-a-string", "started-at-is-a-bool"],
+)
 def test_launch_status_ignores_a_state_entry_with_an_unusable_started_at(
-    tmp_path: Path, bad_started_at: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, bad_started_at: object, spawn_sleeper: SpawnSleeper
 ) -> None:
     """launch_status skips entry with invalid started_at (string "1.0" or bool).
 
-    State server entry has started_at="1.0" (string) or True instead of float.
-    launch_status detects type violation and skips the entry, returning
-    server_running=False.
+    State server entry has started_at="1.0" (string) or True instead of float,
+    while the client entry names a process the test really started. launch_status
+    reports the client running, so the state file was read, and server_running=False,
+    so only the unusable entry was dropped.
     """
-    monkeypatch.setattr(game_dir, "process_alive", _process_alive)
-    write_launch_state(tmp_path, server={"pid": 111, "started_at": bad_started_at})
+    client = spawn_sleeper()
+    write_launch_state(
+        tmp_path,
+        server={"pid": 111, "started_at": bad_started_at},
+        client=_live_ref(client),
+    )
 
-    assert launch_status(tmp_path).server_running is False
+    status = launch_status(tmp_path)
+
+    assert status.server_running is False
+    assert status.client_running is True

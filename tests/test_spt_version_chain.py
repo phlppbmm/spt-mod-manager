@@ -61,53 +61,29 @@ def test_read_core_json_version_returns_the_field_when_present(
     assert read_core_json_version(layout) == "4.1.0"
 
 
-def test_read_core_json_version_none_for_a_4x_style_config_without_the_key(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(json.dumps({"projectName": "SPT", "compatibleTarkovVersion": "1.0"}), id="key-absent"),
+        pytest.param(None, id="file-missing"),
+        pytest.param("{not valid json", id="malformed-json"),
+        pytest.param(json.dumps({"sptVersion": "   "}), id="whitespace-only-value"),
+        pytest.param(json.dumps([1, 2, 3]), id="non-object-root"),
+    ],
+)
+def test_read_core_json_version_none_for_a_core_json_that_names_no_version(
+    tmp_path: Path, content: str | None
 ) -> None:
-    """core.json without sptVersion key returns None."""
-    layout = _layout(tmp_path)
-    _write_core_json(layout, json.dumps({"projectName": "SPT", "compatibleTarkovVersion": "1.0"}))
+    """read_core_json_version returns None for every core.json naming no version.
 
-    assert read_core_json_version(layout) is None
-
-
-def test_read_core_json_version_none_when_file_missing(tmp_path: Path) -> None:
-    """When core.json does not exist, read_core_json_version returns None.
-
-    Creates a GameLayout with the directory structure but no core.json file.
+    The file holds a 4.x config without the key, is absent (``content`` None),
+    holds an unclosed brace, holds a whitespace-only version or a JSON array
+    instead of an object. None of these names a version, and the reader treats
+    the file as a hint only, so each returns None instead of raising.
     """
     layout = _layout(tmp_path)
-
-    assert read_core_json_version(layout) is None
-
-
-def test_read_core_json_version_none_when_json_malformed(tmp_path: Path) -> None:
-    """When core.json is invalid JSON, read_core_json_version returns None.
-
-    Writes syntactically invalid JSON to core.json (unclosed brace).
-    """
-    layout = _layout(tmp_path)
-    _write_core_json(layout, "{not valid json")
-
-    assert read_core_json_version(layout) is None
-
-
-def test_read_core_json_version_none_for_an_empty_string_value(
-    tmp_path: Path,
-) -> None:
-    """Whitespace-only sptVersion is treated as empty."""
-    layout = _layout(tmp_path)
-    _write_core_json(layout, json.dumps({"sptVersion": "   "}))
-
-    assert read_core_json_version(layout) is None
-
-
-def test_read_core_json_version_none_for_a_valid_json_non_object_root(
-    tmp_path: Path,
-) -> None:
-    """Non-object JSON root (e.g., array) returns None."""
-    layout = _layout(tmp_path)
-    _write_core_json(layout, json.dumps([1, 2, 3]))
+    if content is not None:
+        _write_core_json(layout, content)
 
     assert read_core_json_version(layout) is None
 
@@ -323,35 +299,31 @@ def test_rpc_set_spt_version_stores_and_returns_the_stripped_value(
 # ============================================================================
 
 
-def test_cli_init_with_spt_version_option_stores_it_and_skips_the_prompt(
-    fake_game_dir_runtime: Path,
+@pytest.mark.parametrize(
+    ("extra_args", "stdin_input"),
+    [
+        pytest.param(["--spt-version", "4.1.2"], None, id="spt-version-option"),
+        pytest.param([], "4.1.2\n", id="interactive-prompt"),
+    ],
+)
+def test_cli_init_stores_the_spt_version_it_was_given(
+    fake_game_dir_runtime: Path, extra_args: list[str], stdin_input: str | None
 ) -> None:
-    """The --spt-version CLI option stores the version without prompting.
+    """CLI init stores the version from the option and from the interactive answer alike.
 
-    Runs ``sptmod init --spt-version 4.1.2``; must exit 0 and print
-    "initialized SPT 4.1.2" to stdout (no interactive prompt).
+    ``sptmod init --spt-version 4.1.2`` skips the prompt; ``sptmod init`` without
+    the option asks and is answered "4.1.2". Both exit 0, print "initialized SPT
+    4.1.2" and leave that version stored in the new repository.
     """
     result = runner.invoke(
         cli_app,
-        ["init", str(fake_game_dir_runtime), "--spt-version", "4.1.2"],
+        ["init", str(fake_game_dir_runtime), *extra_args],
+        input=stdin_input,
     )
 
     assert result.exit_code == 0
     assert "initialized SPT 4.1.2" in result.stdout
-
-
-def test_cli_init_without_spt_version_prompts_and_stores_the_answer(
-    fake_game_dir_runtime: Path,
-) -> None:
-    """Without --spt-version, CLI init prompts interactively and stores input.
-
-    Runs ``sptmod init`` without --spt-version and feeds "4.1.2\n" to stdin;
-    must exit 0 and print "initialized SPT 4.1.2".
-    """
-    result = runner.invoke(cli_app, ["init", str(fake_game_dir_runtime)], input="4.1.2\n")
-
-    assert result.exit_code == 0
-    assert "initialized SPT 4.1.2" in result.stdout
+    assert read_stored_version(Repo(fake_game_dir_runtime)) == "4.1.2"
 
 
 def test_cli_init_reports_a_warning_when_both_runtime_dirs_are_present(

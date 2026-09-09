@@ -47,21 +47,6 @@ def test_revert_removes_the_files_added_by_the_reverted_commit(
     assert not (initialized_repo.path / relative).exists()
 
 
-def test_revert_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
-    """Repo.revert returns new commit hash distinct from original.
-
-    Adds file via add_hash. Calls repo.revert(add_hash). revert_hash must be
-    non-empty, not equal to add_hash.
-    """
-    relative = Path("SPT/user/mods/ModA/file.txt")
-    add_hash = _add_and_commit(initialized_repo, relative, "content-v1\n", "mod: ModA install")
-
-    revert_hash = initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
-
-    assert revert_hash != ""
-    assert revert_hash != add_hash
-
-
 def test_revert_adds_the_extra_trailers_to_the_new_commit(
     initialized_repo: Repo,
 ) -> None:
@@ -91,22 +76,6 @@ def test_cherry_pick_reintroduces_the_removed_file(initialized_repo: Repo) -> No
     initialized_repo.cherry_pick(add_hash, extra_trailers={"Mod-State": "enabled"})
 
     assert (initialized_repo.path / relative).read_text(encoding="utf-8") == "content-v1\n"
-
-
-def test_cherry_pick_returns_a_new_commit_hash(initialized_repo: Repo) -> None:
-    """Repo.cherry_pick returns new commit hash distinct from original.
-
-    Adds, then reverts, then cherry-picks add_hash. cherry_hash must be
-    non-empty, not equal to add_hash.
-    """
-    relative = Path("SPT/user/mods/ModA/file.txt")
-    add_hash = _add_and_commit(initialized_repo, relative, "content-v1\n", "mod: ModA install")
-    initialized_repo.revert(add_hash, extra_trailers={"Mod-State": "removed"})
-
-    cherry_hash = initialized_repo.cherry_pick(add_hash, extra_trailers={"Mod-State": "enabled"})
-
-    assert cherry_hash != ""
-    assert cherry_hash != add_hash
 
 
 def test_cherry_pick_adds_the_extra_trailers_to_the_new_commit(

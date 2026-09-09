@@ -76,65 +76,48 @@ def test_server_base_url_maps_any_interface_hosts_to_loopback(tmp_path: Path, ho
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
 
 
-def test_server_base_url_falls_back_when_the_file_is_missing(tmp_path: Path) -> None:
-    """server_base_url() uses defaults (127.0.0.1:6969) when http.json is missing."""
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(None, id="file-missing"),
+        pytest.param("not json", id="invalid-json"),
+        pytest.param([1, 2, 3], id="json-array-not-object"),
+    ],
+)
+def test_server_base_url_falls_back_when_the_file_says_nothing_usable(tmp_path: Path, config: object) -> None:
+    """server_base_url() uses defaults (127.0.0.1:6969) when http.json holds no config.
+
+    http.json is absent (``config`` None), holds the unparseable text "not json"
+    or holds a JSON array instead of an object. None of these names an address,
+    so the default local server address is returned instead of raising.
+    """
+    if config is not None:
+        _write_http_config(tmp_path, config)
+
     assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
 
 
-def test_server_base_url_falls_back_when_the_file_is_invalid_json(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("config", "expected_url"),
+    [
+        pytest.param({"ip": 12345, "port": 7000}, "https://127.0.0.1:7000", id="ip-is-a-number"),
+        pytest.param({"ip": "10.0.0.5", "port": "7000"}, "https://10.0.0.5:6969", id="port-is-a-string"),
+        # bool is an int subclass in Python; the guard must reject it explicitly.
+        pytest.param({"ip": "10.0.0.5", "port": True}, "https://10.0.0.5:6969", id="port-is-a-bool"),
+    ],
+)
+def test_server_base_url_ignores_a_field_of_the_wrong_type(
+    tmp_path: Path, config: object, expected_url: str
 ) -> None:
-    """server_base_url returns defaults when http.json is not valid JSON.
+    """server_base_url() defaults the field of the wrong type and keeps the other one.
 
-    http.json contains "not json"; parse fails. server_base_url returns
-    "https://127.0.0.1:6969" (defaults).
+    http.json names the ip as a number, the port as a string, or the port as a
+    boolean; each unusable field falls back to its default (127.0.0.1 and 6969)
+    while the well-typed field of the same file is still used.
     """
-    _write_http_config(tmp_path, "not json")
+    _write_http_config(tmp_path, config)
 
-    assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
-
-
-def test_server_base_url_falls_back_when_the_file_is_not_a_json_object(
-    tmp_path: Path,
-) -> None:
-    """server_base_url returns defaults when http.json is a JSON array not object.
-
-    http.json contains [1, 2, 3]; not an object. server_base_url returns
-    "https://127.0.0.1:6969" (defaults).
-    """
-    _write_http_config(tmp_path, [1, 2, 3])
-
-    assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:6969"
-
-
-def test_server_base_url_ignores_a_non_string_ip_field(tmp_path: Path) -> None:
-    """server_base_url ignores ip when not a string type.
-
-    http.json has ip=12345 (int, not string); server_base_url uses default
-    IP 127.0.0.1 but keeps port=7000, returning "https://127.0.0.1:7000".
-    """
-    _write_http_config(tmp_path, {"ip": 12345, "port": 7000})
-
-    assert server_base_url(_layout(tmp_path)) == "https://127.0.0.1:7000"
-
-
-def test_server_base_url_ignores_a_non_int_port_field(tmp_path: Path) -> None:
-    """server_base_url ignores port when not an int type.
-
-    http.json has ip="10.0.0.5", port="7000" (string, not int); server_base_url
-    uses port default 6969, returning "https://10.0.0.5:6969".
-    """
-    _write_http_config(tmp_path, {"ip": "10.0.0.5", "port": "7000"})
-
-    assert server_base_url(_layout(tmp_path)) == "https://10.0.0.5:6969"
-
-
-def test_server_base_url_ignores_a_boolean_port_field(tmp_path: Path) -> None:
-    """server_base_url() explicitly rejects bool (despite int subclass) as port."""
-    # bool is an int subclass in Python; the guard must reject it explicitly.
-    _write_http_config(tmp_path, {"ip": "10.0.0.5", "port": True})
-
-    assert server_base_url(_layout(tmp_path)) == "https://10.0.0.5:6969"
+    assert server_base_url(_layout(tmp_path)) == expected_url
 
 
 # --------------------------------------------------------------------------

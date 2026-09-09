@@ -153,43 +153,51 @@ def _state_file(root: Path) -> Path:
 # --------------------------------------------------------------------------
 
 
-def test_watch_game_returns_immediately_with_no_state_file(tmp_path: Path) -> None:
-    """watch_game returns immediately without polling when state file is absent.
-
-    No state file → no launch recorded → nothing to watch. Monkeypatched sleep
-    fails test if called. watch_game returns without touching filesystem.
-    """
-    watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
-
-    assert not _state_file(tmp_path).exists()
+def _read_state_text(root: Path) -> str | None:
+    """Return the launch state file content of ``root``, None when there is none."""
+    state_file = _state_file(root)
+    return state_file.read_text(encoding="utf-8") if state_file.exists() else None
 
 
-def test_watch_game_returns_immediately_with_a_malformed_state_file(
-    tmp_path: Path,
+def _no_state_file(root: Path) -> None:
+    """Leave the game directory without a launch state file: no launch recorded."""
+    assert not _state_file(root).exists()
+
+
+def _malformed_state_file(root: Path) -> None:
+    """Leave a launch state file behind whose content is not JSON at all."""
+    _state_file(root).write_text("not json", encoding="utf-8")
+
+
+def _state_without_a_client(root: Path) -> None:
+    """Record a launch that named a server but no game to wait for."""
+    write_launch_state(root, profile_id="p", server=process_ref(1, 1.0, started_by_sptmod=True))
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(_no_state_file, id="no-state-file"),
+        pytest.param(_malformed_state_file, id="malformed-state-file"),
+        pytest.param(_state_without_a_client, id="no-client-recorded"),
+    ],
+)
+def test_watch_game_returns_immediately_when_there_is_no_game_to_watch(
+    tmp_path: Path, setup: Callable[[Path], None]
 ) -> None:
-    """watch_game returns immediately when state file JSON is unparseable.
+    """watch_game returns at once, and leaves the state file as it was, with no game recorded.
 
-    State file contains "not json" (not valid JSON); watch_game fails to parse it,
-    returns without polling (sleep not called), and leaves the file byte-identical.
+    There is no state file, the state file is unparseable, or it records a server
+    but no game. In each case nothing can be waited for, so the sleep the watcher
+    would poll with fails the test if called, and the state file is left byte for
+    byte as the setup wrote it instead of being cleared.
     """
-    _state_file(tmp_path).write_text("not json", encoding="utf-8")
+    setup(tmp_path)
+    before = _read_state_text(tmp_path)
 
     watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
 
-    assert _state_file(tmp_path).read_text(encoding="utf-8") == "not json"
-
-
-def test_watch_game_returns_immediately_with_no_client_recorded(tmp_path: Path) -> None:
-    """watch_game returns immediately when state records server but no client.
-
-    State file has server ref but client=None; no client process to wait for.
-    watch_game skips polling (sleep not called) and leaves state file untouched.
-    """
-    write_launch_state(tmp_path, profile_id="p", server=process_ref(1, 1.0, started_by_sptmod=True))
-
-    watch_game(tmp_path, sleep=lambda _seconds: pytest.fail("must not sleep"))
-
-    assert _state_file(tmp_path).exists()  # left untouched, not cleared
+    assert _read_state_text(tmp_path) == before
 
 
 # --------------------------------------------------------------------------
@@ -720,27 +728,23 @@ def test_watch_game_refuses_to_note_a_game_when_the_launch_time_is_unknown(
 # --------------------------------------------------------------------------
 
 
-def test_main_reports_usage_and_exits_2_with_the_wrong_argument_count(
-    capsys: pytest.CaptureFixture[str],
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param([], id="no-arguments"),
+        pytest.param(["a", "b"], id="two-arguments"),
+    ],
+)
+def test_main_reports_usage_and_exits_2_for_the_wrong_argument_count(
+    capsys: pytest.CaptureFixture[str], argv: list[str]
 ) -> None:
-    """main() exits 2 and prints USAGE to stderr when argv list is empty.
+    """main() exits 2 and prints USAGE to stderr for any argument count but one.
 
-    Called with no arguments; main() validates argument count and exits with
-    code 2. USAGE constant is printed to stderr.
+    Called without arguments and with two of them; the watcher takes exactly one
+    game directory, so both counts exit with code 2 and print the usage line to
+    stderr instead of watching anything.
     """
-    assert main([]) == 2
-    assert USAGE in capsys.readouterr().err
-
-
-def test_main_reports_usage_and_exits_2_with_too_many_arguments(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """main() exits 2 and prints USAGE to stderr when argv has 2 items.
-
-    Called with ["a", "b"]; main() validates argument count, finds too many,
-    exits with code 2 and prints USAGE to stderr.
-    """
-    assert main(["a", "b"]) == 2
+    assert main(argv) == 2
     assert USAGE in capsys.readouterr().err
 
 

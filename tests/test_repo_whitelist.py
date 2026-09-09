@@ -93,50 +93,28 @@ def test_untracked_under_hides_ignored_prefixes(initialized_repo: Repo) -> None:
     assert initialized_repo.untracked_under(Path("SPT/user/profiles/backups")) == []
 
 
-def test_untracked_under_shows_new_trackable_mod_file(initialized_repo: Repo) -> None:
-    """Repo.untracked_under shows new mod files in SPT/user/mods.
+@pytest.mark.parametrize(
+    ("relative", "prefix"),
+    [
+        pytest.param("SPT/user/mods/TestMod/mod.dll", "SPT/user/mods", id="mods-dir"),
+        pytest.param("BepInEx/plugins/TestPlugin.dll", "BepInEx", id="bepinex-plugins"),
+        pytest.param("BepInEx/config/TestPlugin.cfg", "BepInEx", id="bepinex-config"),
+        pytest.param("BepInEx/patchers/Fixer.dll", "BepInEx", id="bepinex-patchers"),
+        pytest.param("BepInEx/core/BepInEx.dll", "BepInEx", id="bepinex-core"),
+    ],
+)
+def test_untracked_under_shows_a_new_trackable_file(initialized_repo: Repo, relative: str, prefix: str) -> None:
+    """Repo.untracked_under reports every new file the whitelist allows.
 
-    Creates SPT/user/mods/TestMod/mod.dll. Calls untracked_under(Path("SPT/user/mods")).
-    Returns [Path("SPT/user/mods/TestMod/mod.dll")].
+    One new file is written below the mod directory, below ``BepInEx/plugins``,
+    ``BepInEx/config``, ``BepInEx/patchers`` (e.g. WTT-CommonLib's
+    FixPluginTypesSerialization.dll) or ``BepInEx/core`` (the BepInEx runtime an
+    SPT release ships); untracked_under on the enclosing prefix reports exactly
+    that file, so all five directories are trackable alike.
     """
-    mod_file = initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll"
-    _write(mod_file, "binary-ish")
+    _write(initialized_repo.path / relative, "trackable")
 
-    result = initialized_repo.untracked_under(Path("SPT/user/mods"))
-
-    assert result == [Path("SPT/user/mods/TestMod/mod.dll")]
-
-
-def test_untracked_under_shows_new_trackable_plugin_and_config(
-    initialized_repo: Repo,
-) -> None:
-    """Repo.untracked_under shows plugins and config in BepInEx.
-
-    Creates BepInEx/plugins/TestPlugin.dll and BepInEx/config/TestPlugin.cfg.
-    Calls untracked_under(Path("BepInEx")). Result set must contain both paths.
-    """
-    _write(initialized_repo.path / "BepInEx" / "plugins" / "TestPlugin.dll", "plugin")
-    _write(initialized_repo.path / "BepInEx" / "config" / "TestPlugin.cfg", "cfg")
-
-    result = set(initialized_repo.untracked_under(Path("BepInEx")))
-
-    assert result == {
-        Path("BepInEx/plugins/TestPlugin.dll"),
-        Path("BepInEx/config/TestPlugin.cfg"),
-    }
-
-
-def test_untracked_under_shows_new_trackable_patcher(
-    initialized_repo: Repo,
-) -> None:
-    """``BepInEx/patchers/`` (e.g. WTT-CommonLib's FixPluginTypesSerialization.dll)
-    must be trackable like ``BepInEx/plugins/`` and ``BepInEx/config/``.
-    """
-    _write(initialized_repo.path / "BepInEx" / "patchers" / "Fixer.dll", "patcher")
-
-    result = initialized_repo.untracked_under(Path("BepInEx"))
-
-    assert Path("BepInEx/patchers/Fixer.dll") in result
+    assert initialized_repo.untracked_under(Path(prefix)) == [Path(relative)]
 
 
 def test_commit_with_paths_none_stages_bepinex_patchers(
@@ -153,19 +131,6 @@ def test_commit_with_paths_none_stages_bepinex_patchers(
     files = {mod_file.path for mod_file in initialized_repo.show_files(commit_hash)}
 
     assert Path("BepInEx/patchers/Fixer.dll") in files
-
-
-def test_untracked_under_shows_new_trackable_bepinex_core_file(
-    initialized_repo: Repo,
-) -> None:
-    """``BepInEx/core/`` (the BepInEx runtime an SPT release ships) must be
-    trackable like ``BepInEx/plugins/`` and ``BepInEx/patchers/``.
-    """
-    _write(initialized_repo.path / "BepInEx" / "core" / "BepInEx.dll", "runtime")
-
-    result = initialized_repo.untracked_under(Path("BepInEx"))
-
-    assert Path("BepInEx/core/BepInEx.dll") in result
 
 
 @pytest.mark.parametrize(
@@ -280,23 +245,6 @@ def test_commit_with_paths_none_stages_only_whitelisted_files(
         Path("BepInEx/config/TestPlugin.cfg"),
     }
     assert files == expected
-
-
-def test_commit_with_paths_none_never_includes_ignored_dummies(
-    initialized_repo: Repo,
-) -> None:
-    """Repo.commit(paths=None) excludes ignored files (logs, cache, backups, etc)."""
-    _write(initialized_repo.path / "SPT" / "user" / "mods" / "TestMod" / "mod.dll", "dll")
-
-    commit_hash = initialized_repo.commit("mod: whitelist roundtrip", paths=None)
-    files = {mod_file.path for mod_file in initialized_repo.show_files(commit_hash)}
-
-    forbidden = {
-        Path("SPT/user/logs/x.log"),
-        Path("EscapeFromTarkov_Data/foo"),
-        Path("SPT/user/profiles/backups/old.json"),
-    }
-    assert files.isdisjoint(forbidden)
 
 
 def test_is_clean_after_full_whitelist_commit_ignores_leftover_dummies(

@@ -16,7 +16,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -76,6 +76,21 @@ def _held(path: Path, raw_content: str) -> Generator[Path]:
 
 def _holder_content(operation: str, *, pid: int | None = None) -> str:
     return json.dumps({"pid": os.getpid() if pid is None else pid, "operation": operation})
+
+
+def _no_lock_file(path: Path) -> None:
+    """Leave the game directory without any lock file."""
+    assert not (path / LOCK_FILE_NAME).exists()
+
+
+def _unheld_lock_file(path: Path) -> None:
+    """Leave a lock file naming this process that nobody holds the OS lock on."""
+    _write_lock(path, pid=os.getpid(), operation="crashed run")
+
+
+def _unopenable_lock_path(path: Path) -> None:
+    """Put a directory where the lock file belongs, so it cannot be opened."""
+    (path / LOCK_FILE_NAME).mkdir()
 
 
 # --- staging_dir ---------------------------------------------------------
@@ -173,25 +188,7 @@ def test_download_cache_dir_honors_xdg_cache_home_and_is_created_on_demand(
     assert result.is_dir()
 
 
-def test_download_cache_dir_is_a_sibling_of_staging_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """download_cache_dir() and staging_dir() share a common parent under sptmod."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-
-    downloads = download_cache_dir()
-    staging = staging_dir()
-
-    assert downloads.parent == staging.parent
-
-
 # --- is_locked -------------------------------------------------------------
-
-
-def test_is_locked_false_without_a_lock_file(fake_game_dir: Path) -> None:
-    """is_locked returns False when LOCK_FILE_NAME does not exist.
-
-    No lock file → nothing holds the lock. is_locked() returns False.
-    """
-    assert is_locked(fake_game_dir) is False
 
 
 def test_is_locked_true_while_another_operation_holds_the_lock(
@@ -206,25 +203,24 @@ def test_is_locked_true_while_another_operation_holds_the_lock(
         assert is_locked(fake_game_dir) is True
 
 
-def test_is_locked_false_for_a_lock_file_nobody_holds(fake_game_dir: Path) -> None:
-    """is_locked returns False when lock file exists but no OS lock is held.
-
-    Lock file has current pid and "crashed run" operation (stale entry); no fcntl
-    lock on the file. is_locked() finds no OS lock, returns False.
-    """
-    _write_lock(fake_game_dir, pid=os.getpid(), operation="crashed run")
-
-    assert is_locked(fake_game_dir) is False
-
-
-def test_is_locked_false_when_the_lock_path_cannot_be_opened(
-    fake_game_dir: Path,
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(_no_lock_file, id="no-lock-file"),
+        pytest.param(_unheld_lock_file, id="lock-file-nobody-holds"),
+        pytest.param(_unopenable_lock_path, id="lock-path-is-a-directory"),
+    ],
+)
+def test_is_locked_false_when_nobody_holds_the_operating_system_lock(
+    fake_game_dir: Path, setup: Callable[[Path], None]
 ) -> None:
-    """is_locked() returns False when lock path is a directory (cannot open).
+    """is_locked returns False whenever no process holds the OS lock.
 
-    os.open() raises OSError; is_locked() treats it as "not locked".
+    The game directory has no lock file at all, a leftover lock file naming this
+    process that nobody holds, or a directory where the lock file belongs, which
+    cannot be opened. Only the OS lock counts as held, so all three report False.
     """
-    (fake_game_dir / LOCK_FILE_NAME).mkdir()
+    setup(fake_game_dir)
 
     assert is_locked(fake_game_dir) is False
 
@@ -299,33 +295,24 @@ def test_game_lock_file_content_records_pid_and_operation(clean_repo: Repo) -> N
 # --- lock files nobody holds never block ---------------------------------
 
 
-def test_leftover_lock_file_of_a_dead_process_does_not_block(
-    clean_repo: Repo,
+@pytest.mark.parametrize(
+    "pid_source",
+    [
+        pytest.param(_dead_pid, id="dead-pid"),
+        pytest.param(os.getpid, id="live-pid"),
+    ],
+)
+def test_a_leftover_lock_file_nobody_holds_does_not_block(
+    clean_repo: Repo, pid_source: Callable[[], int]
 ) -> None:
-    """game_lock ignores lock file from dead pid and acquires immediately.
+    """game_lock ignores a leftover lock file whatever process it names.
 
-    Lock file has a nonexistent pid (_dead_pid()), no OS lock held. New caller
-    game_lock() acquires immediately (< 1s), overwrites with new operation.
+    The file names a process that no longer exists, or this very process, but
+    nobody holds the operating-system lock on it. Only that lock blocks, so the
+    new operation gets the lock at once (under a second) and its own name ends
+    up in the file.
     """
-    _write_lock(clean_repo.path, pid=_dead_pid(), operation="crashed run")
-    started = time.monotonic()
-
-    with game_lock(clean_repo.path, "new run"):
-        content = json.loads((clean_repo.path / LOCK_FILE_NAME).read_text(encoding="utf-8"))
-
-    assert content["operation"] == "new run"
-    assert time.monotonic() - started < 1.0
-
-
-def test_leftover_lock_file_naming_a_live_pid_does_not_block(
-    clean_repo: Repo,
-) -> None:
-    """Lock file content (pid claim) doesn't block if no OS lock is actually held.
-
-    File claims the current process pid, but no actual fcntl/msvcrt lock is held.
-    New caller acquires the lock immediately.
-    """
-    lock_path = _write_lock(clean_repo.path, pid=os.getpid(), operation="ancient run")
+    lock_path = _write_lock(clean_repo.path, pid=pid_source(), operation="old run")
     started = time.monotonic()
 
     with game_lock(clean_repo.path, "new run"):

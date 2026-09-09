@@ -64,15 +64,15 @@ port.
 
 ```bash
 uv sync                              # Python env
-uv run pytest                        # full suite (2158 collected: 2157 passed, 1 skipped)
+uv run pytest                        # full suite
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run ruff check src
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
-cd frontend && pnpm vitest run --coverage  # src/lib coverage (v8, 100%; 26 files, 798 tests)
-cd frontend && pnpm test:components        # Svelte components/routes (10 files, 264 tests)
+cd frontend && pnpm vitest run --coverage  # src/lib coverage (v8, 100%)
+cd frontend && pnpm test:components        # Svelte components/routes
 cd frontend && pnpm test:components --coverage  # its own thresholds: a measured floor, not 100%
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
 cd src-tauri && cargo llvm-cov       # Rust coverage (70.54% lines)
@@ -133,6 +133,11 @@ cargo tauri dev                      # hot reload during development
   `src/sptmod/cli.py` hits exactly, so the next line added there has to come
   with a split (spt-mod-manager-vra) — and `min-similarity-lines = 24` for the
   CatalogMod dataclass/schema mirror.
+- Tests assert behavior through public entry points, never the shape of the source: no pinned counts (functions,
+  error classes, routes, options, module lines), no "X was removed / is absent from the tree" assertions, no
+  restating a constant against itself. Reflection-derived contract tests stay — they enumerate a live list, so a new
+  entry is covered automatically, but they carry no hardcoded length. Packaging and release invariants (version
+  agreement across manifests and the like) live in `.github/workflows/release.yml`, not in the suite.
 - Every test module, class, and function has a docstring stating setup,
   assertion, and reason. Tests are fully typed via fixture Protocols in
   `tests/fixture_types.py`; shared builders in `tests/conftest.py`,

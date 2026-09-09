@@ -71,11 +71,11 @@ uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
 cd frontend && pnpm install && pnpm check && pnpm test && pnpm build
-cd frontend && pnpm vitest run --coverage  # src/lib coverage (v8, 100%)
+cd frontend && pnpm vitest run --coverage  # src/lib coverage (v8, gated at 100%)
 cd frontend && pnpm test:components        # Svelte components/routes
 cd frontend && pnpm test:components --coverage  # its own thresholds: a measured floor, not 100%
 cargo build && cargo test            # Rust (Tauri, src-tauri/)
-cd src-tauri && cargo llvm-cov       # Rust coverage (70.54% lines)
+cd src-tauri && cargo llvm-cov       # Rust coverage — reported only, no enforced floor
 
 # after changing service functions or request/response schemas:
 uv run python -m sptmod.server.dump_openapi openapi.json
@@ -87,11 +87,17 @@ uv tool install --editable .         # install sptmod CLI
 cargo tauri dev                      # hot reload during development
 ```
 
+Numbers that no gate enforces (test counts, Rust coverage percentages) are
+deliberately absent here — measure them when you need them; a hardcoded
+snapshot only rots. Where a gate does enforce a figure (Python coverage 100%,
+`src/lib` coverage 100%, the pylint design limits) it is named.
+
 ## Architecture in five lines
 
 - `src/sptmod/core/` is pure logic: typed exceptions, dataclasses, injected
   progress callbacks; it knows neither CLI nor HTTP.
-- `subprocess` ONLY in `core/repo.py` and `core/launch/`; `httpx` ONLY in `core/forge/client.py` and `core/sptserver.py`.
+- `subprocess` ONLY in `core/repo.py` and `core/launch/`; `httpx` ONLY in `core/forge/client.py` (Forge),
+  `core/sptserver.py` (local server) and `core/sptrelease/client.py` (SPT release source) — one per remote service.
 - One contract, four transports: service function ↔ `sptmod rpc <name>` ↔
   Tauri `#[tauri::command] rpc()` ↔ client.ts wrapper — guarded by
   route-per-function and schema-parity tests.
@@ -99,6 +105,24 @@ cargo tauri dev                      # hot reload during development
   `types.ts` is generated, never hand-edited.
 - Git never surfaces in user-facing language (auto-snapshot handles dirty
   profiles; errors speak plain language).
+
+## Package layouts
+
+Three former single files are packages now; import from the package, not from
+a module path that no longer exists:
+
+- `src/sptmod/cli/` — `base.py` (the typer `app`, shared helpers, `add_typer`),
+  `mods.py`, `repo.py`, `sources.py`, `spt.py`, `gamedir.py`, `reports.py`,
+  `rpc.py`. `__init__.py` imports every module for its side effect of
+  registering commands, so the import order there fixes the `sptmod --help`
+  command order (pinned by `tests/test_smoke.py`).
+- `src/sptmod/core/forge/catalog/` — `schema.py` (DDL, the migration list, the
+  default db path), `rows.py` (row ↔ dataclass mapping), `store.py` (the
+  `CatalogStore` itself). The package no longer re-exports `platformdirs`;
+  tests patch `XDG_CONFIG_HOME`.
+- `src/sptmod/server/schemas/` — `base.py`, `mods.py`, `requests.py`,
+  `modsets.py`, `runtime.py`, with `__init__.py` as the facade that re-exports
+  the contract names unchanged.
 
 ## Conventions & hard-won rules
 
@@ -111,14 +135,16 @@ cargo tauri dev                      # hot reload during development
 - Mod identity: the install-commit `Mod:` trailer (from the mod's own
   package.json) ≠ the Forge display name; link rows by Forge id.
 - Catalog cache is disposable; schema evolves via the ALTER list in
-  `catalog._MOD_COLUMN_MIGRATIONS`.
+  `sptmod.core.forge.catalog.schema.MOD_COLUMN_MIGRATIONS`.
 - Line length 119 (ruff E501) — including docstrings.
 - Real-mod corpus for manual verification lives untracked in `_data/mods/`.
 - Tests exercise only public entry points and observable effects; never patch
   or call private names (service functions, public methods, CliRunner, `sptmod rpc`, TS exports).
 - Only mocked boundaries: HTTP (respx), subprocess (stub binary), environment
   (PATH, HOME, XDG_*), filesystem conditions. Public keyword-only seams for
-  testability: `locate_directory(roots=)`, `game_lock(timeout=, poll_interval=)`.
+  testability: `locate_directory(roots=)`, `game_lock(timeout=, poll_interval=)`,
+  and `stop_game(terminate_timeout=)` / `watch_game(terminate_timeout=)` — the
+  seconds a process gets to close on its own before it is killed.
 - Two frontend suites with different standards: `pnpm test` gates `src/lib` at
   100%, `pnpm test:components` runs `frontend/tests/**` under happy-dom against a
   measured coverage floor. Component tests mock `src/lib/api/transport.ts` and
@@ -129,10 +155,12 @@ cargo tauri dev                      # hot reload during development
   NO suppression pragmas of any kind in src or tests (`type: ignore`, `noqa`,
   `pylint: disable`, `pragma: no cover`) — lint findings are resolved by
   refactoring; the only configured knobs are pylint design limits set to the
-  exact observed maxima — among them `max-module-lines = 1000`, which
-  `src/sptmod/cli.py` hits exactly, so the next line added there has to come
-  with a split (spt-mod-manager-vra) — and `min-similarity-lines = 24` for the
-  CatalogMod dataclass/schema mirror.
+  exact observed maxima — among them `max-module-lines = 900`, set by
+  `tests/test_services_update.py`, the longest module in the tree — plus
+  `min-similarity-lines = 24` for the CatalogMod dataclass/schema mirror, and
+  `[tool.pylint.imports] allow-any-import-level = ["libarchive"]`, because
+  libarchive-c loads `libarchive.so` at import time, so archive.py imports it
+  inside the 7z fallback and that knob is the pragma-free way to allow it.
 - Tests assert behavior through public entry points, never the shape of the source: no pinned counts (functions,
   error classes, routes, options, module lines), no "X was removed / is absent from the tree" assertions, no
   restating a constant against itself. Reflection-derived contract tests stay — they enumerate a live list, so a new
@@ -149,4 +177,6 @@ cargo tauri dev                      # hot reload during development
   `tests/fixtures_profile.py`, `tests/fixtures_rpc.py` and `tests/fixtures_spt.py`
   are registered via `pytest_plugins` in `tests/conftest.py`, so their fixtures
   are suite-wide.
+- `conftest.py`'s process-scan guard ignores processes belonging to a test run,
+  so a second pytest run of this repo no longer aborts the first.
 - A strict `xfail` may pin a known production bug only with a bead reference.

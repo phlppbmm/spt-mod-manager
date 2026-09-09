@@ -57,7 +57,7 @@ src/sptmod/
     modsets.py          mod set store: one JSON document per user, keyed by game directory
     fika.py             Fika role store (tolerant), canonical host address
     services/           all user-facing operations as pure functions
-      __init__.py       facade: the 50 service functions and their result types
+      __init__.py       facade: the service functions and their result types
       common.py         shared constants, repo mod lookups, layout path translation
       state.py          status, history, snapshot, installability guard
       gamedir.py        directory browsing/locating, init, SPT version, launch
@@ -78,7 +78,11 @@ src/sptmod/
       client.py         the ONLY module allowed httpx for the Forge; Forge v0 client
       models.py         the Forge API dataclasses (no httpx, pure data)
       parse.py          tolerant JSON-to-dataclass coercion for Forge payloads
-      catalog.py        SQLite cache (config dir), sync/search/classify
+      catalog/          SQLite cache (config dir), sync/search/classify
+        __init__.py     facade: CatalogStore and the names callers import
+        schema.py       DDL, the MOD_COLUMN_MIGRATIONS ALTER list, default db path
+        rows.py         row <-> dataclass mapping for the cached tables
+        store.py        the CatalogStore itself: sync, search, browse, favorites
       cache.py          persistent archive cache (download resumption, LRU)
       download.py       streaming downloads, cache hit/resumption, size verification
       resolve.py        install plans over /mods/dependencies
@@ -88,12 +92,22 @@ src/sptmod/
       apply.py          pure path/version logic of a release (include set, stale set,
                         required client build, version comparison)
   watch.py              process entry for detached game watcher
-  cli.py                typer adapter; exceptions -> exit codes; rich tables
+  cli/                  typer adapter; exceptions -> exit codes; rich tables
+    __init__.py         imports every module below for its command-registration
+                        side effect; that import order fixes `sptmod --help`
+    base.py             the typer `app`, shared error handling, progress printing
+    mods.py             install, update, list, files, remove, disable, enable, adopt
+    repo.py             init, status, snapshot, history, export, import
+    sources.py          sync, search, browse
+    spt.py              the `sptmod spt` group: list, update, downgrade
+    gamedir.py          game directory selection commands
+    reports.py          check and version
+    rpc.py              hidden `sptmod rpc <name>` entry point
   server/
     __init__.py         RPC and OpenAPI dispatch package
     rpc.py              hidden CLI command `sptmod rpc <name>` (RPC stdin/stdout)
     schemas/            Pydantic mirror of the core dataclasses (THE contract)
-      __init__.py       facade: the 119 contract names, re-exported unchanged
+      __init__.py       facade: the contract names, re-exported unchanged
       base.py           the base model every contract model derives from
       mods.py           models mirroring mods, profiles and the catalog
       requests.py       request/response models of the mod, profile and catalog functions
@@ -118,7 +132,7 @@ packaging/              freezing the Python core for the desktop bundle
 .github/workflows/
   ci.yml                Python/frontend/Rust gates plus sidecar and app matrices
   release.yml           v* tag -> signed bundles in a draft release
-tests/                  Python test suite (2158 tests)
+tests/                  Python test suite
   conftest.py           git isolation, process-scan guard, game dirs, repos
   fixture_types.py      fixture Protocols for typing
   fixtures_forge.py     Forge client/catalog fixtures (pytest_plugins)
@@ -184,7 +198,7 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
   release source on api.github.com, anonymous, one GET) — one module per remote
   service. The release *archive* is downloaded through `ForgeClient.stream`,
   which takes an arbitrary URL, so no fourth module appears.
-- Core raises typed exceptions only; no print/logging outside cli.py/server/.
+- Core raises typed exceptions only; no print/logging outside cli/ and server/.
 - One API contract, four transports: service function ↔ `sptmod rpc <name>`
   ↔ Tauri `#[tauri::command] rpc()` ↔ camelCase wrapper in client.ts. Guarded
   by tests: route-per-function, schema-parity, error-mapping completeness in
@@ -501,8 +515,10 @@ download cache.
   429 backoff honoring Retry-After, guarded pagination (repeat-URL set +
   `current_page >= last_page`), envelope/error mapping, streaming with
   `follow_redirects=True` (download links 307-redirect to CDNs/GitHub).
-- Catalog cache: SQLite in the platformdirs config dir (never the game dir).
-  Schema evolution = `_MOD_COLUMN_MIGRATIONS` (mods) + `_VERSION_COLUMN_MIGRATIONS`
+- Catalog cache: SQLite in the platformdirs config dir (never the game dir); the
+  default db path lives in `core/forge/catalog/schema.py`, so tests patch
+  `XDG_CONFIG_HOME` rather than platformdirs.
+  Schema evolution = `MOD_COLUMN_MIGRATIONS` (mods) + `VERSION_COLUMN_MIGRATIONS`
   (versions) ALTER lists applied on open; the cache is disposable. Cached per
   mod: thumbnail, teaser, favourites, endorsements, category title, license
   name+link, source links (JSON column), featured/ads/AI flags, the reduced
@@ -1443,24 +1459,25 @@ behavior-focused; do not weaken them to make an implementation fit.
 ### Quality gates
 
 ```bash
-uv run pytest                        # Python suite (2158 collected: 2157 passed, 1 skipped)
+uv run pytest                        # Python suite
 uv run pytest --cov                  # with coverage gates (line & branch 100%)
 uv run pyright                       # strict type checking on src + tests
 uv run pylint src tests              # strict linting (design limits to observed maxima)
 uv run mypy --strict src tests       # strict typing on both src and tests
-cd frontend && pnpm vitest run --coverage  # src/lib (798 tests; 100% coverage)
-cd frontend && pnpm test:components --coverage  # components (264 tests; coverage floor)
-cargo build && cargo test            # Rust (17 driver + 2 ignored e2e)
-cd src-tauri && cargo llvm-cov       # Rust coverage
+cd frontend && pnpm vitest run --coverage  # src/lib (gated at 100% coverage)
+cd frontend && pnpm test:components --coverage  # components (measured coverage floor)
+cargo build && cargo test            # Rust (driver tests plus ignored e2e)
+cd src-tauri && cargo llvm-cov       # Rust coverage - reported only, no enforced floor
 ```
 
 ### Suite sizes and coverage
 
-- **Python:** 2157 passed, 1 skipped; `uv run pytest --cov` enforces 100%
+- **Python:** 2137 passed, 1 skipped (measured 2026-09-09; nothing enforces the
+  count, so re-measure rather than trusting it); `uv run pytest --cov` enforces 100%
   coverage (line and branch) on `src/sptmod` (coverage config in pyproject.toml).
   Run `uv run pytest` without --cov for development (no speed penalty, coverage
   excluded from default pytest addopts so single-file runs stay usable).
-- **Frontend (`src/lib`):** 798 vitest tests in 26 files, run by `pnpm test` in a
+- **Frontend (`src/lib`):** 789 vitest tests in 26 files, run by `pnpm test` in a
   `node` environment (`vite.config.ts`); strict 100%
   statements/branches/functions/lines on `src/lib/**/*.ts` (minus `*.test.ts` and
   generated `api/types.ts`; v8 provider).
@@ -1470,7 +1487,8 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   `src/lib/components/**/*.svelte` are the measured floor of what these tests
   reach — statements 94.19, branches 76.68, functions 93.91, lines 93.17 — not a
   100% gate: raise them together with new tests, never round them up.
-- **Rust (Tauri):** 17 driver tests + 2 ignored e2e tests. rpc.rs's
+- **Rust (Tauri):** 15 driver tests + 2 ignored e2e tests. No coverage floor is
+  enforced anywhere, so `cargo llvm-cov` reports a number nothing verifies. rpc.rs's
   `#[tauri::command] rpc()` glue is covered only by the `#[ignore]` e2e test,
   which needs Wry display; the rest of the uncovered lines in `cargo llvm-cov`
   are async resume points it cannot attribute plus the error path in
@@ -1513,8 +1531,8 @@ cd src-tauri && cargo llvm-cov       # Rust coverage
   in src or tests (`type: ignore`, `noqa`, `pylint: disable`, `pragma: no cover`).
   Lint findings are resolved by refactoring; the only configured knobs are pylint
   design limits set to the exact observed maxima — among them
-  `max-module-lines = 1000`, which `src/sptmod/cli.py` hits exactly, so the next
-  line added there has to come with a split (spt-mod-manager-vra) —
+  `max-module-lines = 900`, set by `tests/test_services_update.py`, the longest
+  module in the tree —
   `min-similarity-lines = 24` for the CatalogMod dataclass/schema mirror, and
   `[tool.pylint.imports] allow-any-import-level = ["libarchive"]`, because
   importing the bindings loads `libarchive.so` and the import therefore has to

@@ -182,6 +182,9 @@ cache resets and game directory switches.
 | `sptmod sync [--full]` | Refresh the local Forge catalog cache. |
 | `sptmod search QUERY [--compatible]` | Search the cached catalog. |
 | `sptmod browse [--installed\|--available\|--all] [--compatible]` | List the cached catalog with the installed state. |
+| `sptmod spt list` | List the SPT versions the game directory can change to, with the installed Escape from Tarkov build. |
+| `sptmod spt update VERSION [--yes]` | Change the game directory to a newer SPT version. |
+| `sptmod spt downgrade [VERSION] [--yes]` | Go back to an older SPT version, or undo the last SPT change when VERSION is omitted. |
 | `sptmod version` | Print the version. |
 
 ## Known limitation

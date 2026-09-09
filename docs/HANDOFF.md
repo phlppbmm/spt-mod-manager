@@ -341,20 +341,28 @@ src/sptmod/
     archive.py            # extract (.7z/.zip/.rar), traversal guard, anchor
     modmeta.py            # package.json parsing, trailer mapping, semver
     conflicts.py          # file/DLL/dependency/SPT-version checks
-    profile.py            # profile load, residue detection from db/
+    profile/              # profile load, residue detection from db/ (a package:
+                          #   nodes, ids, files, categories, scan)
     workspace.py          # staging dir, download cache, apply lock
-    services.py           # all user-facing operations (pure functions)
+    services/             # all user-facing operations (pure functions; a package:
+                          #   common, state, gamedir, profiles, lifecycle,
+                          #   install_archive, install_forge, update, catalog,
+                          #   transfer, modsets, fika, spt)
     favorites.py          # favorites list, load/save
     forge/
       client.py           # Forge HTTP client (only httpx import)
-      catalog.py          # SQLite cache (sync/search/classify)
+      catalog/            # SQLite cache (sync/search/classify; a package:
+                          #   schema, rows, store)
       cache.py            # persistent archive cache (download resume, LRU)
       download.py         # streaming downloads, cache hit/resume, verify
       resolve.py          # install plans over /mods/dependencies
-  cli.py                  # typer adapter (exceptions → exit codes)
+  cli/                    # typer adapter (exceptions → exit codes; a package:
+                          #   base, mods, repo, sources, spt, gamedir,
+                          #   reports, rpc)
   server/
     rpc.py                # `sptmod rpc <name>` (stdin/stdout JSON)
-    schemas.py            # Pydantic schemas (contract, mirror of core)
+    schemas/              # Pydantic schemas (contract, mirror of core; a package:
+                          #   base, mods, requests, modsets, runtime)
     errors.py             # RPC error code mapping
     dump_openapi.py       # OpenAPI doc generator
 
@@ -379,9 +387,13 @@ _data/mods/               # 21 real mod archives (untracked, test corpus)
 
 **Hard rules:**
 
-- `subprocess` only in `core/repo.py` (raw git, no GitPython).
-- `httpx` only in `core/forge/client.py` and `core/forge/download.py`.
-- No print/logging outside `cli.py` and `server/`.
+- `subprocess` only in `core/repo.py` (raw git, no GitPython) and, since game
+  launching was added, `core/launch/`.
+- `httpx` only in `core/forge/client.py`; as shipped, one client module per
+  remote service: `core/forge/client.py`, `core/sptserver.py` and
+  `core/sptrelease/client.py` (`core/forge/download.py` streams through the
+  Forge client instead of importing httpx itself).
+- No print/logging outside `cli/` and `server/`.
 - All paths via `pathlib`; no Linux-only assumptions.
 - Strict type annotations everywhere (`mypy --strict`).
 - Forge cache is foreign state; lives in platformdirs config dir, never in

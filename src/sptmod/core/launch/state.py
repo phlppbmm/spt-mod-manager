@@ -23,6 +23,8 @@ LAUNCH_LOG_FILE_NAME: Final = ".sptmod-launch.log"
 LAUNCH_LOG_MAX_BYTES: Final = 200 * 1024
 CLIENT_MODE: Final = "client"
 _TEMP_PREFIX: Final = ".sptmod-launch-"
+
+
 @dataclass(frozen=True)
 class ProcessRef:
     """A remembered process: the pair survives a reused process number."""
@@ -51,9 +53,13 @@ class LaunchState:
     watcher: ProcessRef | None = None
     failure: str = ""
     mode: str = ""
+
+
 def _state_file(path: Path) -> Path:
     """Return the launch state file of the installation at ``path``."""
     return path / LAUNCH_STATE_FILE_NAME
+
+
 def read_state(path: Path) -> LaunchState:
     """Return the remembered launch state, empty when there is none.
 
@@ -96,6 +102,8 @@ def _reference(value: Json) -> ProcessRef | None:
     if not isinstance(started_at, int | float) or isinstance(started_at, bool):
         return None
     return ProcessRef(pid=pid, started_at=float(started_at))
+
+
 def _adopted_reference(value: Json, client: ProcessRef | None) -> ProcessRef | None:
     """Read the adopted game, ``None`` unless it hangs off ``client``.
 
@@ -110,6 +118,8 @@ def _adopted_reference(value: Json, client: ProcessRef | None) -> ProcessRef | N
     if value.get("descendant_of") != client.pid:
         return None
     return _reference(value)
+
+
 def write_state(path: Path, state: LaunchState) -> None:
     """Write the launch state of ``path`` in one piece.
 
@@ -148,6 +158,8 @@ def _reference_payload(reference: ProcessRef | None) -> dict[str, object] | None
     if reference is None:
         return None
     return {"pid": reference.pid, "started_at": reference.started_at}
+
+
 def log(path: Path, message: str) -> None:
     """Append one line to the launch log of ``path``.
 
@@ -186,6 +198,8 @@ def _trim_log(log_file: Path) -> None:
         return
     _, _, kept = log_file.read_bytes()[-LAUNCH_LOG_MAX_BYTES:].partition(b"\n")
     log_file.write_bytes(kept)
+
+
 def clear_state(path: Path) -> None:
     """Forget what was running in the installation at ``path``."""
     with suppress(OSError):

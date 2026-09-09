@@ -1235,7 +1235,9 @@ not read from a live install — the first live run should confirm it.
 `__version__` (which `sptmod version` prints) and `[package].version` in
 `src-tauri/Cargo.toml` must equal it, and `src-tauri/tauri.conf.json` must NOT
 carry a `version` key — Tauri v2 falls back to the crate version only while that
-key is absent. `tests/test_version_agreement.py` enforces all four conditions.
+key is absent. `tests/test_version_agreement.py` checks that `sptmod version` prints
+the pyproject version; the Cargo and tauri.conf.json conditions are enforced by the
+release workflow before it builds.
 `frontend/package.json` is private and stays out of the rule.
 
 ### Bundles

@@ -175,12 +175,7 @@ def test_favorites_survive_clear_catalog_cache(monkeypatch: pytest.MonkeyPatch, 
     whole config dir instead of just the db file), this fails: list_favorites
     would report [] after the clear instead of [7].
     """
-    config_dir = tmp_path / "config"
-    def user_config_path(*_args: object, **_kwargs: object) -> Path:
-        return config_dir
-
-    monkeypatch.setattr("sptmod.core.favorites.platformdirs.user_config_path", user_config_path)
-    monkeypatch.setattr("sptmod.core.forge.catalog.platformdirs.user_config_path", user_config_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     services.set_favorite(7, True)
     db_path = default_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)

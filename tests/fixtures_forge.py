@@ -141,11 +141,6 @@ def isolated_default_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     ``forge.catalog.default_db_path()``, which must not touch the developer's
     real config directory.
     """
-    config_dir = tmp_path / "config"
-    def user_config_path(*_args: object, **_kwargs: object) -> Path:
-        return config_dir
-
-    monkeypatch.setattr(
-        "sptmod.core.forge.catalog.platformdirs.user_config_path", user_config_path
-    )
-    return config_dir / DB_FILE_NAME
+    config_home = tmp_path / "config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    return config_home / "sptmod" / DB_FILE_NAME

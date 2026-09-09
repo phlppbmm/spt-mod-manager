@@ -4,13 +4,7 @@ The package keeps the SQL schema with the dataclasses it mirrors
 (:mod:`sptmod.core.forge.catalog.schema`), the pure row and payload conversions
 (:mod:`sptmod.core.forge.catalog.rows`) and the database object
 (:mod:`sptmod.core.forge.catalog.store`) apart.
-
-``platformdirs`` stays reachable as ``sptmod.core.forge.catalog.platformdirs``:
-that is where :func:`default_db_path` resolves the user config directory, and
-it is the seam tests redirect to keep the developer's real catalog untouched.
 """
-
-import platformdirs
 
 from sptmod.core.forge.catalog.rows import is_compatible, is_newer
 from sptmod.core.forge.catalog.schema import (
@@ -57,5 +51,4 @@ __all__ = [
     "default_db_path",
     "is_compatible",
     "is_newer",
-    "platformdirs",
 ]

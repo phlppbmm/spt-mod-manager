@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use serde_json::json;
 
-use sptmod_desktop_lib::driver::{self, ProgressEvent};
+use sptmod_desktop_lib::driver::{self, ProgressEvent, ResolutionOrder};
 use sptmod_desktop_lib::rpc::{RpcError, FUNCTIONS};
 
 /// Guards mutation of `driver::BINARY_ENV` (a process-global env var), so
@@ -379,13 +379,19 @@ fn binary_path_reads_sptmod_cli_env_var_or_falls_back_to_default_when_unset_or_e
     // if one of the assertions above had panicked.
 }
 
+/// Drives `resolve_binary` through every combination of `SPTMOD_CLI`, a known
+/// bundled sidecar path and its existence, under both resolution orders, and
+/// asserts the returned binary. Both orders live in one table because a single
+/// test binary is compiled with one `cfg!(debug_assertions)` value, so the order
+/// has to be asserted through the explicit parameter rather than the build mode.
 #[test]
-fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
+fn resolve_binary_resolution_order_across_env_bundled_exists_and_order() {
     struct Case {
         id: &'static str,
         env_value: Option<&'static str>,
         bundled: Option<&'static str>,
         exists_returns: bool,
+        order: ResolutionOrder,
         expected: &'static str,
     }
     let cases = [
@@ -394,6 +400,15 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: Some("/opt/custom/sptmod-cli"),
             bundled: Some("/resources/sidecar/sptmod"),
             exists_returns: true,
+            order: ResolutionOrder::SidecarFirst,
+            expected: "/opt/custom/sptmod-cli",
+        },
+        Case {
+            id: "non-empty env override wins under PathFirst too",
+            env_value: Some("/opt/custom/sptmod-cli"),
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            order: ResolutionOrder::PathFirst,
             expected: "/opt/custom/sptmod-cli",
         },
         Case {
@@ -401,6 +416,7 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: Some("/opt/custom/sptmod-cli"),
             bundled: None,
             exists_returns: false,
+            order: ResolutionOrder::SidecarFirst,
             expected: "/opt/custom/sptmod-cli",
         },
         Case {
@@ -408,6 +424,7 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: Some(""),
             bundled: Some("/resources/sidecar/sptmod"),
             exists_returns: true,
+            order: ResolutionOrder::SidecarFirst,
             expected: "/resources/sidecar/sptmod",
         },
         Case {
@@ -415,6 +432,7 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: None,
             bundled: Some("/resources/sidecar/sptmod"),
             exists_returns: true,
+            order: ResolutionOrder::SidecarFirst,
             expected: "/resources/sidecar/sptmod",
         },
         Case {
@@ -422,6 +440,7 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: None,
             bundled: Some("/resources/sidecar/sptmod"),
             exists_returns: false,
+            order: ResolutionOrder::SidecarFirst,
             expected: driver::DEFAULT_BINARY,
         },
         Case {
@@ -429,6 +448,23 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
             env_value: Some(""),
             bundled: None,
             exists_returns: false,
+            order: ResolutionOrder::SidecarFirst,
+            expected: driver::DEFAULT_BINARY,
+        },
+        Case {
+            id: "PathFirst ignores an existing bundled sidecar (stale dev build must not shadow PATH)",
+            env_value: None,
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            order: ResolutionOrder::PathFirst,
+            expected: driver::DEFAULT_BINARY,
+        },
+        Case {
+            id: "PathFirst with an empty env override still uses the PATH default",
+            env_value: Some(""),
+            bundled: Some("/resources/sidecar/sptmod"),
+            exists_returns: true,
+            order: ResolutionOrder::PathFirst,
             expected: driver::DEFAULT_BINARY,
         },
     ];
@@ -436,20 +472,51 @@ fn resolve_binary_resolution_order_across_env_bundled_and_exists() {
     for case in cases {
         let env_value = case.env_value.map(OsString::from);
         let bundled = case.bundled.map(PathBuf::from);
-        let result = driver::resolve_binary(env_value, bundled, &|_path| case.exists_returns);
+        let result =
+            driver::resolve_binary(env_value, bundled, case.order, &|_path| case.exists_returns);
         assert_eq!(result, PathBuf::from(case.expected), "case: {}", case.id);
     }
 }
 
 /// `resolve_binary` must short-circuit before probing the filesystem when it
-/// has no bundled path to probe: this pins that `exists` is only ever called
-/// with a `Some(bundled)` path, never invented from thin air.
+/// has nothing to probe: with no bundled path under `SidecarFirst`, and under
+/// `PathFirst` regardless of a known bundled path. This pins that `exists` is
+/// never called speculatively, so a stale sidecar's mere presence costs no
+/// filesystem access in a dev build.
 #[test]
-fn resolve_binary_does_not_probe_exists_when_no_bundled_path_is_known() {
-    let result = driver::resolve_binary(None, None, &|_path| {
-        panic!("exists() must not be called when there is no bundled path")
-    });
-    assert_eq!(result, PathBuf::from(driver::DEFAULT_BINARY));
+fn resolve_binary_does_not_probe_exists_when_the_sidecar_cannot_be_chosen() {
+    struct Case {
+        id: &'static str,
+        bundled: Option<&'static str>,
+        order: ResolutionOrder,
+    }
+    let cases = [
+        Case {
+            id: "no bundled path known",
+            bundled: None,
+            order: ResolutionOrder::SidecarFirst,
+        },
+        Case {
+            id: "PathFirst with a known bundled path",
+            bundled: Some("/resources/sidecar/sptmod"),
+            order: ResolutionOrder::PathFirst,
+        },
+    ];
+
+    for case in cases {
+        let result = driver::resolve_binary(
+            None,
+            case.bundled.map(PathBuf::from),
+            case.order,
+            &|_path| panic!("exists() must not be called, case: {}", case.id),
+        );
+        assert_eq!(
+            result,
+            PathBuf::from(driver::DEFAULT_BINARY),
+            "case: {}",
+            case.id
+        );
+    }
 }
 
 #[test]
@@ -462,8 +529,14 @@ fn sidecar_path_joins_sidecar_subdir_and_binary_name_with_platform_exe_suffix() 
     assert_eq!(result, expected);
 }
 
+/// Writes a real sidecar file into a resource directory and asserts that
+/// `binary_path` — compiled here with `debug_assertions`, exactly like
+/// `cargo tauri dev` — still returns the bare `sptmod` name, and keeps doing so
+/// once the file is removed. This is the reported bug: a stale gitignored
+/// PyInstaller build under `src-tauri/sidecar/` used to shadow the editable CLI
+/// on `PATH` and answered "unknown function" for newer RPC functions.
 #[test]
-fn binary_path_with_resource_dir_uses_bundled_sidecar_when_present_else_path_default() {
+fn binary_path_in_a_debug_build_ignores_a_stale_bundled_sidecar() {
     let _guard = lock_env_guard();
     let _restore = EnvVarRestore::capture(driver::BINARY_ENV);
     // SAFETY: serialized by ENV_GUARD; no other code in this test binary
@@ -478,8 +551,8 @@ fn binary_path_with_resource_dir_uses_bundled_sidecar_when_present_else_path_def
 
     assert_eq!(
         driver::binary_path(Some(dir.path())),
-        sidecar_file,
-        "sidecar file exists on disk, must be preferred over the PATH default"
+        PathBuf::from(driver::DEFAULT_BINARY),
+        "a present sidecar must not shadow the PATH default in a debug build"
     );
 
     std::fs::remove_file(&sidecar_file).unwrap();
@@ -487,10 +560,30 @@ fn binary_path_with_resource_dir_uses_bundled_sidecar_when_present_else_path_def
     assert_eq!(
         driver::binary_path(Some(dir.path())),
         PathBuf::from(driver::DEFAULT_BINARY),
-        "sidecar file removed, must fall back to the PATH default"
+        "sidecar file removed, still the PATH default"
     );
     // `_restore` (dropped here) restores the original SPTMOD_CLI value even
     // if one of the assertions above had panicked.
+}
+
+/// A release build must keep bundling precedence: with the same on-disk sidecar
+/// as the debug test above, `SidecarFirst` selects the sidecar file, so the
+/// shipped app never depends on a `sptmod` install on the user's `PATH`.
+#[test]
+fn resolve_binary_selects_a_real_on_disk_sidecar_under_the_release_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let sidecar_file = driver::sidecar_path(dir.path());
+    std::fs::create_dir_all(sidecar_file.parent().unwrap()).unwrap();
+    std::fs::write(&sidecar_file, b"stub").unwrap();
+
+    let result = driver::resolve_binary(
+        None,
+        Some(sidecar_file.clone()),
+        ResolutionOrder::SidecarFirst,
+        &|path| path.exists(),
+    );
+
+    assert_eq!(result, sidecar_file);
 }
 
 #[test]

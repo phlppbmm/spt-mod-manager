@@ -6,6 +6,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Once;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,10 +39,26 @@ pub fn sidecar_path(resource_dir: &Path) -> PathBuf {
         .join(format!("{DEFAULT_BINARY}{}", std::env::consts::EXE_SUFFIX))
 }
 
-/// Resolution order: `SPTMOD_CLI`, then the bundled sidecar, then `sptmod` on `PATH`.
+/// What to try after the `SPTMOD_CLI` override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionOrder {
+    /// Prefer an existing bundled sidecar over `sptmod` on `PATH`.
+    SidecarFirst,
+    /// Prefer `sptmod` on `PATH` over the bundled sidecar.
+    PathFirst,
+}
+
+/// Resolution order in release builds ([`ResolutionOrder::SidecarFirst`]):
+/// `SPTMOD_CLI`, then the bundled sidecar, then `sptmod` on `PATH`. In debug
+/// builds ([`ResolutionOrder::PathFirst`]): `SPTMOD_CLI`, then `sptmod` on
+/// `PATH`, so that a stale sidecar build in the dev resource directory cannot
+/// shadow the developer's editable install. `PATH` itself is resolved by the OS
+/// when the process is spawned, which is why the bare [`DEFAULT_BINARY`] name is
+/// returned for it.
 pub fn resolve_binary(
     env_value: Option<OsString>,
     bundled: Option<PathBuf>,
+    order: ResolutionOrder,
     exists: &dyn Fn(&Path) -> bool,
 ) -> PathBuf {
     if let Some(value) = env_value {
@@ -49,20 +66,29 @@ pub fn resolve_binary(
             return PathBuf::from(value);
         }
     }
-    match bundled {
-        Some(path) if exists(&path) => path,
+    match (order, bundled) {
+        (ResolutionOrder::SidecarFirst, Some(path)) if exists(&path) => path,
         _ => PathBuf::from(DEFAULT_BINARY),
     }
 }
 
 /// The CLI to spawn, resolved against the process environment and the app's
-/// resource directory.
+/// resource directory, and logged once per process to stderr.
 pub fn binary_path(resource_dir: Option<&Path>) -> PathBuf {
-    resolve_binary(
+    let order = if cfg!(debug_assertions) {
+        ResolutionOrder::PathFirst
+    } else {
+        ResolutionOrder::SidecarFirst
+    };
+    let binary = resolve_binary(
         std::env::var_os(BINARY_ENV),
         resource_dir.map(sidecar_path),
+        order,
         &|path| path.exists(),
-    )
+    );
+    static LOGGED: Once = Once::new();
+    LOGGED.call_once(|| eprintln!("sptmod: using CLI {} ({order:?})", binary.display()));
+    binary
 }
 
 /// Run `<binary> rpc <name>` with `payload` on stdin, reporting every progress

@@ -1,11 +1,18 @@
 """Request building: query/filter[...]/sort/include serialization on the wire."""
 
+from collections.abc import Callable
+
 import httpx
+import pytest
 import respx
 
 from fixture_types import ClientFactory, JsonDict
 from fixtures_forge import recorded_requests
 from forge_json import page_envelope, success_envelope
+from sptmod.core.forge.client import ForgeClient
+
+type ModPairs = list[tuple[str, str]]
+type BulkCall = Callable[[ForgeClient, ModPairs], None]
 
 
 def test_mods_serializes_query_filters_sort_include_fields(
@@ -63,73 +70,76 @@ def test_mod_versions_serializes_filters_and_sort(
     assert params["include"] == "dependencies"
 
 
-def test_updates_serializes_mods_as_colon_pairs_and_spt_version(
-    client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """updates() serializes mod list as colon-separated id:version pairs.
+_UPDATES_RESPONSE: JsonDict = {
+    "spt_version": "3.11.5",
+    "updates": [],
+    "blocked_updates": [],
+    "up_to_date": [],
+    "incompatible_with_spt": [],
+}
 
-    Mods [("5", "1.2.0"), ("com.example.mod", "2.0.5")] and spt_version="3.11.5"
-    produce wire params mods="5:1.2.0,com.example.mod:2.0.5" and spt_version="3.11.5";
-    identifiers can be numeric IDs (as strings) or GUIDs, and are joined with commas.
+
+def _call_updates(client: ForgeClient, mods: ModPairs) -> None:
+    """Ask the client for updates of ``mods`` against a fixed SPT version."""
+    client.updates(mods=mods, spt_version="3.11.5")
+
+
+def _call_dependencies(client: ForgeClient, mods: ModPairs) -> None:
+    """Ask the client for the dependencies of ``mods`` against a fixed SPT version."""
+    client.dependencies(mods=mods, spt_version="3.11.5")
+
+
+_MOD_PAIR_CASES = [
+    pytest.param(
+        "/mods/updates",
+        _UPDATES_RESPONSE,
+        _call_updates,
+        [("5", "1.2.0"), ("com.example.mod", "2.0.5")],
+        "5:1.2.0,com.example.mod:2.0.5",
+        id="updates-two-pairs",
+    ),
+    pytest.param(
+        "/mods/dependencies",
+        {},
+        _call_dependencies,
+        [("5", "1.2.0"), ("com.example.mod", "2.0.5")],
+        "5:1.2.0,com.example.mod:2.0.5",
+        id="dependencies-two-pairs",
+    ),
+    pytest.param(
+        "/mods/updates",
+        _UPDATES_RESPONSE,
+        _call_updates,
+        [("5", "1.2.0")],
+        "5:1.2.0",
+        id="updates-single-pair",
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "response_data", "call", "mods", "expected_mods"), _MOD_PAIR_CASES)
+def test_mod_pairs_are_sent_as_comma_joined_id_colon_version_pairs(
+    client_factory: ClientFactory,
+    respx_router: respx.MockRouter,
+    path: str,
+    response_data: JsonDict,
+    call: BulkCall,
+    mods: ModPairs,
+    expected_mods: str,
+) -> None:
+    """Both bulk endpoints send their mod list as ``id:version`` pairs joined by commas.
+
+    Calls ``updates`` and ``dependencies`` with a mod list and the SPT version and
+    asserts the ``mods`` and ``spt_version`` query parameters on the recorded
+    request. Reason: identifiers may be numeric ids or GUIDs, several mods are
+    separated by a comma and a single mod must not gain a trailing one, because
+    the API rejects a malformed list.
     """
-    minimal_data: JsonDict = {
-        "spt_version": "3.11.5",
-        "updates": [],
-        "blocked_updates": [],
-        "up_to_date": [],
-        "incompatible_with_spt": [],
-    }
-    route = respx_router.get("/mods/updates").mock(
-        return_value=httpx.Response(200, json=success_envelope(minimal_data))
-    )
+    route = respx_router.get(path).mock(return_value=httpx.Response(200, json=success_envelope(response_data)))
     client = client_factory()
 
-    client.updates(mods=[("5", "1.2.0"), ("com.example.mod", "2.0.5")], spt_version="3.11.5")
+    call(client, mods)
 
     params = recorded_requests(route)[0].url.params
-    assert params["mods"] == "5:1.2.0,com.example.mod:2.0.5"
+    assert params["mods"] == expected_mods
     assert params["spt_version"] == "3.11.5"
-
-
-def test_dependencies_serializes_mods_as_colon_pairs_and_spt_version(
-    client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """dependencies() serializes mod list as colon-separated id:version pairs.
-
-    Mods [("5", "1.2.0"), ("com.example.mod", "2.0.5")] and spt_version="3.11.5"
-    produce wire params mods="5:1.2.0,com.example.mod:2.0.5" and spt_version="3.11.5";
-    identifiers can be numeric IDs (as strings) or GUIDs, and are joined with commas.
-    """
-    route = respx_router.get("/mods/dependencies").mock(return_value=httpx.Response(200, json=success_envelope({})))
-    client = client_factory()
-
-    client.dependencies(mods=[("5", "1.2.0"), ("com.example.mod", "2.0.5")], spt_version="3.11.5")
-
-    params = recorded_requests(route)[0].url.params
-    assert params["mods"] == "5:1.2.0,com.example.mod:2.0.5"
-    assert params["spt_version"] == "3.11.5"
-
-
-def test_updates_serializes_single_pair_without_trailing_comma(
-    client_factory: ClientFactory, respx_router: respx.MockRouter
-) -> None:
-    """updates() serializes a single mod pair without a trailing comma.
-
-    A single-element mod list [("5", "1.2.0")] produces mods="5:1.2.0" (no comma),
-    not "5:1.2.0," (which would be incorrect and rejected by the API).
-    """
-    minimal_data: JsonDict = {
-        "spt_version": "3.11.5",
-        "updates": [],
-        "blocked_updates": [],
-        "up_to_date": [],
-        "incompatible_with_spt": [],
-    }
-    route = respx_router.get("/mods/updates").mock(
-        return_value=httpx.Response(200, json=success_envelope(minimal_data))
-    )
-    client = client_factory()
-
-    client.updates(mods=[("5", "1.2.0")], spt_version="3.11.5")
-
-    assert recorded_requests(route)[0].url.params["mods"] == "5:1.2.0"

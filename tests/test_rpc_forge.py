@@ -546,3 +546,36 @@ def test_apply_spt_release_reports_a_refused_write_with_its_own_code(
         "stopped at SPT_Runtime/SPT_Data/configs/core.json; your previous "
         "files are one snapshot back."
     )
+
+
+def test_apply_spt_release_echoes_the_operation_id_on_every_line_it_writes(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """A version change reports its progress and its outcome under the caller's operation id.
+
+    Offers release 4.1.1, applies it through ``sptmod rpc apply_spt_release``
+    with an operation id of the caller's choosing, and asserts every progress
+    line and the result carry that id together with the new version. Reason: a
+    version change runs for minutes, so the desktop app follows it by matching
+    the id it sent against the lines it reads; an unmarked or differently
+    marked answer could not be attributed to this update.
+    """
+    spt_release_source.offer(
+        make_spt_release(version="4.1.1", client_build="40743"),
+        version="4.1.1",
+        client_build="40743",
+    )
+
+    exit_code, lines = invoke_rpc(
+        "apply_spt_release",
+        {"path": str(spt_game_dir), "version": "4.1.1", "operation_id": "spt-update-op-id"},
+    )
+
+    assert exit_code == 0
+    assert_progress_then_result(lines)
+    assert all(line["operation_id"] == "spt-update-op-id" for line in lines[:-1])
+    result = lines[-1]["data"]
+    assert result["operation_id"] == "spt-update-op-id"
+    assert result["version"] == "4.1.1"

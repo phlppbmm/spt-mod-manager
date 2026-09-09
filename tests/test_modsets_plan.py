@@ -30,35 +30,52 @@ def _plan(clean_repo: Repo, mod_set_store: Path, entries: list[services.ModSetEn
 # --- the matching table --------------------------------------------------
 
 
-def test_active_mod_matching_an_enabled_entry_of_the_same_version_is_unchanged(
-    clean_repo: Repo, install_commit: InstallCommit, mod_set_store: Path
+@pytest.mark.parametrize(
+    ("installed_state", "entry_enabled", "bucket", "reasons"),
+    [
+        pytest.param("installed", True, "unchanged", [], id="active-mod-enabled-entry-unchanged"),
+        pytest.param("disabled", True, "enable", [""], id="disabled-mod-enabled-entry-enable"),
+        pytest.param(
+            "installed",
+            False,
+            "disable",
+            ["the set turns this mod off"],
+            id="active-mod-disabled-entry-disable",
+        ),
+        pytest.param("disabled", False, "unchanged", [], id="disabled-mod-disabled-entry-unchanged"),
+    ],
+)
+def test_a_mod_the_set_names_lands_in_the_bucket_its_two_states_imply(
+    clean_repo: Repo,
+    install_commit: InstallCommit,
+    mod_set_store: Path,
+    installed_state: str,
+    entry_enabled: bool,
+    bucket: str,
+    reasons: list[str],
 ) -> None:
-    """If the body is `pass`, this fails: TargetMod is missing from unchanged
-    instead of appearing there with nothing to enable or disable."""
-    install_commit(clean_repo, "TargetMod", "1.0.0", state="installed")
+    """Planning sorts a named mod by its installed state and the entry's own switch.
 
-    plan = _plan(clean_repo, mod_set_store, [_entry("TargetMod", version="1.0.0")])
+    Seeds TargetMod as installed or disabled, saves a set whose entry for it is on
+    or off, and asserts the mod shows up in exactly one of unchanged/enable/disable
+    with the reason the plan gives for a change: none for an enable, which needs
+    no explanation, and a plain sentence for a disable. Reason: only a state
+    mismatch is work, so an already matching mod must stay out of the change
+    lists, and the user is told why applying the set would switch a mod off.
+    """
+    install_commit(clean_repo, "TargetMod", "1.0.0", state=installed_state)
 
-    assert plan.unchanged == ["TargetMod"]
-    assert not plan.enable
-    assert not plan.disable
+    plan = _plan(clean_repo, mod_set_store, [_entry("TargetMod", version="1.0.0", enabled=entry_enabled)])
+
+    buckets = {
+        "unchanged": plan.unchanged,
+        "enable": [change.name for change in plan.enable],
+        "disable": [change.name for change in plan.disable],
+    }
+    assert buckets == {name: (["TargetMod"] if name == bucket else []) for name in buckets}
+    assert [change.reason for change in [*plan.enable, *plan.disable]] == reasons
     assert not plan.missing
     assert not plan.different
-
-
-def test_disabled_mod_matching_an_enabled_entry_is_planned_to_enable(
-    clean_repo: Repo, install_commit: InstallCommit, mod_set_store: Path
-) -> None:
-    """If the body is `pass`, this fails: plan.enable is empty instead of
-    holding a change for TargetMod."""
-    install_commit(clean_repo, "TargetMod", "1.0.0", state="disabled")
-
-    plan = _plan(clean_repo, mod_set_store, [_entry("TargetMod", version="1.0.0")])
-
-    assert [change.name for change in plan.enable] == ["TargetMod"]
-    assert not plan.disable
-    assert not plan.missing
-    assert not plan.unchanged
 
 
 def test_an_entry_naming_a_mod_that_was_never_installed_is_planned_as_missing(
@@ -95,38 +112,6 @@ def test_a_removed_mod_matching_an_enabled_entry_is_planned_as_missing(
     assert not plan.unchanged
     assert not plan.enable
     assert not plan.disable
-
-
-def test_active_mod_matching_a_disabled_entry_is_planned_to_disable_with_a_reason(
-    clean_repo: Repo, install_commit: InstallCommit, mod_set_store: Path
-) -> None:
-    """If the reason text were dropped, this fails: reason would be empty
-    instead of explaining the set turns the mod off."""
-    install_commit(clean_repo, "TargetMod", "1.0.0", state="installed")
-
-    plan = _plan(clean_repo, mod_set_store, [_entry("TargetMod", version="1.0.0", enabled=False)])
-
-    assert len(plan.disable) == 1
-    assert plan.disable[0].name == "TargetMod"
-    assert plan.disable[0].reason == "the set turns this mod off"
-    assert not plan.enable
-    assert not plan.missing
-    assert not plan.unchanged
-
-
-def test_disabled_mod_matching_a_disabled_entry_is_unchanged(
-    clean_repo: Repo, install_commit: InstallCommit, mod_set_store: Path
-) -> None:
-    """If the body is `pass`, this fails: TargetMod would not appear in
-    unchanged at all."""
-    install_commit(clean_repo, "TargetMod", "1.0.0", state="disabled")
-
-    plan = _plan(clean_repo, mod_set_store, [_entry("TargetMod", version="1.0.0", enabled=False)])
-
-    assert plan.unchanged == ["TargetMod"]
-    assert not plan.enable
-    assert not plan.disable
-    assert not plan.missing
 
 
 def test_active_mod_not_named_by_the_set_is_planned_to_disable_with_a_reason(

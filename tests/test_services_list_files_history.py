@@ -6,6 +6,7 @@ exercised against a repository with several mods in different states.
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ from sptmod.core import services
 from sptmod.core.errors import AmbiguousModError, ModNotFoundError
 from sptmod.core.models import ACTIVE_STATES
 from sptmod.core.repo import Repo
+
+type LookUpByName = Callable[[Path, str], list[object]]
+type ExpectedFor = Callable[[str], list[object]]
 
 
 def test_list_mods_on_a_fresh_repo_returns_no_mods(clean_repo: Repo) -> None:
@@ -165,45 +169,6 @@ def test_mod_files_returns_the_files_of_the_active_mods_install_commit(
     assert all(mod_file.change == "added" for mod_file in result)
 
 
-def test_mod_files_matches_case_insensitively(clean_repo: Repo, install_commit: InstallCommit) -> None:
-    """mod_files performs case-insensitive name matching.
-
-    Calling mod_files(path, "moda") after installing ModA returns the same
-    files as mod_files(path, "ModA").
-    """
-    install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "a-content"})
-
-    result = services.mod_files(clean_repo.path, "moda")
-
-    assert {mod_file.path for mod_file in result} == {Path("BepInEx/plugins/ModA.dll")}
-
-
-def test_mod_files_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
-    """mod_files raises ModNotFoundError for a non-existent mod name.
-
-    Calling mod_files(path, "Ghost") raises ModNotFoundError.
-    """
-    with pytest.raises(ModNotFoundError):
-        services.mod_files(clean_repo.path, "Ghost")
-
-
-def test_mod_files_raises_ambiguous_mod_error_for_case_variant_names(
-    clean_repo: Repo, install_commit: InstallCommit
-) -> None:
-    """mod_files raises AmbiguousModError when multiple case variants exist.
-
-    After installing both CoolMod and coolmod, calling mod_files(path, "COOLMOD")
-    raises AmbiguousModError with candidates={'CoolMod', 'coolmod'}.
-    """
-    install_commit(clean_repo, "CoolMod", minute=1)
-    install_commit(clean_repo, "coolmod", minute=2)
-
-    with pytest.raises(AmbiguousModError) as exc_info:
-        services.mod_files(clean_repo.path, "COOLMOD")
-
-    assert set(exc_info.value.candidates) == {"CoolMod", "coolmod"}
-
-
 def test_history_without_name_returns_all_commits_newest_first(
     clean_repo: Repo, install_commit: InstallCommit
 ) -> None:
@@ -242,40 +207,83 @@ def test_history_filtered_by_name_returns_only_that_mods_commits(
     assert [commit.hash for commit in result] == [second_hash, first_hash]
 
 
-def test_history_name_filter_matches_case_insensitively(clean_repo: Repo, install_commit: InstallCommit) -> None:
-    """history name filtering performs case-insensitive matching.
+# --- name lookup, shared by mod_files and history --------------------------
 
-    After installing ModA, calling history(path, "moda") returns the same
-    commit as history(path, "ModA").
+
+def _mod_file_paths(path: Path, name: str) -> list[object]:
+    """Return the paths of the files ``mod_files`` reports for mod ``name``."""
+    return [mod_file.path for mod_file in services.mod_files(path, name)]
+
+
+def _history_hashes(path: Path, name: str) -> list[object]:
+    """Return the hashes of the commits ``history`` reports for mod ``name``."""
+    return [commit.hash for commit in services.history(path, name)]
+
+
+def _the_file_the_install_commit_added(_commit_hash: str) -> list[object]:
+    """The single file the install commit of ModA put into the game directory."""
+    return [Path("BepInEx/plugins/ModA.dll")]
+
+
+def _the_install_commit(commit_hash: str) -> list[object]:
+    """The install commit of ModA itself."""
+    return [commit_hash]
+
+
+_LOOKUP_BY_NAME = [
+    pytest.param(_mod_file_paths, id="mod_files"),
+    pytest.param(_history_hashes, id="history"),
+]
+
+
+@pytest.mark.parametrize(
+    ("look_up", "expected_for"),
+    [
+        pytest.param(_mod_file_paths, _the_file_the_install_commit_added, id="mod_files"),
+        pytest.param(_history_hashes, _the_install_commit, id="history"),
+    ],
+)
+def test_a_mod_is_found_no_matter_how_the_name_is_capitalized(
+    clean_repo: Repo, install_commit: InstallCommit, look_up: LookUpByName, expected_for: ExpectedFor
+) -> None:
+    """Looking a mod up by a differently capitalized name reports the same mod.
+
+    Installs ModA with one plugin file and asks for "moda"; asserts the answer is
+    exactly that file for ``mod_files`` and exactly the install commit for
+    ``history``. Reason: mod names are typed by hand on the command line, so
+    capitalization must not decide whether a mod is found.
     """
-    commit_hash = install_commit(clean_repo, "ModA", minute=1)
+    commit_hash = install_commit(clean_repo, "ModA", files={"BepInEx/plugins/ModA.dll": "a-content"})
 
-    result = services.history(clean_repo.path, "moda")
-
-    assert [commit.hash for commit in result] == [commit_hash]
+    assert look_up(clean_repo.path, "moda") == expected_for(commit_hash)
 
 
-def test_history_raises_mod_not_found_for_unknown_name(clean_repo: Repo) -> None:
-    """history raises ModNotFoundError for a non-existent mod name.
+@pytest.mark.parametrize("look_up", _LOOKUP_BY_NAME)
+def test_an_unknown_mod_name_is_reported_as_not_found(clean_repo: Repo, look_up: LookUpByName) -> None:
+    """Asking for a mod that was never installed raises ModNotFoundError.
 
-    Calling history(path, "Ghost") raises ModNotFoundError.
+    Looks "Ghost" up in a repository holding only the baseline commit; asserts
+    ModNotFoundError. Reason: an empty result would read as "this mod has no
+    files or commits" instead of "there is no such mod".
     """
     with pytest.raises(ModNotFoundError):
-        services.history(clean_repo.path, "Ghost")
+        look_up(clean_repo.path, "Ghost")
 
 
-def test_history_raises_ambiguous_mod_error_for_case_variant_names(
-    clean_repo: Repo, install_commit: InstallCommit
+@pytest.mark.parametrize("look_up", _LOOKUP_BY_NAME)
+def test_a_name_matching_several_case_variants_is_reported_as_ambiguous(
+    clean_repo: Repo, install_commit: InstallCommit, look_up: LookUpByName
 ) -> None:
-    """history raises AmbiguousModError when multiple case variants exist.
+    """A name that matches two installed mods raises AmbiguousModError naming both.
 
-    After installing both CoolMod and coolmod, calling history(path, "COOLMOD")
-    raises AmbiguousModError with candidates={'CoolMod', 'coolmod'}.
+    Installs CoolMod and coolmod, asks for "COOLMOD" and asserts the error lists
+    both candidates. Reason: guessing one of them could show the wrong mod's
+    files or history, so the user has to pick the exact spelling.
     """
     install_commit(clean_repo, "CoolMod", minute=1)
     install_commit(clean_repo, "coolmod", minute=2)
 
     with pytest.raises(AmbiguousModError) as exc_info:
-        services.history(clean_repo.path, "COOLMOD")
+        look_up(clean_repo.path, "COOLMOD")
 
     assert set(exc_info.value.candidates) == {"CoolMod", "coolmod"}

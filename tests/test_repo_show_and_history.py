@@ -1,11 +1,12 @@
 """Tests for Repo.show_files, Repo.show_file_content and Repo.last_touching."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from sptmod.core.errors import GitError
-from sptmod.core.models import ModFile
+from sptmod.core.models import FileChange, ModFile
 from sptmod.core.repo import Repo
 
 RELATIVE = Path("SPT/user/mods/ModA/file.txt")
@@ -22,58 +23,78 @@ def _write(repo: Repo, relative: Path, content: str) -> None:
     full.write_text(content, encoding="utf-8")
 
 
-def test_show_files_reports_added_file(initialized_repo: Repo) -> None:
-    """Repo.show_files() marks newly added files with change='added'."""
-    _write(initialized_repo, RELATIVE, "v1\n")
-    commit_hash = initialized_repo.commit(
-        "mod: ModA install",
-        trailers={"Mod": "ModA", "Mod-Version": "1.0.0"},
-        paths=[RELATIVE],
-    )
-
-    files = initialized_repo.show_files(commit_hash)
-
-    assert files == [ModFile(path=RELATIVE, change="added")]
+def _add_the_file(repo: Repo) -> None:
+    """Put the first version of the mod file into the working tree."""
+    _write(repo, RELATIVE, "v1\n")
 
 
-def test_show_files_reports_modified_file(initialized_repo: Repo) -> None:
-    """Repo.show_files() marks changed files with change='modified'."""
-    _write(initialized_repo, RELATIVE, "v1\n")
-    initialized_repo.commit(
-        "mod: ModA install",
-        trailers={"Mod": "ModA", "Mod-Version": "1.0.0"},
-        paths=[RELATIVE],
-    )
-    _write(initialized_repo, RELATIVE, "v2\n")
-    update_hash = initialized_repo.commit(
-        "mod: ModA update",
-        trailers={"Mod": "ModA", "Mod-Version": "1.1.0"},
-        paths=[RELATIVE],
-    )
-
-    files = initialized_repo.show_files(update_hash)
-
-    assert files == [ModFile(path=RELATIVE, change="modified")]
+def _change_the_file(repo: Repo) -> None:
+    """Overwrite the mod file with different content."""
+    _write(repo, RELATIVE, "v2\n")
 
 
-def test_show_files_reports_deleted_file(initialized_repo: Repo) -> None:
-    """Repo.show_files() marks deleted files with change='deleted'."""
-    _write(initialized_repo, RELATIVE, "v1\n")
-    initialized_repo.commit(
-        "mod: ModA install",
-        trailers={"Mod": "ModA", "Mod-Version": "1.0.0"},
-        paths=[RELATIVE],
-    )
-    (initialized_repo.path / RELATIVE).unlink()
-    remove_hash = initialized_repo.commit(
-        "mod: ModA remove",
-        trailers={"Mod": "ModA", "Mod-State": "removed"},
-        paths=[RELATIVE],
-    )
+def _delete_the_file(repo: Repo) -> None:
+    """Remove the mod file from the working tree."""
+    (repo.path / RELATIVE).unlink()
 
-    files = initialized_repo.show_files(remove_hash)
 
-    assert files == [ModFile(path=RELATIVE, change="deleted")]
+@pytest.mark.parametrize(
+    ("commit_first_version", "touch_the_file", "subject", "trailers", "expected_change"),
+    [
+        pytest.param(
+            False,
+            _add_the_file,
+            "mod: ModA install",
+            {"Mod": "ModA", "Mod-Version": "1.0.0"},
+            "added",
+            id="added",
+        ),
+        pytest.param(
+            True,
+            _change_the_file,
+            "mod: ModA update",
+            {"Mod": "ModA", "Mod-Version": "1.1.0"},
+            "modified",
+            id="modified",
+        ),
+        pytest.param(
+            True,
+            _delete_the_file,
+            "mod: ModA remove",
+            {"Mod": "ModA", "Mod-State": "removed"},
+            "deleted",
+            id="deleted",
+        ),
+    ],
+)
+def test_show_files_labels_how_a_commit_touched_each_file(
+    initialized_repo: Repo,
+    commit_first_version: bool,
+    touch_the_file: Callable[[Repo], None],
+    subject: str,
+    trailers: dict[str, str],
+    expected_change: FileChange,
+) -> None:
+    """A commit reports every file it touched together with the kind of change.
+
+    Optionally commits a first version of the mod file, then adds, rewrites or
+    deletes it and writes the install, update or removal commit for it; asserts
+    that commit lists exactly that file with the matching change label. Reason: the file list of a commit is
+    what the history view shows, so a mod update must read as "modified" and a
+    removal as "deleted" rather than as another addition.
+    """
+    if commit_first_version:
+        _write(initialized_repo, RELATIVE, "v1\n")
+        initialized_repo.commit(
+            "mod: ModA install",
+            trailers={"Mod": "ModA", "Mod-Version": "1.0.0"},
+            paths=[RELATIVE],
+        )
+    touch_the_file(initialized_repo)
+
+    commit_hash = initialized_repo.commit(subject, trailers=trailers, paths=[RELATIVE])
+
+    assert initialized_repo.show_files(commit_hash) == [ModFile(path=RELATIVE, change=expected_change)]
 
 
 def test_show_file_content_returns_historical_content_not_working_tree(

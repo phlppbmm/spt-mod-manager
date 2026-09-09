@@ -48,6 +48,15 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match the pyproject version $version; expected v$version." >&2
             exit 1
           fi
+          crate_version=$(sed -n '/^\[package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' src-tauri/Cargo.toml)
+          if [ "$crate_version" != "$version" ]; then
+            echo "The desktop crate version $crate_version does not match the pyproject version $version; the bundled app would report a different version than the core it ships." >&2
+            exit 1
+          fi
+          if jq -e 'has("version")' src-tauri/tauri.conf.json > /dev/null; then
+            echo "src-tauri/tauri.conf.json declares a version key; it would override Cargo.toml and become a second source of truth. Remove it before tagging a release." >&2
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true

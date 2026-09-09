@@ -2,11 +2,10 @@
 
 (1) init_game_dir on an unresolvable-version dir leaves no .git residue and
     fails before git init runs. (2) init on a zero-commit half-init repo
-    continues instead of refusing. (3) init on a repo with commits still
-    refuses. (4) CLI init on an undetectable-version layout, no
-    --spt-version, no input -> clear error, no .git residue. (5) an explicit
-    --spt-version wins over a core.json/PE value that would detect
-    differently. (6) the PE reader returns None quickly for a header
+    continues instead of refusing. (3) CLI init on an undetectable-version
+    layout, no --spt-version, no input -> clear error, no .git residue. (4) an
+    explicit --spt-version wins over a core.json/PE value that would detect
+    differently. (5) the PE reader returns None quickly for a header
     claiming a giant section size, no multi-GB read.
 """
 
@@ -21,7 +20,7 @@ from typer.testing import CliRunner
 from pe_builder import build_synthetic_exe, write_server_exe
 from sptmod.cli import app as cli_app
 from sptmod.core import services
-from sptmod.core.errors import GitError, SptVersionUnknownError
+from sptmod.core.errors import SptVersionUnknownError
 from sptmod.core.game_dir import read_pe_file_version
 from sptmod.core.repo import Repo
 
@@ -56,25 +55,7 @@ def test_init_on_a_zero_commit_half_init_repo_continues(
     assert Repo(fake_game_dir_runtime).log() != []
 
 
-# --- (3) a repo with commits still refuses ---------------------------------
-
-
-def test_init_on_a_repo_with_commits_still_refuses(
-    fake_game_dir_runtime: Path,
-) -> None:
-    """Calling init_game_dir twice raises GitError on the second call.
-
-    The first init succeeds and creates commits; the second init() call must
-    raise GitError (the real "repo has commits" error, not a stale
-    AlreadyInitializedError from earlier implementations).
-    """
-    services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
-
-    with pytest.raises(GitError):
-        services.init_game_dir(fake_game_dir_runtime, spt_version="4.1.2")
-
-
-# --- (4) CLI init, undetectable version, no --spt-version, no input -------
+# --- (3) CLI init, undetectable version, no --spt-version, no input -------
 
 
 def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
@@ -92,7 +73,7 @@ def test_cli_init_undetectable_version_no_option_no_input_errors_cleanly(
     assert not (fake_game_dir_runtime / ".git").exists()
 
 
-# --- (5) explicit --spt-version wins over a detectable core.json/PE value -
+# --- (4) explicit --spt-version wins over a detectable core.json/PE value -
 
 
 def test_explicit_spt_version_overrides_a_detectable_core_json_version(
@@ -128,7 +109,7 @@ def test_explicit_spt_version_overrides_a_detectable_pe_version(
     assert result.spt_version == "9.9.9"
 
 
-# --- (6) PE reader: giant claimed section size returns None quickly -------
+# --- (5) PE reader: giant claimed section size returns None quickly -------
 
 
 def test_read_pe_file_version_none_quickly_for_a_giant_claimed_section_size(

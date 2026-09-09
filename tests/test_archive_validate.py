@@ -22,8 +22,7 @@ UNSAFE_MEMBERS = [
     pytest.param("a\\..\\..\\evil.txt", id="windows-backslash-dotdot"),
 ]
 
-# Keyed by the parametrize id so the "all together" test can reuse the exact
-# same member names without going back through ``pytest.param`` objects.
+# Keyed by the parametrize id that names the category each member stands for.
 SAFE_MEMBER_PATHS: dict[str, str] = {
     "nested-file": "a/b/c.txt",
     "top-level-file": "package.json",
@@ -55,17 +54,6 @@ def test_validate_member_paths_rejects_unsafe_member_mixed_with_safe_ones() -> N
 def test_validate_member_paths_accepts_safe_member(member: str) -> None:
     """Safe member paths (nested, server/client anchors) are accepted."""
     validate_member_paths([member])
-
-
-def test_validate_member_paths_accepts_all_safe_members_together() -> None:
-    """validate_member_paths accepts mixed safe members (nested, anchors, dots).
-
-    Calls validate_member_paths() with 6 different safe path categories:
-    "package.json" (top-level), "a/b.txt" (nested), "a/b/c.txt" (deep),
-    "SPT/user/mods/CoolMod/package.json" (server anchor), "BepInEx/plugins/CoolPlugin.dll"
-    (client anchor), and "weird..name/file.txt" (dots in name, not traversal). None raise.
-    """
-    validate_member_paths(list(SAFE_MEMBER_PATHS.values()))
 
 
 def test_validate_member_paths_accepts_empty_sequence() -> None:

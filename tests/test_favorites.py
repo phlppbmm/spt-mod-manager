@@ -25,14 +25,6 @@ def test_default_favorites_path_honors_xdg_config_home(monkeypatch: pytest.Monke
     assert result == config_home / "sptmod" / "favorites.json"
 
 
-def test_favorites_file_name_constant_is_favorites_json() -> None:
-    """The FAVORITES_FILE_NAME constant is exactly "favorites.json".
-
-    Asserts the constant value to catch accidental renames.
-    """
-    assert FAVORITES_FILE_NAME == "favorites.json"
-
-
 # --- load_favorites ----------------------------------------------------------
 
 

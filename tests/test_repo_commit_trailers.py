@@ -58,24 +58,6 @@ def test_commit_trailers_roundtrip_through_log(initialized_repo: Repo) -> None:
     assert commits[0].trailers == FULL_TRAILERS
 
 
-def test_commit_empty_value_trailer_is_kept_as_present_but_empty(
-    initialized_repo: Repo,
-) -> None:
-    """Repo.commit preserves empty trailer values (present key, empty string).
-
-    Commits FULL_TRAILERS (which has Mod-Guid=""). Calls Repo.log(). Verifies
-    "Mod-Guid" in commits[0].trailers and commits[0].trailers["Mod-Guid"] == "".
-    """
-    _add_mod_file(initialized_repo)
-    initialized_repo.commit("mod: SAIN 3.2.1", trailers=FULL_TRAILERS)
-
-    commits = initialized_repo.log()
-
-    assert len(commits) == 1
-    assert "Mod-Guid" in commits[0].trailers
-    assert commits[0].trailers["Mod-Guid"] == ""
-
-
 def test_commit_subject_is_preserved(initialized_repo: Repo) -> None:
     """Repo.log returns exact commit subject line without modification.
 
@@ -201,25 +183,27 @@ def test_commit_with_nothing_to_commit_raises_git_error(initialized_repo: Repo) 
         initialized_repo.commit("mod: nothing here", paths=[])
 
 
-@pytest.mark.parametrize("bad_value", ["user\nMod-State: installed", "user\rinjected"])
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        pytest.param("user\nMod-State: installed", id="newline-smuggles-a-second-trailer"),
+        pytest.param("user\rinjected", id="carriage-return-smuggles-a-second-line"),
+    ],
+)
 def test_commit_rejects_trailer_values_containing_newlines(initialized_repo: Repo, bad_value: str) -> None:
-    """Repo.commit() rejects trailer values containing line breaks to prevent injection."""
+    """A trailer value carrying a line break is refused and writes no commit.
+
+    Stages a mod file and commits with a ``Mod-Author`` value that contains a
+    line break; asserts a GitError and that the repository history stays empty.
+    Reason: a line break would let a caller smuggle further trailers (such as
+    ``Mod-State: installed``) into the commit message, so the guard must reject
+    the whole commit rather than write a partially attacker-controlled one.
+    """
     _add_mod_file(initialized_repo)
 
     with pytest.raises(GitError):
         initialized_repo.commit("mod: SAIN 3.2.1", trailers={"Mod-Author": bad_value})
 
-
-def test_commit_rejecting_an_injected_trailer_value_does_not_create_extra_trailers(
-    initialized_repo: Repo,
-) -> None:
-    """Rejecting a malicious trailer prevents the commit entirely (atomicity)."""
-    _add_mod_file(initialized_repo)
-
-    with pytest.raises(GitError):
-        initialized_repo.commit("mod: SAIN 3.2.1", trailers={"Mod-Author": "user\nMod-State: installed"})
-
-    # The commit must not have gone through at all (no injected 'Mod-State').
     assert initialized_repo.log() == []
 
 

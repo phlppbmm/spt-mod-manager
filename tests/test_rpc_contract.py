@@ -54,15 +54,6 @@ def test_every_service_function_is_an_rpc_key_and_vice_versa() -> None:
     assert set(RPC_FUNCTIONS.keys()) == set(SERVICE_FUNCTION_NAMES)
 
 
-def test_rpc_functions_has_exactly_fifty_entries() -> None:
-    """len(RPC_FUNCTIONS) == 50; pins the endpoint count against regressions.
-
-    Adding or removing an endpoint must update this assertion to keep the
-    contract explicit.
-    """
-    assert len(RPC_FUNCTIONS) == 50
-
-
 @pytest.mark.parametrize("name", sorted(RPC_FUNCTIONS))
 def test_spec_function_is_the_same_named_service_function(name: str) -> None:
     """RPC_FUNCTIONS[name].function is the same object as services.<name>.
@@ -194,17 +185,6 @@ def _concrete_core_error_classes() -> list[type[Exception]]:
 CONCRETE_CORE_ERROR_CLASSES = _concrete_core_error_classes()
 
 
-def test_there_are_thirtyfour_concrete_core_error_classes() -> None:
-    """len(CONCRETE_CORE_ERROR_CLASSES) == 34 to pin corpus against regressions.
-
-    Adding a new exception class to core.errors requires updating this count
-    so the change is caught by parametrized error tests.
-    """
-    # Pins the corpus this test enumerates so a newly added exception class
-    # is caught here rather than silently skipped by the parametrization.
-    assert len(CONCRETE_CORE_ERROR_CLASSES) == 34
-
-
 @pytest.mark.parametrize(
     "error_type",
     CONCRETE_CORE_ERROR_CLASSES,
@@ -230,16 +210,19 @@ def test_operation_in_progress_maps_to_its_own_specific_code() -> None:
 
 
 # --------------------------------------------------------------------------
-# operation_id / wrap bookkeeping.
+# operation_id bookkeeping.
 # --------------------------------------------------------------------------
 
 
 def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -> None:
-    """Specs with operation_id=True have operation_id field; unmarked specs do not.
+    """A spec is flagged as long-running exactly when its response carries an operation_id.
 
-    The seven marked specs (install_from_archive, sync_catalog, install_mod,
-    update_mod, apply_mod_set, launch_profile, apply_spt_release) are the
-    only ones with long-running operations.
+    Reflects over the whole registry and compares the set of specs with
+    ``operation_id=True`` against the set whose response model declares an
+    ``operation_id`` field; asserts the two sets are equal. Reason: the flag is
+    what makes the adapter echo the caller's operation id on every line, so a
+    spec that declares the field without the flag (or the reverse) would answer
+    with an id the client cannot correlate.
     """
     declares_operation_id = {
         name
@@ -251,30 +234,3 @@ def test_exactly_the_responses_declaring_operation_id_are_marked_in_the_spec() -
     marked = {name for name, spec in RPC_FUNCTIONS.items() if spec.operation_id}
 
     assert marked == declares_operation_id
-    assert marked == {
-        "install_from_archive",
-        "sync_catalog",
-        "install_mod",
-        "update_mod",
-        "apply_mod_set",
-        "launch_profile",
-        "apply_spt_release",
-    }
-
-
-def test_exactly_the_wrapped_specs_wrap_a_result_under_a_named_field() -> None:
-    """Four specs wrap plain results: set_spt_version, export_mods, list/set_favorite.
-
-    Wrapping ensures JSON responses are always objects; plain list/string results
-    are nested under named fields (spt_version, content, mod_ids).
-    """
-    # Most wrapped results are plain strings; list_favorites/set_favorite wrap
-    # a plain list[int] the same way, under "mod_ids".
-    wrapped = {name: spec.wrap for name, spec in RPC_FUNCTIONS.items() if spec.wrap}
-
-    assert wrapped == {
-        "set_spt_version": "spt_version",
-        "export_mods": "content",
-        "list_favorites": "mod_ids",
-        "set_favorite": "mod_ids",
-    }

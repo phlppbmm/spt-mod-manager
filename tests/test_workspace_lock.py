@@ -7,8 +7,9 @@ content naming the holder), leftover lock files never blocking anyone, the
 timeout path with its exact user-facing message, the waiting progress
 callback, and the service-layer guarantees the lock exists for: a second
 operation waits instead of ever seeing the held lock as an unmanaged file,
-read-only calls are never blocked, and the lock file never surfaces in
-``status()``/``is_clean()``.
+read-only calls are never blocked, the lock file never surfaces in
+``status()``/``is_clean()``, and a path that is no game directory is refused
+in plain language before any lock file is written.
 """
 
 import fcntl
@@ -25,7 +26,7 @@ import pytest
 
 from fixture_types import InstallCommit, MakeArchive
 from sptmod.core import services
-from sptmod.core.errors import OperationInProgressError
+from sptmod.core.errors import NotAGameDirError, OperationInProgressError
 from sptmod.core.repo import Repo
 from sptmod.core.workspace import (
     LOCK_FILE_NAME,
@@ -618,3 +619,56 @@ def test_lock_file_never_appears_in_status_and_tree_stays_clean(
     assert not report.other_untracked
     assert not report.other_modified
     assert clean_repo.is_clean() is True
+
+
+# --- a path that is no game directory is refused before the lock is taken --
+
+LOCK_TAKING_CALLS = [
+    services.clean_profile,
+    services.remove_mod,
+    services.disable_mod,
+    services.enable_mod,
+]
+LOCK_TAKING_CALL_IDS = ["clean_profile", "remove_mod", "disable_mod", "enable_mod"]
+
+
+@pytest.mark.parametrize("call", LOCK_TAKING_CALLS, ids=LOCK_TAKING_CALL_IDS)
+def test_a_missing_path_is_refused_in_plain_language_by_every_locking_call(
+    tmp_path: Path,
+    call: Callable[
+        [Path, str], services.CleanupResult | services.RemoveResult | services.ToggleResult
+    ],
+) -> None:
+    """Every operation taking the lock refuses a missing directory as no game directory.
+
+    Calls the service function with a path that does not exist and asserts a
+    NotAGameDirError naming the path, whose message mentions neither the lock
+    file nor an operating-system errno, and that nothing was created at the
+    path. Reason: the lock file used to be opened before any check, so a
+    missing directory surfaced as a raw OSError the adapters could only report
+    as an internal error.
+    """
+    missing = tmp_path / "gone"
+
+    with pytest.raises(NotAGameDirError) as error:
+        call(missing, "ServerMod")
+
+    message = str(error.value)
+    assert str(missing) in message
+    assert LOCK_FILE_NAME not in message
+    assert "Errno" not in message
+    assert missing.exists() is False
+
+
+def test_a_directory_that_is_no_spt_installation_keeps_its_content(tmp_path: Path) -> None:
+    """A locking call on an ordinary directory refuses it and leaves no lock file.
+
+    Calls clean_profile on an empty directory that is no SPT installation and
+    asserts NotAGameDirError plus an unchanged, still empty directory. Reason:
+    taking the lock first dropped a .sptmod-lock file into whatever directory
+    a caller passed, including ones sptmod has no business writing to.
+    """
+    with pytest.raises(NotAGameDirError):
+        services.clean_profile(tmp_path, "ServerMod")
+
+    assert not list(tmp_path.iterdir())

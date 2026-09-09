@@ -23,6 +23,7 @@ from typing import Final
 import platformdirs
 
 from sptmod.core.errors import OperationInProgressError
+from sptmod.core.game_dir import detect_layout
 from sptmod.core.models import Json, Progress
 
 if sys.platform == "win32":
@@ -111,9 +112,11 @@ def game_lock(
         poll_interval: Seconds between two attempts to take the lock.
 
     Raises:
+        NotAGameDirError: ``game_dir`` is no SPT game directory.
         OperationInProgressError: another operation still held the game
             directory after the maximum waiting time.
     """
+    detect_layout(game_dir)
     handle = _acquire(
         game_dir / LOCK_FILE_NAME,
         operation,

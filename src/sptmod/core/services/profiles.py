@@ -124,6 +124,7 @@ def check_profiles(path: Path) -> CheckResult:
     residues are reported and never block.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         GitError: git failed.
     """
     return check_all(Repo(path), detect_layout(path))

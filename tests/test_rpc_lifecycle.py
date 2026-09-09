@@ -298,6 +298,28 @@ def test_clean_profile_naming_a_profile_that_does_not_exist_reports_invalid_path
     assert "ghost" in lines[0]["data"]["error"]
 
 
+def test_clean_profile_on_a_missing_path_reports_a_game_directory_error(tmp_path: Path) -> None:
+    """A path that does not exist is answered as NOT_A_GAME_DIR, not as an internal error.
+
+    Asks ``sptmod rpc clean_profile`` to clean a mod out of a directory that
+    does not exist and asserts exit 1, code NOT_A_GAME_DIR and a message that
+    names the path but neither an operating-system errno nor the lock file.
+    Reason: the desktop app decides on the code whether to send the user back
+    to the folder picker, and an internal error with a raw errno string tells
+    it, and the user, nothing.
+    """
+    missing = tmp_path / "gone"
+
+    exit_code, lines = invoke_rpc("clean_profile", {"path": str(missing), "mod_name": "ServerMod"})
+
+    assert exit_code == 1
+    assert lines[0]["data"]["code"] == "NOT_A_GAME_DIR"
+    message = lines[0]["data"]["error"]
+    assert str(missing) in message
+    assert "Errno" not in message
+    assert ".sptmod-lock" not in message
+
+
 def test_adopt_mod_commits_an_untracked_mod_folder(clean_repo: Repo) -> None:
     """adopt_mod(target=\"SPT/user/mods/ManualMod\") commits the directory.
 

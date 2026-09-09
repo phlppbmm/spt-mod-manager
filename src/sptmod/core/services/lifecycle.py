@@ -136,6 +136,7 @@ def remove_mod(
         if profiles were cleaned.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         ModNotFoundError: no active mod matches ``name``.
         AmbiguousModError: several mods match ``name``; the error lists them.
         ProfileResidueError: a profile still references content of the mod and
@@ -193,6 +194,7 @@ def disable_mod(path: Path, name: str) -> ToggleResult:
     ``notice``.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         ModNotFoundError: no mod named ``name`` was ever installed.
         AmbiguousModError: several mods match ``name``; the error lists them.
         DirtyTreeError: the working tree has uncommitted or untracked changes.
@@ -246,6 +248,7 @@ def enable_mod(path: Path, name: str) -> ToggleResult:
     through ``notice``.
 
     Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
         ModNotFoundError: no mod named ``name`` was ever installed.
         AmbiguousModError: several mods match ``name``; the error lists them.
         DirtyTreeError: the working tree has uncommitted or untracked changes.
@@ -307,8 +310,8 @@ def adopt_mod(
     installation that already had mods.
 
     Raises:
-        NotAGameDirError: ``target`` lies outside the game directory or below
-            none of the mod paths.
+        NotAGameDirError: ``path`` is no SPT game directory, or ``target``
+            lies outside it or below none of the mod paths.
         ModNotFoundError: ``target`` does not exist.
         ConflictError: ``target`` is part of SPT itself, an active mod already
             provides it, even when it also holds untracked files, or it is

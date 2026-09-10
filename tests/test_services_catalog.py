@@ -5,6 +5,7 @@ Covers ``sync_catalog``, ``search_catalog`` and ``browse_catalog`` in
 commands built on top of them.
 """
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -317,6 +318,149 @@ def test_browse_catalog_hides_versions_that_are_not_installable(
     beta = results[1]
     assert beta.latest_version is None
     assert beta.state == "available"
+
+
+def _offered_versions(entries: list[CatalogEntry]) -> list[tuple[str, str | None]]:
+    """Return the version each entry offers, by mod name, None where none is."""
+    return [
+        (entry.mod.name, None if entry.latest_version is None else entry.latest_version.version)
+        for entry in entries
+    ]
+
+
+@pytest.mark.parametrize(
+    ("spt_version", "expected"),
+    [
+        pytest.param(
+            None,
+            [("Alpha Mod", "1.0.0"), ("Beta Mod", None)],
+            id="the_version_of_the_game_directory",
+        ),
+        pytest.param(
+            "",
+            [("Alpha Mod", "1.0.0"), ("Beta Mod", None)],
+            id="an_empty_version_falls_back_to_the_installed_one",
+        ),
+        pytest.param(
+            "3.8.0",
+            [("Alpha Mod", None), ("Beta Mod", "2.0.0")],
+            id="a_version_the_user_picked",
+        ),
+    ],
+)
+def test_browse_catalog_judges_the_entries_against_the_chosen_spt_version(
+    fake_game_dir: Path,
+    db_path: Path,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    spt_version: str | None,
+    expected: list[tuple[str, str | None]],
+) -> None:
+    """The game directory runs SPT 4.1.0, which only Alpha Mod's ``^4.0.0``
+    fits, while Beta Mod's ``^3.8.0`` fits SPT 3.8.0 instead. Browsing for
+    3.8.0 must therefore offer Beta Mod's version and none for Alpha Mod --
+    the exact opposite of what the installed version yields -- because the
+    filter exists to show what a version the user has not installed yet could
+    run. Omitting the version keeps judging against the installed one, and so
+    does the empty string the frontend sends for "no choice made" -- an empty
+    version is no version to judge against.
+    """
+    clean_repo_at(fake_game_dir)
+    client = client_factory()
+    _seed(
+        db_path,
+        client,
+        respx_router,
+        [
+            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
+            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
+        ],
+    )
+
+    results = services.browse_catalog(
+        fake_game_dir, "all", spt_version=spt_version, db_path=db_path
+    )
+
+    assert _offered_versions(results) == expected
+
+
+@pytest.mark.parametrize(
+    ("spt_version", "expected"),
+    [
+        pytest.param(
+            None,
+            [("Alpha Mod", "1.0.0"), ("Beta Mod", "2.0.0")],
+            id="no_version_to_judge_against",
+        ),
+        pytest.param(
+            "3.8.0",
+            [("Alpha Mod", None), ("Beta Mod", "2.0.0")],
+            id="a_version_the_user_picked",
+        ),
+    ],
+)
+def test_browse_catalog_judges_against_a_chosen_version_without_an_installed_one(
+    fake_game_dir: Path,
+    db_path: Path,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+    spt_version: str | None,
+    expected: list[tuple[str, str | None]],
+) -> None:
+    """The game directory names no SPT version at all, so nothing is known to
+    judge against and every mod is offered its newest version. A version the
+    user picked has to take over that judgement anyway -- otherwise the filter
+    would stay dead exactly where it helps most, before the first install.
+    """
+    core = fake_game_dir / "SPT" / "SPT_Data" / "configs" / "core.json"
+    core.write_text(json.dumps({"someOtherSetting": True}), encoding="utf-8")
+    clean_repo_at(fake_game_dir)
+    client = client_factory()
+    _seed(
+        db_path,
+        client,
+        respx_router,
+        [
+            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
+            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
+        ],
+    )
+
+    results = services.browse_catalog(
+        fake_game_dir, "all", spt_version=spt_version, db_path=db_path
+    )
+
+    assert _offered_versions(results) == expected
+
+
+def test_browse_catalog_keeps_only_the_mods_the_chosen_version_can_run(
+    fake_game_dir: Path,
+    db_path: Path,
+    client_factory: Callable[..., ForgeClient],
+    respx_router: respx.MockRouter,
+) -> None:
+    """Asking for only the compatible mods judges them against the picked
+    version too: Alpha Mod, which the installed SPT 4.1.0 runs, is dropped for
+    SPT 3.8.0 and Beta Mod takes its place -- both options have to mean the
+    same version, or the list and its filter would disagree.
+    """
+    clean_repo_at(fake_game_dir)
+    client = client_factory()
+    _seed(
+        db_path,
+        client,
+        respx_router,
+        [
+            _mod_json(1, "Alpha Mod", "Alice", "1.0.0", "^4.0.0"),
+            _mod_json(2, "Beta Mod", "Bob", "2.0.0", "^3.8.0"),
+        ],
+    )
+
+    results = services.browse_catalog(
+        fake_game_dir, "all", True, spt_version="3.8.0", db_path=db_path
+    )
+
+    assert [entry.mod.name for entry in results] == ["Beta Mod"]
 
 
 # --- CLI ---------------------------------------------------------

@@ -1,10 +1,12 @@
 """In-process tests for the catalog side of ``sptmod rpc <name>``:
 ``sync_catalog`` against a respx-mocked Forge plus the cache routes
-``search_catalog``, ``browse_catalog`` and ``clear_catalog_cache``. Split out
-of :mod:`test_rpc`, which keeps the envelope and error-mapping cases; the
+``search_catalog``, ``browse_catalog``, ``clear_catalog_cache`` and
+``get_thumbnails``. Split out of :mod:`test_rpc`, which keeps the envelope
+and error-mapping cases; the
 Forge is always mocked, so no test reaches the real API.
 """
 
+import base64
 import json
 import re
 from pathlib import Path
@@ -13,6 +15,7 @@ import pytest
 import respx
 
 from conftest import invoke_rpc
+from fixture_types import JsonDict
 from forge_json import mod_json_minimal, page_envelope
 from sptmod.core.forge.catalog import Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL
@@ -216,3 +219,102 @@ def test_clear_catalog_cache_with_downloads_also_clears_the_archive_cache(
         "downloads_freed_bytes": expected_freed,
     }
     assert not entry.exists()
+
+
+THUMBNAIL_URL = "https://files.example.test/mods/47/thumb.png"
+THUMBNAIL_BYTES = b"\x89PNG\r\n\x1a\nthe pixels of mod 47"
+
+
+def test_get_thumbnails_answers_a_data_url_per_forge_id_over_the_wire(tmp_path: Path) -> None:
+    """The route carries the images to the frontend, so the answer must reach
+    it complete: the requested ids as keys of the ``thumbnails`` object, the
+    picture of a mod as a ``data:`` URL and None for a mod without one. The
+    image host serves the picture only against the Forge origin as
+    ``Referer``, hence a data URL here also proves the header was sent.
+    """
+    db = tmp_path / "catalog.db"
+    cache_dir = tmp_path / "thumbnails"
+    cache_dir.mkdir()
+    mods = [
+        mod_json_minimal(id=47, thumbnail=THUMBNAIL_URL),
+        mod_json_minimal(id=48, name="Second Mod", slug="second-mod", thumbnail=None),
+    ]
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{DEFAULT_BASE_URL}/mods").respond(200, json=page_envelope(mods))
+        image = router.get(THUMBNAIL_URL, headers={"Referer": "https://sp-mod.com/"})
+        image.respond(200, content=THUMBNAIL_BYTES, headers={"Content-Type": "image/png"})
+        router.get(THUMBNAIL_URL).respond(403)
+        invoke_rpc("sync_catalog", {"path": "/unused", "db_path": str(db)})
+
+        exit_code, lines = invoke_rpc(
+            "get_thumbnails",
+            {"mod_ids": [47, 48], "db_path": str(db), "cache_dir": str(cache_dir)},
+        )
+
+    encoded = base64.b64encode(THUMBNAIL_BYTES).decode("ascii")
+    assert exit_code == 0
+    assert lines[-1] == {
+        "event": "result",
+        "data": {"thumbnails": {"47": f"data:image/png;base64,{encoded}", "48": None}},
+    }
+
+
+def _mod_with_version(mod_id: int, name: str, version: str, spt_constraint: str) -> JsonDict:
+    """Build the Forge JSON of a mod offering exactly one version."""
+    return mod_json_minimal(
+        id=mod_id,
+        name=name,
+        slug=name.lower().replace(" ", "-"),
+        versions=[
+            {
+                "id": mod_id * 100,
+                "version": version,
+                "spt_version_constraint": spt_constraint,
+                "downloads": 1,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+        ],
+    )
+
+
+def _offered(entries: list[JsonDict]) -> list[tuple[str, str | None]]:
+    """Return the version each browsed entry offers, by mod name."""
+    return [
+        (
+            entry["mod"]["name"],
+            None if entry["latest_version"] is None else entry["latest_version"]["version"],
+        )
+        for entry in entries
+    ]
+
+
+def test_browse_catalog_judges_the_entries_against_the_requested_spt_version(
+    clean_repo: Repo, tmp_path: Path
+) -> None:
+    """The Compatibility filter of the Mods view sends the version the user
+    picked, so it has to travel over the route and decide what is offered: the
+    game directory runs SPT 4.1.0, which fits Alpha Mod's ``^4.0.0``, while a
+    browse for 3.8.0 must offer Beta Mod's version instead and none for Alpha
+    Mod. Sending no version keeps judging against the installed one.
+    """
+    db_path = tmp_path / "catalog.db"
+    envelope = page_envelope(
+        [
+            _mod_with_version(1, "Alpha Mod", "1.0.0", "^4.0.0"),
+            _mod_with_version(2, "Beta Mod", "2.0.0", "^3.8.0"),
+        ]
+    )
+    request: JsonDict = {"path": str(clean_repo.path), "db_path": str(db_path)}
+    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
+        router.get("/mods").respond(200, json=envelope)
+        invoke_rpc("sync_catalog", request)
+
+        installed_exit, installed_lines = invoke_rpc("browse_catalog", request)
+        chosen_exit, chosen_lines = invoke_rpc(
+            "browse_catalog", {**request, "spt_version": "3.8.0"}
+        )
+
+    assert installed_exit == 0
+    assert chosen_exit == 0
+    assert _offered(installed_lines[0]["data"]) == [("Alpha Mod", "1.0.0"), ("Beta Mod", None)]
+    assert _offered(chosen_lines[0]["data"]) == [("Alpha Mod", None), ("Beta Mod", "2.0.0")]

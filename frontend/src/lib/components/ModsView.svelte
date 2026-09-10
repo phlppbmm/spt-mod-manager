@@ -12,6 +12,7 @@
 		listFavorites,
 		listMods,
 		listModSets,
+		listSptReleases,
 		saveModSet,
 		updateMod,
 		type CatalogEntry,
@@ -32,6 +33,7 @@
 	import {
 		activeQuickTab,
 		applyQuickTab,
+		installableVersions,
 		pillDefinitions,
 		QUICK_TABS,
 		type QuickTabId
@@ -78,6 +80,8 @@
 	let chips = $state(new Set(restored.chips));
 	let category: string | null = $state(restored.category);
 	let search = $state(restored.search);
+	let judgedVersion: string | undefined = $state(restored.sptVersion);
+	let installable: string[] = $state([]);
 	let favorites: number[] = $state([]);
 	let entries: CatalogEntry[] = $state([]);
 	let mods: ModInfo[] = $state([]);
@@ -95,6 +99,7 @@
 	let replaceName = $state('');
 	let reload = $state(0);
 	let requestId = 0;
+	let releaseRequestId = 0;
 	let seenMutations: string | null = null;
 	let now = $state(Date.now());
 
@@ -130,7 +135,7 @@
 	});
 	let favoriteIds = $derived(new Set(favorites));
 	let sort = $state<ModSort | null>(null);
-	let filter = $derived<ModFilter>({ chips, category, search });
+	let filter = $derived<ModFilter>({ chips, category, search, sptVersion: judgedVersion });
 	let context = $derived<FilterContext>({
 		favorites: favoriteIds,
 		disabled: disabledNames,
@@ -199,12 +204,14 @@
 		chips = new Set(next.chips);
 		category = next.category;
 		search = next.search;
+		judgedVersion = next.sptVersion;
 	}
 
 	function setFilterAndState(next: ModFilter): void {
 		chips = new Set(next.chips);
 		category = next.category;
 		search = next.search;
+		judgedVersion = next.sptVersion;
 		setFilter(next);
 	}
 
@@ -244,21 +251,67 @@
 			invalidate(path);
 		}
 		seenMutations = mutations;
-		void load(path, refreshKey, reload);
+		void load(path, refreshKey, reload, judgedVersion);
 	});
 
-	function apply(catalog: CatalogEntry[], installed: ModInfo[], favored: number[]): void {
+	$effect(() => {
+		const gameDir = path;
+		untrack(() => void loadInstallable(gameDir));
+	});
+
+	/**
+	 * The versions the compatibility pill can offer. A release source that
+	 * cannot be read keeps the versions loaded so far, so the pill degrades to
+	 * the installed version and "All versions" instead of failing the view.
+	 */
+	async function loadInstallable(gameDir: string): Promise<void> {
+		const request = ++releaseRequestId;
+		const view = cached(gameDir, 'list_spt_releases', [], () => listSptReleases(gameDir));
+		const hit = view.value;
+		if (hit !== undefined) {
+			adoptInstallable(installableVersions(hit.releases));
+		}
+		const releases = await view.refresh().catch(() => null);
+		if (request === releaseRequestId && releases !== null) {
+			adoptInstallable(installableVersions(releases.releases));
+		}
+	}
+
+	/** A version this game directory cannot install stops judging the list. */
+	function adoptInstallable(versions: string[]): void {
+		installable = versions;
+		if (versions.length > 0 && judgedVersion !== undefined && !versions.includes(judgedVersion)) {
+			setFilterAndState({ ...filter, sptVersion: undefined });
+		}
+	}
+
+	/**
+	 * While another SPT version judges the list, the rows are a preview of that
+	 * version rather than the state of the installation, so they name no update
+	 * targets: the update itself is decided against the installed version.
+	 */
+	function apply(
+		catalog: CatalogEntry[],
+		installed: ModInfo[],
+		favored: number[],
+		sptVersion: string | undefined
+	): void {
 		entries = catalog;
 		mods = installed;
 		favorites = favored;
-		onupdatable(updatableFromCatalog(catalog, installed));
+		onupdatable(sptVersion === undefined ? updatableFromCatalog(catalog, installed) : []);
 	}
 
-	async function load(gameDir: string, _refreshKey: number, _reload: number): Promise<void> {
+	async function load(
+		gameDir: string,
+		_refreshKey: number,
+		_reload: number,
+		sptVersion: string | undefined
+	): Promise<void> {
 		const request = ++requestId;
 		now = Date.now();
-		const catalogView = cached(gameDir, 'browse_catalog', [], () =>
-			browseCatalog(gameDir, 'all', false)
+		const catalogView = cached(gameDir, 'browse_catalog', [sptVersion ?? null], () =>
+			browseCatalog(gameDir, 'all', false, sptVersion)
 		);
 		const modsView = cached(gameDir, 'list_mods', [], () => listMods(gameDir, true));
 		const favoritesView = cached(gameDir, 'list_favorites', [], async () => {
@@ -269,7 +322,7 @@
 		const modsHit = modsView.value;
 		const favoritesHit = favoritesView.value;
 		if (catalogHit !== undefined && modsHit !== undefined && favoritesHit !== undefined) {
-			apply(catalogHit, modsHit, favoritesHit);
+			apply(catalogHit, modsHit, favoritesHit, sptVersion);
 			loading = false;
 		} else {
 			loading = true;
@@ -284,7 +337,7 @@
 			if (request !== requestId) {
 				return;
 			}
-			apply(catalog, installed, favored);
+			apply(catalog, installed, favored, sptVersion);
 		} catch (cause) {
 			if (request === requestId) {
 				error = cause instanceof Error ? cause.message : String(cause);
@@ -374,7 +427,7 @@
 		<QuickTabs active={activeQuickTab(filter)} onselect={pickTab} />
 		<FilterBar
 			{filter}
-			definitions={pillDefinitions(categories, sptVersion)}
+			definitions={pillDefinitions(categories, sptVersion, installable)}
 			{counts}
 			onchange={setFilterAndState}
 		/>

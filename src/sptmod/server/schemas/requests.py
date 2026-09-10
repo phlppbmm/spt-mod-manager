@@ -192,7 +192,12 @@ class SearchCatalogRequest(CoreModel):
 
 
 class BrowseCatalogRequest(CoreModel):
-    """Parameters of ``browse_catalog``."""
+    """Parameters of ``browse_catalog``.
+
+    ``spt_version`` judges the entries against another SPT version than the one
+    the game directory has, so a player can see what is ready for the release
+    they are about to install.
+    """
 
     # ``catalog_filter`` keeps the wire name ``filter`` through its alias, so neither the
     # model field nor the service parameter shadows the builtin.
@@ -201,6 +206,7 @@ class BrowseCatalogRequest(CoreModel):
     path: Path
     catalog_filter: BrowseFilter = Field("all", alias="filter")
     compatible_only: bool = False
+    spt_version: str | None = None
     db_path: Path | None = None
 
 
@@ -314,6 +320,24 @@ class ModDetails(CoreModel):
     mod: CatalogMod | None
     versions: list[CatalogVersion]
     description: str
+
+
+class GetThumbnailsRequest(CoreModel):
+    """Parameters of ``get_thumbnails``."""
+
+    mod_ids: list[int]
+    db_path: Path | None = None
+    cache_dir: Path | None = None
+
+
+class ThumbnailsResponse(CoreModel):
+    """The image of every requested mod as a data URL, keyed by Forge id.
+
+    A mod the catalog knows no image for, and one whose image cannot be
+    fetched, carries None: the caller shows its placeholder then.
+    """
+
+    thumbnails: dict[int, str | None]
 
 
 class GetModDetailsRequest(CoreModel):

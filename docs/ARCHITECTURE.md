@@ -85,6 +85,7 @@ src/sptmod/
         store.py        the CatalogStore itself: sync, search, browse, favorites
       cache.py          persistent archive cache (download resumption, LRU)
       download.py       streaming downloads, cache hit/resumption, size verification
+      thumbnails.py     persistent thumbnail cache; fetches images with the Referer the host demands
       resolve.py        install plans over /mods/dependencies
     sptrelease/
       __init__.py       package docstring only
@@ -177,6 +178,7 @@ frontend/               SvelteKit, Svelte 5 runes, adapter-static, no SSR
   src/lib/filterstate.ts     module-scope filter state (survives route nav, not restart)
   src/lib/modsets.ts         mod set rows, options, plan summary, missing-mod install targets
   src/lib/fika.ts            role options, canonical host address, host label, address error
+  src/lib/thumbnails.ts      thumbnail loading: session cache, coalesced batches, in-memory LRU
   src/lib/components/        SetupScreen, ModsView, ModRow, Dialog, ModSetEditor, ModSetDialog
   src/routes/+layout.svelte  app shell: top bar, nav tabs, window controls
   src/routes/                / (setup or mods), /history, /profile, /settings
@@ -196,7 +198,7 @@ _data/mods/             untracked corpus of 21 real mod archives for local runs
 - `httpx` only in `core/forge/client.py` (read-only Forge API with throttling),
   `core/sptserver.py` (an SPT server — this machine's or a Fika host's — with a
   self-signed cert and zlib bodies) and `core/sptrelease/client.py` (the SPT
-  release source on api.github.com, anonymous, one GET) — one module per remote
+  release sources on api.github.com, anonymous, one GET each) — one module per remote
   service. The release *archive* is downloaded through `ForgeClient.stream`,
   which takes an arbitrary URL, so no fourth module appears.
 - Core raises typed exceptions only; no print/logging outside cli/ and server/.
@@ -532,6 +534,9 @@ download cache.
   sync prunes rows the API no longer returns — but never on an empty response.
   `DATA_VERSION` stays "2" (no resync forced). Unicode-correct casefold search;
   `%`/`_` literal. Both `CatalogMod` and `CatalogVersion` schemas expose all fields.
+- `browse_catalog` judges the entries against the SPT version of the game
+  directory unless a caller passes `spt_version=`, which lets the UI ask what
+  is ready for a release the player has not installed yet.
 - Compatibility filter: an EMPTY `spt_version_constraint` counts as
   INCOMPATIBLE (old hub imports would otherwise flood the filter — 749 false
   positives measured). Install-time §6 checks stay tolerant (warning).
@@ -566,6 +571,50 @@ download cache.
   Forge id is accepted and duplicate marks are idempotent. Returns the full id
   list. Frontend joins the favorites set with browse results by id, so a
   favorited-but-uncached mod displays as a favorite without a catalog entry.
+
+## Mod thumbnails
+
+The Forge image host `files.sp-mod.com` sits behind Cloudflare hotlink
+protection: it answers 403 unless the request carries
+`Referer: https://sp-mod.com/`. A webview `<img>` element can never send that
+header, so every thumbnail failed. It is hotlink protection, not a CSP
+restriction. The images are therefore fetched in Python, where the header can be
+set, and handed to the frontend as base64 `data:` URLs.
+
+`core/forge/thumbnails.py` fetches through `ForgeClient.stream` with the Referer
+derived from the configured Forge base URL, so an `SPTMOD_FORGE_URL` override
+keeps working and no fourth httpx site appears.
+
+Cache: `workspace.thumbnail_cache_dir()` = `<user cache>/sptmod/thumbnails`,
+sibling to the download cache. Layout `<key>` for the bytes, `<key>.json` for
+`{"url", "media_type"}`, `<key>.part` while writing; the key is the sha256 of the
+image URL and the sidecar stores that URL, so a mod whose thumbnail moved misses
+instead of being served a stale image. Per-image cap `MAX_IMAGE_BYTES` 4 MiB,
+cache cap `MAX_CACHE_BYTES` 128 MiB, LRU by mtime swept after a write.
+Disposable like the download cache: every read, write or clean-up failure
+degrades to "no thumbnail" rather than failing the view. `clear_catalog_cache`
+wipes it too, with no new request or result field.
+
+`get_thumbnails(mod_ids, *, db_path=None, cache_dir=None) -> dict[int, str | None]`
+in `services/catalog.py` takes the image URL from the catalog row only, so a
+caller can never make the app fetch an arbitrary URL. RPC route
+`get_thumbnails`, request `{mod_ids, db_path?, cache_dir?}`, response
+`{thumbnails: {"<modId>": "data:…" | null}}` — JSON object keys are strings on
+the wire.
+
+Frontend `src/lib/thumbnails.ts`: `loadThumbnail(modId)` over a module-level
+session cache (mod id -> data URL or null), per-id in-flight de-duplication and
+microtask coalescing into one rpc call, sequential batches of 32, in-memory LRU
+of 256 entries. It imports only `api/client.ts`, so `api/transport.ts` stays the
+app's only invoke/listen site. A failed batch resolves every id in it to null
+and is remembered for the session, so a transient failure shows placeholders
+instead of retry storms.
+
+`ModRow` loads the data URL in a `$effect` and renders it in the list row and in
+the detail dialog. The letter placeholder of the list row covers "no thumbnail",
+"still loading" and "failed" alike, so nothing shows a broken-image icon or
+raises a toast; the detail dialog carries no placeholder and renders the image
+only once it is loaded.
 
 ## Mod sets
 
@@ -1054,21 +1103,32 @@ default true, passed as a parameter to each launch call).
 
 ## Updating SPT
 
-**Release source.** The published SPT releases come from the GitHub releases API of `sp-tarkov/build`
-(`core/sptrelease/client.py`): anonymous, one GET of 100 entries (that covers every release ever published, so
-pagination is never followed), 60 requests per hour per IP. `SPTMOD_SPT_RELEASE_URL` overrides the endpoint for
-mirrors and tests. Drafts, pre-releases and entries without a readable `x.y.z` tag are dropped; a leading `v` on old
-tags is stripped. The required Escape from Tarkov build is parsed from the release name (`SPT 4.1.2 (40743)`); when a
-name carries no build, `<runtime>/SPT_Data/configs/core.json` of the unpacked release answers with the trailing
-component of `compatibleTarkovVersion` (`0.16.9.40743` → `40743`). Release bodies are never parsed — their wording is
-inconsistent across versions. Two sources were rejected: the Forge's `/spt/versions` lists no 4.x at all (newest
-3.11.4), and the installer feed `release.json` describes only the newest release. The upstream org has been archived
-since 2026-08-06; releases and assets still resolve, and the env override is the mitigation if hosting moves.
+**Release source.** SPT's release hosting is split across two GitHub repositories, and
+`core/sptrelease/client.py` reads both: `SP-Tushonka/build` carries the current line (4.1.3 and newer),
+`sp-tarkov/build` the older half (up to 4.1.2, published 2026-08-06, from an org that is archived but still serves
+its releases and assets). sp-mod.com's own `/api/v0/spt/versions` splits the same way. Each source is read
+anonymously with one GET of 100 entries (that covers every release a source ever published, so pagination is never
+followed), so a listing costs two of the 60 requests per hour per IP. The results are merged de-duplicated by
+version — the first source listed wins a collision, because the current repository is authoritative for any version
+it republishes, even when the archived entry for that version is the one carrying an asset — and sorted by
+publication date, newest first. A failure of
+*any* source raises `SptReleaseUnavailableError`, so a short but plausible-looking list can never reach the caller.
+`SPTMOD_SPT_RELEASE_URL` replaces both defaults with one endpoint for mirrors and tests. Drafts, pre-releases and
+entries without a readable `x.y.z` tag are dropped; a leading `v` on old tags is stripped. The required Escape from
+Tarkov build is parsed from the release name (`SPT 4.1.2 (40743)`); when a name carries no build,
+`<runtime>/SPT_Data/configs/core.json` of the unpacked release answers with the trailing component of
+`compatibleTarkovVersion` (`0.16.9.40743` → `40743`). Release bodies are never parsed — their wording is
+inconsistent across versions. Two sources were rejected. The Forge's `/spt/versions` does list every 4.x in one
+page, but it mirrors the release metadata rather than hosting the releases; the download URLs, sizes and publication
+dates come from the GitHub release APIs, so those are read directly. The installer feed `release.json` describes only
+the newest release.
 
-**Only the newest release of a line keeps its asset** (verified: 3 of 83 releases have one, the newest patch of 4.1,
-4.0 and 3.11; the mirror URLs in older release bodies answer 404). `list_spt_releases` therefore reports every release
-of the installed series with a `downloadable` flag, and the history undo — not a download — is the primary downgrade
-path. The UI and the CLI say so instead of promising more.
+**Almost no release keeps its asset** — an asset survives only on the newest patch of a line at the time its
+repository stopped publishing that line (verified: 4 of the 86 merged releases have one; the 4.1 line has two,
+4.1.2 from `sp-tarkov/build` and 4.1.5 from `SP-Tushonka/build`, plus 4.0.13 and 3.11.4; the mirror URLs in older
+release bodies answer 404). `list_spt_releases` therefore reports every release of the installed series with a
+`downloadable` flag, and the history undo — not a download — is the primary downgrade path. The UI and the CLI say
+so instead of promising more.
 
 **Applying a release** (`services.apply_spt_release`, one function for update and downgrade):
 
@@ -1419,14 +1479,22 @@ there lists what is implemented and what is not. What exists:
   toggles the favorite and Escape gives up the focus. The focused row is kept
   as a mod id, so filtering and sorting keep it.
 - `filterstate.ts` — the single source for search text, pills and quick tabs.
-  It holds one `ModFilter` (chips, category, search), defaults to
-  compatible-only, survives route changes but not an app restart, and notifies
+  It holds one `ModFilter` (chips, category, search, the SPT version the list
+  is judged against), defaults to compatible-only against the installed
+  version, survives route changes but not an app restart, and notifies
   subscribers only when the value really differs.
 - `filterpills.ts` — the pill definitions (Compatibility, Category, Type,
   Fika, State, Featured), which pills are active for a filter, applying and
   removing a pill, and the quick tabs. Every pill is a radio because chips are
   ANDed; the Compatibility pill shows the SPT version as its label when one is
-  known.
+  known. It offers the installed version first, then one option per
+  installable release (`installableVersions` over the `list_spt_releases`
+  answer, downloadable ones, newest first, the installed one left out), then
+  "All versions"; a version option carries that version in the filter, which
+  `ModsView` hands to `browse_catalog` so the backend judges the rows, the
+  compatibility chip and the counts against it. An unreachable release source
+  leaves the pill with the two options it always had — the Mods view never
+  raises for it and stays usable offline.
 - `popover.ts` — the key handling of a popover: Escape closes, Tab and
   Shift+Tab cycle through the focusable elements of the panel.
 - `selection.ts` — toggle one row or all, the tri-state header checkbox,
@@ -1614,14 +1682,14 @@ cd src-tauri && cargo llvm-cov       # Rust coverage - reported only, no enforce
   design); `--file` installs without metadata are versionless unless
   `--version` is given (CLI prints a hint).
 - `.rar` creation is untestable (extraction works via bsdtar).
-- SPT keeps a download only for the newest release of each line (3 of 83
-  releases carry an asset), so downgrading by download is effectively dead —
-  the history undo is the real downgrade path, and the UI greys out what cannot
-  be fetched.
-- The upstream `sp-tarkov/build` repository is archived (since 2026-08-06).
-  Releases and their assets still resolve; if release hosting moves,
-  `SPTMOD_SPT_RELEASE_URL` is the only lever, and the release list has no cache
-  against the 60-requests-per-hour anonymous budget.
+- SPT keeps a download only for the newest patch a line reached before its
+  repository stopped publishing it (4 of the 86 merged releases carry an asset),
+  so downgrading by download is effectively dead — the history undo is the real
+  downgrade path, and the UI greys out what cannot be fetched.
+- The release list is assembled from two GitHub repositories (`SP-Tushonka/build`
+  for 4.1.3 and newer, the archived `sp-tarkov/build` for 4.1.2 and older), and
+  it has no cache: every listing spends two requests of the
+  60-requests-per-hour anonymous budget.
 - sp-mod.com deviates from the old forge source in category/license/
   dependency-embed shapes — the client parses the LIVE shapes (with
   tolerant fallbacks); resolve uses `/mods/dependencies`, which matches.

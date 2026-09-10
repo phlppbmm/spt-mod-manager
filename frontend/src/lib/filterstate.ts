@@ -7,7 +7,12 @@ export const DEFAULT_FILTER: ModFilter = {
 };
 
 function copy(filter: ModFilter): ModFilter {
-	return { chips: new Set(filter.chips), category: filter.category, search: filter.search };
+	return {
+		chips: new Set(filter.chips),
+		category: filter.category,
+		search: filter.search,
+		sptVersion: filter.sptVersion
+	};
 }
 
 let current: ModFilter = copy(DEFAULT_FILTER);
@@ -40,6 +45,7 @@ export function filtersEqual(a: ModFilter, b: ModFilter): boolean {
 	return (
 		a.category === b.category &&
 		a.search === b.search &&
+		a.sptVersion === b.sptVersion &&
 		a.chips.size === b.chips.size &&
 		[...a.chips].every((chip) => b.chips.has(chip))
 	);

@@ -984,6 +984,44 @@
         }
       }
     },
+    "/api/get_thumbnails": {
+      "post": {
+        "summary": "Get Thumbnails",
+        "operationId": "get_thumbnails_api_get_thumbnails_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetThumbnailsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThumbnailsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plan_mod_install": {
       "post": {
         "summary": "Plan Mod Install",
@@ -2254,7 +2292,7 @@
         "type": "object"
       },
       "BrowseCatalogRequest": {
-        "description": "Parameters of ``browse_catalog``.",
+        "description": "Parameters of ``browse_catalog``.\n\n``spt_version`` judges the entries against another SPT version than the one\nthe game directory has, so a player can see what is ready for the release\nthey are about to install.",
         "properties": {
           "path": {
             "format": "path",
@@ -2269,6 +2307,17 @@
             "default": false,
             "title": "Compatible Only",
             "type": "boolean"
+          },
+          "spt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spt Version"
           },
           "db_path": {
             "anyOf": [
@@ -3500,6 +3549,47 @@
           "mod_id"
         ],
         "title": "GetModDetailsRequest",
+        "type": "object"
+      },
+      "GetThumbnailsRequest": {
+        "description": "Parameters of ``get_thumbnails``.",
+        "properties": {
+          "mod_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Mod Ids",
+            "type": "array"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
+          "cache_dir": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Dir"
+          }
+        },
+        "required": [
+          "mod_ids"
+        ],
+        "title": "GetThumbnailsRequest",
         "type": "object"
       },
       "HistoryRequest": {
@@ -5951,6 +6041,30 @@
           "operation_id"
         ],
         "title": "SyncCatalogResponse",
+        "type": "object"
+      },
+      "ThumbnailsResponse": {
+        "description": "The image of every requested mod as a data URL, keyed by Forge id.\n\nA mod the catalog knows no image for, and one whose image cannot be\nfetched, carries None: the caller shows its placeholder then.",
+        "properties": {
+          "thumbnails": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Thumbnails",
+            "type": "object"
+          }
+        },
+        "required": [
+          "thumbnails"
+        ],
+        "title": "ThumbnailsResponse",
         "type": "object"
       },
       "ToggleResult": {

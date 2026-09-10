@@ -25,6 +25,7 @@
 	import { groupRemovalsByProfile } from '$lib/cleanup';
 	import type { RowState } from '$lib/modfilter';
 	import { rowKey } from '$lib/rownav';
+	import { loadThumbnail } from '$lib/thumbnails';
 
 	interface Props {
 		path: string;
@@ -64,6 +65,9 @@
 		onbusy
 	}: Props = $props();
 
+	const EAGER_ROWS = 60;
+	const LOOKAHEAD = '200px';
+
 	const FORCEABLE_CODES = [
 		'CONFLICT',
 		'DEPENDENCY',
@@ -71,6 +75,9 @@
 		'PROFILE_RESIDUE'
 	];
 
+	let rowElement: HTMLElement | null = $state(null);
+	let onScreen = $state(false);
+	let thumbnail: string | null = $state(null);
 	let busy = $state(false);
 	let progress: ProgressEvent | null = $state(null);
 	let plan: InstallPlan | null = $state(null);
@@ -89,6 +96,45 @@
 	let cleanProfiles = $state(false);
 
 	let cleanupGroups = $derived.by(() => groupRemovalsByProfile(cleanupPlan?.removals ?? []));
+
+	$effect(() => {
+		const element = rowElement;
+		if (index <= EAGER_ROWS || typeof IntersectionObserver === 'undefined') {
+			onScreen = true;
+			return;
+		}
+		if (element === null) {
+			return;
+		}
+		const observer = new IntersectionObserver(
+			(seen) => {
+				if (seen.some((observed) => observed.isIntersecting)) {
+					onScreen = true;
+				}
+			},
+			{ rootMargin: LOOKAHEAD }
+		);
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
+
+	$effect(() => {
+		const modId = entry.mod.id;
+		const source = entry.mod.thumbnail;
+		if (!source || !onScreen) {
+			thumbnail = null;
+			return;
+		}
+		let current = true;
+		void loadThumbnail(modId, source).then((dataUrl) => {
+			if (current) {
+				thumbnail = dataUrl;
+			}
+		});
+		return () => {
+			current = false;
+		};
+	});
 
 	let cleanupPlanGeneration = 0;
 
@@ -267,6 +313,7 @@
 </script>
 
 <div
+	bind:this={rowElement}
 	class="row panel-row"
 	class:busy
 	id="modrow-{entry.mod.id}"
@@ -297,8 +344,8 @@
 		>
 			{favorite ? '★' : '☆'}
 		</button>
-		{#if entry.mod.thumbnail}
-			<img class="thumb" src={entry.mod.thumbnail} alt="" loading="lazy" />
+		{#if thumbnail}
+			<img class="thumb" src={thumbnail} alt="" />
 		{:else}
 			<div class="thumb placeholder" aria-hidden="true">{entry.mod.name.slice(0, 1)}</div>
 		{/if}
@@ -536,8 +583,8 @@
 {#if details !== null}
 	<Dialog title={entry.mod.name} onclose={() => (details = null)}>
 		<div class="detail-head">
-			{#if entry.mod.thumbnail}
-				<img class="detail-thumb" src={entry.mod.thumbnail} alt="" />
+			{#if thumbnail}
+				<img class="detail-thumb" src={thumbnail} alt="" />
 			{/if}
 			<div class="detail-meta">
 				<div>by {entry.mod.author}</div>

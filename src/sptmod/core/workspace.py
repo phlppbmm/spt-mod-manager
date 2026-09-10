@@ -36,6 +36,7 @@ LOCK_FILE_NAME: Final = ".sptmod-lock"
 _APP_NAME: Final = "sptmod"
 _STAGING_DIR_NAME: Final = "staging"
 _DOWNLOAD_CACHE_DIR_NAME: Final = "downloads"
+_THUMBNAIL_CACHE_DIR_NAME: Final = "thumbnails"
 _STAGING_MAX_AGE_SECONDS: Final = 24 * 60 * 60
 _LOCK_TIMEOUT_SECONDS: Final = 300.0
 _LOCK_POLL_SECONDS: Final = 0.2
@@ -68,6 +69,19 @@ def download_cache_dir() -> Path:
     downloads = path / _DOWNLOAD_CACHE_DIR_NAME
     downloads.mkdir(parents=True, exist_ok=True)
     return downloads
+
+
+def thumbnail_cache_dir() -> Path:
+    """Return the directory the fetched mod thumbnails are kept in.
+
+    Lives next to the downloaded archives in the user's cache directory and is
+    created on demand. Its contents survive across runs so an image is fetched
+    once; size is bounded by the thumbnail cache's own housekeeping.
+    """
+    path = platformdirs.user_cache_path(_APP_NAME, appauthor=False)
+    thumbnails = path / _THUMBNAIL_CACHE_DIR_NAME
+    thumbnails.mkdir(parents=True, exist_ok=True)
+    return thumbnails
 
 
 def is_locked(game_dir: Path) -> bool:

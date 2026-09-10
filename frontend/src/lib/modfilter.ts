@@ -58,6 +58,12 @@ export interface ModFilter {
 	chips: ReadonlySet<ChipId>;
 	category: string | null;
 	search: string;
+	/**
+	 * The SPT version the entries are judged against; undefined asks for the
+	 * version the game directory has. The backend decides compatibility, so
+	 * this travels to `browseCatalog` rather than into a row predicate.
+	 */
+	sptVersion?: string;
 }
 
 /**

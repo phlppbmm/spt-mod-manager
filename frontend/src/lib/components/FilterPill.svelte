@@ -41,9 +41,14 @@
 		staged = [option.id];
 	}
 
+	// An option naming an SPT version shares its chip with its siblings, and the
+	// row count for that version is only known after the backend judged it.
 	function countOf(option: PillOption): number | null {
 		const chip = option.chips.length === 1 ? option.chips[0] : null;
-		return chip === null ? null : counts[chip];
+		if (chip === null || option.sptVersion !== undefined) {
+			return null;
+		}
+		return counts[chip];
 	}
 
 	function apply(): void {

@@ -61,6 +61,7 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("import_list", schemas.ImportListRequest, schemas.ImportDiff),
     ("clear_catalog_cache", schemas.ClearCatalogCacheRequest, schemas.ClearCacheResult),
     ("get_mod_details", schemas.GetModDetailsRequest, schemas.ModDetails),
+    ("get_thumbnails", schemas.GetThumbnailsRequest, schemas.ThumbnailsResponse),
     ("plan_mod_install", schemas.PlanModInstallRequest, schemas.InstallPlan),
     ("install_mod", schemas.InstallModRequest, schemas.InstallModResponse),
     ("check_updates", schemas.CheckUpdatesRequest, schemas.UpdatesReport),

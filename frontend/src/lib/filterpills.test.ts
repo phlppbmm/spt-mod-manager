@@ -6,11 +6,32 @@ import {
 	applyPill,
 	applyQuickTab,
 	availablePills,
+	installableVersions,
 	pillDefinitions,
 	removePill
 } from './filterpills';
 import type { PillDefinition, PillKey } from './filterpills';
+import type { SptReleaseInfo } from './api/client';
 import type { ChipId, ModFilter } from './modfilter';
+
+/**
+ * Only `version` and `downloadable` steer the compatibility options; the other
+ * fields of the RPC row are fixed placeholders so a test states just what it
+ * varies.
+ */
+function makeRelease(overrides: Partial<SptReleaseInfo> = {}): SptReleaseInfo {
+	return {
+		version: '4.1.3',
+		client_build: '39000',
+		published_at: '2026-01-02T03:04:05Z',
+		url: 'https://sp-tarkov.com/releases/4.1.3',
+		downloadable: true,
+		content_length: 1024,
+		installed: false,
+		newer: true,
+		...overrides
+	};
+}
 
 function makeFilter(overrides: Partial<ModFilter> = {}): ModFilter {
 	return {
@@ -308,3 +329,188 @@ describe('applyQuickTab', () => {
 		expect([...result.chips]).toEqual(['compatible']);
 	});
 });
+
+describe('installableVersions', () => {
+	it('keeps the versions the manager can install, in the order the source lists them', () => {
+		const releases = [
+			makeRelease({ version: '4.1.5' }),
+			makeRelease({ version: '4.1.3' }),
+			makeRelease({ version: '4.1.0' })
+		];
+
+		expect(installableVersions(releases)).toEqual(['4.1.5', '4.1.3', '4.1.0']);
+	});
+
+	it('drops a release that has no download, so the pill cannot offer an unreachable version', () => {
+		const releases = [
+			makeRelease({ version: '4.1.5' }),
+			makeRelease({ version: '4.1.4', downloadable: false }),
+			makeRelease({ version: '4.1.0' })
+		];
+
+		expect(installableVersions(releases)).toEqual(['4.1.5', '4.1.0']);
+	});
+
+	it('names a version once even when the source lists it twice', () => {
+		const releases = [
+			makeRelease({ version: '4.1.5' }),
+			makeRelease({ version: '4.1.5', client_build: '39001' })
+		];
+
+		expect(installableVersions(releases)).toEqual(['4.1.5']);
+	});
+
+	it('reports nothing when no release can be installed', () => {
+		expect(installableVersions([makeRelease({ downloadable: false })])).toEqual([]);
+		expect(installableVersions([])).toEqual([]);
+	});
+});
+
+describe('the compatibility pill with installable versions', () => {
+	const compatOf = (installable: string[], sptVersion: string | null = '4.1.0'): PillDefinition =>
+		defOf(pillDefinitions([], sptVersion, installable), 'compatibility');
+
+	it('offers the installed version first, then every other version, then "All versions"', () => {
+		const options = compatOf(['4.1.5', '4.1.3', '4.1.0']).options;
+
+		expect(options).toEqual([
+			{ id: 'compatible', label: 'SPT 4.1.0', chips: ['compatible'] },
+			{ id: 'spt-4.1.5', label: 'SPT 4.1.5', chips: ['compatible'], sptVersion: '4.1.5' },
+			{ id: 'spt-4.1.3', label: 'SPT 4.1.3', chips: ['compatible'], sptVersion: '4.1.3' },
+			{ id: 'all', label: 'All versions', chips: [] }
+		]);
+	});
+
+	it('offers every installable version when no SPT version is installed yet', () => {
+		const options = compatOf(['4.1.5', '4.1.0'], null).options;
+
+		expect(options.map((option) => option.id)).toEqual([
+			'compatible',
+			'spt-4.1.5',
+			'spt-4.1.0',
+			'all'
+		]);
+		expect(options[0].label).toBe('Compatible');
+	});
+
+	it('leaves the pill at the installed version and "All versions" without any release', () => {
+		expect(compatOf([]).options.map((option) => option.id)).toEqual(['compatible', 'all']);
+	});
+});
+
+describe('the SPT version a filter is judged against', () => {
+	const defs = pillDefinitions(['Weapons'], '4.1.0', ['4.1.5', '4.1.3']);
+	const compat = defOf(defs, 'compatibility');
+
+	it('reports the picked version as the active compatibility option, not the installed one', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+		expect(activePills(filter, [compat])).toEqual([
+			{ key: 'compatibility', optionIds: ['spt-4.1.5'], valueLabel: 'SPT 4.1.5' }
+		]);
+	});
+
+	it('reports the installed version as active while the filter names no version', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']) });
+
+		expect(activePills(filter, [compat])).toEqual([
+			{ key: 'compatibility', optionIds: ['compatible'], valueLabel: 'SPT 4.1.0' }
+		]);
+	});
+
+	it('reports no compatibility pill for a version the pill does not offer', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '3.9.0' });
+
+		expect(activePills(filter, [compat])).toEqual([]);
+	});
+
+	/**
+	 * Every option of the pill except "All versions" means "show what runs on
+	 * this version": each one narrows the list with the compatible chip and only
+	 * differs in the version the backend judges the entries against.
+	 */
+	it.each([
+		{ pick: 'the installed version', id: 'compatible', version: undefined },
+		{ pick: 'a newer version', id: 'spt-4.1.5', version: '4.1.5' },
+		{ pick: 'an older version of the same line', id: 'spt-4.1.3', version: '4.1.3' }
+	])('picking $pick keeps the compatible chip and records the version', ({ id, version }) => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), search: 'scav' });
+
+		const result = applyPill(filter, compat, [id]);
+
+		expect(result).toEqual({
+			chips: new Set<ChipId>(['compatible']),
+			category: null,
+			search: 'scav',
+			sptVersion: version
+		});
+	});
+
+	it('drops chip and version together when "All versions" is picked', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+		const result = applyPill(filter, compat, ['all']);
+
+		expect([...result.chips]).toEqual([]);
+		expect(result.sptVersion).toBeUndefined();
+	});
+
+	it('forgets the version when the compatibility pill is removed', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+		expect(removePill(filter, compat).sptVersion).toBeUndefined();
+	});
+
+	it('keeps the version when a pill that owns no version is applied', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+		const result = applyPill(filter, defOf(defs, 'state'), ['installed']);
+
+		expect(result.sptVersion).toBe('4.1.5');
+	});
+
+	it('keeps the version across a quick-tab switch', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+		expect(applyQuickTab(filter, 'updates').sptVersion).toBe('4.1.5');
+	});
+
+	it('offers the compatibility pill again once its version-less state is restored', () => {
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '3.9.0' });
+
+		expect(availablePills(filter, defs).map((def) => def.key)).toContain('compatibility');
+	});
+});
+
+/**
+ * The pill picks the judged version even when the release source offered
+ * nothing: a version chosen for another game directory is still in the shared
+ * filter, and the pill has to be able to show and clear it.
+ */
+describe('the compatibility pill without any installable release', () => {
+	const compat = defOf(pillDefinitions([], '4.1.0', []), 'compatibility');
+	const stale = makeFilter({ chips: new Set<ChipId>(['compatible']), sptVersion: '4.1.5' });
+
+	it('does not let a version it cannot offer pass as the installed version', () => {
+		expect(activePills(stale, [compat])).toEqual([]);
+	});
+
+	it('clears the version it cannot offer when "All versions" is picked', () => {
+		const result = applyPill(stale, compat, ['all']);
+
+		expect(result.sptVersion).toBeUndefined();
+		expect([...result.chips]).toEqual([]);
+	});
+
+	it('clears the version it cannot offer when the pill is removed', () => {
+		expect(removePill(stale, compat).sptVersion).toBeUndefined();
+	});
+
+	it('returns to the installed version when its only narrowing option is picked', () => {
+		const result = applyPill(stale, compat, ['compatible']);
+
+		expect(result.sptVersion).toBeUndefined();
+		expect([...result.chips]).toEqual(['compatible']);
+	});
+});
+

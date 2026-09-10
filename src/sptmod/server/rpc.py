@@ -175,6 +175,12 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.GetModDetailsRequest,
         schemas.ModDetails,
     ),
+    "get_thumbnails": RpcSpec(
+        services.get_thumbnails,
+        schemas.GetThumbnailsRequest,
+        schemas.ThumbnailsResponse,
+        wrap="thumbnails",
+    ),
     "plan_mod_install": RpcSpec(
         services.plan_mod_install,
         schemas.PlanModInstallRequest,

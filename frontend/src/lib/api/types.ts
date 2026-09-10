@@ -429,6 +429,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/get_thumbnails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Thumbnails */
+        post: operations["get_thumbnails_api_get_thumbnails_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan_mod_install": {
         parameters: {
             query?: never;
@@ -1029,6 +1046,10 @@ export interface components {
         /**
          * BrowseCatalogRequest
          * @description Parameters of ``browse_catalog``.
+         *
+         *     ``spt_version`` judges the entries against another SPT version than the one
+         *     the game directory has, so a player can see what is ready for the release
+         *     they are about to install.
          */
         BrowseCatalogRequest: {
             /**
@@ -1043,6 +1064,8 @@ export interface components {
              * @default false
              */
             compatible_only: boolean;
+            /** Spt Version */
+            spt_version?: string | null;
             /** Db Path */
             db_path?: string | null;
         };
@@ -1630,6 +1653,18 @@ export interface components {
             mod_id: number;
             /** Db Path */
             db_path?: string | null;
+        };
+        /**
+         * GetThumbnailsRequest
+         * @description Parameters of ``get_thumbnails``.
+         */
+        GetThumbnailsRequest: {
+            /** Mod Ids */
+            mod_ids: number[];
+            /** Db Path */
+            db_path?: string | null;
+            /** Cache Dir */
+            cache_dir?: string | null;
         };
         /**
          * HistoryRequest
@@ -2944,6 +2979,19 @@ export interface components {
             operation_id: string;
         };
         /**
+         * ThumbnailsResponse
+         * @description The image of every requested mod as a data URL, keyed by Forge id.
+         *
+         *     A mod the catalog knows no image for, and one whose image cannot be
+         *     fetched, carries None: the caller shows its placeholder then.
+         */
+        ThumbnailsResponse: {
+            /** Thumbnails */
+            thumbnails: {
+                [key: string]: string | null;
+            };
+        };
+        /**
          * ToggleResult
          * @description Outcome of ``disable_mod`` and ``enable_mod``.
          */
@@ -3918,6 +3966,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModDetails"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_thumbnails_api_get_thumbnails_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GetThumbnailsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsResponse"];
                 };
             };
             /** @description Default Response */

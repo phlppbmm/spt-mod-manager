@@ -39,6 +39,7 @@ export type UpdatesReport = Schemas['UpdatesReport'];
 export type UpdateCandidate = Schemas['UpdateCandidate'];
 export type BlockedUpdate = Schemas['BlockedUpdate'];
 export type ClearCacheResult = Schemas['ClearCacheResult'];
+export type ThumbnailsResponse = Schemas['ThumbnailsResponse'];
 export type DirectoryListing = Schemas['DirectoryListing'];
 export type DirectoryEntry = Schemas['DirectoryEntry'];
 export type LocatedDirectory = Schemas['LocatedDirectory'];
@@ -200,12 +201,14 @@ export function searchCatalog(
 export function browseCatalog(
 	path: string,
 	filter: BrowseFilter = 'all',
-	compatibleOnly: boolean = false
+	compatibleOnly: boolean = false,
+	sptVersion?: string
 ): Promise<CatalogEntry[]> {
 	return call<CatalogEntry[]>('browse_catalog', {
 		path,
 		filter,
-		compatible_only: compatibleOnly
+		compatible_only: compatibleOnly,
+		spt_version: sptVersion
 	} satisfies Schemas['BrowseCatalogRequest']);
 }
 
@@ -277,6 +280,12 @@ export function getModDetails(modId: number): Promise<ModDetails> {
 	return call<ModDetails>('get_mod_details', {
 		mod_id: modId
 	} satisfies Schemas['GetModDetailsRequest']);
+}
+
+export function getThumbnails(modIds: number[]): Promise<ThumbnailsResponse> {
+	return call<ThumbnailsResponse>('get_thumbnails', {
+		mod_ids: modIds
+	} satisfies Schemas['GetThumbnailsRequest']);
 }
 
 export function clearCatalogCache(

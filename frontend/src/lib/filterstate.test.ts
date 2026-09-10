@@ -250,3 +250,59 @@ describe('subscribeFilter', () => {
 		expect(listenerB).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe('the SPT version the list is judged against', () => {
+	it('hands the chosen version back to the next reader of the shared filter', () => {
+		setFilter({
+			chips: new Set<ChipId>(['compatible']),
+			category: null,
+			search: '',
+			sptVersion: '4.1.5'
+		});
+
+		expect(getFilter().sptVersion).toBe('4.1.5');
+	});
+
+	it('tells two filters apart that differ only in the version they are judged against', () => {
+		const base: ModFilter = { chips: new Set<ChipId>(['compatible']), category: null, search: '' };
+
+		expect(filtersEqual(base, { ...base, sptVersion: '4.1.5' })).toBe(false);
+		expect(filtersEqual({ ...base, sptVersion: '4.1.5' }, { ...base, sptVersion: '4.1.5' })).toBe(
+			true
+		);
+	});
+
+	it('notifies subscribers when only the judged version changed', () => {
+		const seen: (string | undefined)[] = [];
+		const stop = subscribeFilter((filter) => seen.push(filter.sptVersion));
+
+		setFilter({
+			chips: new Set<ChipId>(['compatible']),
+			category: null,
+			search: '',
+			sptVersion: '4.0.0'
+		});
+		stop();
+
+		expect(seen).toEqual([undefined, '4.0.0']);
+	});
+
+	it('counts a filter that names a version as changed away from the default', () => {
+		expect(isDefaultFilter({ ...DEFAULT_FILTER, sptVersion: '4.1.5' })).toBe(false);
+		expect(isDefaultFilter({ ...DEFAULT_FILTER, sptVersion: undefined })).toBe(true);
+	});
+
+	it('forgets the version again when the filter is cleared', () => {
+		setFilter({
+			chips: new Set<ChipId>(['compatible']),
+			category: null,
+			search: '',
+			sptVersion: '4.1.5'
+		});
+
+		clearFilter();
+
+		expect(getFilter().sptVersion).toBeUndefined();
+	});
+});
+

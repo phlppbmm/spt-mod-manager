@@ -14,6 +14,7 @@ from typing import Literal
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.favorites import default_favorites_path, load_favorites, save_favorites
 from sptmod.core.forge import cache as download_cache
+from sptmod.core.forge import thumbnails as thumbnail_cache
 from sptmod.core.forge.catalog import (
     Catalog,
     CatalogEntry,
@@ -191,12 +192,13 @@ def search_catalog(
         GitError: git failed.
     """
     installed = list_mods(path)
-    compatible_with = _compatible_with(path, compatible_only)
+    spt_version = detected_spt_version(path)
     with open_catalog(db_path) as catalog:
+        compatible_with = spt_version if compatible_only else None
         matched = {
             mod.id for mod in catalog.search(query, compatible_with=compatible_with)
         }
-        entries = _classified(catalog, installed, path, compatible_only)
+        entries = _classified(catalog, installed, spt_version, compatible_only)
     return [entry for entry in entries if entry.mod.id in matched]
 
 
@@ -205,6 +207,7 @@ def browse_catalog(
     catalog_filter: BrowseFilter = "all",
     compatible_only: bool = False,
     *,
+    spt_version: str | None = None,
     db_path: Path | None = None,
 ) -> list[CatalogEntry]:
     """Return the cached catalog joined with the installed mods of ``path``.
@@ -217,7 +220,9 @@ def browse_catalog(
         path: The tracked game directory.
         catalog_filter: Which of the three lists to return.
         compatible_only: Keep only mods with a version compatible with the SPT
-            version of the game directory.
+            version the entries are judged against.
+        spt_version: Judge the entries against this SPT version instead of the
+            one the game directory has; empty or omitted uses that one.
         db_path: Catalog database path; defaults to :func:`default_db_path`.
 
     Returns:
@@ -228,8 +233,9 @@ def browse_catalog(
         GitError: git failed.
     """
     installed = list_mods(path)
+    judged_against = spt_version or detected_spt_version(path)
     with open_catalog(db_path) as catalog:
-        entries = _classified(catalog, installed, path, compatible_only)
+        entries = _classified(catalog, installed, judged_against, compatible_only)
     if catalog_filter == "all":
         return entries
     wanted = catalog_filter == "installed"
@@ -289,9 +295,10 @@ def clear_catalog_cache(
 ) -> ClearCacheResult:
     """Delete the local Forge catalog cache.
 
-    Removes the SQLite file the catalog lives in, so the next
-    :func:`sync_catalog` starts from an empty cache. The cache holds no truth
-    about the installation, hence nothing else is touched.
+    Removes the SQLite file the catalog lives in and the mod images fetched
+    for it, so the next :func:`sync_catalog` starts from an empty cache. The
+    cache holds no truth about the installation, hence nothing else is
+    touched.
 
     Args:
         db_path: Catalog database path; defaults to :func:`default_db_path`.
@@ -309,6 +316,7 @@ def clear_catalog_cache(
     cache = db_path or default_db_path()
     removed = cache.exists()
     cache.unlink(missing_ok=True)
+    thumbnail_cache.clear()
     if not downloads:
         return ClearCacheResult(db_path=cache, removed=removed)
     freed = download_cache.clear()
@@ -318,6 +326,42 @@ def clear_catalog_cache(
         downloads_path=download_cache_dir(),
         downloads_freed_bytes=freed,
     )
+
+
+def get_thumbnails(
+    mod_ids: Sequence[int],
+    *,
+    db_path: Path | None = None,
+    cache_dir: Path | None = None,
+) -> dict[int, str | None]:
+    """Return the thumbnail of every mod in ``mod_ids`` as a data URL.
+
+    The image of a mod is read from the cached catalog row, never from the
+    caller, and fetched from the Forge with the header its image host insists
+    on. Every image is kept on disk, so the next call for the same mod answers
+    from there.
+
+    Args:
+        mod_ids: Forge ids of the mods to show an image for.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+        cache_dir: Directory the images are kept in; defaults to
+            :func:`sptmod.core.workspace.thumbnail_cache_dir`.
+
+    Returns:
+        The data URL of each requested mod, or None for a mod the catalog
+        knows no image for and for an image that cannot be fetched.
+
+    Raises:
+        CatalogUnavailableError: The catalog cache cannot be opened.
+    """
+    with open_catalog(db_path) as catalog:
+        urls = {mod_id: _thumbnail_url(catalog, mod_id) for mod_id in mod_ids}
+    wanted = {mod_id: url for mod_id, url in urls.items() if url is not None}
+    if not wanted:
+        return dict.fromkeys(urls, None)
+    with ForgeClient() as client:
+        loaded = thumbnail_cache.load(wanted, client=client, cache_dir=cache_dir)
+    return {mod_id: loaded.get(mod_id) for mod_id in urls}
 
 
 def list_favorites(*, favorites_path: Path | None = None) -> list[int]:
@@ -368,10 +412,10 @@ def set_favorite(
 def _classified(
     catalog: Catalog,
     installed: Sequence[ModInfo],
-    path: Path,
+    spt_version: str | None,
     compatible_only: bool,
 ) -> list[CatalogEntry]:
-    """Join the catalog with ``installed``, judged against the SPT version.
+    """Join the catalog with ``installed``, judged against ``spt_version``.
 
     ``latest_version`` always holds a version the installer can actually
     resolve, so a mod without one is listed as ``available``/``installed``
@@ -379,7 +423,6 @@ def _classified(
     the resolver would refuse. Without ``compatible_only`` those mods stay in
     the list.
     """
-    spt_version = detected_spt_version(path)
     compatible = catalog.classify(installed, compatible_with=spt_version)
     if compatible_only or spt_version is None:
         return compatible
@@ -396,5 +439,7 @@ def _classified(
     return sorted(entries, key=lambda entry: (entry.mod.name.casefold(), entry.mod.id))
 
 
-def _compatible_with(path: Path, compatible_only: bool) -> str | None:
-    return detected_spt_version(path) if compatible_only else None
+def _thumbnail_url(catalog: Catalog, mod_id: int) -> str | None:
+    """Return the image URL the catalog holds for ``mod_id``, if it holds one."""
+    mod = catalog.get_mod(mod_id)
+    return None if mod is None else mod.thumbnail or None

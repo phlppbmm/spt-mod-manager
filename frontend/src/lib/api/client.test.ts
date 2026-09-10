@@ -16,6 +16,7 @@ import {
 	exportModSet,
 	getFikaSettings,
 	getModDetails,
+	getThumbnails,
 	history,
 	importList,
 	importModSet,
@@ -276,6 +277,12 @@ const wrapperCases: Array<{
 		payload: { path: '/game', filter: 'installed', compatible_only: true }
 	},
 	{
+		id: 'browseCatalog forwards the SPT version the catalog is judged against',
+		call: () => browseCatalog('/game', 'all', false, '4.1.5'),
+		command: 'browse_catalog',
+		payload: { path: '/game', filter: 'all', compatible_only: false, spt_version: '4.1.5' }
+	},
+	{
 		id: 'exportMods defaults format to "text" and clientOnly to false',
 		call: () => exportMods('/game'),
 		command: 'export_mods',
@@ -352,6 +359,12 @@ const wrapperCases: Array<{
 		call: () => getModDetails(47),
 		command: 'get_mod_details',
 		payload: { mod_id: 47 }
+	},
+	{
+		id: 'getThumbnails forwards the mod ids',
+		call: () => getThumbnails([47, 63]),
+		command: 'get_thumbnails',
+		payload: { mod_ids: [47, 63] }
 	},
 	{
 		id: 'clearCatalogCache defaults downloads to false with no request',

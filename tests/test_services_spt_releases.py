@@ -3,7 +3,9 @@
 Covers ``list_spt_releases``: the series filter and the version arithmetic it
 rests on, the order of the listed releases, the installed and newer flags, the
 page, date, download and size of every release, an unreadable installed
-version, the client build, a handed release client and an unreachable source.
+version, the client build, a handed release client, an unreachable source and
+the releases of both default sources reaching an installation that came from
+the archived one.
 """
 
 from datetime import UTC, datetime
@@ -236,3 +238,50 @@ def test_list_rejects_a_directory_that_is_no_game_directory(tmp_path: Path) -> N
     """list_spt_releases() raises NotAGameDirError before it reads any release."""
     with pytest.raises(NotAGameDirError, match="not an SPT game directory"):
         services.list_spt_releases(tmp_path)
+
+
+# --- the release sources the client reads by itself ----------------------
+
+# What the current release repository publishes beyond NEWEST, the last
+# release the archived repository ever saw.
+CONTINUED = "4.1.5"
+CONTINUED_EARLIER = "4.1.3"
+
+
+def test_list_spans_the_current_and_the_archived_release_source(
+    fake_game_dir_runtime: Path,
+    spt_release_sources: tuple[SptReleaseSource, ...],
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """list_spt_releases() offers releases of both default sources to an installation from the old one.
+
+    Nothing names a release source, so the client reads its defaults: the
+    current repository publishes 4.1.5 and 4.1.3, the archived one stopped at
+    4.1.2, and the installation is that 4.1.2. All five releases of the series
+    are listed newest first with 4.1.2 marked installed and the two later ones
+    newer, because a player whose SPT came from the archived repository must
+    be offered the releases that appeared after the move.
+    """
+    current, *archived = spt_release_sources
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", NEWEST)
+    write_client_exe(fake_game_dir_runtime)
+    clean_repo_at(fake_game_dir_runtime)
+    for version in (CONTINUED, CONTINUED_EARLIER):
+        offer(current, make_spt_release, version)
+    for source in archived:
+        for version in (NEWEST, NEW, INSTALLED):
+            offer(source, make_spt_release, version)
+
+    listed = services.list_spt_releases(fake_game_dir_runtime)
+
+    assert listed.current_version == NEWEST
+    assert listed.latest == CONTINUED
+    assert [
+        (entry.version, entry.installed, entry.newer) for entry in listed.releases
+    ] == [
+        (CONTINUED, False, True),
+        (CONTINUED_EARLIER, False, True),
+        (NEWEST, True, False),
+        (NEW, False, False),
+        (INSTALLED, False, False),
+    ]

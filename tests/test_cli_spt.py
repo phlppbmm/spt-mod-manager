@@ -5,7 +5,8 @@ client build, the confirmation, its ``--yes`` bypass and the refusals a "no"
 and a missing answer produce, the refusal of a
 version change in the wrong direction, the exit codes of an unpublished
 release, a mismatching game build and a missing version change to undo, the
-hint printed after a successful change, and both forms of going back.
+hint printed after a successful change, both forms of going back, and an
+update to a release only the current release repository publishes.
 """
 
 import re
@@ -18,6 +19,7 @@ from typer.testing import CliRunner
 from conftest import clean_repo_at
 from fixture_types import MakeArchive, MakeSptRelease
 from fixtures_spt import SptReleaseSource, spt_release_members, write_client_exe
+from pe_builder import write_server_exe
 from sptmod.cli import app
 from sptmod.core import services
 
@@ -26,6 +28,9 @@ runner = CliRunner()
 INSTALLED = "4.1.0"
 NEW = "4.1.1"
 NEWEST = "4.1.2"
+# The release the current repository publishes; the archived one it replaced
+# stopped at NEWEST.
+CONTINUED = "4.1.5"
 OLDER = "4.0.9"
 BUILD = "40743"
 OTHER_BUILD = "40999"
@@ -518,3 +523,40 @@ def test_downgrade_keeps_the_version_when_the_undo_is_declined(
     assert (spt_game_dir / "winhttp.dll").read_text(encoding="utf-8") == (
         f"doorstop of {NEW}"
     )
+
+
+def test_update_reaches_a_release_of_the_source_that_replaced_the_archived_one(
+    fake_game_dir_runtime: Path,
+    spt_release_sources: tuple[SptReleaseSource, ...],
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt list`` and ``spt update`` reach a release only the current repository publishes.
+
+    Nothing names a release source, so the CLI reads both defaults: the
+    archived repository stopped at the installed 4.1.2 and the current one
+    publishes 4.1.5. The table offers 4.1.5 as newer and the update puts it in
+    place, which is the whole point of reading two sources -- a player whose
+    SPT came from the archived repository would otherwise never be offered
+    anything again.
+    """
+    current, *archived = spt_release_sources
+    write_server_exe(fake_game_dir_runtime, "SPT_Runtime", NEWEST)
+    write_client_exe(fake_game_dir_runtime)
+    clean_repo_at(fake_game_dir_runtime)
+    _offer(current, make_spt_release, CONTINUED)
+    for source in archived:
+        _offer(source, make_spt_release, NEWEST)
+    monkeypatch.chdir(fake_game_dir_runtime)
+
+    listed_code, listed_output, _ = _invoke(["spt", "list"])
+    exit_code, output, _ = _invoke(["spt", "update", CONTINUED, "--yes"])
+
+    assert (listed_code, exit_code) == (0, 0)
+    assert _rows(listed_output) == [
+        ["Version", "EFT build", "Released", "State", "Download"],
+        [CONTINUED, BUILD, "2025-01-02 03:04", "newer", "yes"],
+        [NEWEST, BUILD, "2025-01-02 03:04", "installed", "yes"],
+    ]
+    assert f"SPT is now {CONTINUED}" in _text(output)
+    assert _subjects(fake_game_dir_runtime)[0] == f"spt: {CONTINUED}"

@@ -1,34 +1,90 @@
-"""Behaviour of ``SptReleaseClient``: URL resolution, request shape, parsing, and error mapping.
+"""Behaviour of ``SptReleaseClient``: source selection, merging, request shape, parsing, error mapping.
 
-Covers: base URL precedence (argument > env > default, empty env falls back);
+Covers: which sources are read (argument > env var > the default sources, an
+empty env var falling back to them); the merge of the default sources into one
+newest-first list with the first source winning a version two sources publish;
 single GET with ``per_page=100`` and the GitHub ``Accept`` header; field
 parsing for every ``SptRelease`` attribute including tag/name pattern
 matching, asset selection, and date fallback; skipping of drafts,
 pre-releases, and unparseable entries; newest-first ordering; error mapping
 for network failures, error statuses, non-JSON bodies, and a JSON body that
-is not a list; and the context-manager close contract.
+is not a list, for a failure of any single source; and the context-manager
+close contract.
 """
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
 import respx
 
+from fixture_types import JsonDict
 from fixtures_forge import recorded_requests
 from github_json import asset_json, release_json, release_without_asset_json
 from sptmod.core.errors import SptReleaseUnavailableError
 from sptmod.core.sptrelease.client import (
-    DEFAULT_RELEASES_URL,
+    DEFAULT_RELEASES_URLS,
     UNKNOWN_DATE,
     SptRelease,
     SptReleaseClient,
-    spt_releases_url,
 )
 
 FAKE_RELEASES_URL = "https://sptrelease.invalid/releases"
 RELEASE_ENV_VAR = "SPTMOD_SPT_RELEASE_URL"
+BUILD = "40743"
+ARCHIVE_SIZE = 123456789
+
+# The sources read when nothing names one: SPT's current release repository
+# first, every source it succeeded after it.
+CURRENT_SOURCE, *ARCHIVED_SOURCES = DEFAULT_RELEASES_URLS
+
+
+def released(
+    version: str,
+    published_at: str,
+    *,
+    source: str = "current",
+    build: str = BUILD,
+    size: int = ARCHIVE_SIZE,
+) -> JsonDict:
+    """Build a release entry for ``version`` whose page and archive name the source publishing it.
+
+    Every field a source can differ in -- the page, the build, the date, the
+    download link and its size -- carries ``source``, so a merged release can
+    be traced back to the repository it came from.
+    """
+    name = f"SPT-{version}-{build}.7z"
+    return release_json(
+        tag_name=version,
+        name=f"SPT {version} ({build})",
+        published_at=published_at,
+        html_url=f"https://{source}.invalid/tag/{version}",
+        assets=[
+            asset_json(
+                name=name,
+                browser_download_url=f"https://{source}.invalid/{version}/{name}",
+                size=size,
+            )
+        ],
+    )
+
+
+# What the current release repository carries: the versions the archived one
+# never saw.
+CONTINUED_RELEASES = [
+    released("4.1.5", "2026-03-01T00:00:00Z"),
+    released("4.1.4", "2026-02-01T00:00:00Z"),
+    released("4.1.3", "2026-01-01T00:00:00Z"),
+]
+
+# What the archived repository stopped at.
+ARCHIVED_RELEASES = [
+    released("4.1.2", "2025-06-01T00:00:00Z", source="archived"),
+    released("4.1.1", "2025-03-01T00:00:00Z", source="archived"),
+    released("4.0.9", "2024-12-01T00:00:00Z", source="archived"),
+]
 
 
 @pytest.fixture
@@ -38,70 +94,148 @@ def fake_router() -> Iterator[respx.MockRouter]:
         yield router
 
 
+def mount(router: respx.MockRouter, url: str, releases: list[JsonDict]) -> respx.Route:
+    """Answer a GET of ``url`` with ``releases`` and return the route, so its calls can be counted."""
+    return router.get(url).mock(return_value=httpx.Response(200, json=releases))
+
+
+def failure_mock(mode: str) -> dict[str, Any]:
+    """Return the respx keywords letting a source fail in ``mode``.
+
+    Built per call, so two parametrized cases never share one response object.
+    """
+    modes: dict[str, dict[str, Any]] = {
+        "unreachable": {"side_effect": httpx.ConnectError("boom")},
+        "forbidden": {"return_value": httpx.Response(403)},
+        "server-error": {"return_value": httpx.Response(500)},
+        "unreadable-body": {"return_value": httpx.Response(200, content=b"not json at all")},
+        "not-a-list": {"return_value": httpx.Response(200, json={"message": "not a list"})},
+    }
+    return modes[mode]
+
+
 # --------------------------------------------------------------------------
-# URL resolution: argument > SPTMOD_SPT_RELEASE_URL > DEFAULT_RELEASES_URL.
+# Source selection and the merge of the default sources.
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("env_value", "expected"),
-    [
-        pytest.param(None, DEFAULT_RELEASES_URL, id="env-unset"),
-        pytest.param("", DEFAULT_RELEASES_URL, id="env-empty"),
-        pytest.param("https://mirror.invalid/releases", "https://mirror.invalid/releases", id="env-set"),
-    ],
-)
-def test_spt_releases_url_reads_the_environment(
-    monkeypatch: pytest.MonkeyPatch, env_value: str | None, expected: str
+@pytest.mark.parametrize("env_value", [pytest.param(None, id="env-unset"), pytest.param("", id="env-empty")])
+def test_releases_merges_every_default_source_into_one_newest_first_list(
+    monkeypatch: pytest.MonkeyPatch, fake_router: respx.MockRouter, env_value: str | None
 ) -> None:
-    """spt_releases_url() returns the env var when it names a URL, the default otherwise.
+    """Without a named source, every default source is read and their releases arrive in one list.
 
-    SPTMOD_SPT_RELEASE_URL is unset, set to the empty string, or set to a mirror
-    address; the first two fall back to DEFAULT_RELEASES_URL because an empty
-    variable names no host, the third wins so a mirror needs no code change.
+    SPTMOD_SPT_RELEASE_URL is unset or empty -- an empty variable names no
+    host -- while the current repository publishes 4.1.5, 4.1.4 and 4.1.3 and
+    the archived one 4.1.2 and older; the returned list spans both
+    repositories, newest first, because a player whose SPT came from the
+    archived source must still be offered what the current one publishes.
     """
     if env_value is None:
         monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
     else:
         monkeypatch.setenv(RELEASE_ENV_VAR, env_value)
+    mount(fake_router, CURRENT_SOURCE, CONTINUED_RELEASES)
+    for url in ARCHIVED_SOURCES:
+        mount(fake_router, url, ARCHIVED_RELEASES)
 
-    assert spt_releases_url() == expected
+    with SptReleaseClient() as client:
+        releases = client.releases()
+
+    assert [release.version for release in releases] == ["4.1.5", "4.1.4", "4.1.3", "4.1.2", "4.1.1", "4.0.9"]
+
+
+def test_a_version_two_sources_publish_is_kept_once_with_the_entry_of_the_first(
+    monkeypatch: pytest.MonkeyPatch, fake_router: respx.MockRouter
+) -> None:
+    """A version both default sources publish appears once, carrying the first source's data.
+
+    Both repositories publish 4.1.2, with a different page, build, date and
+    download; the merged list holds it once and every field comes from the
+    source read first, because the archived copy of a version the current
+    source republished is the outdated one.
+    """
+    monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
+    mount(
+        fake_router,
+        CURRENT_SOURCE,
+        [released("4.1.3", "2026-01-01T00:00:00Z"), released("4.1.2", "2025-12-01T00:00:00Z", build="40760")],
+    )
+    for url in ARCHIVED_SOURCES:
+        mount(fake_router, url, [released("4.1.2", "2025-06-01T00:00:00Z", source="archived", build="40001", size=99)])
+
+    with SptReleaseClient() as client:
+        releases = client.releases()
+
+    assert [release.version for release in releases] == ["4.1.3", "4.1.2"]
+    assert releases[1] == SptRelease(
+        version="4.1.2",
+        client_build="40760",
+        published_at=datetime(2025, 12, 1, tzinfo=UTC),
+        url="https://current.invalid/tag/4.1.2",
+        download_url="https://current.invalid/4.1.2/SPT-4.1.2-40760.7z",
+        archive_name="SPT-4.1.2-40760.7z",
+        content_length=ARCHIVE_SIZE,
+    )
+
+
+def test_a_version_one_source_publishes_twice_is_kept_once_with_its_first_entry(
+    fake_router: respx.MockRouter,
+) -> None:
+    """A version listed twice by one source is kept once, with the entry that came first.
+
+    The source lists 4.1.2 twice with different pages and builds; the result
+    holds the first of them, because a source's own order is the order it
+    means.
+    """
+    mount(
+        fake_router,
+        FAKE_RELEASES_URL,
+        [
+            released("4.1.2", "2025-12-01T00:00:00Z", build="40760"),
+            released("4.1.2", "2025-06-01T00:00:00Z", source="stale", build="40001"),
+        ],
+    )
+
+    with SptReleaseClient(FAKE_RELEASES_URL) as client:
+        releases = client.releases()
+
+    assert [(release.version, release.client_build, release.url) for release in releases] == [
+        ("4.1.2", "40760", "https://current.invalid/tag/4.1.2")
+    ]
 
 
 @pytest.mark.parametrize(
-    ("env_value", "base_url", "asked_url"),
+    ("env_value", "base_url"),
     [
-        pytest.param(FAKE_RELEASES_URL, None, FAKE_RELEASES_URL, id="env-var-used"),
-        pytest.param(None, None, DEFAULT_RELEASES_URL, id="default-used"),
-        pytest.param(
-            "https://env.invalid/releases", FAKE_RELEASES_URL, FAKE_RELEASES_URL, id="explicit-argument-wins"
-        ),
+        pytest.param(FAKE_RELEASES_URL, None, id="env-var-used"),
+        pytest.param("https://env.invalid/releases", FAKE_RELEASES_URL, id="explicit-argument-wins"),
     ],
 )
-def test_the_client_asks_the_host_the_precedence_rules_pick(
+def test_a_named_source_replaces_the_default_sources(
     monkeypatch: pytest.MonkeyPatch,
     fake_router: respx.MockRouter,
-    env_value: str | None,
+    env_value: str,
     base_url: str | None,
-    asked_url: str,
 ) -> None:
-    """releases() sends its request to the URL the precedence rules select.
+    """A source named by the environment or by the argument is read alone; no default is asked.
 
-    The environment names a URL and no argument is given, neither names one, or
-    both do; the route registered on the expected host is the one that records a
-    call, so the precedence (argument > env var > default) is asserted through
-    the request the client really sends.
+    The environment names the mirror and no argument is given, or both name a
+    source; the mirror publishes 7.0.0 while the defaults publish the usual
+    versions, so the result naming only 7.0.0 and every default route staying
+    uncalled show that pointing at a mirror really replaces both defaults --
+    and that the argument outranks the variable.
     """
-    if env_value is None:
-        monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
-    else:
-        monkeypatch.setenv(RELEASE_ENV_VAR, env_value)
+    monkeypatch.setenv(RELEASE_ENV_VAR, env_value)
+    defaults = {url: mount(fake_router, url, CONTINUED_RELEASES) for url in DEFAULT_RELEASES_URLS}
+    named = mount(fake_router, FAKE_RELEASES_URL, [released("7.0.0", "2026-06-01T00:00:00Z", source="mirror")])
 
-    route = fake_router.get(asked_url).mock(return_value=httpx.Response(200, json=[]))
     with SptReleaseClient(base_url) as client:
-        client.releases()
+        releases = client.releases()
 
-    assert route.call_count == 1
+    assert [release.version for release in releases] == ["7.0.0"]
+    assert named.call_count == 1
+    assert {url: route.call_count for url, route in defaults.items()} == dict.fromkeys(DEFAULT_RELEASES_URLS, 0)
 
 
 # --------------------------------------------------------------------------
@@ -351,47 +485,46 @@ def test_releases_with_an_empty_list_returns_an_empty_list(fake_router: respx.Mo
 # --------------------------------------------------------------------------
 
 
-def test_releases_raises_on_network_error(fake_router: respx.MockRouter) -> None:
-    """A network failure (e.g. connection refused) is mapped to SptReleaseUnavailableError."""
-    fake_router.get(FAKE_RELEASES_URL).mock(side_effect=httpx.ConnectError("boom"))
-
-    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
-        client.releases()
-
-    assert "internet connection" in str(exc_info.value)
-
-
-@pytest.mark.parametrize("status", [403, 500], ids=["forbidden", "server-error"])
-def test_releases_raises_on_error_status(fake_router: respx.MockRouter, status: int) -> None:
-    """A non-2xx HTTP status (403, 500) is mapped to SptReleaseUnavailableError, naming the status."""
-    fake_router.get(FAKE_RELEASES_URL).mock(return_value=httpx.Response(status))
-
-    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
-        client.releases()
-
-    assert str(status) in str(exc_info.value)
-
-
-def test_releases_raises_on_a_non_json_body(fake_router: respx.MockRouter) -> None:
-    """A 200 response whose body is not JSON is mapped to SptReleaseUnavailableError."""
-    fake_router.get(FAKE_RELEASES_URL).mock(return_value=httpx.Response(200, content=b"not json at all"))
-
-    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
-        client.releases()
-
-    assert "unreadable" in str(exc_info.value)
-
-
-def test_releases_raises_when_the_body_is_a_json_object_instead_of_a_list(
+@pytest.mark.parametrize(
+    "failing", [pytest.param(0, id="first-source-fails"), pytest.param(-1, id="last-source-fails")]
+)
+@pytest.mark.parametrize(
+    ("mode", "fragment"),
+    [
+        pytest.param("unreachable", "internet connection", id="unreachable"),
+        pytest.param("forbidden", "403", id="forbidden"),
+        pytest.param("server-error", "500", id="server-error"),
+        pytest.param("unreadable-body", "unreadable", id="unreadable-body"),
+        pytest.param("not-a-list", "unexpected shape", id="not-a-list"),
+    ],
+)
+def test_a_single_failing_source_lets_the_whole_call_fail(
+    monkeypatch: pytest.MonkeyPatch,
     fake_router: respx.MockRouter,
+    failing: int,
+    mode: str,
+    fragment: str,
 ) -> None:
-    """A 200 response whose JSON body is an object (not a list) is mapped to SptReleaseUnavailableError."""
-    fake_router.get(FAKE_RELEASES_URL).mock(return_value=httpx.Response(200, json={"message": "not a list"}))
+    """Any source that cannot be read raises SptReleaseUnavailableError, whichever source it is.
 
-    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
+    One default source is unreachable, answers 403 or 500, sends a body that
+    is not JSON or a JSON object instead of a list, while every other source
+    answers with a full release list; the call raises and names the reason,
+    because a half-read list would silently hide the newest releases from the
+    player instead of telling them the source is down.
+    """
+    monkeypatch.delenv(RELEASE_ENV_VAR, raising=False)
+    failing_url = DEFAULT_RELEASES_URLS[failing]
+    for url in DEFAULT_RELEASES_URLS:
+        if url == failing_url:
+            fake_router.get(url).mock(**failure_mock(mode))
+        else:
+            mount(fake_router, url, CONTINUED_RELEASES)
+
+    with SptReleaseClient() as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
         client.releases()
 
-    assert "unexpected shape" in str(exc_info.value)
+    assert fragment in str(exc_info.value)
 
 
 # --------------------------------------------------------------------------

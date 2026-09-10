@@ -16,6 +16,7 @@ from fixture_types import JsonDict, MakeArchive, MakeSptRelease
 from github_json import asset_json, release_json, release_without_asset_json
 from pe_builder import build_synthetic_exe, write_server_exe
 from sptmod.core import services
+from sptmod.core.sptrelease.client import DEFAULT_RELEASES_URLS
 
 # The mocked release source; every SPT-release test points the client at it
 # through SPTMOD_SPT_RELEASE_URL, so the real GitHub host is never reached.
@@ -203,6 +204,22 @@ def spt_release_source(monkeypatch: pytest.MonkeyPatch) -> Iterator[SptReleaseSo
     monkeypatch.setenv(SPT_RELEASE_URL_ENV, SPT_RELEASE_LIST_URL)
     with respx.mock(assert_all_called=False) as router:
         yield SptReleaseSource(router, SPT_RELEASE_LIST_URL)
+
+
+@pytest.fixture
+def spt_release_sources(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[SptReleaseSource, ...]]:
+    """Every release source the client reads by itself, mocked, one per default URL.
+
+    Removes ``SPTMOD_SPT_RELEASE_URL``, so a service or the CLI builds the
+    client with its own default sources, and mocks each of them separately;
+    the first source of the returned tuple is the one read first. Lets a test
+    publish different releases per repository -- what the current one carries
+    and what the archived one stopped at -- without any of them reaching
+    GitHub.
+    """
+    monkeypatch.delenv(SPT_RELEASE_URL_ENV, raising=False)
+    with respx.mock(assert_all_called=False) as router:
+        yield tuple(SptReleaseSource(router, url) for url in DEFAULT_RELEASES_URLS)
 
 
 @pytest.fixture

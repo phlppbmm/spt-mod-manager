@@ -13,7 +13,10 @@ import httpx
 from sptmod.core.errors import SptReleaseUnavailableError
 from sptmod.core.models import Json
 
-DEFAULT_RELEASES_URL: Final = "https://api.github.com/repos/sp-tarkov/build/releases"
+DEFAULT_RELEASES_URLS: Final = (
+    "https://api.github.com/repos/SP-Tushonka/build/releases",
+    "https://api.github.com/repos/sp-tarkov/build/releases",
+)
 RELEASES_PER_PAGE: Final = 100
 DEFAULT_TIMEOUT: Final = 30.0
 UNKNOWN_DATE: Final = datetime.min.replace(tzinfo=UTC)
@@ -29,9 +32,10 @@ class SptReleaseEnv(StrEnum):
     RELEASES_URL = "SPTMOD_SPT_RELEASE_URL"
 
 
-def spt_releases_url() -> str:
-    """Return the release list URL from the environment, or the default when unset or empty."""
-    return os.environ.get(SptReleaseEnv.RELEASES_URL) or DEFAULT_RELEASES_URL
+def spt_releases_urls() -> tuple[str, ...]:
+    """Return the release list URLs: the single one the environment names, or the default sources."""
+    named = os.environ.get(SptReleaseEnv.RELEASES_URL)
+    return (named,) if named else DEFAULT_RELEASES_URLS
 
 
 @dataclass(frozen=True)
@@ -114,26 +118,27 @@ def _parse_release(data: Mapping[str, Json]) -> SptRelease | None:
 class SptReleaseClient:
     """Read-only client for the published SPT releases.
 
-    The source needs no authentication and is read in one request; releases
-    beyond the first page are not fetched because the page holds every SPT
-    release ever published.
+    The sources need no authentication and each is read in one request;
+    releases beyond the first page are not fetched because the page holds
+    every SPT release a source ever published. By default SPT's current and
+    its former release source are read and merged.
 
-    Without an explicit ``base_url`` the environment variable
-    ``SPTMOD_SPT_RELEASE_URL`` is read at construction time and overrides
-    :data:`DEFAULT_RELEASES_URL`, so a mirror can be pointed at without code
-    changes.
+    An explicit ``base_url`` or the environment variable
+    ``SPTMOD_SPT_RELEASE_URL``, read at construction time, replaces
+    :data:`DEFAULT_RELEASES_URLS` with that single URL, so a mirror can be
+    pointed at without code changes.
     """
 
     def __init__(self, base_url: str | None = None, *, timeout: float = DEFAULT_TIMEOUT) -> None:
         """Initialize an SptReleaseClient.
 
         Args:
-            base_url: The release list URL; defaults to
+            base_url: The single release list URL to read; defaults to
                 ``SPTMOD_SPT_RELEASE_URL`` when that variable is set,
-                otherwise to the official release source.
+                otherwise to the official release sources.
             timeout: Request timeout in seconds (default: 30.0).
         """
-        self.base_url = base_url or spt_releases_url()
+        self.base_urls: tuple[str, ...] = (base_url,) if base_url else spt_releases_urls()
         self._http = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
@@ -156,25 +161,30 @@ class SptReleaseClient:
         self.close()
 
     def releases(self) -> list[SptRelease]:
-        """Fetch the published SPT releases, newest first.
+        """Fetch the published SPT releases of every configured source, newest first.
 
         Drafts, pre-releases and entries without a readable version are left
         out; a release without a published archive is kept, with empty
-        download fields.
+        download fields. A version published by more than one source is kept
+        once, with the entry of the source read first.
 
         Returns:
             The parsed releases, ordered by publication date, newest first.
 
         Raises:
-            SptReleaseUnavailableError: If the source is unreachable, answers
+            SptReleaseUnavailableError: If a source is unreachable, answers
                 with an error status, or sends a body that is not a list of
                 releases.
         """
-        return sorted(self._fetch(), key=lambda release: release.published_at, reverse=True)
+        merged: dict[str, SptRelease] = {}
+        for url in self.base_urls:
+            for release in self._fetch(url):
+                merged.setdefault(release.version, release)
+        return sorted(merged.values(), key=lambda release: release.published_at, reverse=True)
 
-    def _fetch(self) -> Sequence[SptRelease]:
+    def _fetch(self, base_url: str) -> Sequence[SptRelease]:
         try:
-            response = self._http.get(self.base_url, params={"per_page": str(RELEASES_PER_PAGE)})
+            response = self._http.get(base_url, params={"per_page": str(RELEASES_PER_PAGE)})
         except httpx.HTTPError as error:
             raise SptReleaseUnavailableError(
                 "The SPT release list cannot be reached. Check your internet connection and try again."

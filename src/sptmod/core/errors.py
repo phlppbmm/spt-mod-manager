@@ -179,6 +179,24 @@ class ClientBuildMismatchError(SptmodError):
     """The installed Escape from Tarkov build does not match the SPT release."""
 
 
+class SptModsIncompatibleError(SptmodError):
+    """Installed mods have no version for the SPT version that was asked for.
+
+    Attributes:
+        spt_version: The SPT version the change was refused for.
+        mods: The installed mods the mod list has no version of for it.
+    """
+
+    def __init__(self, spt_version: str, mods: Sequence[str]) -> None:
+        super().__init__(
+            f"these installed mods have no version for SPT {spt_version}: "
+            f"{', '.join(mods)}. Update or remove them first, or change the "
+            f"SPT version anyway."
+        )
+        self.spt_version = spt_version
+        self.mods: list[str] = list(mods)
+
+
 class ForgeApiError(SptmodError):
     """The Forge API answered with an error envelope.
 

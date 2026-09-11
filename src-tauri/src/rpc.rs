@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::driver;
 
-pub const FUNCTIONS: [&str; 51] = [
+pub const FUNCTIONS: [&str; 52] = [
     "list_directories",
     "locate_directory",
     "init_game_dir",
@@ -50,6 +50,7 @@ pub const FUNCTIONS: [&str; 51] = [
     "launch_status",
     "stop_game",
     "list_spt_releases",
+    "check_spt_compatibility",
     "apply_spt_release",
     "revert_spt_update",
     "get_fika_settings",

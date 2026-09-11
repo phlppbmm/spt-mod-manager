@@ -37,6 +37,7 @@ from sptmod.core.errors import (
     ProfileResidueError,
     ServerPortBusyError,
     SptmodError,
+    SptModsIncompatibleError,
     SptReleaseUnavailableError,
     SptReleaseWriteError,
     SptVersionUnknownError,
@@ -89,6 +90,7 @@ class ErrorCode(StrEnum):
     SPT_RELEASE_WRITE_FAILED = "SPT_RELEASE_WRITE_FAILED"
     MOD_FILE_WRITE_FAILED = "MOD_FILE_WRITE_FAILED"
     CLIENT_BUILD_MISMATCH = "CLIENT_BUILD_MISMATCH"
+    SPT_MODS_INCOMPATIBLE = "SPT_MODS_INCOMPATIBLE"
 
 
 # Stable machine-readable code per core exception class. The lookup walks the
@@ -132,6 +134,7 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     SptReleaseWriteError: ErrorCode.SPT_RELEASE_WRITE_FAILED,
     ModFileWriteError: ErrorCode.MOD_FILE_WRITE_FAILED,
     ClientBuildMismatchError: ErrorCode.CLIENT_BUILD_MISMATCH,
+    SptModsIncompatibleError: ErrorCode.SPT_MODS_INCOMPATIBLE,
 }
 
 
@@ -165,12 +168,19 @@ def error_details(error: Exception) -> schemas.ErrorDetails:
                 schemas.ProfileResidue.model_validate(item) for item in error.residues
             ]
         )
+    return _named_details(error)
+
+
+def _named_details(error: Exception) -> schemas.ErrorDetails:
+    """Return the payload of the errors carrying names, paths or API codes."""
     if isinstance(error, GitError):
         return schemas.ErrorDetails(conflicting_paths=error.conflicting_paths)
     if isinstance(error, ModSetIncompleteError):
         return schemas.ErrorDetails(name=error.name, missing=error.missing)
     if isinstance(error, AmbiguousModError):
         return schemas.ErrorDetails(name=error.name, candidates=error.candidates)
+    if isinstance(error, SptModsIncompatibleError):
+        return schemas.ErrorDetails(spt_version=error.spt_version, mods=error.mods)
     if isinstance(error, ForgeApiError):
         return schemas.ErrorDetails(api_code=error.code, api_status=error.status)
     return schemas.ErrorDetails()

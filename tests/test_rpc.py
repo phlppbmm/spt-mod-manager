@@ -456,6 +456,8 @@ def test_error_without_structured_payload_gets_empty_details(fake_game_dir: Path
         "api_code": "",
         "api_status": 0,
         "missing": [],
+        "spt_version": "",
+        "mods": [],
     }
 
 

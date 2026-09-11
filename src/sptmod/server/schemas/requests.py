@@ -428,6 +428,8 @@ class ErrorDetails(CoreModel):
     api_code: str = ""
     api_status: int = 0
     missing: list[str] = []
+    mods: list[str] = []
+    spt_version: str = ""
 
 
 class ErrorResponse(CoreModel):

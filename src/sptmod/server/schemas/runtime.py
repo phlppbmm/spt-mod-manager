@@ -164,15 +164,38 @@ class SptReleaseList(CoreModel):
     latest: str = ""
 
 
+class CheckSptCompatibilityRequest(CoreModel):
+    """Parameters of ``check_spt_compatibility``."""
+
+    path: Path
+    version: str
+    db_path: Path | None = None
+
+
+class SptCompatibilityReport(CoreModel):
+    """How the installed mods stand to an SPT version the game could change to."""
+
+    spt_version: str
+    compatible: list[str] = []
+    incompatible: list[str] = []
+    skipped: list[str] = []
+    checked: bool = True
+    notice: str = ""
+
+
 class ApplySptReleaseRequest(CoreModel):
     """Parameters of ``apply_spt_release``.
 
     ``operation_id`` names the progress stream of this version change; a
     generated one is used and echoed back when the caller sends none.
+    ``allow_incompatible_mods`` changes the version even when installed mods
+    have no version for it.
     """
 
     path: Path
     version: str
+    db_path: Path | None = None
+    allow_incompatible_mods: bool = False
     operation_id: str | None = None
 
 

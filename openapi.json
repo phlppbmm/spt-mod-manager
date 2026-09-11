@@ -1744,6 +1744,44 @@
         }
       }
     },
+    "/api/check_spt_compatibility": {
+      "post": {
+        "summary": "Check Spt Compatibility",
+        "operationId": "check_spt_compatibility_api_check_spt_compatibility_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckSptCompatibilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SptCompatibilityReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/apply_spt_release": {
       "post": {
         "summary": "Apply Spt Release",
@@ -2144,7 +2182,7 @@
         "type": "object"
       },
       "ApplySptReleaseRequest": {
-        "description": "Parameters of ``apply_spt_release``.\n\n``operation_id`` names the progress stream of this version change; a\ngenerated one is used and echoed back when the caller sends none.",
+        "description": "Parameters of ``apply_spt_release``.\n\n``operation_id`` names the progress stream of this version change; a\ngenerated one is used and echoed back when the caller sends none.\n``allow_incompatible_mods`` changes the version even when installed mods\nhave no version for it.",
         "properties": {
           "path": {
             "format": "path",
@@ -2154,6 +2192,23 @@
           "version": {
             "title": "Version",
             "type": "string"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          },
+          "allow_incompatible_mods": {
+            "default": false,
+            "title": "Allow Incompatible Mods",
+            "type": "boolean"
           },
           "operation_id": {
             "anyOf": [
@@ -2757,6 +2812,38 @@
         "title": "CheckResult",
         "type": "object"
       },
+      "CheckSptCompatibilityRequest": {
+        "description": "Parameters of ``check_spt_compatibility``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "db_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Path"
+          }
+        },
+        "required": [
+          "path",
+          "version"
+        ],
+        "title": "CheckSptCompatibilityRequest",
+        "type": "object"
+      },
       "CheckUpdatesRequest": {
         "description": "Parameters of ``check_updates``.",
         "properties": {
@@ -3297,6 +3384,19 @@
             },
             "title": "Missing",
             "type": "array"
+          },
+          "mods": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Mods",
+            "type": "array"
+          },
+          "spt_version": {
+            "default": "",
+            "title": "Spt Version",
+            "type": "string"
           }
         },
         "title": "ErrorDetails",
@@ -5739,6 +5839,54 @@
           "version"
         ],
         "title": "SptApplyResult",
+        "type": "object"
+      },
+      "SptCompatibilityReport": {
+        "description": "How the installed mods stand to an SPT version the game could change to.",
+        "properties": {
+          "spt_version": {
+            "title": "Spt Version",
+            "type": "string"
+          },
+          "compatible": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Compatible",
+            "type": "array"
+          },
+          "incompatible": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Incompatible",
+            "type": "array"
+          },
+          "skipped": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "checked": {
+            "default": true,
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "notice": {
+            "default": "",
+            "title": "Notice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spt_version"
+        ],
+        "title": "SptCompatibilityReport",
         "type": "object"
       },
       "SptReleaseInfo": {

@@ -282,6 +282,11 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.ListSptReleasesRequest,
         schemas.SptReleaseList,
     ),
+    "check_spt_compatibility": RpcSpec(
+        services.check_spt_compatibility,
+        schemas.CheckSptCompatibilityRequest,
+        schemas.SptCompatibilityReport,
+    ),
     "apply_spt_release": RpcSpec(
         services.apply_spt_release,
         schemas.ApplySptReleaseRequest,

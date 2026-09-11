@@ -4,6 +4,7 @@ Not a test module: the ``test_forge_*`` and ``test_services_*`` suites import
 these builders so the shape of a mocked Forge payload lives in one place.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -235,3 +236,32 @@ def updates_payload(
         "up_to_date": list(up_to_date or []),
         "incompatible_with_spt": list(incompatible_with_spt or []),
     }
+
+
+def mod_json_with_versions(
+    *, mod_id: int, name: str, constraints: Sequence[str]
+) -> dict[str, Any]:
+    """Build a Forge mod envelope holding one version per SPT constraint.
+
+    The mod carries ``mod_id`` and ``name``, and one published version per
+    entry of ``constraints``, each declaring that entry as its
+    ``spt_version_constraint``. An empty ``constraints`` sequence builds a mod
+    the catalog knows by name and ID but holds no version of.
+    """
+    return mod_json_full(
+        id=mod_id,
+        name=name,
+        slug=name.casefold().replace(" ", "-"),
+        owner=owner_json(id=mod_id * 10, name=f"{name} author"),
+        detail_url=f"{DEFAULT_BASE_URL}/mods/{name.casefold().replace(' ', '-')}",
+        versions=[
+            {
+                "id": mod_id * 100 + index,
+                "version": f"1.{index}.0",
+                "spt_version_constraint": constraint,
+                "downloads": 7,
+                "published_at": "2025-01-02T00:00:00Z",
+            }
+            for index, constraint in enumerate(constraints)
+        ],
+    )

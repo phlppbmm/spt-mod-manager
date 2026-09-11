@@ -109,9 +109,11 @@ from sptmod.core.services.profiles import (
 )
 from sptmod.core.services.spt import (
     SptApplyResult,
+    SptCompatibilityReport,
     SptReleaseInfo,
     SptReleaseList,
     apply_spt_release,
+    check_spt_compatibility,
     list_spt_releases,
     revert_spt_update,
 )
@@ -193,6 +195,7 @@ __all__ = [
     "SPT_VERSION_TRAILER",
     "SnapshotResult",
     "SptApplyResult",
+    "SptCompatibilityReport",
     "SptReleaseInfo",
     "SptReleaseList",
     "StatusReport",
@@ -209,6 +212,7 @@ __all__ = [
     "bind_profile_set",
     "browse_catalog",
     "check_profiles",
+    "check_spt_compatibility",
     "check_updates",
     "clean_profile",
     "clear_catalog_cache",

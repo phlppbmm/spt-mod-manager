@@ -84,7 +84,9 @@ const ALL_DETAILS: ErrorDetails = {
 	reason: '',
 	api_code: '',
 	api_status: 0,
-	missing: ['SAIN', 'Looting Bots']
+	missing: ['SAIN', 'Looting Bots'],
+	mods: [],
+	spt_version: ''
 };
 
 describe('entriesFromMods', () => {

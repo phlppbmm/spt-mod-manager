@@ -104,11 +104,57 @@ def _spt_releases(wanted: str, newer: bool) -> services.SptReleaseList:
     return releases
 
 
-def _change_spt_version(wanted: str, newer: bool, yes: bool) -> None:
+def _released_version(wanted: str, releases: services.SptReleaseList) -> str:
+    """Return the published version ``wanted`` names, or ``wanted`` when none does.
+
+    The version a player types can be shorter than the published one, and the
+    mods are judged against the version that will actually be put in place.
+    """
+    return next(
+        (
+            release.version
+            for release in releases.releases
+            if compare_versions(release.version, wanted) == 0
+        ),
+        wanted,
+    )
+
+
+def _report_mod_check(version: str) -> None:
+    """Name the installed mods that stand against the change to ``version``."""
+    report = services.check_spt_compatibility(Path.cwd(), version)
+    if not report.checked:
+        console.print(report.notice, markup=False)
+        return
+    if report.incompatible:
+        console.print(
+            f"these installed mods have no version for SPT {version}: "
+            f"{', '.join(report.incompatible)}",
+            markup=False,
+        )
+    if report.skipped:
+        console.print(
+            f"these installed mods could not be checked against SPT {version}: "
+            f"{', '.join(report.skipped)}",
+            markup=False,
+        )
+
+
+def _change_spt_version(
+    wanted: str, newer: bool, yes: bool, allow_incompatible_mods: bool
+) -> None:
     """Confirm and then put the SPT version ``wanted`` into the game directory."""
     releases = _spt_releases(wanted, newer)
+    _report_mod_check(_released_version(wanted, releases))
     _confirm_spt_change(wanted, releases.current_version, yes)
-    _print_spt_result(services.apply_spt_release(Path.cwd(), wanted, _report_progress))
+    _print_spt_result(
+        services.apply_spt_release(
+            Path.cwd(),
+            wanted,
+            _report_progress,
+            allow_incompatible_mods=allow_incompatible_mods,
+        )
+    )
 
 
 @spt_app.command("list")
@@ -131,10 +177,22 @@ def spt_update(
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Change the version without asking.")
     ] = False,
+    allow_incompatible_mods: Annotated[
+        bool,
+        typer.Option(
+            "--allow-incompatible-mods",
+            help="Change the version even when installed mods have no version for it.",
+        ),
+    ] = False,
 ) -> None:
     """Change the game directory to a newer SPT version."""
     with _handled():
-        _change_spt_version(spt_version, newer=True, yes=yes)
+        _change_spt_version(
+            spt_version,
+            newer=True,
+            yes=yes,
+            allow_incompatible_mods=allow_incompatible_mods,
+        )
 
 
 @spt_app.command("downgrade")
@@ -149,6 +207,17 @@ def spt_downgrade(
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Change the version without asking.")
     ] = False,
+    allow_incompatible_mods: Annotated[
+        bool,
+        typer.Option(
+            "--allow-incompatible-mods",
+            help=(
+                "Change the version even when installed mods have no version "
+                "for it; without VERSION there is nothing to check, so it does "
+                "nothing there."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Go back to an older SPT version, or undo the last SPT change."""
     with _handled():
@@ -156,4 +225,9 @@ def spt_downgrade(
             _confirm_spt_undo(yes)
             _print_spt_result(services.revert_spt_update(Path.cwd()))
             return
-        _change_spt_version(spt_version, newer=False, yes=yes)
+        _change_spt_version(
+            spt_version,
+            newer=False,
+            yes=yes,
+            allow_incompatible_mods=allow_incompatible_mods,
+        )

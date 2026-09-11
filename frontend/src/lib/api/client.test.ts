@@ -6,6 +6,7 @@ import {
 	bindProfileSet,
 	browseCatalog,
 	checkProfiles,
+	checkSptCompatibility,
 	checkUpdates,
 	cleanProfile,
 	clearCatalogCache,
@@ -433,16 +434,43 @@ const wrapperCases: Array<{
 		payload: { path: '/game' }
 	},
 	{
-		id: 'applySptRelease defaults operationId to null',
+		id: 'checkSptCompatibility forwards path and target version',
+		call: () => checkSptCompatibility('/game', '4.1.2'),
+		command: 'check_spt_compatibility',
+		payload: { path: '/game', version: '4.1.2' }
+	},
+	{
+		id: 'applySptRelease defaults operationId to null and keeps incompatible mods blocking',
 		call: () => applySptRelease('/game', '4.1.2'),
 		command: 'apply_spt_release',
-		payload: { path: '/game', version: '4.1.2', operation_id: null }
+		payload: {
+			path: '/game',
+			version: '4.1.2',
+			allow_incompatible_mods: false,
+			operation_id: null
+		}
 	},
 	{
 		id: 'applySptRelease forwards an explicit operationId',
 		call: () => applySptRelease('/game', '4.1.2', 'op-5'),
 		command: 'apply_spt_release',
-		payload: { path: '/game', version: '4.1.2', operation_id: 'op-5' }
+		payload: {
+			path: '/game',
+			version: '4.1.2',
+			allow_incompatible_mods: false,
+			operation_id: 'op-5'
+		}
+	},
+	{
+		id: 'applySptRelease passes the override for mods without a release on',
+		call: () => applySptRelease('/game', '4.1.2', 'op-5', true),
+		command: 'apply_spt_release',
+		payload: {
+			path: '/game',
+			version: '4.1.2',
+			allow_incompatible_mods: true,
+			operation_id: 'op-5'
+		}
 	},
 	{
 		id: 'revertSptUpdate forwards path',

@@ -8,6 +8,7 @@
 	import {
 		applyModSet,
 		applySptRelease,
+		checkSptCompatibility,
 		clearCatalogCache,
 		deleteModSet,
 		exportMods,
@@ -43,10 +44,14 @@
 	import { setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import {
 		canApply,
+		confirmBlocked,
 		confirmationFor,
 		formatReleaseDate,
+		modCheckView,
+		needsModCheck,
 		releaseState,
-		type ChangeKind
+		type ChangeKind,
+		type ModCheck
 	} from '$lib/spt';
 	import {
 		applyTheme,
@@ -147,11 +152,14 @@
 	let sptProgress: ProgressEvent | null = $state(null);
 	let pendingKind: ChangeKind | null = $state(null);
 	let pendingRelease: SptReleaseInfo | null = $state(null);
+	let modCheck: ModCheck | null = $state(null);
+	let allowIncompatible = $state(false);
 
 	const currentVersion = $derived(installedVersion());
 	const confirmation = $derived(
 		pendingKind === null ? null : confirmationFor(pendingRelease, currentVersion, pendingKind)
 	);
+	const modVerdict = $derived(modCheck === null ? null : modCheckView(modCheck));
 
 	const fikaAddressError = $derived(addressError(fikaRole, fikaAddress));
 
@@ -605,17 +613,43 @@
 	function ask(release: SptReleaseInfo | null, kind: ChangeKind): void {
 		pendingRelease = release;
 		pendingKind = kind;
+		modCheck = null;
+		allowIncompatible = false;
+		if (needsModCheck(release, kind)) {
+			void checkInstalledMods(release.version);
+		}
+	}
+
+	async function checkInstalledMods(target: string): Promise<void> {
+		const gameDir = path;
+		if (gameDir === null) {
+			return;
+		}
+		modCheck = { kind: 'pending' };
+		try {
+			const report = await checkSptCompatibility(gameDir, target);
+			if (pendingRelease?.version === target) {
+				modCheck = { kind: 'ready', report };
+			}
+		} catch {
+			if (pendingRelease?.version === target) {
+				modCheck = { kind: 'failed' };
+			}
+		}
 	}
 
 	function closeConfirmation(): void {
 		pendingRelease = null;
 		pendingKind = null;
+		modCheck = null;
+		allowIncompatible = false;
 	}
 
 	async function runPending(): Promise<void> {
 		const gameDir = path;
 		const kind = pendingKind;
 		const release = pendingRelease;
+		const allowed = allowIncompatible;
 		closeConfirmation();
 		if (gameDir === null || kind === null) {
 			return;
@@ -627,7 +661,7 @@
 			const version =
 				kind === 'undo' || release === null
 					? await undoChange(gameDir)
-					: await applyRelease(gameDir, release.version);
+					: await applyRelease(gameDir, release.version, allowed);
 			// The mods view serves the catalog, the installed mods and the SPT
 			// version from this cache; dropping it makes it check them again.
 			invalidate(gameDir);
@@ -642,13 +676,17 @@
 		}
 	}
 
-	async function applyRelease(gameDir: string, version: string): Promise<string> {
+	async function applyRelease(
+		gameDir: string,
+		version: string,
+		allowed: boolean
+	): Promise<string> {
 		const operationId = crypto.randomUUID();
 		const unsubscribe = await subscribe(operationId, (event) => {
 			sptProgress = event;
 		});
 		try {
-			const result = await applySptRelease(gameDir, version, operationId);
+			const result = await applySptRelease(gameDir, version, operationId, allowed);
 			return result.version === '' ? version : result.version;
 		} finally {
 			unsubscribe();
@@ -1350,8 +1388,32 @@
 {#if confirmation !== null}
 	<Dialog title={confirmation.title} onclose={closeConfirmation}>
 		<p>{confirmation.body}</p>
+		{#if modVerdict !== null}
+			<p class={modVerdict.tone === 'warn' ? 'warn-text' : 'note'}>{modVerdict.message}</p>
+			{#if modVerdict.incompatible.length > 0}
+				<ul class="mod-verdict">
+					{#each modVerdict.incompatible as mod (mod)}
+						<li>{mod}</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if modVerdict.skippedNote !== ''}
+				<p class="note">{modVerdict.skippedNote}</p>
+			{/if}
+			{#if modVerdict.needsOverride}
+				<label class="override">
+					<input type="checkbox" bind:checked={allowIncompatible} />
+					Change the SPT version anyway
+				</label>
+			{/if}
+		{/if}
 		{#snippet actions()}
-			<button type="button" class="btn-primary" onclick={() => void runPending()}>
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={confirmBlocked(modVerdict, allowIncompatible)}
+				onclick={() => void runPending()}
+			>
 				Continue
 			</button>
 		{/snippet}
@@ -1590,6 +1652,19 @@
 		align-items: center;
 		gap: var(--space-3);
 		padding: var(--space-2) var(--space-3);
+	}
+
+	.mod-verdict {
+		margin: 0 0 var(--space-3);
+		padding-left: var(--space-5);
+		max-height: 12rem;
+		overflow-y: auto;
+	}
+
+	.override {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 	}
 
 	.name {

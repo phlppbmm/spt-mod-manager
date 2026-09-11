@@ -144,6 +144,7 @@ SCHEMA_PARITY_PAIRS: list[tuple[type, type[BaseModel]]] = [
     (StopResult, schemas.StopResult),
     (services.SptReleaseInfo, schemas.SptReleaseInfo),
     (services.SptReleaseList, schemas.SptReleaseList),
+    (services.SptCompatibilityReport, schemas.SptCompatibilityReport),
     (services.SptApplyResult, schemas.SptApplyResult),
     (services.FikaSettings, schemas.FikaSettings),
     (services.HostProfile, schemas.HostProfile),

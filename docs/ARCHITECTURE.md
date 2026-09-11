@@ -1137,26 +1137,49 @@ so instead of promising more.
 2. Resolve the version against the release list. Unknown version, a version of another SPT series than the installed
    one (a series change means the other runtime directory, which only the official installer does) and a version
    without a published download all raise `SptReleaseUnavailableError` pointing at `https://sp-mod.com/installer`.
-3. Download through the existing cache (`forge/download.download_cached`) with the key `spt-<version>`; the key is
+3. **Mod check, before anything is downloaded.** The installed mods are judged against the resolved version (see
+   "Judging the installed mods"); when any of them is incompatible, `SptModsIncompatibleError` names them and the
+   change stops, unless the keyword-only `allow_incompatible_mods=True` says to go ahead. The guard sits after the
+   resolution, so the refusals of step 2 keep their precedence and wording, and before the download, so a refused
+   change costs no bandwidth.
+4. Download through the existing cache (`forge/download.download_cached`) with the key `spt-<version>`; the key is
    non-numeric, so it cannot collide with the numeric Forge version ids. Size verification is the cache's usual one.
-4. Extract into the staging area. py7zr stays the primary backend; SPT release archives are LZMA2 + BCJ2, which py7zr
+5. Extract into the staging area. py7zr stays the primary backend; SPT release archives are LZMA2 + BCJ2, which py7zr
    does not implement, so `archive._extract_7z` falls back to libarchive-c on
    `UnsupportedCompressionMethodError`. Member names are validated in a first read pass before extraction, as for
    every other format. Without the system library the fallback raises `ArchiveError` carrying
    `LIBARCHIVE_INSTALL_HINT`, in the same shape as the existing rar backend hint.
-5. **Client-build check, before anything is written.** The build the release needs is compared with the
+6. **Client-build check, before anything is written.** The build the release needs is compared with the
    `ProductVersion` of `EscapeFromTarkov.exe` (`game_dir.read_client_build`: `-` counts as a separator like `.`, the
    second-to-last component is the build, `FileVersion` is read when there is no `ProductVersion`). A mismatch *and*
    an unreadable installed build both raise `ClientBuildMismatchError` naming the official installer — a deviation
    from the design's proposal to warn and proceed, because writing a program set the game cannot load is the worse
    outcome. Only a release that names no build and ships no readable `core.json` skips the comparison.
-6. Under the game lock: `ensure_installable` again, then the tracked program files the release no longer ships are
+7. Under the game lock: `ensure_installable` again, then the tracked program files the release no longer ships are
    deleted, the include set is copied in with the release's `SPT_Runtime/` prefix rewritten to the layout's runtime
    directory, empty directories are pruned, and everything lands in **one** commit `spt: <version>` — no trailers, so
    the touched paths stay unowned by any mod and later changes to them classify as `game_files_changed`. Afterwards
    `sptmod.sptversion` is resolved again from the freshly written `SPT.Server.exe` and stored.
-7. A re-apply of the version already in place writes the same bytes, leaves the tree clean and commits nothing: the
+8. A re-apply of the version already in place writes the same bytes, leaves the tree clean and commits nothing: the
    result carries the version with an empty commit and no files.
+
+**Judging the installed mods** (`services.check_spt_compatibility(path, version, *, db_path=None)`) is a seam of its
+own, so a caller can show the verdict before it commits to a change. Its `SptCompatibilityReport` sorts the installed
+mods into three name lists that stay distinct: `compatible` — the local mod list holds at least one version of that mod
+declared for the target SPT version; `incompatible` — it holds versions of the mod but none for that version, which is
+the warning and the only verdict that refuses anything; `skipped` — the list knows nothing about the mod, so there is
+nothing to judge, which is reported but on its own refuses nothing. Mods are linked to list entries the way they are
+everywhere else, by the Forge id of the install commit first and by name otherwise, and the verdict itself comes from
+the catalog's own `is_compatible(spt_version_constraint, target)` rather than a second matching rule — so the catalog
+rule that an *empty* constraint counts as incompatible holds here too. Two cases leave `checked=False` with a
+plain-language `notice` and refuse nothing: the mod list was never downloaded (`Catalog.last_synced_at()` is `None`,
+and the notice asks for the mod list to be downloaded), and it cannot be opened at all (`CatalogUnavailableError`,
+caught here so it can never escape a version change). Refusing there would strand every player who has never synced,
+because an unreadable list makes every mod unjudgeable; `checked` and `notice` exist so that the resulting empty
+verdict does not read as an all-clear either. Neither notice names a command or an option, and neither does the
+message of `SptModsIncompatibleError`, which names the mods and says to update or remove them or to change the SPT
+version anyway: one and the same core text is read in the terminal and rendered verbatim in the desktop window, so a
+hint only one of them can act on belongs to that transport rather than to the core (the CLI adds its own, see below).
 
 **Undoing** (`services.revert_spt_update`): under the game lock, the youngest commit whose subject is
 `spt: <version>` or `snapshot: game files updated` and that a later `Revert "…"` commit has not already taken back
@@ -1173,27 +1196,49 @@ structurally outside `is_game_program_path`, so they are neither written nor del
 release that shipped such a file would have it dropped silently. The four loader files in the game root are matched by
 name, case-sensitively, exactly as git applies the whitelist patterns.
 
-**Re-running the compatibility check is the caller's job.** The service reports nothing about mods: the Settings page
-invalidates its cached views and points at the Updates tab, the CLI prints the hint to run `sptmod update --check`.
+**The mods are looked at twice, over two different questions.** Beforehand the service answers whether a mod has any
+version for the wanted SPT version at all, and refuses over the ones that have none. Which mods then have an *update*
+to fetch is the caller's job afterwards: the Settings page invalidates its cached views and points at the Updates tab,
+the CLI prints the hint to run `sptmod update --check`.
 
 **CLI:** `sptmod spt list` (table Version | EFT build | Released | State | Download, plus the installed EFT build),
 `sptmod spt update <version>` and `sptmod spt downgrade [version]`, the latter without an argument being the undo.
 Both changing commands confirm first unless `--yes`/`-y` is given, and the confirmation refuses on closed stdin, so
 `--yes` is required for non-interactive use. `update` refuses a version that is not newer and `downgrade` one that is
 not older (exit 2, typer's parameter error); when the installed version cannot be read there is nothing to compare
-against and the direction check is skipped. Exit codes: 18 `SptReleaseUnavailableError`,
-19 `ClientBuildMismatchError`, 20 `SptReleaseWriteError`, plus the inherited 3/4/5/10. A refused write of mod
-files (install, update, profile cleanup) is `ModFileWriteError` (`MOD_FILE_WRITE_FAILED`, CLI exit 21), which
-names the file it stopped at, what the system said, and that the previous files are one snapshot back.
+against and the direction check is skipped. Both also take `--allow-incompatible-mods`, kept apart from `--yes`
+because the one waives a verdict and the other only waives a prompt. Both print the verdict before the confirmation
+prompt: the incompatible mods by name, the unjudgeable ones as a secondary note, the report's `notice` when the check
+could not run, and nothing at all when it came back clean — the player reads which mods will break before deciding,
+not after. The verdict is asked for the resolved release version rather than the string that was typed, so `4.1` is
+reported against `4.1.0`, and what resolves it is the release list the direction check has already fetched.
+Bare `sptmod spt downgrade`, the undo, knows no target version in advance and is deliberately not guarded. Exit
+codes: 18 `SptReleaseUnavailableError`, 19 `ClientBuildMismatchError`, 20 `SptReleaseWriteError`,
+22 `SptModsIncompatibleError`, plus the inherited 3/4/5/10. Beside `EXIT_CODES` and keyed the same way, `ERROR_HINTS`
+in `cli/base.py` maps an error type to a suffix that `handled()` appends to the printed `error: <message>`; its one
+entry today points `SptModsIncompatibleError` at `--allow-incompatible-mods`, so a terminal user still learns the
+exact flag while the shared message stays neutral.
+A refused write of mod files (install, update, profile cleanup) is `ModFileWriteError` (`MOD_FILE_WRITE_FAILED`,
+CLI exit 21), which names the file it stopped at, what the system said, and that the previous files are one snapshot
+back.
 
-**RPC:** `list_spt_releases`, `apply_spt_release` (declares `operation_id`, reports download/extract/copy progress via
-the existing `InstallStep` steps) and `revert_spt_update`. New error codes `SPT_RELEASE_UNAVAILABLE` (503 in prose)
-and `CLIENT_BUILD_MISMATCH` (409); "nothing to undo" reuses `GIT_ERROR`.
+**RPC:** `list_spt_releases`, `check_spt_compatibility`, `apply_spt_release` (declares `operation_id`, reports
+download/extract/copy progress via the existing `InstallStep` steps) and `revert_spt_update`. New error codes
+`SPT_RELEASE_UNAVAILABLE` (503 in prose), `CLIENT_BUILD_MISMATCH` (409) and `SPT_MODS_INCOMPATIBLE`, whose
+`error_details()` carries `spt_version` and `mods` so the frontend can name them; "nothing to undo" reuses `GIT_ERROR`.
 
 **UI:** the Settings page gains an "SPT version" section (installed version, installed EFT build, the releases of the
 line with their required build, date and state, per row an Update / "Go back to this version" button disabled with a
 reason when there is no download, and "Undo the last SPT change"). The confirmation dialog names the safety snapshot
-in plain language and warns that mods built for the other version may stop working. The app shell
+in plain language, warns that mods built for the other version may stop working, and carries the mod verdict for the
+picked release: the incompatible mods by name in a scrolling list rather than as a bare count, the skipped ones as a
+milder secondary note that gates nothing. While mods are incompatible, Continue stays disabled behind an unticked
+"Change the SPT version anyway" checkbox, which resets when the dialog closes or another release is picked and passes
+`allow_incompatible_mods` when it is ticked; Continue is disabled while the verdict is still being fetched as well,
+so a fast click cannot slip past the gate. A verdict that could not be fetched fails soft, saying so while leaving
+the change possible. The undo asks for no verdict, having no target version. The logic behind all of it
+(`needsModCheck`, `modCheckView`, `confirmBlocked`) sits in `frontend/src/lib/spt.ts`, under the 100% `src/lib`
+coverage gate. The app shell
 (`src/routes/+layout.svelte`) shows a dismissible startup banner when the newest release of the line is above the
 installed version; the dismissal is stored in `localStorage` under `sptmod.dismissedSptRelease` as the version
 string, so a later release shows the banner again. A failing release list keeps the shell quiet — only the Settings
@@ -1221,8 +1266,8 @@ not read from a live install — the first live run should confirm it.
   is never parsed.
 - Rust-only error codes: `unknown_function` (not in FUNCTIONS list), `unreachable`
   (binary not found / spawn failed), `bad_output` (no parseable final result line).
-- RPC functions: 50 service functions (declared as `FUNCTIONS: [&str; 50]` in
-  rpc.rs); the frontend client.ts has 48 camelCase wrappers (`adopt_mod` and
+- RPC functions: 52 service functions (declared as `FUNCTIONS: [&str; 52]` in
+  rpc.rs); the frontend client.ts has 50 camelCase wrappers (`adopt_mod` and
   `install_from_archive` are RPC-exposed but have no wrapper or frontend caller).
 - Plugins: dialog (native folder/save/open), fs (write text file), opener (URLs),
   clipboard-manager (copy), plus process and updater registered in `setup`.
@@ -1663,9 +1708,16 @@ cd src-tauri && cargo llvm-cov       # Rust coverage - reported only, no enforce
   `tests/github_json.py`: assets present/absent, `v`-prefixed tags, names without a
   build, error statuses, malformed bodies), `tests/test_services_spt_releases.py`,
   `_apply.py`, `_refusals.py` and `_revert.py` (list/apply/undo, include and
-  exclude set, stale deletion, build check, re-apply without a commit) and
+  exclude set, stale deletion, build check, re-apply without a commit),
   `tests/test_cli_spt.py` (`sptmod spt
-  list|update|downgrade`, confirmation, direction refusal, exit codes). The BCJ2
+  list|update|downgrade`, confirmation, direction refusal, exit codes),
+  `tests/test_services_spt_compatibility.py` (the three `check_spt_compatibility`
+  verdicts — a mod with a version for the wanted release, one with none, one the
+  mod list cannot judge — and the `apply_spt_release` guard that refuses over
+  them, including the two cases where the check could not be performed) and
+  `tests/test_cli_spt_compatibility.py` (`sptmod spt update` and `spt downgrade`
+  refusing with the mods named and exit code 22, and going through with
+  `--allow-incompatible-mods`). The BCJ2
   fallback runs against the committed `tests/data/bcj2-mod.7z` and
   `tests/data/bcj2-traversal.7z` — no Python writer can produce that filter.
 - Download cache tests: `tests/test_forge_cache.py` (cache layout, claim/keep/release,

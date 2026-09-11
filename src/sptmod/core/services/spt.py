@@ -9,7 +9,7 @@ installed mods are never touched: they lie outside the program set.
 import shutil
 import tempfile
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -17,11 +17,14 @@ from typing import Final
 
 from sptmod.core.archive import extract
 from sptmod.core.errors import (
+    CatalogUnavailableError,
     ClientBuildMismatchError,
     GitError,
+    SptModsIncompatibleError,
     SptReleaseUnavailableError,
     SptReleaseWriteError,
 )
+from sptmod.core.forge.catalog import Catalog, CatalogMod, is_compatible
 from sptmod.core.forge.client import ForgeClient
 from sptmod.core.forge.download import download_cached
 from sptmod.core.game_dir import (
@@ -31,17 +34,18 @@ from sptmod.core.game_dir import (
     resolve_spt_version,
     store_spt_version,
 )
-from sptmod.core.models import CommitInfo, ModFile, Progress
+from sptmod.core.models import CommitInfo, ModFile, ModInfo, Progress
 from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
     GAME_FILES_SNAPSHOT,
     InstallStep,
     mod_prefixes,
+    open_catalog,
     prefixed_progress,
     prune_empty,
     report_step,
 )
-from sptmod.core.services.state import ensure_installable
+from sptmod.core.services.state import ensure_installable, list_mods
 from sptmod.core.sptrelease.apply import (
     ReleaseFile,
     compare_versions,
@@ -61,6 +65,16 @@ CACHE_KEY_PREFIX: Final = "spt-"
 # The subject git gives a commit that takes another one back.
 UNDO_SUBJECT_PREFIX: Final = 'Revert "'
 INSTALLER_URL: Final = "https://sp-mod.com/installer"
+# What the mod check reports instead of an all-clear when the local mod list
+# cannot answer for a single mod.
+CATALOG_MISSING_NOTICE: Final = (
+    "The mod list has not been downloaded yet, so your installed mods could "
+    "not be checked. Download it first to have them checked."
+)
+CATALOG_UNREADABLE_NOTICE: Final = (
+    "The mod list on this computer could not be opened, so your installed "
+    "mods could not be checked."
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +126,26 @@ class SptApplyResult:
     files: list[ModFile] = field(default_factory=list[ModFile])
 
 
+@dataclass(frozen=True)
+class SptCompatibilityReport:
+    """How the installed mods stand to an SPT version the game could change to.
+
+    ``compatible`` names the mods the mod list has a version of for
+    ``spt_version`` and ``incompatible`` the ones it has none for -- those are
+    what a version change is refused over. ``skipped`` names the mods the list
+    cannot judge because it knows nothing about them; on their own they refuse
+    nothing. ``checked`` is false when the mod list could not answer at all,
+    and ``notice`` then says why in plain words.
+    """
+
+    spt_version: str
+    compatible: list[str] = field(default_factory=list[str])
+    incompatible: list[str] = field(default_factory=list[str])
+    skipped: list[str] = field(default_factory=list[str])
+    checked: bool = True
+    notice: str = ""
+
+
 def list_spt_releases(
     path: Path, *, client: SptReleaseClient | None = None
 ) -> SptReleaseList:
@@ -140,11 +174,60 @@ def list_spt_releases(
         return _release_list(path, owned)
 
 
+def check_spt_compatibility(
+    path: Path, version: str, *, db_path: Path | None = None
+) -> SptCompatibilityReport:
+    """Judge the mods installed in ``path`` against the SPT version ``version``.
+
+    Every active mod is matched to its entry in the local mod list -- by its
+    Forge ID first, by its name otherwise -- and counts as compatible when
+    that entry holds at least one version declared for ``version``. A mod the
+    list holds no version of at all cannot be judged and is reported as
+    skipped rather than as incompatible, so an entry nobody has downloaded yet
+    never stands in the way of a version change. Nothing is downloaded or
+    written here.
+
+    A mod list that was never downloaded, and one that cannot be opened, leave
+    the report marked as not checked with a notice saying so, instead of an
+    empty result that would read as a clean bill of health.
+
+    Args:
+        path: The tracked game directory.
+        version: The SPT version the installed mods are judged against.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+
+    Returns:
+        The compatible, the incompatible and the unjudgeable mods, or a report
+        marked as not checked when the mod list could not answer.
+
+    Raises:
+        NotAGameDirError: ``path`` is no SPT game directory.
+        GitError: git failed.
+    """
+    try:
+        with open_catalog(db_path) as catalog:
+            if catalog.last_synced_at() is None:
+                return SptCompatibilityReport(
+                    spt_version=version,
+                    checked=False,
+                    notice=CATALOG_MISSING_NOTICE,
+                )
+            return _judge_mods(catalog, list_mods(path), version)
+    except CatalogUnavailableError:
+        return SptCompatibilityReport(
+            spt_version=version,
+            checked=False,
+            notice=CATALOG_UNREADABLE_NOTICE,
+        )
+
+
 def apply_spt_release(
     path: Path,
     version: str,
     progress: Progress | None = None,
     *,
+    db_path: Path | None = None,
+    allow_incompatible_mods: bool = False,
     client: SptReleaseClient | None = None,
 ) -> SptApplyResult:
     """Put SPT ``version`` into the game directory at ``path``.
@@ -156,6 +239,12 @@ def apply_spt_release(
     profiles, mod settings, the BepInEx configuration and every installed mod
     lie outside that set and stay untouched, so one step goes back to the
     version before.
+
+    Before anything is downloaded, the installed mods are judged against the
+    wanted version: when the local mod list holds versions of a mod but none
+    for that version, the change is refused and those mods are named, unless
+    ``allow_incompatible_mods`` says to go ahead anyway. Mods the list cannot
+    judge refuse nothing.
 
     Before the release is written, the Escape from Tarkov build it needs is
     compared with the build of the installed game; they have to match, because
@@ -170,6 +259,9 @@ def apply_spt_release(
         path: The tracked game directory.
         version: The SPT version to put in place.
         progress: Optional callback for download and install progress.
+        db_path: Catalog database path; defaults to :func:`default_db_path`.
+        allow_incompatible_mods: Change the version even when installed mods
+            have no version for it.
         client: Release source client; a default one is built when omitted.
 
     Returns:
@@ -180,6 +272,8 @@ def apply_spt_release(
         SptReleaseUnavailableError: the release source cannot be read, names
             no such version, publishes no download for it, or the version
             belongs to another SPT series than the installed one.
+        SptModsIncompatibleError: installed mods have no version for the
+            wanted SPT version and ``allow_incompatible_mods`` is not set.
         ClientBuildMismatchError: the installed game has another Escape from
             Tarkov build than the release needs, or its build cannot be read.
         DirtyTreeError: the game folder holds files sptmod does not manage.
@@ -192,9 +286,23 @@ def apply_spt_release(
         GitError: git failed.
     """
     if client is not None:
-        return _apply_release(path, version, progress, client)
+        return _apply_release(
+            path,
+            version,
+            progress,
+            client,
+            db_path=db_path,
+            allow_incompatible_mods=allow_incompatible_mods,
+        )
     with SptReleaseClient() as owned:
-        return _apply_release(path, version, progress, owned)
+        return _apply_release(
+            path,
+            version,
+            progress,
+            owned,
+            db_path=db_path,
+            allow_incompatible_mods=allow_incompatible_mods,
+        )
 
 
 def revert_spt_update(path: Path) -> SptApplyResult:
@@ -274,7 +382,13 @@ def _release_info(release: SptRelease, current: str) -> SptReleaseInfo:
 
 
 def _apply_release(
-    path: Path, version: str, progress: Progress | None, client: SptReleaseClient
+    path: Path,
+    version: str,
+    progress: Progress | None,
+    client: SptReleaseClient,
+    *,
+    db_path: Path | None,
+    allow_incompatible_mods: bool,
 ) -> SptApplyResult:
     """Download, check and write the release ``version`` into ``path``."""
     layout = detect_layout(path)
@@ -282,6 +396,8 @@ def _apply_release(
     previous = resolve_spt_version(layout, repo) or ""
     ensure_installable(repo)
     release = _resolve_release(client, version, previous)
+    if not allow_incompatible_mods:
+        _refuse_incompatible_mods(path, release.version, db_path)
     reporter = prefixed_progress(progress, f"SPT {release.version}")
 
     with tempfile.TemporaryDirectory(prefix="sptmod-", dir=staging_dir()) as temp_name:
@@ -309,6 +425,58 @@ def _apply_release(
         commit=commit_hash,
         files=repo.show_files(commit_hash) if commit_hash else [],
     )
+
+
+def _refuse_incompatible_mods(path: Path, version: str, db_path: Path | None) -> None:
+    """Stop the change to ``version`` while installed mods have no version for it.
+
+    Raises:
+        SptModsIncompatibleError: the mod list holds versions of those mods,
+            but none of them for ``version``.
+    """
+    report = check_spt_compatibility(path, version, db_path=db_path)
+    if report.incompatible:
+        raise SptModsIncompatibleError(version, report.incompatible)
+
+
+def _judge_mods(
+    catalog: Catalog, installed: Sequence[ModInfo], version: str
+) -> SptCompatibilityReport:
+    """Sort ``installed`` into the verdicts the mod list gives for ``version``."""
+    by_name: dict[str, CatalogMod] = {}
+    for cached in catalog.search(""):
+        by_name.setdefault(cached.name.casefold(), cached)
+    compatible: list[str] = []
+    incompatible: list[str] = []
+    skipped: list[str] = []
+    for mod in installed:
+        known = _catalog_mod(catalog, by_name, mod)
+        versions = [] if known is None else catalog.get_versions(known.id)
+        if not versions:
+            skipped.append(mod.name)
+        elif any(
+            is_compatible(entry.spt_version_constraint, version) for entry in versions
+        ):
+            compatible.append(mod.name)
+        else:
+            incompatible.append(mod.name)
+    return SptCompatibilityReport(
+        spt_version=version,
+        compatible=compatible,
+        incompatible=incompatible,
+        skipped=skipped,
+    )
+
+
+def _catalog_mod(
+    catalog: Catalog, by_name: Mapping[str, CatalogMod], mod: ModInfo
+) -> CatalogMod | None:
+    """Return the mod-list entry of ``mod``, matched by Forge ID before name."""
+    if mod.forge_id.isdigit():
+        known = catalog.get_mod(int(mod.forge_id))
+        if known is not None:
+            return known
+    return by_name.get(mod.name.casefold())
 
 
 def _resolve_release(

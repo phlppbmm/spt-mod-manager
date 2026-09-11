@@ -31,6 +31,7 @@ from sptmod.core.errors import (
     NotImplementedYetError,
     ProfileResidueError,
     SptmodError,
+    SptModsIncompatibleError,
     SptReleaseUnavailableError,
     SptReleaseWriteError,
     SptVersionUnknownError,
@@ -70,6 +71,13 @@ EXIT_CODES: Final[dict[type[SptmodError], int]] = {
     ClientBuildMismatchError: 19,
     SptReleaseWriteError: 20,
     ModFileWriteError: 21,
+    SptModsIncompatibleError: 22,
+}
+
+# What a core message cannot say, because it is shown on every transport: the
+# option of this command line that goes ahead regardless.
+ERROR_HINTS: Final[dict[type[SptmodError], str]] = {
+    SptModsIncompatibleError: " Repeat the command with --allow-incompatible-mods to do that.",
 }
 
 DATE_FORMAT: Final = "%Y-%m-%d %H:%M"
@@ -82,7 +90,8 @@ def handled() -> Generator[None]:
     try:
         yield
     except SptmodError as error:
-        error_console.print(f"error: {error}", markup=False)
+        hint = ERROR_HINTS.get(type(error), "")
+        error_console.print(f"error: {error}{hint}", markup=False)
         raise typer.Exit(EXIT_CODES.get(type(error), GENERIC_EXIT_CODE)) from error
 
 

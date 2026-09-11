@@ -3,15 +3,18 @@ import {
 	DISMISSED_RELEASE_KEY,
 	canApply,
 	compareVersions,
+	confirmBlocked,
 	confirmationFor,
 	formatReleaseDate,
 	loadDismissedRelease,
+	modCheckView,
+	needsModCheck,
 	noticeFor,
 	releaseState,
 	saveDismissedRelease
 } from './spt';
 import type { ChangeKind } from './spt';
-import type { SptReleaseInfo, SptReleaseList } from './api/client';
+import type { SptCompatibilityReport, SptReleaseInfo, SptReleaseList } from './api/client';
 
 /**
  * The release rows come from the RPC schema, but only `version` and
@@ -387,5 +390,250 @@ describe('saveDismissedRelease', () => {
 		vi.stubGlobal('localStorage', createFailingStorage());
 
 		expect(() => saveDismissedRelease('4.1.3')).not.toThrow();
+	});
+});
+
+/**
+ * The compatibility report comes from the RPC schema; a test states only the
+ * fields it varies, so the builder fills a report that judged nothing.
+ */
+function makeReport(overrides: Partial<SptCompatibilityReport> = {}): SptCompatibilityReport {
+	return {
+		spt_version: '4.2.0',
+		compatible: [],
+		incompatible: [],
+		skipped: [],
+		checked: true,
+		notice: '',
+		...overrides
+	};
+}
+
+describe('needsModCheck', () => {
+	it.each([
+		{ id: 'an update to a known release', kind: 'update' as ChangeKind },
+		{ id: 'a downgrade to a known release', kind: 'downgrade' as ChangeKind }
+	])('asks for the installed mods before $id', ({ kind }) => {
+		expect(needsModCheck(makeRelease({ version: '4.2.0' }), kind)).toBe(true);
+	});
+
+	it.each([
+		{ id: 'an undo, which has no target version to judge', release: makeRelease(), kind: 'undo' as ChangeKind },
+		{ id: 'an undo without a release at all', release: null, kind: 'undo' as ChangeKind },
+		{ id: 'an update without a release to check against', release: null, kind: 'update' as ChangeKind },
+		{
+			id: 'a downgrade without a release to check against',
+			release: null,
+			kind: 'downgrade' as ChangeKind
+		}
+	])('skips the check for $id', ({ release, kind }) => {
+		expect(needsModCheck(release, kind)).toBe(false);
+	});
+});
+
+describe('modCheckView', () => {
+	it('says the check is running and marks the verdict as not yet arrived', () => {
+		expect(modCheckView({ kind: 'pending' })).toEqual({
+			tone: 'note',
+			message: 'Checking your installed mods against this version…',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: true
+		});
+	});
+
+	it('lets the change go ahead when the check itself failed, and says so', () => {
+		expect(modCheckView({ kind: 'failed' })).toEqual({
+			tone: 'note',
+			message:
+				'Your installed mods could not be checked against this version. ' +
+				'The change can still go ahead.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it('repeats the reason the backend gave for not checking and still allows the change', () => {
+		const report = makeReport({ checked: false, notice: 'The mod list was never downloaded.' });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'note',
+			message: 'The mod list was never downloaded. The change can still go ahead.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it('falls back to its own wording when the backend gave no reason', () => {
+		const report = makeReport({ checked: false, notice: '' });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'note',
+			message:
+				'Your installed mods could not be checked against this version. ' +
+				'The change can still go ahead.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it('ignores mods it could not judge while the check itself did not run', () => {
+		const report = makeReport({ checked: false, skipped: ['SAIN'], incompatible: ['Looting Bots'] });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'note',
+			message:
+				'Your installed mods could not be checked against this version. ' +
+				'The change can still go ahead.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it('warns about the one mod without a release and names it', () => {
+		const report = makeReport({ spt_version: '4.2.0', compatible: ['SAIN'], incompatible: ['SVM'] });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'warn',
+			message: '1 installed mod has no release for SPT 4.2.0:',
+			incompatible: ['SVM'],
+			skippedNote: '',
+			needsOverride: true,
+			pending: false
+		});
+	});
+
+	it('warns about several mods without a release and names every one of them', () => {
+		const report = makeReport({ spt_version: '4.0.1', incompatible: ['SVM', 'Fika', 'Looting Bots'] });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'warn',
+			message: '3 installed mods have no release for SPT 4.0.1:',
+			incompatible: ['SVM', 'Fika', 'Looting Bots'],
+			skippedNote: '',
+			needsOverride: true,
+			pending: false
+		});
+	});
+
+	it('reports that every installed mod has a release, without holding the change back', () => {
+		const report = makeReport({ spt_version: '4.2.0', compatible: ['SAIN', 'SVM'] });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'note',
+			message: '2 installed mods have a release for SPT 4.2.0.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it('reports a single compatible mod in the singular', () => {
+		const report = makeReport({ spt_version: '4.2.0', compatible: ['SAIN'] });
+
+		expect(modCheckView({ kind: 'ready', report }).message).toBe(
+			'1 installed mod has a release for SPT 4.2.0.'
+		);
+	});
+
+	it('says there was nothing to judge when no mod fell into either outcome', () => {
+		const report = makeReport({ spt_version: '4.2.0' });
+
+		expect(modCheckView({ kind: 'ready', report })).toEqual({
+			tone: 'note',
+			message: 'No installed mods to check against SPT 4.2.0.',
+			incompatible: [],
+			skippedNote: '',
+			needsOverride: false,
+			pending: false
+		});
+	});
+
+	it.each([
+		{
+			id: 'alongside mods without a release',
+			report: makeReport({ incompatible: ['SVM'], skipped: ['Fika'] }),
+			expectedNote: '1 installed mod could not be checked: Fika.'
+		},
+		{
+			id: 'alongside mods with a release',
+			report: makeReport({ compatible: ['SAIN'], skipped: ['Fika', 'Waypoints'] }),
+			expectedNote: '2 installed mods could not be checked: Fika, Waypoints.'
+		},
+		{
+			id: 'as the only mods in the report',
+			report: makeReport({ skipped: ['Fika'] }),
+			expectedNote: '1 installed mod could not be checked: Fika.'
+		}
+	])('names the mods it could not judge $id', ({ report, expectedNote }) => {
+		expect(modCheckView({ kind: 'ready', report }).skippedNote).toBe(expectedNote);
+	});
+
+	it.each([
+		{ id: 'mods without a release', report: makeReport({ incompatible: ['SVM'] }) },
+		{ id: 'mods with a release', report: makeReport({ compatible: ['SAIN'] }) },
+		{ id: 'no mods at all', report: makeReport() }
+	])('leaves the unjudged sentence empty for a report with $id', ({ report }) => {
+		expect(modCheckView({ kind: 'ready', report }).skippedNote).toBe('');
+	});
+
+	it('never holds the change back for mods it could not judge', () => {
+		const report = makeReport({ compatible: ['SAIN'], skipped: ['Fika', 'Waypoints'] });
+
+		expect(modCheckView({ kind: 'ready', report }).needsOverride).toBe(false);
+	});
+});
+
+describe('confirmBlocked', () => {
+	it('lets the change through while no verdict has arrived yet', () => {
+		expect(confirmBlocked(null, false)).toBe(false);
+	});
+
+	it('holds the change back while mods without a release are unacknowledged', () => {
+		const view = modCheckView({ kind: 'ready', report: makeReport({ incompatible: ['SVM'] }) });
+
+		expect(confirmBlocked(view, false)).toBe(true);
+	});
+
+	it('releases the change once the player says to go ahead anyway', () => {
+		const view = modCheckView({ kind: 'ready', report: makeReport({ incompatible: ['SVM'] }) });
+
+		expect(confirmBlocked(view, true)).toBe(false);
+	});
+
+	it.each([
+		{ id: 'every mod has a release', report: makeReport({ compatible: ['SAIN'] }) },
+		{ id: 'the only finding is mods it could not judge', report: makeReport({ skipped: ['Fika'] }) },
+		{ id: 'the check could not run', report: makeReport({ checked: false }) }
+	])('never blocks when $id', ({ report }) => {
+		expect(confirmBlocked(modCheckView({ kind: 'ready', report }), false)).toBe(false);
+	});
+
+	it('never blocks once the check failed', () => {
+		expect(confirmBlocked(modCheckView({ kind: 'failed' }), false)).toBe(false);
+	});
+
+	it.each([
+		{ id: 'nothing has been acknowledged', allowed: false },
+		{ id: 'the player already acknowledged incompatible mods', allowed: true }
+	])('holds the change back while the check is still running and $id', ({ allowed }) => {
+		expect(confirmBlocked(modCheckView({ kind: 'pending' }), allowed)).toBe(true);
+	});
+
+	it('stops blocking as soon as a clean verdict replaces the running check', () => {
+		const running = modCheckView({ kind: 'pending' });
+		const arrived = modCheckView({ kind: 'ready', report: makeReport({ compatible: ['SAIN'] }) });
+
+		expect([confirmBlocked(running, false), confirmBlocked(arrived, false)]).toEqual([true, false]);
 	});
 });

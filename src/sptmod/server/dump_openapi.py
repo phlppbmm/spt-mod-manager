@@ -82,6 +82,11 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("stop_game", schemas.StopGameRequest, schemas.StopResult),
     ("list_spt_releases", schemas.ListSptReleasesRequest, schemas.SptReleaseList),
     (
+        "check_spt_compatibility",
+        schemas.CheckSptCompatibilityRequest,
+        schemas.SptCompatibilityReport,
+    ),
+    (
         "apply_spt_release",
         schemas.ApplySptReleaseRequest,
         schemas.ApplySptReleaseResponse,

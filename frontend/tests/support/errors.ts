@@ -1,7 +1,7 @@
 /**
  * Builders for the error shape the transport raises. Every field of
  * `ErrorDetails` is required, so a test that cares about one of them would
- * otherwise have to spell out all eleven.
+ * otherwise have to spell out all thirteen.
  */
 
 import { ApiError, type ErrorDetails } from '$lib/api/transport';
@@ -19,6 +19,8 @@ export function errorDetails(overrides: Partial<ErrorDetails> = {}): ErrorDetail
 		api_code: '',
 		api_status: 0,
 		missing: [],
+		mods: [],
+		spt_version: '',
 		...overrides
 	};
 }

@@ -769,6 +769,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/check_spt_compatibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Spt Compatibility */
+        post: operations["check_spt_compatibility_api_check_spt_compatibility_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/apply_spt_release": {
         parameters: {
             query?: never;
@@ -968,6 +985,8 @@ export interface components {
          *
          *     ``operation_id`` names the progress stream of this version change; a
          *     generated one is used and echoed back when the caller sends none.
+         *     ``allow_incompatible_mods`` changes the version even when installed mods
+         *     have no version for it.
          */
         ApplySptReleaseRequest: {
             /**
@@ -977,6 +996,13 @@ export interface components {
             path: string;
             /** Version */
             version: string;
+            /** Db Path */
+            db_path?: string | null;
+            /**
+             * Allow Incompatible Mods
+             * @default false
+             */
+            allow_incompatible_mods: boolean;
             /** Operation Id */
             operation_id?: string | null;
         };
@@ -1219,6 +1245,21 @@ export interface components {
              * @default []
              */
             warnings: string[];
+        };
+        /**
+         * CheckSptCompatibilityRequest
+         * @description Parameters of ``check_spt_compatibility``.
+         */
+        CheckSptCompatibilityRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Version */
+            version: string;
+            /** Db Path */
+            db_path?: string | null;
         };
         /**
          * CheckUpdatesRequest
@@ -1526,6 +1567,16 @@ export interface components {
              * @default []
              */
             missing: string[];
+            /**
+             * Mods
+             * @default []
+             */
+            mods: string[];
+            /**
+             * Spt Version
+             * @default
+             */
+            spt_version: string;
         };
         /**
          * ErrorResponse
@@ -2803,6 +2854,39 @@ export interface components {
              * @default []
              */
             files: components["schemas"]["ModFile"][];
+        };
+        /**
+         * SptCompatibilityReport
+         * @description How the installed mods stand to an SPT version the game could change to.
+         */
+        SptCompatibilityReport: {
+            /** Spt Version */
+            spt_version: string;
+            /**
+             * Compatible
+             * @default []
+             */
+            compatible: string[];
+            /**
+             * Incompatible
+             * @default []
+             */
+            incompatible: string[];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: string[];
+            /**
+             * Checked
+             * @default true
+             */
+            checked: boolean;
+            /**
+             * Notice
+             * @default
+             */
+            notice: string;
         };
         /**
          * SptReleaseInfo
@@ -4626,6 +4710,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SptReleaseList"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_spt_compatibility_api_check_spt_compatibility_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckSptCompatibilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SptCompatibilityReport"];
                 };
             };
             /** @description Default Response */

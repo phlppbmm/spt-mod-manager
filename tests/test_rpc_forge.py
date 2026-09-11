@@ -1,7 +1,7 @@
 """In-process tests for the Forge-backed side of ``sptmod rpc <name>``:
 ``get_mod_details``, ``plan_mod_install``, ``install_mod``, ``check_updates``,
-``update_mod``, ``import_list`` with apply, and the ``apply_spt_release``
-version change. Split out of :mod:`test_rpc`, which keeps the envelope and
+``update_mod``, ``import_list`` with apply, ``check_spt_compatibility`` and
+the ``apply_spt_release`` version change. Split out of :mod:`test_rpc`, which keeps the envelope and
 error-mapping cases; the Forge and the SPT release source are always mocked,
 so no test reaches a real host.
 """
@@ -18,10 +18,18 @@ from fixture_types import (
     MakeSptRelease,
     TrailerInstallCommit,
 )
+from fixtures_forge import seed_catalog
 from fixtures_rpc import assert_progress_then_result, install_request
-from fixtures_spt import SptReleaseSource
-from forge_json import mod_json_full, owner_json, page_envelope, version_json
+from fixtures_spt import SptReleaseSource, offer
+from forge_json import (
+    mod_json_full,
+    mod_json_with_versions,
+    owner_json,
+    page_envelope,
+    version_json,
+)
 from sptmod.core.forge.client import DEFAULT_BASE_URL
+from sptmod.core.repo import Repo
 
 SPT_CONSTRAINT = "^4.0.0"
 
@@ -579,3 +587,115 @@ def test_apply_spt_release_echoes_the_operation_id_on_every_line_it_writes(
     result = lines[-1]["data"]
     assert result["operation_id"] == "spt-update-op-id"
     assert result["version"] == "4.1.1"
+
+
+# --------------------------------------------------------------------------
+# The mod check in front of a version change: check_spt_compatibility and the
+# refusal apply_spt_release answers with.
+# --------------------------------------------------------------------------
+
+
+def test_check_spt_compatibility_answers_the_verdict_of_every_installed_mod(
+    spt_game_dir: Path,
+    install_commit: TrailerInstallCommit,
+    db_path: Path,
+) -> None:
+    """``check_spt_compatibility`` answers with the three verdict lists.
+
+    Installs one mod the downloaded mod list holds a 4.1 version of and one it
+    has never heard of, then asks the check for release 4.1.1 through
+    ``sptmod rpc``. Asserts the answer names the version and sorts both mods.
+    Reason: the desktop app shows this verdict before it offers the version
+    change, so the three lists have to survive the transport separately.
+    """
+    repo = Repo(spt_game_dir)
+    install_commit(repo, "GoodMod")
+    install_commit(repo, "Unlisted")
+    seed_catalog(
+        db_path,
+        [mod_json_with_versions(mod_id=901, name="GoodMod", constraints=["~4.1.0"])],
+    )
+
+    exit_code, lines = invoke_rpc(
+        "check_spt_compatibility",
+        {"path": str(spt_game_dir), "version": "4.1.1", "db_path": str(db_path)},
+    )
+
+    assert exit_code == 0
+    assert lines[-1]["data"] == {
+        "spt_version": "4.1.1",
+        "compatible": ["GoodMod"],
+        "incompatible": [],
+        "skipped": ["Unlisted"],
+        "checked": True,
+        "notice": "",
+    }
+
+
+def test_apply_spt_release_refuses_over_mods_and_names_them_in_the_details(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    install_commit: TrailerInstallCommit,
+    db_path: Path,
+) -> None:
+    """A change refused over the mods carries its own code and structured data.
+
+    Installs a mod the mod list holds no 4.1.1 version of and applies that
+    release through ``sptmod rpc``. Asserts exit 1, the code
+    ``SPT_MODS_INCOMPATIBLE`` and details naming the wanted version and the
+    mod. Reason: the desktop app has to offer "change anyway" next to the
+    exact mods it concerns, which it can only do from the structured payload.
+    """
+    install_commit(Repo(spt_game_dir), "OldMod")
+    seed_catalog(
+        db_path,
+        [mod_json_with_versions(mod_id=911, name="OldMod", constraints=["~4.0.0"])],
+    )
+    download = offer(spt_release_source, make_spt_release, "4.1.1")
+
+    exit_code, lines = invoke_rpc(
+        "apply_spt_release",
+        {"path": str(spt_game_dir), "version": "4.1.1", "db_path": str(db_path)},
+    )
+
+    assert exit_code == 1
+    data = lines[-1]["data"]
+    assert data["code"] == "SPT_MODS_INCOMPATIBLE"
+    assert data["details"]["spt_version"] == "4.1.1"
+    assert data["details"]["mods"] == ["OldMod"]
+    assert download.call_count == 0
+
+
+def test_apply_spt_release_changes_the_version_when_the_mods_are_allowed(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    install_commit: TrailerInstallCommit,
+    db_path: Path,
+) -> None:
+    """``allow_incompatible_mods`` reaches the service through the transport.
+
+    Repeats the refused change with the override in the request and asserts
+    the new version is reported as applied. Reason: the desktop app's "change
+    anyway" is worth nothing unless the flag survives the transport.
+    """
+    install_commit(Repo(spt_game_dir), "OldMod")
+    seed_catalog(
+        db_path,
+        [mod_json_with_versions(mod_id=921, name="OldMod", constraints=["~4.0.0"])],
+    )
+    offer(spt_release_source, make_spt_release, "4.1.1")
+
+    exit_code, lines = invoke_rpc(
+        "apply_spt_release",
+        {
+            "path": str(spt_game_dir),
+            "version": "4.1.1",
+            "db_path": str(db_path),
+            "allow_incompatible_mods": True,
+        },
+    )
+
+    assert exit_code == 0
+    assert lines[-1]["data"]["version"] == "4.1.1"

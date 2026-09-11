@@ -59,6 +59,7 @@ export type StopResult = Schemas['StopResult'];
 export type SptReleaseInfo = Schemas['SptReleaseInfo'];
 export type SptReleaseList = Schemas['SptReleaseList'];
 export type SptApplyResult = Schemas['SptApplyResult'];
+export type SptCompatibilityReport = Schemas['SptCompatibilityReport'];
 export type ApplySptReleaseResponse = Schemas['ApplySptReleaseResponse'];
 export type FikaSettings = Schemas['FikaSettings'];
 export type FikaRole = Schemas['FikaRole'];
@@ -431,14 +432,26 @@ export function listSptReleases(path: string): Promise<SptReleaseList> {
 	} satisfies Schemas['ListSptReleasesRequest']);
 }
 
+export function checkSptCompatibility(
+	path: string,
+	version: string
+): Promise<SptCompatibilityReport> {
+	return call<SptCompatibilityReport>('check_spt_compatibility', {
+		path,
+		version
+	} satisfies Schemas['CheckSptCompatibilityRequest']);
+}
+
 export function applySptRelease(
 	path: string,
 	version: string,
-	operationId: string | null = null
+	operationId: string | null = null,
+	allowIncompatibleMods: boolean = false
 ): Promise<ApplySptReleaseResponse> {
 	return call<ApplySptReleaseResponse>('apply_spt_release', {
 		path,
 		version,
+		allow_incompatible_mods: allowIncompatibleMods,
 		operation_id: operationId
 	} satisfies Schemas['ApplySptReleaseRequest']);
 }

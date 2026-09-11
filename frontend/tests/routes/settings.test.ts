@@ -26,6 +26,7 @@ import type {
 	FikaSettings,
 	ImportDiff,
 	ModSet,
+	SptCompatibilityReport,
 	SptReleaseInfo,
 	SptReleaseList
 } from '$lib/api/client';
@@ -69,6 +70,22 @@ function release(overrides: Partial<SptReleaseInfo> = {}): SptReleaseInfo {
 		content_length: 1024,
 		installed: false,
 		newer: false,
+		...overrides
+	};
+}
+
+/**
+ * The verdict the backend returns for one target version. The builder reports a
+ * version nothing was found for, so a test states only the outcome it varies.
+ */
+function report(overrides: Partial<SptCompatibilityReport> = {}): SptCompatibilityReport {
+	return {
+		spt_version: '4.2.0',
+		compatible: [],
+		incompatible: [],
+		skipped: [],
+		checked: true,
+		notice: '',
 		...overrides
 	};
 }
@@ -382,6 +399,372 @@ describe('the SPT release list', () => {
 		);
 
 		expect(await screen.findByText('There is nothing to undo.')).toBeInTheDocument();
+	});
+});
+
+/**
+ * The pre-flight check that runs before an SPT version change: the dialog has
+ * to show which installed mods have no release for the target version, and the
+ * change must not go through until the player acknowledges them.
+ */
+describe('the mod check before an SPT version change', () => {
+	const releases = sptReleaseList({
+		current_version: '4.1.0',
+		client_build: '41000',
+		latest: '4.3.0',
+		releases: [
+			release({ version: '4.3.0' }),
+			release({ version: '4.2.0' }),
+			release({ version: '4.1.0' }),
+			release({ version: '4.0.0' })
+		]
+	});
+
+	function rowOf(version: string): HTMLElement {
+		const cell = screen.getByRole('link', { name: version });
+		const row = cell.closest('tr');
+		if (row === null) {
+			throw new Error(`no release row for ${version}`);
+		}
+		return row;
+	}
+
+	function stubApply(version: string): void {
+		rpc.returns('apply_spt_release', {
+			previous_version: '4.1.0',
+			version,
+			commit: 'abcdef1',
+			files: [],
+			operation_id: 'op'
+		});
+	}
+
+	/** Open the confirmation dialog for one release row and return the dialog. */
+	async function openChange(
+		user: ReturnType<typeof userEvent.setup>,
+		version: string,
+		action: string,
+		title: string
+	): Promise<HTMLElement> {
+		await screen.findByRole('link', { name: version });
+		await user.click(within(rowOf(version)).getByRole('button', { name: action }));
+		return await screen.findByRole('dialog', { name: title });
+	}
+
+	function openUpdate(
+		user: ReturnType<typeof userEvent.setup>,
+		version = '4.2.0'
+	): Promise<HTMLElement> {
+		return openChange(user, version, 'Update', `Update to SPT ${version}?`);
+	}
+
+	it('asks the backend about the target version the player picked', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('check_spt_compatibility', report({ spt_version: '4.3.0' }));
+		render(Page);
+
+		await openUpdate(user, '4.3.0');
+
+		expect(await screen.findByText('No installed mods to check against SPT 4.3.0.')).toBeInTheDocument();
+		expect(rpc.payloads('check_spt_compatibility')).toEqual([
+			{ path: GAME_DIR, version: '4.3.0' }
+		]);
+	});
+
+	it('names every installed mod without a release before the player commits', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns(
+			'check_spt_compatibility',
+			report({ incompatible: ['SVM', 'Looting Bots'], compatible: ['SAIN'] })
+		);
+		render(Page);
+
+		const dialog = await openUpdate(user);
+
+		expect(
+			await within(dialog).findByText('2 installed mods have no release for SPT 4.2.0:')
+		).toBeInTheDocument();
+		expect(within(dialog).getByText('SVM')).toBeInTheDocument();
+		expect(within(dialog).getByText('Looting Bots')).toBeInTheDocument();
+		expect(rpc.payloads('apply_spt_release')).toEqual([]);
+	});
+
+	it('holds Continue back while the verdict is still on its way and frees it on arrival', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		let deliver = (): void => {};
+		const verdict = new Promise<SptCompatibilityReport>((resolve) => {
+			deliver = () => resolve(report({ compatible: ['SAIN'] }));
+		});
+		rpc.handle('check_spt_compatibility', () => verdict);
+		render(Page);
+
+		const dialog = await openUpdate(user);
+		await within(dialog).findByText('Checking your installed mods against this version…');
+		expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeDisabled();
+
+		deliver();
+
+		expect(
+			await within(dialog).findByText('1 installed mod has a release for SPT 4.2.0.')
+		).toBeInTheDocument();
+		expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeEnabled();
+	});
+
+	it('holds Continue back behind an unticked override while a mod has no release', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('check_spt_compatibility', report({ incompatible: ['SVM'] }));
+		render(Page);
+
+		const dialog = await openUpdate(user);
+		await within(dialog).findByText('1 installed mod has no release for SPT 4.2.0:');
+
+		const override = within(dialog).getByRole('checkbox', {
+			name: 'Change the SPT version anyway'
+		});
+		expect(override).not.toBeChecked();
+		expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeDisabled();
+	});
+
+	it('sends the override to the backend once the player ticks it', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('check_spt_compatibility', report({ incompatible: ['SVM'] }));
+		stubApply('4.2.0');
+		render(Page);
+
+		const dialog = await openUpdate(user);
+		await within(dialog).findByText('1 installed mod has no release for SPT 4.2.0:');
+		await user.click(
+			within(dialog).getByRole('checkbox', { name: 'Change the SPT version anyway' })
+		);
+
+		const proceed = within(dialog).getByRole('button', { name: 'Continue' });
+		expect(proceed).toBeEnabled();
+		await user.click(proceed);
+
+		expect(rpc.payloads('apply_spt_release')).toEqual([
+			{
+				path: GAME_DIR,
+				version: '4.2.0',
+				allow_incompatible_mods: true,
+				operation_id: expect.any(String)
+			}
+		]);
+		expect(
+			await screen.findByText(
+				'SPT is now 4.2.0. Mods built for the other version show up under Updates.'
+			)
+		).toBeInTheDocument();
+	});
+
+	it('sends no override for a clean verdict the player did not have to acknowledge', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('check_spt_compatibility', report({ compatible: ['SAIN'] }));
+		stubApply('4.2.0');
+		render(Page);
+
+		const dialog = await openUpdate(user);
+		await within(dialog).findByText('1 installed mod has a release for SPT 4.2.0.');
+		await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+		expect(rpc.payloads('apply_spt_release')).toEqual([
+			{
+				path: GAME_DIR,
+				version: '4.2.0',
+				allow_incompatible_mods: false,
+				operation_id: expect.any(String)
+			}
+		]);
+	});
+
+	it('forgets the override when the dialog is closed and opened again', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('check_spt_compatibility', report({ incompatible: ['SVM'] }));
+		render(Page);
+
+		const first = await openUpdate(user);
+		await within(first).findByText('1 installed mod has no release for SPT 4.2.0:');
+		await user.click(
+			within(first).getByRole('checkbox', { name: 'Change the SPT version anyway' })
+		);
+		await user.click(within(first).getByRole('button', { name: 'Close' }));
+
+		const second = await openUpdate(user);
+		await within(second).findByText('1 installed mod has no release for SPT 4.2.0:');
+		expect(
+			within(second).getByRole('checkbox', { name: 'Change the SPT version anyway' })
+		).not.toBeChecked();
+		expect(within(second).getByRole('button', { name: 'Continue' })).toBeDisabled();
+	});
+
+	it('forgets the override when the player picks another release', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.handle('check_spt_compatibility', (payload) => {
+			const version = (payload as { version: string }).version;
+			return report({ spt_version: version, incompatible: [`no-release-for-${version}`] });
+		});
+		render(Page);
+
+		const first = await openUpdate(user, '4.3.0');
+		await within(first).findByText('1 installed mod has no release for SPT 4.3.0:');
+		await user.click(
+			within(first).getByRole('checkbox', { name: 'Change the SPT version anyway' })
+		);
+		await user.click(within(first).getByRole('button', { name: 'Close' }));
+
+		const second = await openUpdate(user, '4.2.0');
+		await within(second).findByText('1 installed mod has no release for SPT 4.2.0:');
+		expect(within(second).getByText('no-release-for-4.2.0')).toBeInTheDocument();
+		expect(
+			within(second).getByRole('checkbox', { name: 'Change the SPT version anyway' })
+		).not.toBeChecked();
+		expect(within(second).getByRole('button', { name: 'Continue' })).toBeDisabled();
+	});
+
+	it('reports mods it could not judge without holding the change back', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns(
+			'check_spt_compatibility',
+			report({ compatible: ['SAIN'], skipped: ['Fika', 'Waypoints'] })
+		);
+		stubApply('4.2.0');
+		render(Page);
+
+		const dialog = await openUpdate(user);
+
+		expect(
+			await within(dialog).findByText(
+				'2 installed mods could not be checked: Fika, Waypoints.'
+			)
+		).toBeInTheDocument();
+		expect(
+			within(dialog).queryByRole('checkbox', { name: 'Change the SPT version anyway' })
+		).toBeNull();
+
+		await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+		expect(rpc.payloads('apply_spt_release')).toEqual([
+			{
+				path: GAME_DIR,
+				version: '4.2.0',
+				allow_incompatible_mods: false,
+				operation_id: expect.any(String)
+			}
+		]);
+	});
+
+	it('repeats why the mods could not be checked and lets the change proceed', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns(
+			'check_spt_compatibility',
+			report({ checked: false, notice: 'The mod list has never been downloaded.' })
+		);
+		stubApply('4.2.0');
+		render(Page);
+
+		const dialog = await openUpdate(user);
+
+		expect(
+			await within(dialog).findByText(
+				'The mod list has never been downloaded. The change can still go ahead.'
+			)
+		).toBeInTheDocument();
+
+		await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+		expect(rpc.payloads('apply_spt_release')).toEqual([
+			{
+				path: GAME_DIR,
+				version: '4.2.0',
+				allow_incompatible_mods: false,
+				operation_id: expect.any(String)
+			}
+		]);
+	});
+
+	it('tells the player the check itself failed and still lets the change proceed', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.rejects(
+			'check_spt_compatibility',
+			apiError('The mod list could not be read.', 'CATALOG_UNREADABLE')
+		);
+		stubApply('4.2.0');
+		render(Page);
+
+		const dialog = await openUpdate(user);
+
+		expect(
+			await within(dialog).findByText(
+				'Your installed mods could not be checked against this version. ' +
+					'The change can still go ahead.'
+			)
+		).toBeInTheDocument();
+
+		await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+		expect(rpc.payloads('apply_spt_release')).toEqual([
+			{
+				path: GAME_DIR,
+				version: '4.2.0',
+				allow_incompatible_mods: false,
+				operation_id: expect.any(String)
+			}
+		]);
+	});
+
+	it('checks the mods for a downgrade the same way as for an update', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns(
+			'check_spt_compatibility',
+			report({ spt_version: '4.0.0', incompatible: ['SVM'] })
+		);
+		render(Page);
+
+		const dialog = await openChange(
+			user,
+			'4.0.0',
+			'Go back to this version',
+			'Go back to SPT 4.0.0?'
+		);
+
+		expect(
+			await within(dialog).findByText('1 installed mod has no release for SPT 4.0.0:')
+		).toBeInTheDocument();
+		expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeDisabled();
+	});
+
+	it('does not check any mods for an undo, which has no target version', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.returns('revert_spt_update', {
+			previous_version: '4.2.0',
+			version: '4.1.0',
+			commit: 'abcdef1',
+			files: []
+		});
+		render(Page);
+
+		await user.click(await screen.findByRole('button', { name: 'Undo the last SPT change' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Undo the last SPT change?' });
+		await user.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+		expect(
+			await screen.findByText(
+				'SPT is now 4.1.0. Mods built for the other version show up under Updates.'
+			)
+		).toBeInTheDocument();
+		expect(rpc.names()).not.toContain('check_spt_compatibility');
 	});
 });
 

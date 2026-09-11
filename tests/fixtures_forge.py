@@ -3,7 +3,7 @@
 Registered through ``pytest_plugins`` in :mod:`conftest`.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,8 @@ import pytest
 import respx
 from respx.models import Call
 
-from fixture_types import ClientFactory
+from fixture_types import ClientFactory, JsonDict
+from forge_json import page_envelope
 from sptmod.core.forge.catalog import DB_FILE_NAME, Catalog
 from sptmod.core.forge.client import DEFAULT_BASE_URL, ForgeClient
 
@@ -58,6 +59,23 @@ class RecordingSleep:
 
     def __call__(self, seconds: float) -> None:
         self.calls.append(seconds)
+
+
+def seed_catalog(cache_path: Path, mods: Sequence[JsonDict]) -> None:
+    """Fill the catalog cache at ``cache_path`` with ``mods`` through a real sync.
+
+    Mocks one ``/mods`` page carrying ``mods`` and syncs it into the cache the
+    way ``sptmod sync`` does, so the cache a test reads afterwards was written
+    by the production sync path and counts as downloaded. The router is opened
+    and closed inside this call, so it can be used while another respx router
+    (the SPT release source, say) is mocking a different host.
+    """
+    with respx.mock(base_url=DEFAULT_BASE_URL, assert_all_called=False) as router:
+        router.get("/mods").mock(
+            return_value=httpx.Response(200, json=page_envelope(list(mods)))
+        )
+        with ForgeClient() as client, Catalog(cache_path) as cache:
+            cache.sync(client, full=True)
 
 
 @pytest.fixture

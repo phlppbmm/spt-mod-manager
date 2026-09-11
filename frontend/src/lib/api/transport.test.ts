@@ -25,7 +25,9 @@ const sampleDetails: ErrorDetails = {
 	reason: 'not compatible',
 	api_code: '',
 	api_status: 0,
-	missing: []
+	missing: [],
+	mods: [],
+	spt_version: ''
 };
 
 describe('call', () => {

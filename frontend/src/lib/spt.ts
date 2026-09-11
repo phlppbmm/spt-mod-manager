@@ -1,4 +1,4 @@
-import type { SptReleaseInfo, SptReleaseList } from './api/client';
+import type { SptCompatibilityReport, SptReleaseInfo, SptReleaseList } from './api/client';
 
 export const DISMISSED_RELEASE_KEY = 'sptmod.dismissedSptRelease';
 
@@ -17,6 +17,20 @@ export interface ApplyCheck {
 export interface Confirmation {
 	title: string;
 	body: string;
+}
+
+export type ModCheck =
+	| { kind: 'pending' }
+	| { kind: 'failed' }
+	| { kind: 'ready'; report: SptCompatibilityReport };
+
+export interface ModCheckView {
+	tone: 'note' | 'warn';
+	message: string;
+	incompatible: string[];
+	skippedNote: string;
+	needsOverride: boolean;
+	pending: boolean;
 }
 
 /**
@@ -97,6 +111,43 @@ export function confirmationFor(
 }
 
 /**
+ * A version change only has installed mods to judge when it goes to a known
+ * release; undoing the last change has no target version to check against.
+ */
+export function needsModCheck(
+	release: SptReleaseInfo | null,
+	kind: ChangeKind
+): release is SptReleaseInfo {
+	return kind !== 'undo' && release !== null;
+}
+
+export function modCheckView(check: ModCheck): ModCheckView {
+	if (check.kind === 'pending') {
+		const note = view('note', 'Checking your installed mods against this version…');
+		return { ...note, pending: true };
+	}
+	if (check.kind === 'failed') {
+		return view(
+			'note',
+			'Your installed mods could not be checked against this version. The change can still go ahead.'
+		);
+	}
+	return verdict(check.report);
+}
+
+/**
+ * A verdict that is still being fetched holds the change back until it arrives,
+ * and mods without a release for the target version hold it back until the
+ * player says to go ahead anyway; nothing else gates it.
+ */
+export function confirmBlocked(check: ModCheckView | null, allowed: boolean): boolean {
+	if (check === null) {
+		return false;
+	}
+	return check.pending || (check.needsOverride && !allowed);
+}
+
+/**
  * Format the publication date of a release. Releases whose date is unknown
  * carry a placeholder far in the past; those show a dash instead of a date.
  */
@@ -122,6 +173,49 @@ export function saveDismissedRelease(version: string): void {
 	} catch {
 		return;
 	}
+}
+
+function view(
+	tone: 'note' | 'warn',
+	message: string,
+	incompatible: string[] = [],
+	skippedNote = '',
+	needsOverride = false
+): ModCheckView {
+	return { tone, message, incompatible, skippedNote, needsOverride, pending: false };
+}
+
+function verdict(report: SptCompatibilityReport): ModCheckView {
+	const target = `SPT ${report.spt_version}`;
+	if (!report.checked) {
+		const notice =
+			report.notice === ''
+				? 'Your installed mods could not be checked against this version.'
+				: report.notice;
+		return view('note', `${notice} The change can still go ahead.`);
+	}
+	const skippedNote = skippedSentence(report.skipped);
+	if (report.incompatible.length > 0) {
+		const message = `${modsPhrase(report.incompatible.length)} no release for ${target}:`;
+		return view('warn', message, report.incompatible, skippedNote, true);
+	}
+	if (report.compatible.length === 0) {
+		return view('note', `No installed mods to check against ${target}.`, [], skippedNote);
+	}
+	const message = `${modsPhrase(report.compatible.length)} a release for ${target}.`;
+	return view('note', message, [], skippedNote);
+}
+
+function modsPhrase(count: number): string {
+	return count === 1 ? '1 installed mod has' : `${count} installed mods have`;
+}
+
+function skippedSentence(skipped: string[]): string {
+	if (skipped.length === 0) {
+		return '';
+	}
+	const count = skipped.length === 1 ? '1 installed mod' : `${skipped.length} installed mods`;
+	return `${count} could not be checked: ${skipped.join(', ')}.`;
 }
 
 function numbers(version: string): number[] {

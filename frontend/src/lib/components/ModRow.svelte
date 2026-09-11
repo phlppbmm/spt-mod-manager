@@ -44,6 +44,7 @@
 		onchanged: () => void;
 		onfavorite: (modIds: number[]) => void;
 		onbusy: (modId: number, busy: boolean) => void;
+		showInstalledColumns: boolean;
 	}
 
 	let {
@@ -62,7 +63,8 @@
 		onselect,
 		onchanged,
 		onfavorite,
-		onbusy
+		onbusy,
+		showInstalledColumns
 	}: Props = $props();
 
 	const EAGER_ROWS = 60;
@@ -359,12 +361,16 @@
 			{/if}
 		</div>
 	</div>
-	<div>{entry.installed_version ?? '—'}</div>
+	{#if showInstalledColumns}
+		<div>{entry.installed_version ?? '—'}</div>
+	{/if}
 	<div>{entry.latest_version?.version ?? '—'}</div>
 	<div>{entry.latest_version?.spt_version_constraint || '—'}</div>
-	<div>{entry.mod.downloads.toLocaleString()}</div>
-	<div>{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
-	<div>{installed?.mod_type ?? '—'}</div>
+	<div class="downloads">{entry.mod.downloads.toLocaleString()}</div>
+	<div class="updated">{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
+	{#if showInstalledColumns}
+		<div class="type">{installed?.mod_type ?? '—'}</div>
+	{/if}
 	<div><StatusBadge state={modState} /></div>
 	<div class="actions">
 		{#if progress !== null}
@@ -751,7 +757,9 @@
 	}
 
 	@container mods (max-width: 1060px) {
-		.row > :nth-child(n + 7):nth-child(-n + 9) {
+		.row > .downloads,
+		.row > .updated,
+		.row > .type {
 			display: none;
 		}
 	}

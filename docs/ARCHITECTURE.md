@@ -1246,7 +1246,8 @@ not read from a live install — the first live run should confirm it.
 - Detail dialog (click the mod name): stats, category/flag tags, license and
   source links, dates, description, version table with per-version Fika
   compatibility (compatible/incompatible shown as tags).
-- Mods view shows a result count line ("N mods") above the table.
+- Mods view shows a result count line below the table ("1 result" for a
+  single row, otherwise "N results").
 - Settings page: sections Game directory, SPT version, Appearance (theme
   select: system, light, dark), Launching, Fika, Mod sets, Export the mod
   list, Import a mod list, Catalog cache (two actions: clear cache alone, or
@@ -1486,16 +1487,16 @@ there lists what is implemented and what is not. What exists:
   subscribers only when the value really differs.
 - `filterpills.ts` — the pill definitions (Compatibility, Category, Type,
   Fika, State, Featured), which pills are active for a filter, applying and
-  removing a pill, and the quick tabs. Every pill is a radio because chips are
-  ANDed; the Compatibility pill shows the SPT version as its label when one is
-  known. It offers the installed version first, then one option per
-  installable release (`installableVersions` over the `list_spt_releases`
-  answer, downloadable ones, newest first, the installed one left out), then
-  "All versions"; a version option carries that version in the filter, which
-  `ModsView` hands to `browse_catalog` so the backend judges the rows, the
-  compatibility chip and the counts against it. An unreachable release source
-  leaves the pill with the two options it always had — the Mods view never
-  raises for it and stays usable offline.
+  removing a pill, the quick tabs, and which columns a tab shows. Every pill
+  is a radio because chips are ANDed; the Compatibility pill shows the SPT
+  version as its label when one is known. It offers the installed version
+  first, then one option per installable release (`installableVersions` over
+  the `list_spt_releases` answer, downloadable ones, newest first, the
+  installed one left out), then "All versions"; a version option carries
+  that version in the filter, which `ModsView` hands to `browse_catalog` so
+  the backend judges the rows, the compatibility chip and the counts against
+  it. An unreachable release source leaves the pill with the two options it
+  always had — the Mods view never raises for it and stays usable offline.
 - `popover.ts` — the key handling of a popover: Escape closes, Tab and
   Shift+Tab cycle through the focusable elements of the panel.
 - `selection.ts` — toggle one row or all, the tri-state header checkbox,
@@ -1519,9 +1520,17 @@ there lists what is implemented and what is not. What exists:
 - `ModTable` owns the focused row, keeps it valid when the rows change and
   focuses it when the palette reveals a mod; `ModRow` carries the focus ring
   and applies the key handling of `rownav.ts` to its own actions.
-- `ModTable` is a container-query container: below 1060px table width the
-  Downloads, Updated and Type columns drop out of the header and the rows, and
-  the shared `--mods-grid` template shrinks with them.
+- The Installed and Type columns only exist on the Installed and Updates tabs
+  (`showsInstalledColumns`); on All, Favorites and New neither the header cell
+  nor the row cells are rendered and `--mods-grid` loses both tracks. A sort by
+  the `installed` key is dropped when the tab changes to one without the column
+  (`sortForTab`), because its only control is that hidden header button;
+  switching back starts unsorted.
+- `ModTable` is a container-query container: at 1060px table width and below
+  the Downloads, Updated and Type cells drop out of the header and the rows,
+  and the shared `--mods-grid` template loses their tracks. The rules address
+  the cells by class, so the positions the lean layout shifts cannot hide the
+  wrong ones.
 - `StatusReport` carries an additive `spt_version` field (empty string when
   unknown), filled locally by `resolve_spt_version`. The Mods page takes it
   from the status call it already makes and hands it to the Compatibility pill,

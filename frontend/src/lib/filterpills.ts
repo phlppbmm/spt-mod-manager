@@ -1,5 +1,5 @@
 import type { SptReleaseInfo } from './api/client';
-import type { ChipId, ModFilter } from './modfilter';
+import type { ChipId, ModFilter, ModSort } from './modfilter';
 
 export type PillKey = 'compatibility' | 'category' | 'type' | 'fika' | 'state' | 'featured';
 
@@ -240,4 +240,17 @@ export function applyQuickTab(filter: ModFilter, tab: QuickTabId): ModFilter {
 		search: filter.search,
 		sptVersion: filter.sptVersion
 	};
+}
+
+/** Installed version and mod type are only known for the tabs that list installed mods. */
+export function showsInstalledColumns(tab: QuickTabId): boolean {
+	return tab === 'installed' || tab === 'updates';
+}
+
+/** The header button is the only control for the `installed` sort, so it goes with the column. */
+export function sortForTab(sort: ModSort | null, tab: QuickTabId): ModSort | null {
+	if (sort?.key === 'installed' && !showsInstalledColumns(tab)) {
+		return null;
+	}
+	return sort;
 }

@@ -8,7 +8,9 @@ import {
 	availablePills,
 	installableVersions,
 	pillDefinitions,
-	removePill
+	removePill,
+	showsInstalledColumns,
+	sortForTab
 } from './filterpills';
 import type { PillDefinition, PillKey } from './filterpills';
 import type { SptReleaseInfo } from './api/client';
@@ -514,3 +516,52 @@ describe('the compatibility pill without any installable release', () => {
 	});
 });
 
+
+/**
+ * Setup: `showsInstalledColumns` is asked about every quick tab. Assertion: the
+ * two tabs that list installed mods answer true, the other three false. Reason:
+ * the installed version and the mod type come from the installation, so the
+ * columns that show them are empty on a tab that lists catalog entries.
+ */
+describe('showsInstalledColumns', () => {
+	it.each([
+		['installed', true],
+		['updates', true],
+		['all', false],
+		['favorites', false],
+		['new', false]
+	] as const)('answers %s with %s', (tab, shown) => {
+		expect(showsInstalledColumns(tab)).toBe(shown);
+	});
+});
+
+/**
+ * Setup: a sort is carried over to another quick tab. Assertion: only a sort by
+ * installed version is dropped, and only for a tab that hides that column.
+ * Reason: the column header is the only control for the `installed` sort, so a
+ * sort that survives the column would leave the list ordered by a rule the
+ * player can no longer see or undo.
+ */
+describe('sortForTab', () => {
+	it('drops a sort by installed version on a tab that hides the column', () => {
+		expect(sortForTab({ key: 'installed', descending: true }, 'favorites')).toBeNull();
+	});
+
+	it('keeps a sort by installed version on a tab that shows the column', () => {
+		expect(sortForTab({ key: 'installed', descending: true }, 'updates')).toEqual({
+			key: 'installed',
+			descending: true
+		});
+	});
+
+	it.each(['name', 'latest', 'spt', 'downloads', 'updated'] as const)(
+		'keeps a sort by %s on a tab that hides the installed column',
+		(key) => {
+			expect(sortForTab({ key, descending: false }, 'all')).toEqual({ key, descending: false });
+		}
+	);
+
+	it('leaves an unsorted list unsorted', () => {
+		expect(sortForTab(null, 'all')).toBeNull();
+	});
+});

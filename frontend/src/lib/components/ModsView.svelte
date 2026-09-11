@@ -35,6 +35,8 @@
 		applyQuickTab,
 		installableVersions,
 		pillDefinitions,
+		showsInstalledColumns,
+		sortForTab,
 		type QuickTabId
 	} from '$lib/filterpills';
 	import { filtersEqual, getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
@@ -129,6 +131,7 @@
 		modTypes,
 		now
 	});
+	let quickTab = $derived(activeQuickTab(filter));
 	let rows = $derived(sortEntries(filterEntries(entries, filter, context), sort));
 	let counts = $derived(chipCounts(entries, filter, context));
 	let categories = $derived(categoriesOf(entries));
@@ -169,6 +172,10 @@
 		if (!filtersEqual(filter, getFilter())) {
 			setFilter(filter);
 		}
+	});
+
+	$effect(() => {
+		sort = sortForTab(untrack(() => sort), quickTab);
 	});
 
 	$effect(() => {
@@ -399,7 +406,7 @@
 
 <section>
 	<div class="controls">
-		<QuickTabs active={activeQuickTab(filter)} onselect={pickTab} />
+		<QuickTabs active={quickTab} onselect={pickTab} />
 		<FilterBar
 			{filter}
 			definitions={pillDefinitions(categories, sptVersion, installable)}
@@ -448,6 +455,7 @@
 		{selected}
 		{sort}
 		{loading}
+		showInstalledColumns={showsInstalledColumns(quickTab)}
 		onsort={toggleSort}
 		onselect={(next) => (selected = next)}
 		onfavorite={onFavorites}

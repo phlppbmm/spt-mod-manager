@@ -23,6 +23,7 @@
 		onchanged: () => void;
 		onbusy: (modId: number, busy: boolean) => void;
 		loading: boolean;
+		showInstalledColumns: boolean;
 	}
 
 	let {
@@ -40,7 +41,8 @@
 		onfavorite,
 		onchanged,
 		onbusy,
-		loading
+		loading,
+		showInstalledColumns
 	}: Props = $props();
 
 	let ids = $derived(rows.map((entry) => entry.mod.id));
@@ -83,7 +85,7 @@
 </script>
 
 <div class="table">
-	<div class="panel list" role="grid" aria-label="Mods">
+	<div class="panel list" class:lean={!showInstalledColumns} role="grid" aria-label="Mods">
 		<div class="panel-head head" role="row">
 			<div class="pick" role="columnheader">
 				<input
@@ -98,22 +100,26 @@
 			<div role="columnheader">
 				<button class="sort" onclick={() => onsort('name')}>Mod{sortMark('name')}</button>
 			</div>
-			<div role="columnheader">
-				<button class="sort" onclick={() => onsort('installed')}>Installed{sortMark('installed')}</button>
-			</div>
+			{#if showInstalledColumns}
+				<div role="columnheader">
+					<button class="sort" onclick={() => onsort('installed')}>Installed{sortMark('installed')}</button>
+				</div>
+			{/if}
 			<div role="columnheader">
 				<button class="sort" onclick={() => onsort('latest')}>Latest{sortMark('latest')}</button>
 			</div>
 			<div role="columnheader">
 				<button class="sort" onclick={() => onsort('spt')}>SPT{sortMark('spt')}</button>
 			</div>
-			<div role="columnheader">
+			<div class="downloads" role="columnheader">
 				<button class="sort" onclick={() => onsort('downloads')}>Downloads{sortMark('downloads')}</button>
 			</div>
-			<div role="columnheader">
+			<div class="updated" role="columnheader">
 				<button class="sort" onclick={() => onsort('updated')}>Updated{sortMark('updated')}</button>
 			</div>
-			<div role="columnheader">Type</div>
+			{#if showInstalledColumns}
+				<div class="type" role="columnheader">Type</div>
+			{/if}
 			<div role="columnheader">State</div>
 			<div role="columnheader"></div>
 		</div>
@@ -137,6 +143,7 @@
 				{onfavorite}
 				{onchanged}
 				{onbusy}
+				{showInstalledColumns}
 			/>
 		{/each}
 		{#if rows.length === 0}
@@ -153,13 +160,22 @@
 		container: mods / inline-size;
 	}
 
+	/* `lean` is the layout without the Installed and Type columns. */
 	.list {
 		--mods-grid: 1.75rem 2rem minmax(12rem, 1fr) 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem 7rem 8rem;
+	}
+
+	.list.lean {
+		--mods-grid: 1.75rem 2rem minmax(12rem, 1fr) 5rem 5rem 5.5rem 5.5rem 7rem 8rem;
 	}
 
 	@container mods (max-width: 1090px) {
 		.list {
 			--mods-grid: 1.75rem 2rem minmax(10rem, 1fr) 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem 7rem 8rem;
+		}
+
+		.list.lean {
+			--mods-grid: 1.75rem 2rem minmax(10rem, 1fr) 5rem 5rem 5.5rem 5.5rem 7rem 8rem;
 		}
 	}
 
@@ -168,7 +184,13 @@
 			--mods-grid: 1.75rem 2rem minmax(10rem, 1fr) 5rem 5rem 5rem 7rem 8rem;
 		}
 
-		.head > :nth-child(n + 7):nth-child(-n + 9) {
+		.list.lean {
+			--mods-grid: 1.75rem 2rem minmax(10rem, 1fr) 5rem 5rem 7rem 8rem;
+		}
+
+		.head > .downloads,
+		.head > .updated,
+		.head > .type {
 			display: none;
 		}
 	}

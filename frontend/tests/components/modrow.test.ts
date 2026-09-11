@@ -96,6 +96,19 @@ function rowAction(name: string, label: string): HTMLElement {
 	return button;
 }
 
+/**
+ * The quick-tab strip. `Installed` is also the label of the sort column that
+ * carries the installed version, so the tabs have to be addressed inside their
+ * own strip.
+ */
+function quickTabs(): HTMLElement {
+	const strip = screen.getByRole('button', { name: 'Favorites' }).parentElement;
+	if (strip === null) {
+		throw new Error('the quick tabs are not rendered');
+	}
+	return strip;
+}
+
 /** The row's overflow menu, opened the way a player opens it. */
 async function openMenu(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
 	await user.click(await screen.findByLabelText('More actions'));
@@ -129,11 +142,15 @@ describe('what a row shows', () => {
 	});
 
 	it('shows the installed version and the mod type of an installed mod', async () => {
+		const user = userEvent.setup();
 		stubView(
 			[catalogEntry({ mod: alpha.mod, state: 'installed', installed_version: '0.9.0' })],
 			[installedAlpha]
 		);
 		mount();
+
+		await screen.findByLabelText('Select Alpha');
+		await user.click(within(quickTabs()).getByRole('button', { name: 'Installed' }));
 
 		expect(await screen.findByText('0.9.0')).toBeInTheDocument();
 		expect(screen.getByText('client')).toBeInTheDocument();

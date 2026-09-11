@@ -55,6 +55,7 @@ src/sptmod/
       categories.py     the residue category table: finder/remover pair per container
       scan.py           residue detection over mods and profiles, document cleanup
     modsets.py          mod set store: one JSON document per user, keyed by game directory
+    localsources.py     local mod source store: the project folders of one user
     fika.py             Fika role store (tolerant), canonical host address
     services/           all user-facing operations as pure functions
       __init__.py       facade: the service functions and their result types
@@ -69,6 +70,7 @@ src/sptmod/
       catalog.py        catalog sync/search/browse, mod details, favorites
       transfer.py       export and import of mod lists
       modsets.py        mod set CRUD, sharing, profile binding, plan and apply
+      localsources.py   register project folders, read the mods they offer, install one
       fika.py           Fika role of a game folder, profiles of its host
       spt.py            list, apply and undo a published SPT release
     workspace.py        staging dir for downloads/extraction, apply lock
@@ -102,6 +104,7 @@ src/sptmod/
     repo.py             init, status, snapshot, history, export, import
     sources.py          sync, search, browse
     spt.py              the `sptmod spt` group: list, update, downgrade
+    local.py            the `sptmod local` group: add, list, remove, install
     gamedir.py          game directory selection commands
     reports.py          check and version
     rpc.py              hidden `sptmod rpc <name>` entry point
@@ -114,6 +117,7 @@ src/sptmod/
       mods.py           models mirroring mods, profiles and the catalog
       requests.py       request/response models of the mod, profile and catalog functions
       modsets.py        mod set models and the models of their service functions
+      localsources.py   local mod source models and the models of their service functions
       runtime.py        Fika, game launch and SPT release models
     errors.py           RPC error mapping and exit codes
     dump_openapi.py     python -m sptmod.server.dump_openapi openapi.json
@@ -561,6 +565,24 @@ download cache.
   restart costs no request; a sync that moved the mod on triggers exactly one
   refetch. Degrades to the stored (or empty) description when the Forge is
   down.
+- `browse_catalog` also answers with the installed mods no cached mod stands
+  for. `Catalog.classify` walks the cached rows, so a mod a player built
+  themselves or adopted by hand produced no entry at all and was invisible in
+  the desktop app while `sptmod list` showed it. The service layer
+  (`_local_entries` in `services/catalog.py`) adds one entry per installed mod
+  that no cached row matched, by Forge ID or by casefolded name; the catalog
+  stays repository-independent and its "one entry per cached mod" contract
+  holds. The join still receives the ACTIVE mods, the synthesis the active AND
+  disabled ones (never the removed ones), so turning such a mod off does not
+  make the row -- and with it the way to turn it back on -- disappear. The
+  entry carries the installed version, no `latest_version`, an empty
+  `detail_url`, and `local=True` (an additive field of `CatalogEntry`). Its
+  `mod.id` is derived from the casefolded mod name through a truncated
+  blake2b digest and made negative, so it is stable across calls (the frontend
+  keys its rows by it), can never collide with a Forge ID, and two names
+  landing on the same number walk down until one is free. `search_catalog`
+  keeps reporting cached rows only. `check_updates` ignores these mods for the
+  reason it always did: they carry no Forge ID.
 - Catalog-unavailable (unwritable config dir etc.) is a typed
   `CatalogUnavailableError` (`CATALOG_UNAVAILABLE`, 503); export degrades to
   a linkless list instead of failing.
@@ -751,6 +773,128 @@ dialog) / Copy share code (clipboard) / Delete, and an "Add a set" block taking
 a picked file path or a pasted code — a pasted code wins over the file path, and
 `MOD_SET_EXISTS` asks for another name. `ModSetDialog` is the "Mods are missing"
 dialog with "Install the missing mods" and "Play without them".
+
+## Local mod sources
+
+A local mod source is a project folder a player builds mods in -- their own
+forks, or mods that were never published. The folder is registered once and
+**offers** every mod its `build` folder holds; installing takes one of those
+mods and puts its newest build into the game directory. sptmod never runs a
+build and has no second install path for these mods.
+
+**Storage.** `platformdirs.user_config_path("sptmod", appauthor=False) /
+"localsources.json"` (`core/localsources.py`), one document for the user, not
+keyed by game directory: the same fork is installed into whichever installation
+is played. Deliberately NOT a file in the game repository, for the same reasons
+as the mod sets: it would need whitelist changes, would surface in the
+`game_files_changed` bucket, and would compete with git as the source of truth
+about the installation. Every service function takes a keyword-only
+`store_path` seam (tests never touch the real file). Writes go through mkstemp +
+`os.replace`, so a crash mid-write leaves the previous document intact. An
+unreadable or malformed store raises `InvalidMetadataError` naming the file
+rather than reading as empty -- silently forgetting the folders a player
+registered is data loss. Unknown keys of a well-formed document are ignored.
+
+On-disk shape -- the folder and when it was registered, nothing else:
+
+```json
+{"version": 1, "sources": [{"folder": "/home/user/projects/SPT-Dynamic-Goons",
+                            "added_at": "2026-09-11T12:00:00Z"}]}
+```
+
+A source is identified by `str(folder.resolve())`, so registering the same
+folder twice changes nothing. What a folder offers is never stored: it is read
+from the archives on disk whenever it is asked for, so the registry cannot fall
+out of step with the builds. Adding a folder that does not exist, or is no
+folder, is an `InvalidPathError`.
+
+**What a folder offers.** Every file DIRECTLY inside `<folder>/build` whose
+suffix is in `archive.SUPPORTED_SUFFIXES` (`.7z`, `.zip`, `.rar`) is read the
+way an install reads it -- `extract` into a staging directory, `find_anchor`,
+`read_meta` from `services/install_archive.py` -- and offered under the mod name
+and version the archive itself declares. That is the same source the install
+commit's `Mod:` trailer comes from, which is why listing can link an offered mod
+to the installed one without storing anything. **Sameness is that declared mod
+name, compared casefolded**: two archives declaring the same name are two builds
+of one mod and the most recently modified of them is the one offered; two
+archives declaring different names are two mods, both offered. The search is
+not recursive, so what a folder offers stays predictable no matter what a build
+tool leaves in subfolders, and an archive that is no readable mod (a source
+bundle, an archive that names no mod) is simply not offered instead of failing
+the listing. A folder that offers nothing is the normal "nothing built yet"
+state; only installing fails. The cost of reading the truth from disk is that a
+listing extracts every archive of every registered folder.
+
+**No Forge linkage.** Nothing guesses a Forge identity from a mod name any
+more: `install_from_archive` writes only the IDs a caller hands it, and the
+Forge install path (`install_mod`) is the only caller that has any. A build
+installed from a local source therefore carries empty `Mod-Forge-Id` and
+`Mod-Forge-Version-Id` trailers even when the cached catalog holds a mod of
+exactly that name and version. This is the property the feature stands on: a
+fork that inherited the upstream mod's Forge ID would be offered the upstream
+release by `update_mod` and overwritten with it. The consequence is visible in
+`check_updates`, which reports such a mod as `skipped`. The accepted cost is
+that an archive downloaded from the Forge by hand and installed with
+`sptmod install --file` is not linked for updates either; identifying it would
+mean guessing, and a wrong guess overwrites a player's own work.
+
+**Reinstalling.** A rebuild is one step for the player, and nothing on the path
+compares versions: what the folder offers now replaces what is installed,
+whether or not the version string, the file names or the file count changed --
+during development a rebuild usually carries the same version. Where the mod is
+currently active, `install_local_source` removes it and then installs the new
+build; installing on top would raise `ConflictError` for every tracked file, and
+`force=True` would leave behind the files the new build no longer ships. It
+takes NO lock of its own: it calls the public `remove_mod` and
+`install_from_archive`, each of which takes the apply lock for itself, exactly
+as `apply_mod_set` does -- nesting `game_lock` would self-deadlock. A mod that
+is disabled, removed or never installed needs no removal. The History shows the
+removal and the install as the two commits they are.
+
+There is no rollback between the two steps: an install that fails after the
+removal -- a conflict with another mod, a git failure -- leaves the mod removed
+instead of putting the previous build back. The files of that build are still in
+the repository's history, the folder keeps offering the mod, and installing
+again once the build is fixed is the way back.
+
+**Service functions** (`services/localsources.py`, all with keyword-only
+`store_path`; `InvalidMetadataError` for an unreadable store is possible in
+every one of them and left out of the table). All four take the game directory
+first, so every one of them can answer with the enriched list:
+
+| Function | Purpose | Errors |
+|---|---|---|
+| `add_local_source(path, folder)` | register a project folder, idempotently | `InvalidPathError` |
+| `list_local_sources(path)` | every folder with the mods it offers | — |
+| `remove_local_source(path, folder)` | stop treating a folder as a source | `LocalSourceNotFoundError` |
+| `install_local_source(path, folder, mod, progress=None)` | install the newest build of one offered mod | `LocalSourceNotFoundError`, `LocalSourceNotBuiltError`, every error an install raises |
+
+A listing reports per source: the folder, when it was registered, and one entry
+per offered mod carrying its declared name and version, the archive it resolves
+to, that archive's modification time, and the installed `ModInfo` of that name
+(in whatever state the installation has it) or none.
+`install_local_source` answers with the installed mod, its files, the warnings
+of the install, the archive it installed and whether it replaced an active
+build; a folder that offers no mod of the requested name raises
+`LocalSourceNotBuiltError`.
+
+**Errors and RPC codes:** `LocalSourceNotFoundError`
+(`LOCAL_SOURCE_NOT_FOUND`), `LocalSourceNotBuiltError`
+(`LOCAL_SOURCE_NOT_BUILT`); a folder that does not exist reuses
+`InvalidPathError` (`INVALID_PATH`).
+
+**Surfaces.** CLI group `sptmod local` (`cli/local.py`) with `add`, `list`,
+`remove` and `install FOLDER MOD`: `list` renders one table row per offered mod,
+and a folder that offers nothing reads as "nothing built yet"; `remove` prints
+both halves of the separation -- the mods it installed stay in place, and
+removing such a mod never takes its folder off the list. RPC routes
+`add_local_source`, `list_local_sources`, `remove_local_source` and
+`install_local_source` (the last one long-running, with `operation_id`).
+Frontend: four wrappers in `client.ts` and the "Local mods" section of the
+Settings page, which picks a folder with the directory dialog
+(`open({ directory: true, multiple: false })`), lists each folder with the mods
+it offers, their versions and build dates, an "Install"/"Reinstall" button per
+mod and "Remove" per folder, and states the same separation in its section text.
 
 ## Fika co-op
 
@@ -1613,6 +1757,18 @@ there lists what is implemented and what is not. What exists:
   column published by a page visited earlier cannot leak onto the mod list.
 - A filter change prunes the selection to the rows that stay visible, so a bulk
   action can never touch a mod the user cannot see.
+- A row of a `local` entry -- a mod the player installed themselves -- is marked
+  "Local" next to its name and carries no Forge affordance: no Install, no
+  Update, no Details dialog and no "Open Forge page" (its `detail_url` is
+  empty), while Disable/Enable, Remove and Files stay. Its SPT cell falls back
+  to the `spt_range` of the installed mod, because that value comes from the
+  git trailers and is real; Latest stays "—". `isCompatible` counts such an
+  entry as compatible unconditionally: the "empty constraint counts as
+  incompatible" rule exists to keep old hub imports out of the Forge list and
+  has no bearing on a mod that is already installed, and without the exception
+  the default Compatibility pill would hide it. `ModsView` maps the mod type of
+  these rows through the entry id instead of the Forge id, so the Client/Server
+  filters work for them as well.
 - Bulk actions reuse the per-row RPCs `enable_mod`, `disable_mod` and
   `update_mod` sequentially; there is no multi-row RPC. Two mod operations at
   once would queue on the backend lock for minutes. Failures are collected and

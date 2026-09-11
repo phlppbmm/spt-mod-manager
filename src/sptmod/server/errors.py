@@ -24,6 +24,8 @@ from sptmod.core.errors import (
     InvalidPathError,
     LaunchError,
     LauncherSettingsError,
+    LocalSourceNotBuiltError,
+    LocalSourceNotFoundError,
     LoginFailedError,
     ModFileWriteError,
     ModNotFoundError,
@@ -73,6 +75,8 @@ class ErrorCode(StrEnum):
     LOGIN_FAILED = "LOGIN_FAILED"
     LAUNCHER_SETTINGS_MISSING = "LAUNCHER_SETTINGS_MISSING"
     FIKA_HOST_UNREACHABLE = "FIKA_HOST_UNREACHABLE"
+    LOCAL_SOURCE_NOT_FOUND = "LOCAL_SOURCE_NOT_FOUND"
+    LOCAL_SOURCE_NOT_BUILT = "LOCAL_SOURCE_NOT_BUILT"
     OPERATION_IN_PROGRESS = "OPERATION_IN_PROGRESS"
     CONFLICT = "CONFLICT"
     DEPENDENCY = "DEPENDENCY"
@@ -116,6 +120,8 @@ ERROR_MAPPING: dict[type[Exception], ErrorCode] = {
     LoginFailedError: ErrorCode.LOGIN_FAILED,
     LauncherSettingsError: ErrorCode.LAUNCHER_SETTINGS_MISSING,
     FikaHostUnreachableError: ErrorCode.FIKA_HOST_UNREACHABLE,
+    LocalSourceNotFoundError: ErrorCode.LOCAL_SOURCE_NOT_FOUND,
+    LocalSourceNotBuiltError: ErrorCode.LOCAL_SOURCE_NOT_BUILT,
     OperationInProgressError: ErrorCode.OPERATION_IN_PROGRESS,
     ConflictError: ErrorCode.CONFLICT,
     DependencyError: ErrorCode.DEPENDENCY,

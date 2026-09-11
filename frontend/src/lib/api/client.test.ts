@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import {
+	addLocalSource,
 	applyModSet,
 	applySptRelease,
 	bindProfileSet,
@@ -22,12 +23,14 @@ import {
 	importList,
 	importModSet,
 	initGameDir,
+	installLocalSource,
 	installMod,
 	launchProfile,
 	launchStatus,
 	listDirectories,
 	listFavorites,
 	listHostProfiles,
+	listLocalSources,
 	listMods,
 	listModSets,
 	listProfiles,
@@ -38,6 +41,7 @@ import {
 	planModInstall,
 	planModSet,
 	planProfileCleanup,
+	removeLocalSource,
 	removeMod,
 	renameModSet,
 	revertSptUpdate,
@@ -597,6 +601,36 @@ const wrapperCases: Array<{
 		call: () => listHostProfiles('/game'),
 		command: 'list_host_profiles',
 		payload: { path: '/game' }
+	},
+	{
+		id: 'addLocalSource forwards the game path and the project folder',
+		call: () => addLocalSource('/game', '/home/me/MyMod'),
+		command: 'add_local_source',
+		payload: { path: '/game', folder: '/home/me/MyMod' }
+	},
+	{
+		id: 'listLocalSources forwards the game path',
+		call: () => listLocalSources('/game'),
+		command: 'list_local_sources',
+		payload: { path: '/game' }
+	},
+	{
+		id: 'removeLocalSource forwards the game path and the project folder',
+		call: () => removeLocalSource('/game', '/home/me/MyMod'),
+		command: 'remove_local_source',
+		payload: { path: '/game', folder: '/home/me/MyMod' }
+	},
+	{
+		id: 'installLocalSource defaults operationId to null',
+		call: () => installLocalSource('/game', '/home/me/MyMod', 'MyMod'),
+		command: 'install_local_source',
+		payload: { path: '/game', folder: '/home/me/MyMod', mod: 'MyMod', operation_id: null }
+	},
+	{
+		id: 'installLocalSource forwards the mod and an explicit operationId',
+		call: () => installLocalSource('/game', '/home/me/MyMod', 'MyMod', 'op-4'),
+		command: 'install_local_source',
+		payload: { path: '/game', folder: '/home/me/MyMod', mod: 'MyMod', operation_id: 'op-4' }
 	},
 	{
 		id: 'planFikaInstall forwards the game path',

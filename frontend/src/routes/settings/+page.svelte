@@ -6,6 +6,7 @@
 	import { writeTextFile } from '@tauri-apps/plugin-fs';
 	import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 	import {
+		addLocalSource,
 		applyModSet,
 		applySptRelease,
 		checkSptCompatibility,
@@ -16,10 +17,13 @@
 		getFikaSettings,
 		importList,
 		importModSet,
+		installLocalSource,
 		installMod,
+		listLocalSources,
 		listModSets,
 		listSptReleases,
 		planFikaInstall,
+		removeLocalSource,
 		renameModSet,
 		revertSptUpdate,
 		setFikaSettings,
@@ -29,7 +33,9 @@
 		type FikaSettings,
 		type ImportDiff,
 		type ImportEntry,
+		type LocalSourceInfo,
 		type ModSet,
+		type OfferedMod,
 		type SptReleaseInfo,
 		type SptReleaseList
 	} from '$lib/api/client';
@@ -84,6 +90,7 @@
 		{ id: 'launching', label: 'Launching' },
 		{ id: 'fika', label: 'Fika' },
 		{ id: 'mod-sets', label: 'Mod sets' },
+		{ id: 'local-mods', label: 'Local mods' },
 		{ id: 'export', label: 'Export the mod list' },
 		{ id: 'import', label: 'Import a mod list' },
 		{ id: 'catalog-cache', label: 'Catalog cache' },
@@ -110,6 +117,12 @@
 	let prompt: 'rename' | 'import' | 'host' | null = $state(null);
 	let promptTarget = $state('');
 	let promptName = $state('');
+
+	let localSources: LocalSourceInfo[] = $state([]);
+	let localError = $state('');
+	let localNote = $state('');
+	let localBusy = $state(false);
+	let localProgress: ProgressEvent | null = $state(null);
 
 	let fikaRole: FikaRole = $state('none');
 	let fikaAddress = $state('');
@@ -176,6 +189,7 @@
 		void readVersion();
 		void loadReleases();
 		void loadSets();
+		void loadLocalSources();
 		void loadFika();
 		stopServerOnExit = loadStopServerOnExit();
 		themePreference = loadPreference();
@@ -243,6 +257,83 @@
 		} catch (cause) {
 			setsError = cause instanceof Error ? cause.message : String(cause);
 		}
+	}
+
+	async function loadLocalSources(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		localError = '';
+		try {
+			localSources = await listLocalSources(path);
+		} catch (cause) {
+			localError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function pickLocalFolder(): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		localBusy = true;
+		localError = '';
+		localNote = '';
+		try {
+			const picked = await open({ directory: true, multiple: false });
+			if (picked !== null) {
+				localSources = await addLocalSource(path, picked);
+				localNote = `${picked} is now one of your own mod folders.`;
+			}
+		} catch (cause) {
+			localError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			localBusy = false;
+		}
+	}
+
+	async function forgetLocalSource(folder: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		localBusy = true;
+		localError = '';
+		localNote = '';
+		try {
+			localSources = await removeLocalSource(path, folder);
+			localNote = `${folder} is off the list. The mods it installed stay installed.`;
+		} catch (cause) {
+			localError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			localBusy = false;
+		}
+	}
+
+	async function installLocalBuild(folder: string, mod: string): Promise<void> {
+		if (path === null) {
+			return;
+		}
+		localBusy = true;
+		localError = '';
+		localNote = '';
+		const operationId = crypto.randomUUID();
+		const unsubscribe = await subscribe(operationId, (event) => {
+			localProgress = event;
+		});
+		try {
+			const result = await installLocalSource(path, folder, mod, operationId);
+			localNote = `${result.mod.name} ${result.mod.version} is installed.`;
+			localSources = await listLocalSources(path);
+		} catch (cause) {
+			localError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			unsubscribe();
+			localProgress = null;
+			localBusy = false;
+		}
+	}
+
+	function buildLabel(offered: OfferedMod): string {
+		return `${offered.version}, built ${formatReleaseDate(offered.built_at)}`;
 	}
 
 	async function removeSet(name: string): Promise<void> {
@@ -1231,6 +1322,78 @@
 			</section>
 
 			<section class="section panel">
+				<h2 id="local-mods">Local mods</h2>
+				<p class="note">
+					A local mod is one you build yourself. Name the project folder once, and sptmod
+					offers every mod its "build" folder holds and installs the newest build of the
+					one you pick. It never builds anything itself. Taking a folder off this list
+					leaves the mods it installed in place, and removing such a mod leaves its folder
+					on the list.
+				</p>
+				{#if localSources.length === 0}
+					<p class="note">No folders yet.</p>
+				{:else}
+					<ul class="sets panel">
+						{#each localSources as source (source.folder)}
+							<li class="source">
+								<div class="source-head">
+									<span class="name">{source.folder}</span>
+									<button
+										type="button"
+										class="btn-sm"
+										disabled={localBusy}
+										onclick={() => void forgetLocalSource(source.folder)}
+									>
+										Remove
+									</button>
+								</div>
+								{#if source.mods.length === 0}
+									<p class="note">Nothing built yet</p>
+								{:else}
+									<ul class="offers">
+										{#each source.mods as offered (offered.name)}
+											<li>
+												<span class="name">{offered.name}</span>
+												<span class="versions">{buildLabel(offered)}</span>
+												<button
+													type="button"
+													class="btn-sm"
+													disabled={localBusy}
+													onclick={() =>
+														void installLocalBuild(source.folder, offered.name)}
+												>
+													{offered.mod ? 'Reinstall' : 'Install'}
+												</button>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				<div class="row">
+					<button
+						type="button"
+						class="btn-primary"
+						disabled={path === null || localBusy}
+						onclick={() => void pickLocalFolder()}
+					>
+						Add a folder…
+					</button>
+					{#if localProgress !== null}
+						<span class="note">{localProgress.message}</span>
+					{/if}
+				</div>
+				{#if localError !== ''}
+					<p class="error-text">{localError}</p>
+				{/if}
+				{#if localNote !== ''}
+					<p class="note">{localNote}</p>
+				{/if}
+			</section>
+
+			<section class="section panel">
 				<h2 id="export">Export the mod list</h2>
 				<div class="row">
 					<label>
@@ -1672,6 +1835,32 @@
 	}
 
 	.diff li,
+	.source {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+	}
+
+	.source-head {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.offers {
+		margin: 0;
+		padding: 0 0 0 var(--space-4);
+		list-style: none;
+	}
+
+	.offers li {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-1) 0;
+	}
+
 	.sets li {
 		display: flex;
 		align-items: center;

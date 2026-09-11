@@ -70,6 +70,7 @@ function makeEntry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
 		state: 'available',
 		installed_version: null,
 		latest_version: makeVersion(),
+		local: false,
 		...overrides
 	};
 }
@@ -103,6 +104,22 @@ describe('isCompatible', () => {
 	])('is $expected when $id', ({ latestVersion, expected }) => {
 		const entry = makeEntry({ latest_version: latestVersion });
 		expect(isCompatible(entry)).toBe(expected);
+	});
+
+	it('counts a mod the player installed themselves as compatible', () => {
+		const entry = makeEntry({ latest_version: null, local: true, state: 'installed' });
+
+		expect(isCompatible(entry)).toBe(true);
+	});
+
+	it('keeps a locally installed mod in a list filtered down to compatible mods', () => {
+		const own = makeEntry({ latest_version: null, local: true, state: 'installed' });
+		const incompatible = makeEntry({ latest_version: null });
+		const filter = makeFilter({ chips: new Set<ChipId>(['compatible']) });
+
+		const rows = filterEntries([own, incompatible], filter, makeContext());
+
+		expect(rows).toEqual([own]);
 	});
 });
 

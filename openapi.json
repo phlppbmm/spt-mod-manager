@@ -1592,6 +1592,170 @@
         }
       }
     },
+    "/api/add_local_source": {
+      "post": {
+        "summary": "Add Local Source",
+        "operationId": "add_local_source_api_add_local_source_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLocalSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LocalSourceInfo"
+                  },
+                  "title": "Response Add Local Source Api Add Local Source Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/list_local_sources": {
+      "post": {
+        "summary": "List Local Sources",
+        "operationId": "list_local_sources_api_list_local_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListLocalSourcesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LocalSourceInfo"
+                  },
+                  "title": "Response List Local Sources Api List Local Sources Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/remove_local_source": {
+      "post": {
+        "summary": "Remove Local Source",
+        "operationId": "remove_local_source_api_remove_local_source_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveLocalSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LocalSourceInfo"
+                  },
+                  "title": "Response Remove Local Source Api Remove Local Source Post"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/install_local_source": {
+      "post": {
+        "summary": "Install Local Source",
+        "operationId": "install_local_source_api_install_local_source_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallLocalSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallLocalSourceResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/launch_profile": {
       "post": {
         "summary": "Launch Profile",
@@ -2017,6 +2181,39 @@
   },
   "components": {
     "schemas": {
+      "AddLocalSourceRequest": {
+        "description": "Parameters of ``add_local_source``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "folder": {
+            "format": "path",
+            "title": "Folder",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "folder"
+        ],
+        "title": "AddLocalSourceRequest",
+        "type": "object"
+      },
       "AdoptModRequest": {
         "description": "Parameters of ``adopt_mod``.",
         "properties": {
@@ -2402,7 +2599,7 @@
         "type": "string"
       },
       "CatalogEntry": {
-        "description": "A cached mod joined with the installed state of the game repository.",
+        "description": "A cached mod joined with the installed state of the game repository.\n\n``local`` marks an entry standing for an installed mod the catalog knows\nnothing about.",
         "properties": {
           "mod": {
             "$ref": "#/components/schemas/CatalogMod"
@@ -2430,6 +2627,11 @@
                 "type": "null"
               }
             ]
+          },
+          "local": {
+            "default": false,
+            "title": "Local",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4102,23 +4304,6 @@
             "title": "Force",
             "type": "boolean"
           },
-          "forge_match": {
-            "default": false,
-            "title": "Forge Match",
-            "type": "boolean"
-          },
-          "db_path": {
-            "anyOf": [
-              {
-                "format": "path",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Db Path"
-          },
           "operation_id": {
             "anyOf": [
               {
@@ -4171,6 +4356,101 @@
           "operation_id"
         ],
         "title": "InstallFromArchiveResponse",
+        "type": "object"
+      },
+      "InstallLocalSourceRequest": {
+        "description": "Parameters of ``install_local_source``.\n\n``mod`` names one of the mods the folder offers. ``operation_id`` names the\nprogress stream of this install; a generated one is used and echoed back\nwhen the caller sends none.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "folder": {
+            "format": "path",
+            "title": "Folder",
+            "type": "string"
+          },
+          "mod": {
+            "title": "Mod",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "required": [
+          "path",
+          "folder",
+          "mod"
+        ],
+        "title": "InstallLocalSourceRequest",
+        "type": "object"
+      },
+      "InstallLocalSourceResponse": {
+        "description": "Outcome of ``install_local_source`` plus its progress operation ID.",
+        "properties": {
+          "mod": {
+            "$ref": "#/components/schemas/ModInfo"
+          },
+          "archive": {
+            "format": "path",
+            "title": "Archive",
+            "type": "string"
+          },
+          "replaced": {
+            "default": false,
+            "title": "Replaced",
+            "type": "boolean"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "format": "path",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mod",
+          "archive",
+          "operation_id"
+        ],
+        "title": "InstallLocalSourceResponse",
         "type": "object"
       },
       "InstallModRequest": {
@@ -4565,6 +4845,33 @@
         "title": "ListHostProfilesRequest",
         "type": "object"
       },
+      "ListLocalSourcesRequest": {
+        "description": "Parameters of ``list_local_sources``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ListLocalSourcesRequest",
+        "type": "object"
+      },
       "ListModSetsRequest": {
         "description": "Parameters of ``list_mod_sets``.",
         "properties": {
@@ -4645,6 +4952,34 @@
           "path"
         ],
         "title": "ListSptReleasesRequest",
+        "type": "object"
+      },
+      "LocalSourceInfo": {
+        "description": "A registered project folder with the mods it offers right now.",
+        "properties": {
+          "folder": {
+            "format": "path",
+            "title": "Folder",
+            "type": "string"
+          },
+          "added_at": {
+            "title": "Added At",
+            "type": "string"
+          },
+          "mods": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OfferedMod"
+            },
+            "title": "Mods",
+            "type": "array"
+          }
+        },
+        "required": [
+          "folder",
+          "added_at"
+        ],
+        "title": "LocalSourceInfo",
         "type": "object"
       },
       "LocateDirectoryRequest": {
@@ -5069,6 +5404,47 @@
         "title": "ModType",
         "type": "string"
       },
+      "OfferedMod": {
+        "description": "One mod a project folder offers, in its newest build.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "archive": {
+            "format": "path",
+            "title": "Archive",
+            "type": "string"
+          },
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "mod": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "archive",
+          "built_at"
+        ],
+        "title": "OfferedMod",
+        "type": "object"
+      },
       "PlanEntry": {
         "description": "One mod to install as part of an ``InstallPlan``.",
         "properties": {
@@ -5404,6 +5780,39 @@
           "message"
         ],
         "title": "ProgressEvent",
+        "type": "object"
+      },
+      "RemoveLocalSourceRequest": {
+        "description": "Parameters of ``remove_local_source``.",
+        "properties": {
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "folder": {
+            "format": "path",
+            "title": "Folder",
+            "type": "string"
+          },
+          "store_path": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Path"
+          }
+        },
+        "required": [
+          "path",
+          "folder"
+        ],
+        "title": "RemoveLocalSourceRequest",
         "type": "object"
       },
       "RemoveModRequest": {

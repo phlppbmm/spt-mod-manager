@@ -241,6 +241,16 @@ def make_archive(tmp_path: Path) -> MakeArchive:
 
 
 @pytest.fixture
+def local_source_store(tmp_path: Path) -> Path:
+    """A local mod source store file path under ``tmp_path``.
+
+    Passed as ``store_path`` to every local source service/RPC/CLI call, so the
+    suites never touch the developer's real ``localsources.json``.
+    """
+    return tmp_path / "localsources.json"
+
+
+@pytest.fixture
 def clean_repo(initialized_repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Repo:
     """An ``initialized_repo`` with one baseline whitelist commit, tree clean.
 

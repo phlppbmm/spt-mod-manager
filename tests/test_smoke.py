@@ -68,7 +68,20 @@ def test_cli_help_lists_the_commands_in_the_intended_order() -> None:
         "search",
         "browse",
         "spt",
+        "local",
     ]
+
+
+def test_cli_local_help_lists_the_source_commands_in_the_intended_order() -> None:
+    """``sptmod local --help`` reads from registering a folder to installing from it.
+
+    Same reason as for the top-level help: the order a reader of the help is
+    meant to see is an implicit consequence of the registration order, and
+    nothing else in the code states it.
+    """
+    result = runner.invoke(app, ["local", "--help"])
+
+    assert command_names(result.output) == ["add", "list", "remove", "install"]
 
 
 def test_cli_spt_help_lists_the_version_commands_in_the_intended_order() -> None:

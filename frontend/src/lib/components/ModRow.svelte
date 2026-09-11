@@ -99,6 +99,13 @@
 
 	let cleanupGroups = $derived.by(() => groupRemovalsByProfile(cleanupPlan?.removals ?? []));
 
+	// A mod the player installed themselves has no catalog row: no Forge page,
+	// no published version, and the SPT range git recorded instead of one.
+	let isLocal = $derived(entry.local);
+	let sptLabel = $derived(
+		entry.latest_version?.spt_version_constraint || installed?.spt_range || '—'
+	);
+
 	$effect(() => {
 		const element = rowElement;
 		if (index <= EAGER_ROWS || typeof IntersectionObserver === 'undefined') {
@@ -258,6 +265,9 @@
 	let details: ModDetails | null = $state(null);
 
 	async function showDetails(): Promise<void> {
+		if (isLocal) {
+			return;
+		}
 		busy = true;
 		errorMessage = '';
 		try {
@@ -352,9 +362,16 @@
 			<div class="thumb placeholder" aria-hidden="true">{entry.mod.name.slice(0, 1)}</div>
 		{/if}
 		<div class="name-text">
-			<button class="name-link" onclick={() => void showDetails()}>
-				<strong>{entry.mod.name}</strong>
-			</button>
+			{#if isLocal}
+				<span class="name-plain">
+					<strong>{entry.mod.name}</strong>
+					<span class="local-tag">Local</span>
+				</span>
+			{:else}
+				<button class="name-link" onclick={() => void showDetails()}>
+					<strong>{entry.mod.name}</strong>
+				</button>
+			{/if}
 			<span class="author">{entry.mod.author}</span>
 			{#if entry.mod.teaser}
 				<span class="teaser" title={entry.mod.teaser}>{entry.mod.teaser}</span>
@@ -365,7 +382,7 @@
 		<div>{entry.installed_version ?? '—'}</div>
 	{/if}
 	<div>{entry.latest_version?.version ?? '—'}</div>
-	<div>{entry.latest_version?.spt_version_constraint || '—'}</div>
+	<div>{sptLabel}</div>
 	<div class="downloads">{entry.mod.downloads.toLocaleString()}</div>
 	<div class="updated">{entry.mod.updated_at ? entry.mod.updated_at.slice(0, 10) : '—'}</div>
 	{#if showInstalledColumns}
@@ -461,12 +478,14 @@
 					</li>
 					<li><button type="button" onclick={() => void showFiles()}>Files</button></li>
 				{/if}
-				<li>
-					<button type="button" onclick={() => void showDetails()}>Details</button>
-				</li>
-				<li>
-					<a href={entry.mod.detail_url} target="_blank" rel="noreferrer">Open Forge page</a>
-				</li>
+				{#if !isLocal}
+					<li>
+						<button type="button" onclick={() => void showDetails()}>Details</button>
+					</li>
+					<li>
+						<a href={entry.mod.detail_url} target="_blank" rel="noreferrer">Open Forge page</a>
+					</li>
+				{/if}
 			</ul>
 		</details>
 	</div>
@@ -830,6 +849,29 @@
 
 	.name strong {
 		display: block;
+	}
+
+	.name-plain {
+		display: flex;
+		align-items: baseline;
+		gap: var(--space-2);
+		min-width: 0;
+	}
+
+	.name-plain strong {
+		display: inline;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.local-tag {
+		flex: none;
+		padding: 0 var(--space-1);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-pill);
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
 	}
 
 	.name-link {

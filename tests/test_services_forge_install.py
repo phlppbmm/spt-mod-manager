@@ -1,4 +1,4 @@
-"""Tests for ``install_mod`` and for ``install_from_archive``'s ``forge_match`` catalog lookup.
+"""Tests for ``install_mod`` and for what ``install_from_archive`` records about the Forge.
 
 Covers the end-to-end install against a mocked Forge client and fake archives
 served through the download mock route: a missing dependency as its own
@@ -370,7 +370,7 @@ def test_cli_install_prints_mods_installed_before_a_partial_failure(
     assert re.search(r"installed Dep Mod 1\.0\.0 \(\d+ files\) as \w+", result.stdout)
 
 
-# --- install_from_archive: forge_match --------------------------------------
+# --- install_from_archive: no Forge identity is ever guessed ----------------
 
 
 def _seed_simple_catalog(
@@ -410,55 +410,31 @@ def _cached_mod(mod_id: int, slug: str, owner_name: str, version_id: int, versio
     )
 
 
-@pytest.mark.parametrize(
-    ("catalog_seed", "archive_version", "expected_ids"),
-    [
-        pytest.param(
-            [_cached_mod(401, "coolmod", "Alice", 4011, "1.2.3")],
-            "1.2.3",
-            ("401", "4011"),
-            id="unambiguous-match",
-        ),
-        pytest.param(
-            [_cached_mod(403, "coolmod", "Alice", 4031, "1.2.3")],
-            "9.9.9",
-            ("", ""),
-            id="version-not-cached",
-        ),
-        pytest.param(
-            [
-                _cached_mod(501, "coolmod-a", "Alice", 5011, "1.2.3"),
-                _cached_mod(502, "coolmod-b", "Bob", 5021, "1.2.3"),
-            ],
-            "1.2.3",
-            ("", ""),
-            id="ambiguous-name",
-        ),
-        pytest.param(None, "1.2.3", ("", ""), id="no-catalog-file"),
-    ],
-)
-def test_install_from_archive_forge_match_sets_ids_only_on_one_clear_hit(
+def test_install_from_archive_never_links_a_mod_to_a_cached_catalog_entry(
     clean_repo: Repo,
     client_factory: Callable[..., ForgeClient],
     respx_router: respx.MockRouter,
-    db_path: Path,
+    isolated_default_db_path: Path,
     make_archive: MakeArchive,
-    catalog_seed: list[JsonDict] | None,
-    archive_version: str,
-    expected_ids: tuple[str, str],
 ) -> None:
-    """install_from_archive stamps Forge ids only when the cache names one version.
+    """An archive whose name and version match a cached mod exactly still installs
+    without Forge ids.
 
-    Exactly one cached mod carrying exactly one matching version is a hit and
-    its ids are written into the install commit. A version the cache does not
-    hold, two cached mods of the same name, and a catalog file that was never
-    created all leave the ids empty rather than guessing, because a wrong id
-    would link the installed mod to somebody else's Forge entry.
+    The catalog holds one mod called CoolMod with exactly the version the archive
+    carries, so a name-and-version lookup would find it unambiguously. Both Forge
+    trailers must stay empty regardless: a player's own fork of a published mod
+    carries the name of what it was forked from, and an identity guessed from
+    that name would make ``update_mod`` offer -- and then install -- the upstream
+    release over their fork.
     """
-    if catalog_seed is not None:
-        _seed_simple_catalog(client_factory, respx_router, db_path, catalog_seed)
-    archive = package_archive(make_archive, "CoolMod", "CoolMod", archive_version)
+    _seed_simple_catalog(
+        client_factory,
+        respx_router,
+        isolated_default_db_path,
+        [_cached_mod(401, "coolmod", "Alice", 4011, "1.2.3")],
+    )
+    archive = package_archive(make_archive, "CoolMod", "CoolMod", "1.2.3")
 
-    result = services.install_from_archive(clean_repo.path, archive, forge_match=True, db_path=db_path)
+    result = services.install_from_archive(clean_repo.path, archive)
 
-    assert (result.mod.forge_id, result.mod.forge_version_id) == expected_ids
+    assert (result.mod.forge_id, result.mod.forge_version_id) == ("", "")

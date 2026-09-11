@@ -27,7 +27,6 @@ from sptmod.core.errors import (
     DependencyError,
     GitError,
 )
-from sptmod.core.forge.catalog import Catalog, default_db_path
 from sptmod.core.game_dir import (
     GameLayout,
     detect_layout,
@@ -99,8 +98,6 @@ def install_from_archive(
     forge_id: str = "",
     forge_version_id: str = "",
     source: str | None = None,
-    forge_match: bool = False,
-    db_path: Path | None = None,
 ) -> InstallResult:
     """Install the mod archive ``archive`` into the game directory ``path``.
 
@@ -136,10 +133,9 @@ def install_from_archive(
 
     ``forge_id`` and ``forge_version_id`` are written as ``Mod-Forge-Id`` and
     ``Mod-Forge-Version-Id``; :func:`install_mod` fills them from the install
-    plan. Without them, ``forge_match`` looks the installed name and version up
-    in the cached catalog and sets both trailers on an unambiguous match,
-    leaving them empty otherwise. The lookup is skipped when the catalog cache
-    does not exist yet.
+    plan. Every other caller installs a mod the Forge is never asked about:
+    nothing guesses a Forge mod from the name and the version, so a fork
+    cannot inherit the identity of the mod it was forked from.
 
     Raises:
         NotAGameDirError: ``path`` is no SPT game directory.
@@ -194,11 +190,6 @@ def install_from_archive(
             report_step(
                 progress, InstallStep.COMMIT, f"committing {meta.name} {meta.version}"
             )
-            matched_id, matched_version_id = (
-                _catalog_match(meta.name, meta.version, db_path)
-                if forge_match and not forge_id
-                else ("", "")
-            )
             draft = ModInfo(
                 name=meta.name,
                 version=meta.version,
@@ -208,8 +199,8 @@ def install_from_archive(
                 state=ModState.INSTALLED,
                 commit="",
                 date=UNSET_DATE,
-                forge_id=forge_id or matched_id,
-                forge_version_id=forge_version_id or matched_version_id,
+                forge_id=forge_id,
+                forge_version_id=forge_version_id,
                 guid=meta.guid,
                 source=archive.name if source is None else source,
             )
@@ -385,31 +376,3 @@ def _preferred_dll(dlls: Sequence[Path], archive_stem: str) -> tuple[Path, str]:
         matches, key=lambda match: (len(match[0]), -len(match[1].stem))
     )
     return dll, candidate
-
-
-def _catalog_match(name: str, version: str, db_path: Path | None) -> tuple[str, str]:
-    """Return the Forge mod and version ID cached for ``name`` and ``version``.
-
-    Both are empty unless exactly one cached mod carries that name and exactly
-    one of its cached versions is ``version``, and when the catalog cache does
-    not exist yet.
-    """
-    cache = db_path or default_db_path()
-    if not cache.exists():
-        return "", ""
-    with Catalog(cache) as catalog:
-        mods = [
-            mod
-            for mod in catalog.search(name)
-            if mod.name.casefold() == name.casefold()
-        ]
-        if len(mods) != 1:
-            return "", ""
-        versions = [
-            cached
-            for cached in catalog.get_versions(mods[0].id)
-            if cached.version == version
-        ]
-    if len(versions) != 1:
-        return "", ""
-    return str(mods[0].id), str(versions[0].id)

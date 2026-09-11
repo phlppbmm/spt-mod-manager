@@ -65,6 +65,9 @@ export type FikaSettings = Schemas['FikaSettings'];
 export type FikaRole = Schemas['FikaRole'];
 export type HostProfile = Schemas['HostProfile'];
 export type FikaInstallPlan = Schemas['FikaInstallPlan'];
+export type LocalSourceInfo = Schemas['LocalSourceInfo'];
+export type OfferedMod = Schemas['OfferedMod'];
+export type InstallLocalSourceResponse = Schemas['InstallLocalSourceResponse'];
 
 export function listDirectories(path: string | null = null): Promise<DirectoryListing> {
 	return call<DirectoryListing>('list_directories', {
@@ -400,6 +403,40 @@ export function applyModSet(
 		ignore_missing: ignoreMissing,
 		operation_id: operationId
 	} satisfies Schemas['ApplyModSetRequest']);
+}
+
+export function addLocalSource(path: string, folder: string): Promise<LocalSourceInfo[]> {
+	return call<LocalSourceInfo[]>('add_local_source', {
+		path,
+		folder
+	} satisfies Schemas['AddLocalSourceRequest']);
+}
+
+export function listLocalSources(path: string): Promise<LocalSourceInfo[]> {
+	return call<LocalSourceInfo[]>('list_local_sources', {
+		path
+	} satisfies Schemas['ListLocalSourcesRequest']);
+}
+
+export function removeLocalSource(path: string, folder: string): Promise<LocalSourceInfo[]> {
+	return call<LocalSourceInfo[]>('remove_local_source', {
+		path,
+		folder
+	} satisfies Schemas['RemoveLocalSourceRequest']);
+}
+
+export function installLocalSource(
+	path: string,
+	folder: string,
+	mod: string,
+	operationId: string | null = null
+): Promise<InstallLocalSourceResponse> {
+	return call<InstallLocalSourceResponse>('install_local_source', {
+		path,
+		folder,
+		mod,
+		operation_id: operationId
+	} satisfies Schemas['InstallLocalSourceRequest']);
 }
 
 export function launchProfile(

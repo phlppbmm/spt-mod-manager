@@ -225,12 +225,18 @@ class SyncResult:
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """A cached mod joined with the installed state of the game repository."""
+    """A cached mod joined with the installed state of the game repository.
+
+    ``local`` marks an entry that stands for an installed mod the catalog
+    knows nothing about; the service layer builds those, the cache holds no
+    row for them.
+    """
 
     mod: CatalogMod
     state: CatalogState
     installed_version: str | None
     latest_version: CatalogVersion | None
+    local: bool = False
 
 
 def default_db_path() -> Path:

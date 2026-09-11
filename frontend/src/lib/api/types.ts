@@ -701,6 +701,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/add_local_source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Local Source */
+        post: operations["add_local_source_api_add_local_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/list_local_sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Local Sources */
+        post: operations["list_local_sources_api_list_local_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/remove_local_source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove Local Source */
+        post: operations["remove_local_source_api_remove_local_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/install_local_source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install Local Source */
+        post: operations["install_local_source_api_install_local_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/launch_profile": {
         parameters: {
             query?: never;
@@ -892,6 +960,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddLocalSourceRequest
+         * @description Parameters of ``add_local_source``.
+         */
+        AddLocalSourceRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /**
+             * Folder
+             * Format: path
+             */
+            folder: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
         /**
          * AdoptModRequest
          * @description Parameters of ``adopt_mod``.
@@ -1100,6 +1186,9 @@ export interface components {
         /**
          * CatalogEntry
          * @description A cached mod joined with the installed state of the game repository.
+         *
+         *     ``local`` marks an entry standing for an installed mod the catalog knows
+         *     nothing about.
          */
         CatalogEntry: {
             mod: components["schemas"]["CatalogMod"];
@@ -1107,6 +1196,11 @@ export interface components {
             /** Installed Version */
             installed_version: string | null;
             latest_version: components["schemas"]["CatalogVersion"] | null;
+            /**
+             * Local
+             * @default false
+             */
+            local: boolean;
         };
         /**
          * CatalogMod
@@ -1952,13 +2046,6 @@ export interface components {
              * @default false
              */
             force: boolean;
-            /**
-             * Forge Match
-             * @default false
-             */
-            forge_match: boolean;
-            /** Db Path */
-            db_path?: string | null;
             /** Operation Id */
             operation_id?: string | null;
         };
@@ -1968,6 +2055,61 @@ export interface components {
          */
         InstallFromArchiveResponse: {
             mod: components["schemas"]["ModInfo"];
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: components["schemas"]["Conflict"][];
+            /** Operation Id */
+            operation_id: string;
+        };
+        /**
+         * InstallLocalSourceRequest
+         * @description Parameters of ``install_local_source``.
+         *
+         *     ``mod`` names one of the mods the folder offers. ``operation_id`` names the
+         *     progress stream of this install; a generated one is used and echoed back
+         *     when the caller sends none.
+         */
+        InstallLocalSourceRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /**
+             * Folder
+             * Format: path
+             */
+            folder: string;
+            /** Mod */
+            mod: string;
+            /** Store Path */
+            store_path?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
+         * InstallLocalSourceResponse
+         * @description Outcome of ``install_local_source`` plus its progress operation ID.
+         */
+        InstallLocalSourceResponse: {
+            mod: components["schemas"]["ModInfo"];
+            /**
+             * Archive
+             * Format: path
+             */
+            archive: string;
+            /**
+             * Replaced
+             * @default false
+             */
+            replaced: boolean;
             /**
              * Files
              * @default []
@@ -2177,6 +2319,19 @@ export interface components {
             fika_path?: string | null;
         };
         /**
+         * ListLocalSourcesRequest
+         * @description Parameters of ``list_local_sources``.
+         */
+        ListLocalSourcesRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Store Path */
+            store_path?: string | null;
+        };
+        /**
          * ListModSetsRequest
          * @description Parameters of ``list_mod_sets``.
          */
@@ -2234,6 +2389,24 @@ export interface components {
              * @default false
              */
             refresh: boolean;
+        };
+        /**
+         * LocalSourceInfo
+         * @description A registered project folder with the mods it offers right now.
+         */
+        LocalSourceInfo: {
+            /**
+             * Folder
+             * Format: path
+             */
+            folder: string;
+            /** Added At */
+            added_at: string;
+            /**
+             * Mods
+             * @default []
+             */
+            mods: components["schemas"]["OfferedMod"][];
         };
         /**
          * LocateDirectoryRequest
@@ -2469,6 +2642,27 @@ export interface components {
          */
         ModType: "server" | "client" | "hybrid";
         /**
+         * OfferedMod
+         * @description One mod a project folder offers, in its newest build.
+         */
+        OfferedMod: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Archive
+             * Format: path
+             */
+            archive: string;
+            /**
+             * Built At
+             * Format: date-time
+             */
+            built_at: string;
+            mod?: components["schemas"]["ModInfo"] | null;
+        };
+        /**
          * PlanEntry
          * @description One mod to install as part of an ``InstallPlan``.
          */
@@ -2634,6 +2828,24 @@ export interface components {
             percent: number;
             /** Message */
             message: string;
+        };
+        /**
+         * RemoveLocalSourceRequest
+         * @description Parameters of ``remove_local_source``.
+         */
+        RemoveLocalSourceRequest: {
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /**
+             * Folder
+             * Format: path
+             */
+            folder: string;
+            /** Store Path */
+            store_path?: string | null;
         };
         /**
          * RemoveModRequest
@@ -4596,6 +4808,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplyModSetResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_local_source_api_add_local_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddLocalSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalSourceInfo"][];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_local_sources_api_list_local_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListLocalSourcesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalSourceInfo"][];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_local_source_api_remove_local_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveLocalSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalSourceInfo"][];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    install_local_source_api_install_local_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallLocalSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallLocalSourceResponse"];
                 };
             };
             /** @description Default Response */

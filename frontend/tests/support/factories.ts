@@ -4,7 +4,9 @@ import type {
 	CatalogVersion,
 	CommitInfo,
 	LaunchStatus,
+	LocalSourceInfo,
 	ModInfo,
+	OfferedMod,
 	ModSet,
 	ProfileSummary,
 	SptReleaseList
@@ -66,6 +68,7 @@ export function catalogEntry(overrides: Partial<CatalogEntry> = {}): CatalogEntr
 		state: 'available',
 		installed_version: null,
 		latest_version: catalogVersion(),
+		local: false,
 		...overrides
 	};
 }
@@ -142,6 +145,26 @@ export function modSet(overrides: Partial<ModSet> = {}): ModSet {
 		name: 'Example Set',
 		created_at: '2026-01-01T00:00:00Z',
 		entries: [],
+		...overrides
+	};
+}
+
+export function localSource(overrides: Partial<LocalSourceInfo> = {}): LocalSourceInfo {
+	return {
+		folder: '/home/me/projects/MyMod',
+		added_at: '2026-09-11T12:00:00Z',
+		mods: [],
+		...overrides
+	};
+}
+
+export function offeredMod(overrides: Partial<OfferedMod> = {}): OfferedMod {
+	return {
+		name: 'MyMod',
+		version: '1.0.0',
+		archive: '/home/me/projects/MyMod/build/MyMod-1.0.0.zip',
+		built_at: '2026-09-10T12:00:00Z',
+		mod: null,
 		...overrides
 	};
 }

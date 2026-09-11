@@ -120,6 +120,15 @@
 				types.set(forgeId, mod.mod_type);
 			}
 		}
+		// A mod the player installed themselves has no Forge id; its row is
+		// keyed by the id the backend gave the entry, so the type is linked
+		// through the entry instead.
+		for (const entry of entries) {
+			const own = entry.local ? installedByName.get(entry.mod.name.toLowerCase()) : undefined;
+			if (own !== undefined) {
+				types.set(entry.mod.id, own.mod_type);
+			}
+		}
 		return types;
 	});
 	let favoriteIds = $derived(new Set(favorites));

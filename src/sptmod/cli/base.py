@@ -1,8 +1,9 @@
 """The typer apps, consoles, exit codes and helpers every command group shares.
 
 This module is the hub of the ``sptmod.cli`` package: it imports nothing from
-its siblings, they all import from it. ``spt_app`` is created here rather than
-in :mod:`sptmod.cli.spt` because ``app.add_typer`` needs it.
+its siblings, they all import from it. ``spt_app`` and ``local_app`` are
+created here rather than in :mod:`sptmod.cli.spt` and :mod:`sptmod.cli.local`
+because ``app.add_typer`` needs them.
 """
 
 from collections.abc import Generator
@@ -43,6 +44,8 @@ from sptmod.core.modmeta import InvalidMetadataError
 app = typer.Typer(help="sptmod: mod manager for SPT (Single Player Tarkov).")
 spt_app = typer.Typer(help="Change the SPT version of the game directory.")
 app.add_typer(spt_app, name="spt")
+local_app = typer.Typer(help="Mods you build in a folder of your own.")
+app.add_typer(local_app, name="local")
 
 console = Console()
 error_console = Console(stderr=True)

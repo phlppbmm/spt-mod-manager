@@ -5,11 +5,12 @@ is disposable, so every entry point here reopens it and treats a missing or
 unreadable cache as a plain error rather than as corruption.
 """
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from sptmod.core.errors import ForgeUnavailableError
 from sptmod.core.favorites import default_favorites_path, load_favorites, save_favorites
@@ -25,12 +26,16 @@ from sptmod.core.forge.catalog import (
     default_db_path,
 )
 from sptmod.core.forge.client import ForgeClient
-from sptmod.core.models import ModInfo, Progress
+from sptmod.core.models import ModInfo, ModState, Progress
 from sptmod.core.services.common import detected_spt_version, open_catalog
 from sptmod.core.services.state import list_mods
 from sptmod.core.workspace import download_cache_dir
 
 type BrowseFilter = Literal["all", "installed", "available"]
+
+# The id space the entries of installed mods without a catalog row live in.
+# Forge ids are positive, so a negative id can never stand for a Forge mod.
+_LOCAL_ID_LIMIT: Final = 2**31
 
 
 @dataclass(frozen=True)
@@ -198,7 +203,9 @@ def search_catalog(
         matched = {
             mod.id for mod in catalog.search(query, compatible_with=compatible_with)
         }
-        entries = _classified(catalog, installed, spt_version, compatible_only)
+        entries = _classified(
+            catalog, installed, installed, spt_version, compatible_only
+        )
     return [entry for entry in entries if entry.mod.id in matched]
 
 
@@ -233,9 +240,16 @@ def browse_catalog(
         GitError: git failed.
     """
     installed = list_mods(path)
+    tracked = [
+        mod
+        for mod in list_mods(path, include_all=True)
+        if mod.state != ModState.REMOVED
+    ]
     judged_against = spt_version or detected_spt_version(path)
     with open_catalog(db_path) as catalog:
-        entries = _classified(catalog, installed, judged_against, compatible_only)
+        entries = _classified(
+            catalog, installed, tracked, judged_against, compatible_only
+        )
     if catalog_filter == "all":
         return entries
     wanted = catalog_filter == "installed"
@@ -412,10 +426,28 @@ def set_favorite(
 def _classified(
     catalog: Catalog,
     installed: Sequence[ModInfo],
+    tracked: Sequence[ModInfo],
     spt_version: str | None,
     compatible_only: bool,
 ) -> list[CatalogEntry]:
     """Join the catalog with ``installed``, judged against ``spt_version``.
+
+    ``tracked`` are the mods an entry is built for where the catalog holds no
+    row at all; pass the same list as ``installed`` where only cached mods are
+    wanted.
+    """
+    entries = _cached_entries(catalog, installed, spt_version, compatible_only)
+    entries.extend(_local_entries(catalog, tracked))
+    return sorted(entries, key=lambda entry: (entry.mod.name.casefold(), entry.mod.id))
+
+
+def _cached_entries(
+    catalog: Catalog,
+    installed: Sequence[ModInfo],
+    spt_version: str | None,
+    compatible_only: bool,
+) -> list[CatalogEntry]:
+    """Return one entry per cached mod, judged against ``spt_version``.
 
     ``latest_version`` always holds a version the installer can actually
     resolve, so a mod without one is listed as ``available``/``installed``
@@ -425,7 +457,7 @@ def _classified(
     """
     compatible = catalog.classify(installed, compatible_with=spt_version)
     if compatible_only or spt_version is None:
-        return compatible
+        return list(compatible)
 
     known = {entry.mod.id for entry in compatible}
     entries = list(compatible)
@@ -436,7 +468,73 @@ def _classified(
             "installed" if entry.installed_version is not None else "available"
         )
         entries.append(replace(entry, state=state, latest_version=None))
-    return sorted(entries, key=lambda entry: (entry.mod.name.casefold(), entry.mod.id))
+    return entries
+
+
+def _local_entries(catalog: Catalog, tracked: Sequence[ModInfo]) -> list[CatalogEntry]:
+    """Return one entry per mod of ``tracked`` the catalog holds no row for.
+
+    A mod a player built themselves or adopted from their own installation is
+    in no catalog, so the join produces nothing for it and it would be missing
+    from every list the desktop app shows. Such an entry carries what the
+    repository knows about the mod, no version to update to, and the ``local``
+    mark that keeps the Forge actions away from it. The compatibility filter
+    of the catalog does not apply: there is no published constraint to judge
+    these mods by.
+    """
+    cached = catalog.search("")
+    known_ids = {str(mod.id) for mod in cached}
+    known_names = {mod.name.casefold() for mod in cached}
+    entries: list[CatalogEntry] = []
+    taken: set[int] = set()
+    for mod in sorted(tracked, key=lambda item: item.name.casefold()):
+        cached_id = bool(mod.forge_id) and mod.forge_id in known_ids
+        if cached_id or mod.name.casefold() in known_names:
+            continue
+        entries.append(_local_entry(mod, taken))
+    return entries
+
+
+def _local_entry(mod: ModInfo, taken: set[int]) -> CatalogEntry:
+    """Return the catalog entry standing for the installed mod ``mod``."""
+    mod_id = _local_id(mod.name, taken)
+    taken.add(mod_id)
+    return CatalogEntry(
+        mod=CatalogMod(
+            id=mod_id,
+            hub_id=None,
+            guid=mod.guid or None,
+            name=mod.name,
+            slug="",
+            teaser=None,
+            thumbnail=None,
+            author=mod.author,
+            downloads=0,
+            detail_url="",
+            published_at=None,
+            created_at=None,
+            updated_at=None,
+        ),
+        state="installed",
+        installed_version=mod.version,
+        latest_version=None,
+        local=True,
+    )
+
+
+def _local_id(name: str, taken: set[int]) -> int:
+    """Return the id the entry of the installed mod ``name`` is keyed by.
+
+    Derived from the mod name, so the same mod keeps the same id between calls
+    and the frontend does not tear its row down on every refresh, and negative,
+    so it can never collide with a Forge id. Two names landing on the same
+    number walk down from it until one is free.
+    """
+    digest = hashlib.blake2b(name.casefold().encode("utf-8"), digest_size=8).digest()
+    mod_id = -1 - int.from_bytes(digest, "big") % _LOCAL_ID_LIMIT
+    while mod_id in taken:
+        mod_id -= 1
+    return mod_id
 
 
 def _thumbnail_url(catalog: Catalog, mod_id: int) -> str | None:

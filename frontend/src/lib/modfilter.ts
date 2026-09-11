@@ -68,10 +68,13 @@ export interface ModFilter {
 
 /**
  * A catalog entry counts as compatible when the catalog knows a version for it
- * under the SPT version of the game directory.
+ * under the SPT version of the game directory. A mod the player installed
+ * themselves always counts: nothing published a constraint to judge it by, and
+ * the rule exists to keep mods without one out of the Forge list, not to hide
+ * a mod that is already installed.
  */
 export function isCompatible(entry: CatalogEntry): boolean {
-	return entry.latest_version !== null;
+	return entry.local || entry.latest_version !== null;
 }
 
 export function isFavorite(entry: CatalogEntry, favorites: ReadonlySet<number>): boolean {

@@ -25,6 +25,7 @@ import { goto } from '$app/navigation';
 import type {
 	FikaSettings,
 	ImportDiff,
+	LocalSourceInfo,
 	ModSet,
 	SptCompatibilityReport,
 	SptReleaseInfo,
@@ -35,7 +36,13 @@ import { invalidate } from '$lib/viewcache';
 
 import Page from '../../src/routes/settings/+page.svelte';
 import { apiError } from '../support/errors';
-import { modSet, sptReleaseList } from '../support/factories';
+import {
+	localSource,
+	modInfo,
+	modSet,
+	offeredMod,
+	sptReleaseList
+} from '../support/factories';
 import { rpc } from '../support/rpc';
 
 vi.mock('$lib/api/transport', async (importOriginal) => {
@@ -94,10 +101,12 @@ interface MountStubs {
 	releases?: SptReleaseList;
 	fika?: FikaSettings;
 	sets?: ModSet[];
+	localSources?: LocalSourceInfo[];
 }
 
 function stubMount(stubs: MountStubs = {}): void {
 	rpc.returns('list_mod_sets', { sets: stubs.sets ?? [], bindings: [] });
+	rpc.returns('list_local_sources', stubs.localSources ?? []);
 	rpc.returns(
 		'get_fika_settings',
 		stubs.fika ?? { role: 'none', host_address: '', base_url: '' }
@@ -155,7 +164,7 @@ afterEach(() => {
 });
 
 describe('mounting the page', () => {
-	it('asks the backend for the mod sets, the Fika settings and the SPT releases only', async () => {
+	it('asks the backend for the mod sets, the local mod folders, the Fika settings and the SPT releases only', async () => {
 		stubMount();
 		render(Page);
 
@@ -163,6 +172,7 @@ describe('mounting the page', () => {
 		await vi.waitFor(() => {
 			expect(rpc.names().sort()).toEqual([
 				'get_fika_settings',
+				'list_local_sources',
 				'list_mod_sets',
 				'list_spt_releases'
 			]);
@@ -1323,6 +1333,302 @@ describe('the mod sets section', () => {
 		render(Page);
 
 		expect(await screen.findByText('The sets file is broken.')).toBeInTheDocument();
+	});
+});
+
+describe('the local mods section', () => {
+	const FOLDER = '/home/me/projects/MyMod';
+
+	/** `Remove` and `Install` are labels of other sections too, so tests scope them. */
+	async function localSection(): Promise<HTMLElement> {
+		const heading = await screen.findByRole('heading', { name: 'Local mods' });
+		const section = heading.closest('section');
+		if (section === null) {
+			throw new Error('the local mods section is not rendered');
+		}
+		return section;
+	}
+
+	it('says so when no folder was named yet', async () => {
+		stubMount();
+		render(Page);
+
+		expect(await screen.findByText('No folders yet.')).toBeInTheDocument();
+	});
+
+	it('states that the list of folders and the installed mods are separate things', async () => {
+		stubMount();
+		render(Page);
+
+		expect(
+			within(await localSection()).getByText(/leaves the mods it installed in place/)
+		).toBeInTheDocument();
+	});
+
+	it('registers the folder the directory picker returned', async () => {
+		const user = userEvent.setup();
+		stubMount();
+		vi.mocked(open).mockResolvedValue(FOLDER);
+		rpc.returns('add_local_source', [localSource({ folder: FOLDER })]);
+		render(Page);
+
+		await user.click(
+			within(await localSection()).getByRole('button', { name: 'Add a folder…' })
+		);
+
+		expect(vi.mocked(open).mock.calls).toEqual([[{ directory: true, multiple: false }]]);
+		expect(rpc.payloads('add_local_source')).toEqual([{ path: GAME_DIR, folder: FOLDER }]);
+	});
+
+	it('asks for nothing when the directory picker was cancelled', async () => {
+		const user = userEvent.setup();
+		stubMount();
+		vi.mocked(open).mockResolvedValue(null);
+		render(Page);
+
+		await user.click(
+			within(await localSection()).getByRole('button', { name: 'Add a folder…' })
+		);
+
+		expect(rpc.payloads('add_local_source')).toEqual([]);
+	});
+
+	it('says a folder has built nothing yet and offers no install for it', async () => {
+		stubMount({ localSources: [localSource({ folder: FOLDER })] });
+		render(Page);
+
+		const section = await localSection();
+		expect(within(section).getByText('Nothing built yet')).toBeInTheDocument();
+		expect(within(section).queryByRole('button', { name: 'Install' })).toBeNull();
+	});
+
+	it('lists every mod a folder offers with its own install button', async () => {
+		stubMount({
+			localSources: [
+				localSource({
+					folder: FOLDER,
+					mods: [
+						offeredMod({ name: 'BossSkullTooltips', version: '1.0.0' }),
+						offeredMod({ name: 'DynamicGoons', version: '2.1.0' })
+					]
+				})
+			]
+		});
+		render(Page);
+
+		const section = await localSection();
+		expect(within(section).getByText('BossSkullTooltips')).toBeInTheDocument();
+		expect(within(section).getByText('DynamicGoons')).toBeInTheDocument();
+		expect(within(section).getAllByRole('button', { name: 'Install' })).toHaveLength(2);
+	});
+
+	it('installs the mod whose button was pressed, not the newest archive', async () => {
+		const user = userEvent.setup();
+		stubMount({
+			localSources: [
+				localSource({
+					folder: FOLDER,
+					mods: [
+						offeredMod({ name: 'BossSkullTooltips', version: '1.0.0' }),
+						offeredMod({ name: 'DynamicGoons', version: '2.1.0' })
+					]
+				})
+			]
+		});
+		rpc.returns('install_local_source', {
+			operation_id: 'op-2',
+			mod: modInfo({ name: 'DynamicGoons', version: '2.1.0' }),
+			archive: `${FOLDER}/build/DynamicGoons-2.1.0.zip`,
+			replaced: false,
+			files: [],
+			warnings: []
+		});
+		render(Page);
+
+		const section = await localSection();
+		const rows = within(section).getAllByRole('listitem');
+		const goons = rows.filter((row) => within(row).queryByText('DynamicGoons') !== null).at(-1);
+		await user.click(within(goons as HTMLElement).getByRole('button', { name: 'Install' }));
+
+		expect(rpc.payloads('install_local_source')).toEqual([
+			{
+				path: GAME_DIR,
+				folder: FOLDER,
+				mod: 'DynamicGoons',
+				operation_id: expect.any(String)
+			}
+		]);
+	});
+
+	it('names the version and the build time of every offered mod', async () => {
+		stubMount({
+			localSources: [
+				localSource({
+					folder: FOLDER,
+					mods: [offeredMod({ name: 'MyMod', version: '2.0.0' })]
+				})
+			]
+		});
+		render(Page);
+
+		expect(within(await localSection()).getByText(/2\.0\.0, built /)).toBeInTheDocument();
+	});
+
+	it('installs the newest build and reports the mod it put in place', async () => {
+		const user = userEvent.setup();
+		stubMount({
+			localSources: [localSource({ folder: FOLDER, mods: [offeredMod({ name: 'MyMod' })] })]
+		});
+		rpc.returns('install_local_source', {
+			operation_id: 'op-1',
+			mod: modInfo({ name: 'MyMod', version: '1.0.0' }),
+			archive: `${FOLDER}/build/MyMod-1.0.0.zip`,
+			replaced: false,
+			files: [],
+			warnings: []
+		});
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Install' }));
+
+		expect(rpc.payloads('install_local_source')).toEqual([
+			{ path: GAME_DIR, folder: FOLDER, mod: 'MyMod', operation_id: expect.any(String) }
+		]);
+		expect(await screen.findByText('MyMod 1.0.0 is installed.')).toBeInTheDocument();
+	});
+
+	it('calls the button a reinstall once that mod is installed', async () => {
+		stubMount({
+			localSources: [
+				localSource({
+					folder: FOLDER,
+					mods: [
+						offeredMod({
+							name: 'MyMod',
+							mod: modInfo({
+								name: 'MyMod',
+								version: '1.0.0',
+								forge_id: '',
+								forge_version_id: ''
+							})
+						})
+					]
+				})
+			]
+		});
+		render(Page);
+
+		expect(
+			within(await localSection()).getByRole('button', { name: 'Reinstall' })
+		).toBeEnabled();
+	});
+
+	it('takes a folder off the list and says the mods stay installed', async () => {
+		const user = userEvent.setup();
+		stubMount({
+			localSources: [localSource({ folder: FOLDER, mods: [offeredMod({ name: 'MyMod' })] })]
+		});
+		rpc.returns('remove_local_source', []);
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Remove' }));
+
+		expect(rpc.payloads('remove_local_source')).toEqual([{ path: GAME_DIR, folder: FOLDER }]);
+		expect(
+			await screen.findByText(
+				`${FOLDER} is off the list. The mods it installed stay installed.`
+			)
+		).toBeInTheDocument();
+	});
+
+	it('reports a mod the folder no longer offers when an install is asked for', async () => {
+		const user = userEvent.setup();
+		stubMount({
+			localSources: [localSource({ folder: FOLDER, mods: [offeredMod({ name: 'MyMod' })] })]
+		});
+		rpc.rejects(
+			'install_local_source',
+			apiError("That folder has not built 'MyMod'.", 'LOCAL_SOURCE_NOT_BUILT')
+		);
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Install' }));
+
+		expect(await screen.findByText("That folder has not built 'MyMod'.")).toBeInTheDocument();
+	});
+
+	it('reports a folder that cannot be registered', async () => {
+		const user = userEvent.setup();
+		stubMount();
+		vi.mocked(open).mockResolvedValue(FOLDER);
+		rpc.rejects('add_local_source', apiError('That folder does not exist.', 'INVALID_PATH'));
+		render(Page);
+
+		await user.click(
+			within(await localSection()).getByRole('button', { name: 'Add a folder…' })
+		);
+
+		expect(await screen.findByText('That folder does not exist.')).toBeInTheDocument();
+	});
+
+	it('reports a folder that cannot be taken off the list', async () => {
+		const user = userEvent.setup();
+		stubMount({ localSources: [localSource({ folder: FOLDER })] });
+		rpc.rejects('remove_local_source', apiError('The folder list is broken.', 'BAD_SOURCES'));
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Remove' }));
+
+		expect(await screen.findByText('The folder list is broken.')).toBeInTheDocument();
+	});
+
+	it('shows what a running install is doing', async () => {
+		const user = userEvent.setup();
+		stubMount({
+			localSources: [localSource({ folder: FOLDER, mods: [offeredMod({ name: 'MyMod' })] })]
+		});
+		let operationId = '';
+		let finish: (value: unknown) => void = () => undefined;
+		rpc.handle('install_local_source', (payload) => {
+			operationId = (payload as { operation_id: string }).operation_id;
+			return new Promise((resolve) => {
+				finish = resolve;
+			});
+		});
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Install' }));
+		await vi.waitFor(() => {
+			expect(rpc.subscribed(operationId)).toBe(true);
+		});
+		rpc.progress({
+			operation_id: operationId,
+			step: 'copy',
+			percent: 60,
+			message: 'copying 12 files'
+		});
+
+		expect(await screen.findByText('copying 12 files')).toBeInTheDocument();
+
+		finish({
+			operation_id: operationId,
+			mod: modInfo({ name: 'MyMod', version: '1.0.0' }),
+			archive: `${FOLDER}/build/MyMod-1.0.0.zip`,
+			replaced: false,
+			files: [],
+			warnings: []
+		});
+
+		expect(await screen.findByText('MyMod 1.0.0 is installed.')).toBeInTheDocument();
+		expect(rpc.subscribed(operationId)).toBe(false);
+	});
+
+	it('shows the failure message when the folders cannot be read', async () => {
+		stubMount();
+		rpc.rejects('list_local_sources', apiError('The folder list is broken.', 'BAD_SOURCES'));
+		render(Page);
+
+		expect(await screen.findByText('The folder list is broken.')).toBeInTheDocument();
 	});
 });
 

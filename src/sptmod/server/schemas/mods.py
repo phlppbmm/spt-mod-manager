@@ -172,12 +172,17 @@ class CatalogVersion(CoreModel):
 
 
 class CatalogEntry(CoreModel):
-    """A cached mod joined with the installed state of the game repository."""
+    """A cached mod joined with the installed state of the game repository.
+
+    ``local`` marks an entry standing for an installed mod the catalog knows
+    nothing about.
+    """
 
     mod: CatalogMod
     state: CatalogState
     installed_version: str | None
     latest_version: CatalogVersion | None
+    local: bool = False
 
 
 class SyncResult(CoreModel):

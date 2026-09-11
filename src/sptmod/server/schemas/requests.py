@@ -95,8 +95,6 @@ class InstallFromArchiveRequest(CoreModel):
     name_override: str | None = None
     version_override: str | None = None
     force: bool = False
-    forge_match: bool = False
-    db_path: Path | None = None
     operation_id: str | None = None
 
 

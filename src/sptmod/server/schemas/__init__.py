@@ -11,6 +11,16 @@ every one of them, so ``sptmod.server.schemas`` stays the single import site.
 from .base import (
     CoreModel,
 )
+from .localsources import (
+    AddLocalSourceRequest,
+    InstallLocalSourceRequest,
+    InstallLocalSourceResponse,
+    ListLocalSourcesRequest,
+    LocalInstallResult,
+    LocalSourceInfo,
+    OfferedMod,
+    RemoveLocalSourceRequest,
+)
 from .mods import (
     AdoptResult,
     BlockedUpdate,
@@ -143,6 +153,7 @@ from .runtime import (
 )
 
 __all__ = [
+    "AddLocalSourceRequest",
     "AdoptModRequest",
     "AdoptResult",
     "ApplyModSetRequest",
@@ -195,6 +206,8 @@ __all__ = [
     "InitResult",
     "InstallFromArchiveRequest",
     "InstallFromArchiveResponse",
+    "InstallLocalSourceRequest",
+    "InstallLocalSourceResponse",
     "InstallModRequest",
     "InstallModResponse",
     "InstallModResult",
@@ -208,10 +221,13 @@ __all__ = [
     "ListDirectoriesRequest",
     "ListFavoritesRequest",
     "ListHostProfilesRequest",
+    "ListLocalSourcesRequest",
     "ListModSetsRequest",
     "ListModsRequest",
     "ListProfilesRequest",
     "ListSptReleasesRequest",
+    "LocalInstallResult",
+    "LocalSourceInfo",
     "LocateDirectoryRequest",
     "LocatedDirectory",
     "ManualMod",
@@ -226,6 +242,7 @@ __all__ = [
     "ModSetExport",
     "ModSetOverview",
     "ModSetPlan",
+    "OfferedMod",
     "PlanEntry",
     "PlanFikaInstallRequest",
     "PlanModInstallRequest",
@@ -235,6 +252,7 @@ __all__ = [
     "ProfileResidue",
     "ProfileSummary",
     "ProgressEvent",
+    "RemoveLocalSourceRequest",
     "RemoveModRequest",
     "RemoveResult",
     "RenameModSetRequest",

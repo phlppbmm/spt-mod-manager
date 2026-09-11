@@ -68,6 +68,7 @@ function makeCatalogEntry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
 		state: 'available',
 		installed_version: null,
 		latest_version: makeCatalogVersion(),
+		local: false,
 		...overrides
 	};
 }
@@ -257,6 +258,23 @@ describe('updatableFromCatalog', () => {
 		const result = updatableFromCatalog(entries, installed);
 
 		expect(result.map((target) => target.name)).toEqual(expectedNames);
+	});
+
+	it('never offers a mod the player installed themselves', () => {
+		const own = makeCatalogEntry({
+			mod: makeCatalogMod({ id: -42, name: 'My Own Mod' }),
+			state: 'installed',
+			installed_version: '1.2.0',
+			latest_version: null,
+			local: true
+		});
+
+		const result = updatableFromCatalog(
+			[own],
+			[makeModInfo({ name: 'My Own Mod', forge_id: '' })]
+		);
+
+		expect(result).toEqual([]);
 	});
 
 	it('resolves the target name by Forge id, taking precedence over a name match', () => {

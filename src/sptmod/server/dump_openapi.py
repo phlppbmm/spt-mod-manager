@@ -77,6 +77,22 @@ ROUTES: Final[list[tuple[str, type[BaseModel], Any]]] = [
     ("bind_profile_set", schemas.BindProfileSetRequest, schemas.ModSetOverview),
     ("plan_mod_set", schemas.PlanModSetRequest, schemas.ModSetPlan),
     ("apply_mod_set", schemas.ApplyModSetRequest, schemas.ApplyModSetResponse),
+    ("add_local_source", schemas.AddLocalSourceRequest, list[schemas.LocalSourceInfo]),
+    (
+        "list_local_sources",
+        schemas.ListLocalSourcesRequest,
+        list[schemas.LocalSourceInfo],
+    ),
+    (
+        "remove_local_source",
+        schemas.RemoveLocalSourceRequest,
+        list[schemas.LocalSourceInfo],
+    ),
+    (
+        "install_local_source",
+        schemas.InstallLocalSourceRequest,
+        schemas.InstallLocalSourceResponse,
+    ),
     ("launch_profile", schemas.LaunchProfileRequest, schemas.LaunchProfileResponse),
     ("launch_status", schemas.LaunchStatusRequest, schemas.LaunchStatus),
     ("stop_game", schemas.StopGameRequest, schemas.StopResult),

@@ -165,7 +165,6 @@ def install(
                     version_override=mod_version,
                     force=force,
                     progress=_report_progress,
-                    forge_match=True,
                 )
                 _print_install(archive_result)
                 if not archive_result.mod.version:

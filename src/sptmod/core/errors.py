@@ -264,6 +264,18 @@ class ModSetIncompleteError(SptmodError):
         self.missing: list[str] = list(missing)
 
 
+class LocalSourceNotFoundError(SptmodError):
+    """The folder is not registered as a local mod source."""
+
+
+class LocalSourceNotBuiltError(SptmodError):
+    """A local mod source has no build to install yet.
+
+    A normal state of a freshly registered project folder, not damage the
+    user has to repair: only installing from it needs a build.
+    """
+
+
 class NotImplementedYetError(SptmodError):
     """The requested operation is wired but has no implementation yet."""
 

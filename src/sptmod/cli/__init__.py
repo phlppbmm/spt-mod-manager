@@ -12,10 +12,12 @@ from sptmod.cli.base import (
     callback,
     console,
     error_console,
+    local_app,
     main,
     spt_app,
 )
 from sptmod.cli.gamedir import init, version
+from sptmod.cli.local import local_add, local_install, local_list, local_remove
 from sptmod.cli.mods import (
     adopt,
     disable,
@@ -51,6 +53,11 @@ __all__ = [
     "init",
     "install",
     "list_mods",
+    "local_add",
+    "local_app",
+    "local_install",
+    "local_list",
+    "local_remove",
     "main",
     "remove",
     "rpc",

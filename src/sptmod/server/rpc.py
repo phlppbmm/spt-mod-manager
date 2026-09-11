@@ -261,6 +261,27 @@ RPC_FUNCTIONS: Final[dict[str, RpcSpec]] = {
         schemas.ApplyModSetResponse,
         operation_id=True,
     ),
+    "add_local_source": RpcSpec(
+        services.add_local_source,
+        schemas.AddLocalSourceRequest,
+        list[schemas.LocalSourceInfo],
+    ),
+    "list_local_sources": RpcSpec(
+        services.list_local_sources,
+        schemas.ListLocalSourcesRequest,
+        list[schemas.LocalSourceInfo],
+    ),
+    "remove_local_source": RpcSpec(
+        services.remove_local_source,
+        schemas.RemoveLocalSourceRequest,
+        list[schemas.LocalSourceInfo],
+    ),
+    "install_local_source": RpcSpec(
+        services.install_local_source,
+        schemas.InstallLocalSourceRequest,
+        schemas.InstallLocalSourceResponse,
+        operation_id=True,
+    ),
     "launch_profile": RpcSpec(
         services.launch_profile,
         schemas.LaunchProfileRequest,

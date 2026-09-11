@@ -32,6 +32,21 @@ pytest_plugins = [
 
 
 @pytest.fixture(autouse=True)
+def plain_cli_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the CLI render its help and error screens without terminal styling.
+
+    Rich styles its output whenever it believes something is watching, and a
+    continuous integration run is one of the things it believes that about: it
+    forces colour on when ``CI`` is set, so every assertion about what the CLI
+    prints reads escape sequences instead of the words. Declaring the terminal
+    dumb takes styling out of the picture, so the text a test matches is the
+    text a reader sees.
+    """
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def isolate_git_config(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     """Isolate every test from the developer machine's git configuration.
 

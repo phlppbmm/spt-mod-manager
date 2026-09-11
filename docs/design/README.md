@@ -11,9 +11,9 @@ Implemented in stage 1 (see "Frontend design system" in `../ARCHITECTURE.md`):
   bound to the mods filter, a sync button and the light/dark toggle; below it
   the nav row Mods / Profiles / History / Settings with the active entry as a
   filled pill.
-- Sub-navigation beside the content on Mods (All mods, Installed, Updates,
-  Favorites) and Profiles (one entry per profile). Settings keeps its own
-  section list linked by hash.
+- Sub-navigation beside the content on Profiles (one entry per profile).
+  Settings keeps its own section list linked by hash; Mods uses the
+  quick-filter tabs above the table instead.
 - Page headers with a title and up to two actions (primary and secondary).
 - Quick-filter tabs above the mod table: All, Installed, Updates, Favorites,
   New.

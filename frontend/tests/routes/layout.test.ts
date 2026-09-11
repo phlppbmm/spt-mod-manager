@@ -6,7 +6,9 @@
  * navigation, the two notices and the theme attribute of the document. Reason:
  * the shell decides which link is current, when it bothers the player with an
  * SPT or app-update notice, and it is the only place that turns the shared
- * sub-navigation state into markup.
+ * sub-navigation state into markup. The two pages that decide over that column
+ * are mounted beside the shell here, because whether a screen gets a left-hand
+ * column is only visible where the shell renders it.
  */
 
 import { render, screen, within } from '@testing-library/svelte';
@@ -17,10 +19,21 @@ import { createRawSnippet } from 'svelte';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { check } from '@tauri-apps/plugin-updater';
 
+import { clearFilter } from '$lib/filterstate';
+import { takeIntents } from '$lib/intents';
 import { setGameDir, setSubNav } from '$lib/shellstate';
+import { invalidate } from '$lib/viewcache';
 
+import ModsView from '$lib/components/ModsView.svelte';
 import Layout from '../../src/routes/+layout.svelte';
-import { sptReleaseList } from '../support/factories';
+import ProfilePage from '../../src/routes/profile/+page.svelte';
+import {
+	catalogEntry,
+	catalogMod,
+	launchStatus,
+	profileSummary,
+	sptReleaseList
+} from '../support/factories';
 import { setPageUrl } from '../support/pagestate';
 import { rpc } from '../support/rpc';
 
@@ -58,6 +71,50 @@ function mount(): void {
 	render(Layout, { props: { children: body } });
 }
 
+/**
+ * The mod list, with the answers it asks for on mount, as the mods page embeds
+ * it. It is rendered beside the shell rather than inside it, because the body
+ * snippet of the layout carries markup, not components.
+ */
+function mountModList(): void {
+	rpc.returns('browse_catalog', [catalogEntry({ mod: catalogMod({ id: 1, name: 'Alpha' }) })]);
+	rpc.returns('list_mods', []);
+	rpc.returns('list_favorites', { mod_ids: [] });
+	rpc.returns('list_spt_releases', sptReleaseList());
+	render(ModsView, {
+		props: {
+			path: GAME_DIR,
+			refreshKey: 0,
+			locked: false,
+			sptVersion: '4.1.0',
+			onbusy: () => undefined,
+			onupdatable: () => undefined
+		}
+	});
+}
+
+/** The profiles page with two readable profiles, beside the shell. */
+function mountProfiles(): void {
+	localStorage.setItem('sptmod.game_dir', GAME_DIR);
+	rpc.returns('list_profiles', [
+		profileSummary({ profile_id: 'aaa', file: 'aaa.json', nickname: 'Nikita' }),
+		profileSummary({ profile_id: 'bbb', file: 'bbb.json', nickname: 'Kolya' })
+	]);
+	rpc.returns('check_profiles', { residues: {}, warnings: [] });
+	rpc.returns('list_mods', []);
+	rpc.returns('list_mod_sets', { sets: [], bindings: [] });
+	rpc.returns('get_fika_settings', { role: 'none', host_address: '', base_url: '' });
+	rpc.returns('launch_status', launchStatus());
+	render(ProfilePage);
+}
+
+/** The labels of the section column, in the order the shell shows them. */
+function sectionLabels(nav: HTMLElement): string[] {
+	return within(nav)
+		.getAllByRole('button')
+		.map((item) => item.textContent?.trim() ?? '');
+}
+
 /** The updater plugin only ever has its version and its notes read here. */
 function stubUpdate(version: string): void {
 	vi.mocked(check).mockResolvedValue({
@@ -74,6 +131,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	rpc.reset();
+	invalidate(GAME_DIR);
+	clearFilter();
+	takeIntents(['snapshot', 'launch', 'sync', 'update-all', 'change-folder', 'reveal-mod']);
 	setGameDir(null);
 	setSubNav([], null);
 	vi.mocked(check).mockReset();
@@ -120,6 +180,44 @@ describe('the section navigation', () => {
 		expect(within(nav).getByRole('button', { name: 'Nikita' })).toHaveAttribute(
 			'aria-current',
 			'true'
+		);
+	});
+
+	it('gives the mod list no column, not even the one the page before it left', async () => {
+		setPageUrl('http://localhost/');
+		mount();
+		setSubNav([{ id: 'aaa', label: 'Nikita' }], 'aaa');
+		await screen.findByRole('navigation', { name: 'Mods' });
+
+		mountModList();
+
+		expect(await screen.findByText('Alpha')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Favorites' })).toBeInTheDocument();
+		expect(screen.queryByRole('navigation', { name: 'Mods' })).toBeNull();
+	});
+
+	it('lists the profiles of the Profiles page and follows the one its column picks', async () => {
+		const user = userEvent.setup();
+		mountProfiles();
+		mount();
+
+		const nav = await screen.findByRole('navigation', { name: 'Profiles' });
+		await vi.waitFor(() => {
+			expect(sectionLabels(nav)).toEqual(['Nikita', 'Kolya']);
+		});
+		expect(within(nav).getByRole('button', { name: 'Nikita' })).toHaveAttribute(
+			'aria-current',
+			'true'
+		);
+
+		await user.click(within(nav).getByRole('button', { name: 'Kolya' }));
+
+		expect(within(nav).getByRole('button', { name: 'Kolya' })).toHaveAttribute(
+			'aria-current',
+			'true'
+		);
+		expect(within(nav).getByRole('button', { name: 'Nikita' })).not.toHaveAttribute(
+			'aria-current'
 		);
 	});
 });

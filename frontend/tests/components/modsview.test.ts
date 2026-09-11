@@ -337,6 +337,31 @@ describe('quick tabs', () => {
 		expect(rowNames()).toEqual(['Alpha']);
 	});
 
+	it('narrows the rows to the mods a newer version is out for', async () => {
+		const user = userEvent.setup();
+		const outdated = catalogEntry({
+			mod: catalogMod({ id: 3, name: 'Gamma' }),
+			state: 'update_available',
+			installed_version: '1.0.0',
+			latest_version: catalogVersion({ version: '2.0.0' })
+		});
+		stubView({
+			catalog: [alpha, beta, outdated],
+			mods: [modInfo({ name: 'gamma-trailer', forge_id: '3', state: 'installed' })]
+		});
+		mount();
+
+		await screen.findByLabelText('Select Alpha');
+		await user.click(within(quickTabs()).getByRole('button', { name: 'Updates' }));
+
+		expect(await screen.findByText('1 result')).toBeInTheDocument();
+		expect(rowNames()).toEqual(['Gamma']);
+		expect(within(quickTabs()).getByRole('button', { name: 'Updates' })).toHaveAttribute(
+			'aria-current',
+			'page'
+		);
+	});
+
 	it('leaves no row when nothing was seen inside the new-mods window', async () => {
 		const user = userEvent.setup();
 		stubView();

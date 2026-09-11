@@ -1431,7 +1431,8 @@ there lists what is implemented and what is not. What exists:
   cached `list_profiles` view the Profiles page fills, and turns an entry into
   a route change, an intent, a filter reset or the theme toggle.
 - `SubNav` — the left column the layout renders when a page publishes entries;
-  a click emits the selection back to that page.
+  a click emits the selection back to that page. Only Profiles publishes
+  entries; the mod list relies on `QuickTabs` alone and keeps the store empty.
 - `PageHeader` — title, optional subtitle, and the `aside`, `secondary` and
   `primary` action snippets.
 - `QuickTabs` — the underlined tab row All / Installed / Updates / Favorites /
@@ -1505,8 +1506,10 @@ there lists what is implemented and what is not. What exists:
 ### Mods view behaviour
 
 - `ModsView` mirrors `filterstate` into local state and writes changes back,
-  publishes the sub-nav entries with the active quick tab and the visible rows
-  for the command palette, and enables the top-bar search while it is mounted.
+  publishes the visible rows for the command palette, and enables the top-bar
+  search while it is mounted. It drives the tabs through `QuickTabs` alone and
+  keeps the sub-nav store empty, clearing it on mount and on teardown, so a
+  column published by a page visited earlier cannot leak onto the mod list.
 - A filter change prunes the selection to the rows that stay visible, so a bulk
   action can never touch a mod the user cannot see.
 - Bulk actions reuse the per-row RPCs `enable_mod`, `disable_mod` and

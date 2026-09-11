@@ -35,7 +35,6 @@
 		applyQuickTab,
 		installableVersions,
 		pillDefinitions,
-		QUICK_TABS,
 		type QuickTabId
 	} from '$lib/filterpills';
 	import { filtersEqual, getFilter, setFilter, subscribeFilter } from '$lib/filterstate';
@@ -47,12 +46,7 @@
 		type BulkActionId,
 		type BulkProgress
 	} from '$lib/selection';
-	import {
-		onSubNavSelect,
-		setCommandMods,
-		setSearchEnabled,
-		setSubNav
-	} from '$lib/shellstate';
+	import { setCommandMods, setSearchEnabled, setSubNav } from '$lib/shellstate';
 	import { updatableFromCatalog, type UpdateTarget } from '$lib/updateall';
 	import { cached, invalidate } from '$lib/viewcache';
 
@@ -66,13 +60,6 @@
 	}
 
 	let { path, refreshKey, locked, sptVersion, onbusy, onupdatable }: Props = $props();
-
-	const SUB_NAV = [
-		{ id: 'all', label: 'All mods' },
-		{ id: 'installed', label: 'Installed' },
-		{ id: 'updates', label: 'Updates' },
-		{ id: 'favorites', label: 'Favorites' }
-	];
 
 	const busyIds = new Set<number>();
 	const restored = getFilter();
@@ -158,19 +145,14 @@
 
 	onMount(() => {
 		setSearchEnabled(true);
+		setSubNav([], null);
 		const unsubscribeFilter = subscribeFilter(adopt);
-		const unsubscribeSubNav = onSubNavSelect(selectTab);
 		return () => {
 			setSearchEnabled(false);
 			setSubNav([], null);
 			setCommandMods([]);
 			unsubscribeFilter();
-			unsubscribeSubNav();
 		};
-	});
-
-	$effect(() => {
-		setSubNav(SUB_NAV, activeQuickTab(filter));
 	});
 
 	$effect(() => {
@@ -213,13 +195,6 @@
 		search = next.search;
 		judgedVersion = next.sptVersion;
 		setFilter(next);
-	}
-
-	function selectTab(id: string): void {
-		const tab = QUICK_TABS.find((entry) => entry.id === id);
-		if (tab !== undefined) {
-			setFilterAndState(applyQuickTab(filter, tab.id));
-		}
 	}
 
 	function pickTab(tab: QuickTabId): void {

@@ -18,11 +18,16 @@ class OfferedMod(CoreModel):
 
 
 class LocalSourceInfo(CoreModel):
-    """A registered project folder with the mods it offers right now."""
+    """A registered project folder with the mods it offers right now.
+
+    ``installed`` names the mods this folder put into the game directory, the
+    ones removing the folder uninstalls.
+    """
 
     folder: Path
     added_at: str
     mods: list[OfferedMod] = []
+    installed: list[ModInfo] = []
 
 
 class LocalInstallResult(CoreModel):

@@ -124,7 +124,8 @@ def install_from_archive(
     ``commit``
         One commit ``mod: <name> <version>`` with the full set of mod trailers,
         ``Mod-State: installed`` and ``Mod-Source`` set to the archive file
-        name, or to ``source`` where the caller passes one.
+        name, or to ``source`` where the caller passes one: the Forge release
+        link for a Forge install, the project folder for a local one.
 
     On commit failure, newly-copied files and empty parent directories are
     rolled back. Pre-existing files that were overwritten are not restored;

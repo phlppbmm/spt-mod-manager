@@ -4,8 +4,10 @@ Covers ``install_local_source``: the newest build of the named mod lands in the
 game directory, a build installed earlier is taken out before the new one goes
 in -- whether or not the version changed -- a folder holding several mods
 installs the one that was asked for, a folder that has built nothing is refused
-in plain language, and -- the property this whole feature stands on -- a mod
-installed this way is never linked to a Forge mod, not even when the cached
+in plain language, an installed mod records the folder it came from and is
+paired with a build of that folder even after a rename, and -- the property this
+whole feature stands on -- a mod installed this way is never linked to a Forge
+mod, not even when the cached
 catalog holds a mod of exactly that name and version. Every call passes the
 ``local_source_store`` fixture as its ``store_path``.
 """
@@ -406,6 +408,90 @@ def test_installing_from_an_unregistered_folder_says_it_is_not_registered(
         services.install_local_source(
             clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
         )
+
+
+# --- the folder a mod came from ---------------------------------------------
+
+
+def test_an_installed_mod_records_the_folder_it_came_from(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """The folder is the only record of where such a mod came from: if the
+    install kept the archive file name instead, this fails and removing the
+    folder could not find its mods again."""
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0")
+
+    result = services.install_local_source(
+        clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+    )
+
+    assert result.mod.source == str(folder.resolve())
+
+
+def test_a_build_that_renamed_the_mod_replaces_the_mod_installed_before(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """A mod under development gets renamed. If the install paired the build with
+    an installed mod by name, this fails: the old name would stay installed next
+    to the new one, twice the same mod."""
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0", mtime=_OLD)
+    services.install_local_source(
+        clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+    )
+    (folder / "build" / "MyMod-1.0.0.zip").unlink()
+    write_build(folder, "Renamed-1.1.0.zip", mod_name="Renamed", version="1.1.0", mtime=_NEW)
+
+    result = services.install_local_source(
+        clean_repo.path, folder, "Renamed", store_path=local_source_store
+    )
+
+    assert result.replaced
+    assert [mod.name for mod in services.list_mods(clean_repo.path)] == ["Renamed"]
+
+
+def test_a_renamed_mod_is_listed_as_the_installed_state_of_its_build(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """The listing pairs the same way the install does: if it went by name, this
+    fails because the renamed build would read as not installed while its mod
+    sits in the game directory."""
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0", mtime=_OLD)
+    services.install_local_source(
+        clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+    )
+    (folder / "build" / "MyMod-1.0.0.zip").unlink()
+    write_build(folder, "Renamed-1.1.0.zip", mod_name="Renamed", version="1.1.0", mtime=_NEW)
+
+    sources = services.list_local_sources(clean_repo.path, store_path=local_source_store)
+
+    offered = sources[0].mods[0]
+    assert offered.name == "Renamed"
+    assert offered.mod is not None
+    assert offered.mod.name == _MOD_NAME
+
+
+def test_a_mod_of_the_same_name_from_elsewhere_is_no_build_of_this_folder(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """Only what this folder installed is its own: if the listing paired by name
+    alone, this fails because a mod installed from an archive would read as the
+    installed state of this folder's build."""
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0")
+    other = tmp_path / "downloads"
+    other.mkdir()
+    services.install_from_archive(
+        clean_repo.path,
+        write_build(other, "MyMod-9.9.9.zip", mod_name=_MOD_NAME, version="9.9.9"),
+    )
+
+    sources = services.list_local_sources(clean_repo.path, store_path=local_source_store)
+
+    assert sources[0].mods[0].mod is None
+    assert sources[0].installed == []
 
 
 # --- no Forge linkage -------------------------------------------------------

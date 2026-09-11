@@ -16,11 +16,11 @@ from sptmod.core import services
 # What a folder that has built nothing yet reads as, everywhere it is listed.
 NOTHING_BUILT = "nothing built yet"
 
-# Removing a folder from the list and removing the mod it installed are two
-# separate things; both surfaces say so where the user does either.
-SEPARATE_FROM_THE_MOD = (
-    "The mod it installed stays in place. Removing a mod never takes its "
-    "folder off this list either."
+# Taking a folder off the list uninstalls what it installed, while removing a
+# mod on its own leaves its folder registered; both surfaces say so.
+REMOVAL_UNINSTALLS = (
+    "The mods it installed were uninstalled with it. Removing a mod on its "
+    "own never takes its folder off this list."
 )
 
 
@@ -72,11 +72,14 @@ def local_remove(
         Path, typer.Argument(metavar="FOLDER", help="Registered project folder.")
     ],
 ) -> None:
-    """Take a folder off the list of folders you build mods in."""
+    """Take a folder off the list of folders you build mods in.
+
+    The mods installed from that folder are uninstalled with it.
+    """
     with _handled():
         sources = services.remove_local_source(Path.cwd(), folder)
         console.print(f"{folder} is no longer a local mod folder", markup=False)
-        console.print(SEPARATE_FROM_THE_MOD, markup=False)
+        console.print(REMOVAL_UNINSTALLS, markup=False)
         console.print(_source_table(sources))
 
 

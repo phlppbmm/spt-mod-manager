@@ -4,7 +4,8 @@ Every call passes the ``local_source_store`` fixture (a file under ``tmp_path``)
 as the ``store_path`` seam, so the developer's real ``localsources.json`` is
 never touched. Covers ``add_local_source``, ``list_local_sources`` and
 ``remove_local_source`` against a real store file, the rule that resolves a
-folder to the build it installs from, and the malformed-document branches of
+folder to the build it installs from, the mods a folder's removal uninstalls,
+and the malformed-document branches of
 the underlying store, reached the way a caller reaches them: through the public
 service functions with a hand-written store file.
 """
@@ -128,12 +129,13 @@ def test_remove_local_source_drops_it_from_the_list(
     assert [source.folder for source in remaining] == [kept]
 
 
-def test_remove_local_source_leaves_the_installed_mod_alone(
+def test_remove_local_source_uninstalls_the_mods_it_installed(
     clean_repo: Repo, local_source_store: Path, tmp_path: Path
 ) -> None:
-    """The list of folders and the installed mods are separate things: if the
-    removal touched the game directory, this fails because the mod installed
-    from that folder would no longer be installed."""
+    """Nothing may be left behind with no record of where it came from: if the
+    removal only dropped the folder from the list, this fails because the mod it
+    installed would still be installed and its files still in the game
+    directory."""
     folder = _project(tmp_path)
     write_build(folder, "MyMod-1.0.0.zip", mod_name="MyMod")
     services.add_local_source(clean_repo.path, folder, store_path=local_source_store)
@@ -143,7 +145,86 @@ def test_remove_local_source_leaves_the_installed_mod_alone(
 
     services.remove_local_source(clean_repo.path, folder, store_path=local_source_store)
 
-    assert [mod.name for mod in services.list_mods(clean_repo.path)] == ["MyMod"]
+    assert services.list_mods(clean_repo.path) == []
+    assert not (clean_repo.path / "SPT/user/mods/MyMod").exists()
+
+
+def test_remove_local_source_leaves_the_mods_of_other_folders_alone(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """If the removal went by name or took every local mod, this fails: the mod
+    of the folder that stays registered would be uninstalled too."""
+    dropped = _project(tmp_path, "MyMod")
+    kept = _project(tmp_path, "OtherMod")
+    write_build(dropped, "MyMod-1.0.0.zip", mod_name="MyMod")
+    write_build(kept, "OtherMod-1.0.0.zip", mod_name="OtherMod")
+    for folder in (dropped, kept):
+        services.add_local_source(clean_repo.path, folder, store_path=local_source_store)
+        services.install_local_source(
+            clean_repo.path, folder, folder.name, store_path=local_source_store
+        )
+
+    services.remove_local_source(clean_repo.path, dropped, store_path=local_source_store)
+
+    assert [mod.name for mod in services.list_mods(clean_repo.path)] == ["OtherMod"]
+
+
+def test_remove_local_source_also_uninstalls_a_mod_no_longer_offered(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """A build can disappear from the folder after the install. If the removal
+    only went through what the folder offers now, this fails with the mod still
+    installed and nothing recording where it came from."""
+    folder = _project(tmp_path)
+    archive = write_build(folder, "MyMod-1.0.0.zip", mod_name="MyMod")
+    services.add_local_source(clean_repo.path, folder, store_path=local_source_store)
+    services.install_local_source(
+        clean_repo.path, folder, "MyMod", store_path=local_source_store
+    )
+    archive.unlink()
+
+    services.remove_local_source(clean_repo.path, folder, store_path=local_source_store)
+
+    assert services.list_mods(clean_repo.path) == []
+
+
+def test_a_listing_names_the_mods_a_removal_would_uninstall(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """The surfaces confirm a removal by naming those mods. If the listing left
+    out a mod the folder no longer offers a build of, this fails and the
+    confirmation would understate what the removal does."""
+    folder = _project(tmp_path)
+    archive = write_build(folder, "MyMod-1.0.0.zip", mod_name="MyMod")
+    services.add_local_source(clean_repo.path, folder, store_path=local_source_store)
+    services.install_local_source(
+        clean_repo.path, folder, "MyMod", store_path=local_source_store
+    )
+    archive.unlink()
+
+    sources = services.list_local_sources(clean_repo.path, store_path=local_source_store)
+
+    assert [mod.name for mod in sources[0].installed] == ["MyMod"]
+    assert sources[0].mods == []
+
+
+def test_a_removed_mod_is_no_longer_named_as_one_a_removal_uninstalls(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """Only active mods can be uninstalled: if the listing named a mod that was
+    already removed by hand, this fails and the removal would promise to take out
+    something that is gone."""
+    folder = _project(tmp_path)
+    write_build(folder, "MyMod-1.0.0.zip", mod_name="MyMod")
+    services.add_local_source(clean_repo.path, folder, store_path=local_source_store)
+    services.install_local_source(
+        clean_repo.path, folder, "MyMod", store_path=local_source_store
+    )
+    services.remove_mod(clean_repo.path, "MyMod")
+
+    sources = services.list_local_sources(clean_repo.path, store_path=local_source_store)
+
+    assert sources[0].installed == []
 
 
 def test_removing_the_mod_leaves_the_folder_registered(

@@ -31,6 +31,7 @@ from sptmod.core.localsources import (
     source_key,
 )
 from sptmod.core.models import (
+    ACTIVE_STATES,
     Conflict,
     ModInfo,
     Progress,
@@ -55,9 +56,9 @@ class OfferedMod:
     """One mod a project folder offers, in its newest build.
 
     ``name`` and ``version`` are what the archive itself declares, the same
-    source the install commit takes them from; ``mod`` is the installed mod of
-    that name, in whatever state the installation has it, and empty while
-    there is none.
+    source the install commit takes them from; ``mod`` is the mod this folder
+    installed from this build, in whatever state the installation has it, and
+    empty while there is none.
     """
 
     name: str
@@ -72,12 +73,15 @@ class LocalSourceInfo:
     """A registered project folder with the mods it offers right now.
 
     ``mods`` is empty while the folder has built nothing sptmod can read as a
-    mod -- a normal state, not a failure.
+    mod -- a normal state, not a failure. ``installed`` holds the mods this
+    folder put into the game directory, including those it offers no build of
+    any more: those are the mods removing the folder uninstalls.
     """
 
     folder: Path
     added_at: str
     mods: list[OfferedMod] = field(default_factory=list[OfferedMod])
+    installed: list[ModInfo] = field(default_factory=list[ModInfo])
 
 
 @dataclass(frozen=True)
@@ -160,21 +164,27 @@ def list_local_sources(
 def remove_local_source(
     path: Path, folder: Path, *, store_path: Path | None = None
 ) -> list[LocalSourceInfo]:
-    """Stop treating ``folder`` as a local mod source.
+    """Stop treating ``folder`` as a local mod source and uninstall its mods.
 
-    The mods this source installed stay installed; nothing in the game
-    directory is touched.
+    Every mod installed from this folder is taken out of the game directory
+    first: nothing that came from the folder is left behind with no record of
+    where it came from.
 
     Raises:
         LocalSourceNotFoundError: ``folder`` is not registered.
         InvalidMetadataError: the stored folders cannot be read.
         NotAGameDirError: ``path`` is no SPT game directory.
+        DirtyTreeError: the game folder holds files sptmod does not manage.
+        GameRunningError: the SPT server or client is running.
+        OperationInProgressError: another operation holds the game directory.
         GitError: git failed.
         OSError: the local source file cannot be written.
     """
     store = store_path or default_local_sources_path()
     sources = load_sources(store)
     source = _require(sources, folder)
+    for installed in _source_mods(list_mods(path), source.folder):
+        remove_mod(path, installed.name)
     remaining = [item for item in sources if item is not source]
     save_sources(store, remaining)
     return _enriched(path, remaining)
@@ -194,7 +204,9 @@ def install_local_source(
     ``build`` folder, so a rebuild is installed without anyone naming a file.
     Where the mod is currently active, it is taken out first and the new build
     installed after it: what the folder offers now replaces what is installed,
-    whether or not the version, the file names or the file count changed. The
+    whether or not the version, the name, the file names or the file count
+    changed. The mod is recorded as coming from this folder, so removing the
+    folder later uninstalls it again. The
     installed mod is never linked to a Forge mod, so a later update never
     offers to overwrite a fork with the release it was forked from.
 
@@ -233,10 +245,13 @@ def install_local_source(
             f"{source.folder} has not built {mod!r}: there is no archive of it "
             f"in its {BUILD_DIR_NAME} folder"
         )
-    installed = _installed_mod(list_mods(path), build.name)
+    paired = _paired_mods(offered, list_mods(path), source.folder)
+    installed = paired.get(build.name.casefold())
     if installed is not None:
         remove_mod(path, installed.name)
-    result = install_from_archive(path, build.archive, progress=progress)
+    result = install_from_archive(
+        path, build.archive, progress=progress, source=source_key(source.folder)
+    )
     return LocalInstallResult(
         mod=result.mod,
         archive=build.archive,
@@ -328,30 +343,63 @@ def _read_offer(archive: Path, layout: GameLayout) -> OfferedMod | None:
     )
 
 
-def _installed_mod(mods: Sequence[ModInfo], name: str) -> ModInfo | None:
-    """Return the mod named ``name``, if the installation has it."""
-    wanted = name.casefold()
-    return next((mod for mod in mods if mod.name.casefold() == wanted), None)
+def _source_mods(mods: Sequence[ModInfo], folder: Path) -> list[ModInfo]:
+    """Return the mods that were installed from ``folder``."""
+    key = source_key(folder)
+    return [mod for mod in mods if mod.source == key]
+
+
+def _paired_mods(
+    builds: Sequence[OfferedMod], mods: Sequence[ModInfo], folder: Path
+) -> dict[str, ModInfo]:
+    """Return the installed mod of each offered build, by case-folded name.
+
+    Only mods installed from ``folder`` are candidates, so a build never pairs
+    with a mod of the same name that came from somewhere else. A build pairs
+    with the mod of its name where there is one; where a single build and a
+    single mod of this folder are left over, those two are the same mod under
+    a new name, which is how a renamed mod is replaced instead of duplicated.
+    """
+    candidates = _source_mods(mods, folder)
+    paired: dict[str, ModInfo] = {}
+    for build in builds:
+        wanted = build.name.casefold()
+        match = next((mod for mod in candidates if mod.name.casefold() == wanted), None)
+        if match is not None:
+            paired[wanted] = match
+    open_builds = [build for build in builds if build.name.casefold() not in paired]
+    open_mods = [mod for mod in candidates if mod not in paired.values()]
+    if len(open_builds) == 1 and len(open_mods) == 1:
+        paired[open_builds[0].name.casefold()] = open_mods[0]
+    return paired
+
+
+def _source_info(
+    source: LocalSource, layout: GameLayout, mods: Sequence[ModInfo]
+) -> LocalSourceInfo:
+    """Return one source with the mods it offers and the mods it installed."""
+    builds = _offered_mods(source.folder, layout)
+    paired = _paired_mods(builds, mods, source.folder)
+    active = [mod for mod in mods if mod.state in ACTIVE_STATES]
+    return LocalSourceInfo(
+        folder=source.folder,
+        added_at=source.added_at,
+        mods=[
+            OfferedMod(
+                name=build.name,
+                version=build.version,
+                archive=build.archive,
+                built_at=build.built_at,
+                mod=paired.get(build.name.casefold()),
+            )
+            for build in builds
+        ],
+        installed=_source_mods(active, source.folder),
+    )
 
 
 def _enriched(path: Path, sources: Sequence[LocalSource]) -> list[LocalSourceInfo]:
     """Return every source with the mods it offers and their installed state."""
     layout = detect_layout(path)
     mods = list_mods(path, include_all=True)
-    return [
-        LocalSourceInfo(
-            folder=source.folder,
-            added_at=source.added_at,
-            mods=[
-                OfferedMod(
-                    name=build.name,
-                    version=build.version,
-                    archive=build.archive,
-                    built_at=build.built_at,
-                    mod=_installed_mod(mods, build.name),
-                )
-                for build in _offered_mods(source.folder, layout)
-            ],
-        )
-        for source in sources
-    ]
+    return [_source_info(source, layout, mods) for source in sources]

@@ -866,13 +866,17 @@ first, so every one of them can answer with the enriched list:
 |---|---|---|
 | `add_local_source(path, folder)` | register a project folder, idempotently | `InvalidPathError` |
 | `list_local_sources(path)` | every folder with the mods it offers | — |
-| `remove_local_source(path, folder)` | stop treating a folder as a source | `LocalSourceNotFoundError` |
+| `remove_local_source(path, folder)` | stop treating a folder as a source and uninstall the mods it installed | `LocalSourceNotFoundError`, every error a removal raises |
 | `install_local_source(path, folder, mod, progress=None)` | install the newest build of one offered mod | `LocalSourceNotFoundError`, `LocalSourceNotBuiltError`, every error an install raises |
 
 A listing reports per source: the folder, when it was registered, and one entry
 per offered mod carrying its declared name and version, the archive it resolves
-to, that archive's modification time, and the installed `ModInfo` of that name
-(in whatever state the installation has it) or none.
+to, that archive's modification time, and the `ModInfo` this folder installed
+from that build (in whatever state the installation has it) or none, plus the
+active mods installed from the folder, which a removal uninstalls. A build and
+an installed mod are paired by the `Mod-Source` trailer holding the folder path
+and then by name; a single unpaired build and a single unpaired mod of that
+folder are the same mod under a new name.
 `install_local_source` answers with the installed mod, its files, the warnings
 of the install, the archive it installed and whether it replaced an active
 build; a folder that offers no mod of the requested name raises
@@ -885,16 +889,17 @@ build; a folder that offers no mod of the requested name raises
 
 **Surfaces.** CLI group `sptmod local` (`cli/local.py`) with `add`, `list`,
 `remove` and `install FOLDER MOD`: `list` renders one table row per offered mod,
-and a folder that offers nothing reads as "nothing built yet"; `remove` prints
-both halves of the separation -- the mods it installed stay in place, and
-removing such a mod never takes its folder off the list. RPC routes
+and a folder that offers nothing reads as "nothing built yet"; `remove` uninstalls the mods
+that folder installed and says so, and states the other half -- removing such
+a mod on its own never takes its folder off the list. RPC routes
 `add_local_source`, `list_local_sources`, `remove_local_source` and
 `install_local_source` (the last one long-running, with `operation_id`).
 Frontend: four wrappers in `client.ts` and the "Local mods" section of the
 Settings page, which picks a folder with the directory dialog
 (`open({ directory: true, multiple: false })`), lists each folder with the mods
 it offers, their versions and build dates, an "Install"/"Reinstall" button per
-mod and "Remove" per folder, and states the same separation in its section text.
+mod and "Remove" per folder, which confirms in a dialog naming the mods the
+removal uninstalls, and says the same in its section text.
 
 ## Fika co-op
 

@@ -4955,7 +4955,7 @@
         "type": "object"
       },
       "LocalSourceInfo": {
-        "description": "A registered project folder with the mods it offers right now.",
+        "description": "A registered project folder with the mods it offers right now.\n\n``installed`` names the mods this folder put into the game directory, the\nones removing the folder uninstalls.",
         "properties": {
           "folder": {
             "format": "path",
@@ -4972,6 +4972,14 @@
               "$ref": "#/components/schemas/OfferedMod"
             },
             "title": "Mods",
+            "type": "array"
+          },
+          "installed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModInfo"
+            },
+            "title": "Installed",
             "type": "array"
           }
         },

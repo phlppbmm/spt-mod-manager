@@ -2393,6 +2393,9 @@ export interface components {
         /**
          * LocalSourceInfo
          * @description A registered project folder with the mods it offers right now.
+         *
+         *     ``installed`` names the mods this folder put into the game directory, the
+         *     ones removing the folder uninstalls.
          */
         LocalSourceInfo: {
             /**
@@ -2407,6 +2410,11 @@ export interface components {
              * @default []
              */
             mods: components["schemas"]["OfferedMod"][];
+            /**
+             * Installed
+             * @default []
+             */
+            installed: components["schemas"]["ModInfo"][];
         };
         /**
          * LocateDirectoryRequest

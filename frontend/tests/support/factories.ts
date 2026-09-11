@@ -154,6 +154,7 @@ export function localSource(overrides: Partial<LocalSourceInfo> = {}): LocalSour
 		folder: '/home/me/projects/MyMod',
 		added_at: '2026-09-11T12:00:00Z',
 		mods: [],
+		installed: [],
 		...overrides
 	};
 }

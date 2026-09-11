@@ -1356,12 +1356,12 @@ describe('the local mods section', () => {
 		expect(await screen.findByText('No folders yet.')).toBeInTheDocument();
 	});
 
-	it('states that the list of folders and the installed mods are separate things', async () => {
+	it('states that taking a folder off the list uninstalls the mods it installed', async () => {
 		stubMount();
 		render(Page);
 
 		expect(
-			within(await localSection()).getByText(/leaves the mods it installed in place/)
+			within(await localSection()).getByText(/uninstalls the mods it installed/)
 		).toBeInTheDocument();
 	});
 
@@ -1523,22 +1523,47 @@ describe('the local mods section', () => {
 		).toBeEnabled();
 	});
 
-	it('takes a folder off the list and says the mods stay installed', async () => {
+	it('names the mods a removal uninstalls before it takes the folder off', async () => {
 		const user = userEvent.setup();
 		stubMount({
-			localSources: [localSource({ folder: FOLDER, mods: [offeredMod({ name: 'MyMod' })] })]
+			localSources: [
+				localSource({
+					folder: FOLDER,
+					mods: [offeredMod({ name: 'MyMod' })],
+					installed: [modInfo({ name: 'MyMod', version: '1.0.0' })]
+				})
+			]
 		});
 		rpc.returns('remove_local_source', []);
 		render(Page);
 
 		await user.click(within(await localSection()).getByRole('button', { name: 'Remove' }));
 
+		const dialog = await screen.findByRole('dialog');
+		expect(within(dialog).getByText('MyMod 1.0.0')).toBeInTheDocument();
+		expect(rpc.payloads('remove_local_source')).toEqual([]);
+
+		await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
 		expect(rpc.payloads('remove_local_source')).toEqual([{ path: GAME_DIR, folder: FOLDER }]);
 		expect(
-			await screen.findByText(
-				`${FOLDER} is off the list. The mods it installed stay installed.`
-			)
+			await screen.findByText(`${FOLDER} is off the list. Uninstalled: MyMod.`)
 		).toBeInTheDocument();
+	});
+
+	it('takes a folder that installed nothing off the list after a plain confirmation', async () => {
+		const user = userEvent.setup();
+		stubMount({ localSources: [localSource({ folder: FOLDER })] });
+		rpc.returns('remove_local_source', []);
+		render(Page);
+
+		await user.click(within(await localSection()).getByRole('button', { name: 'Remove' }));
+		await user.click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' })
+		);
+
+		expect(rpc.payloads('remove_local_source')).toEqual([{ path: GAME_DIR, folder: FOLDER }]);
+		expect(await screen.findByText(`${FOLDER} is off the list.`)).toBeInTheDocument();
 	});
 
 	it('reports a mod the folder no longer offers when an install is asked for', async () => {
@@ -1578,6 +1603,9 @@ describe('the local mods section', () => {
 		render(Page);
 
 		await user.click(within(await localSection()).getByRole('button', { name: 'Remove' }));
+		await user.click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' })
+		);
 
 		expect(await screen.findByText('The folder list is broken.')).toBeInTheDocument();
 	});

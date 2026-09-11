@@ -189,11 +189,12 @@ def test_local_list_shows_every_mod_a_folder_offers(
     assert "Tooltips" in result.stdout
 
 
-def test_local_remove_says_the_installed_mod_stays(
+def test_local_remove_uninstalls_the_mod_and_says_so(
     fake_game_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """AC3 in the command line: if the wording were missing, this fails and a
-    user could read the removal as also uninstalling the mod."""
+    """Removing a folder takes its mods out with it: if the wording or the
+    uninstall were missing, this fails and the user would be left with a mod
+    nothing records the origin of."""
     clean_repo_at(fake_game_dir)
     monkeypatch.chdir(fake_game_dir)
     folder = _project(tmp_path)
@@ -204,9 +205,9 @@ def test_local_remove_says_the_installed_mod_stays(
     result = runner.invoke(app, ["local", "remove", str(folder)])
 
     assert result.exit_code == 0
-    assert "stays in place" in result.stdout
-    assert "never takes its" in result.stdout
-    assert (fake_game_dir / "SPT/user/mods/MyMod/package.json").is_file()
+    assert "uninstalled with it" in result.stdout
+    assert "folder off this list" in result.stdout
+    assert not (fake_game_dir / "SPT/user/mods/MyMod").exists()
 
 
 def test_local_remove_of_an_unregistered_folder_reports_it_on_stderr(

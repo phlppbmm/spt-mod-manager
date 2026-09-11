@@ -123,6 +123,7 @@
 	let localNote = $state('');
 	let localBusy = $state(false);
 	let localProgress: ProgressEvent | null = $state(null);
+	let pendingRemoval: LocalSourceInfo | null = $state(null);
 
 	let fikaRole: FikaRole = $state('none');
 	let fikaAddress = $state('');
@@ -291,21 +292,30 @@
 		}
 	}
 
-	async function forgetLocalSource(folder: string): Promise<void> {
-		if (path === null) {
+	async function forgetLocalSource(): Promise<void> {
+		const source = pendingRemoval;
+		if (path === null || source === null) {
 			return;
 		}
+		pendingRemoval = null;
 		localBusy = true;
 		localError = '';
 		localNote = '';
 		try {
-			localSources = await removeLocalSource(path, folder);
-			localNote = `${folder} is off the list. The mods it installed stay installed.`;
+			localSources = await removeLocalSource(path, source.folder);
+			localNote =
+				source.installed.length === 0
+					? `${source.folder} is off the list.`
+					: `${source.folder} is off the list. Uninstalled: ${uninstalledNames(source)}.`;
 		} catch (cause) {
 			localError = cause instanceof Error ? cause.message : String(cause);
 		} finally {
 			localBusy = false;
 		}
+	}
+
+	function uninstalledNames(source: LocalSourceInfo): string {
+		return source.installed.map((mod) => mod.name).join(', ');
 	}
 
 	async function installLocalBuild(folder: string, mod: string): Promise<void> {
@@ -1327,8 +1337,8 @@
 					A local mod is one you build yourself. Name the project folder once, and sptmod
 					offers every mod its "build" folder holds and installs the newest build of the
 					one you pick. It never builds anything itself. Taking a folder off this list
-					leaves the mods it installed in place, and removing such a mod leaves its folder
-					on the list.
+					uninstalls the mods it installed, while removing such a mod on its own leaves
+					its folder on the list.
 				</p>
 				{#if localSources.length === 0}
 					<p class="note">No folders yet.</p>
@@ -1342,7 +1352,7 @@
 										type="button"
 										class="btn-sm"
 										disabled={localBusy}
-										onclick={() => void forgetLocalSource(source.folder)}
+										onclick={() => (pendingRemoval = source)}
 									>
 										Remove
 									</button>
@@ -1652,6 +1662,32 @@
 		{#snippet actions()}
 			<button type="button" class="btn-primary" onclick={() => void installFika()}>
 				Install
+			</button>
+		{/snippet}
+	</Dialog>
+{/if}
+
+{#if pendingRemoval !== null}
+	<Dialog title="Take this folder off the list?" onclose={() => (pendingRemoval = null)}>
+		{#if pendingRemoval.installed.length === 0}
+			<p>{pendingRemoval.folder} is removed from the list. It installed no mod.</p>
+		{:else}
+			<p>These mods were installed from {pendingRemoval.folder} and are uninstalled with it:</p>
+			<ul class="offers">
+				{#each pendingRemoval.installed as installed (installed.name)}
+					<li><span class="name">{installed.name} {installed.version}</span></li>
+				{/each}
+			</ul>
+		{/if}
+
+		{#snippet actions()}
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={localBusy}
+				onclick={() => void forgetLocalSource()}
+			>
+				Remove
 			</button>
 		{/snippet}
 	</Dialog>

@@ -31,9 +31,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/OWNER/REPO/releases/latest/download/latest.json"
+        "https://github.com/phlppbmm/spt-mod-manager/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDMjBCQTkyMDVCRTM4QzYKUldUR09MNEZrcm9nSEIzSzJJTjlmNUJNeWpseFRKSmVIUjNWTGFwcDVZVnU0YVhoYktleFZDNDEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdFMDE5NTcwN0E4RjMxM0YKUldRL01ZOTZjSlVCZmw4RVVBS09XVzBmQUFGMElHRENJSGROaGdDQzdJbW11VEpRb3FvclJ1aWcK"
     }
   },
   "bundle": {

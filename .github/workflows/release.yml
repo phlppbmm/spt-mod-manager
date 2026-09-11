@@ -26,18 +26,27 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
-      - name: Refuse placeholder updater configuration
+      - name: Check the updater configuration
         shell: bash
         env:
           PLACEHOLDER_PUBKEY: dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDMjBCQTkyMDVCRTM4QzYKUldUR09MNEZrcm9nSEIzSzJJTjlmNUJNeWpseFRKSmVIUjNWTGFwcDVZVnU0YVhoYktleFZDNDEK
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           config=src-tauri/tauri.conf.json
-          if jq -e '.plugins.updater.endpoints[] | select(contains("OWNER/REPO"))' "$config" > /dev/null; then
-            echo "The updater endpoints still point at OWNER/REPO. Set the real repository before tagging a release." >&2
+          endpoint=$(jq -r '.plugins.updater.endpoints[0]' "$config")
+          # The installed app asks this URL for updates, so it has to name the repository the
+          # release is published to; a fork or a rename would otherwise update from elsewhere.
+          expected="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          if [ "$endpoint" != "$expected" ]; then
+            echo "The updater endpoint is $endpoint but this release publishes to $GITHUB_REPOSITORY; expected $expected." >&2
             exit 1
           fi
           if [ "$(jq -r '.plugins.updater.pubkey' "$config")" = "$PLACEHOLDER_PUBKEY" ]; then
             echo "The updater pubkey is still the throwaway placeholder key. Generate a real signing key pair, store the private key in TAURI_SIGNING_PRIVATE_KEY and put its public key into tauri.conf.json before tagging a release." >&2
+            exit 1
+          fi
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "The TAURI_SIGNING_PRIVATE_KEY secret is empty. Without it the bundler cannot sign the update artifacts and installed apps would reject the release." >&2
             exit 1
           fi
       - name: Check the tag matches the version
@@ -55,6 +64,11 @@ jobs:
           fi
           if jq -e 'has("version")' src-tauri/tauri.conf.json > /dev/null; then
             echo "src-tauri/tauri.conf.json declares a version key; it would override Cargo.toml and become a second source of truth. Remove it before tagging a release." >&2
+            exit 1
+          fi
+          frontend_version=$(jq -r '.version' frontend/package.json)
+          if [ "$frontend_version" != "$version" ]; then
+            echo "The frontend package version $frontend_version does not match the pyproject version $version." >&2
             exit 1
           fi
       - uses: astral-sh/setup-uv@v7

@@ -244,9 +244,12 @@ them with `pnpm gen:api` after changing service functions or request/response mo
 
 ## Release
 
-Bump the version in **both** `pyproject.toml` (`[project].version`) and `src-tauri/Cargo.toml`
-(`[package].version`); `tests/test_version_agreement.py` fails when they disagree.
-`src-tauri/tauri.conf.json` deliberately carries no `version` key and inherits the crate's.
+Bump the version in `pyproject.toml` (`[project].version`), `src-tauri/Cargo.toml`
+(`[package].version`) and `frontend/package.json`. `pyproject.toml` is the source of truth:
+`tests/test_version_agreement.py` asserts that `sptmod version` reports it, and
+`.github/workflows/release.yml` refuses to build a tag whose name, crate version or frontend
+package version disagrees with it. `src-tauri/tauri.conf.json` deliberately carries no `version`
+key and inherits the crate's; the workflow refuses a config that adds one.
 
 Then tag and push:
 
@@ -259,22 +262,27 @@ git push origin vX.Y.Z
 installers plus the updater manifest `latest.json` into a **draft** GitHub release. Publish that
 draft — the updater endpoint reads the latest published release.
 
-The workflow refuses to build when the one-time setup below is missing: it stops while
-`plugins.updater.endpoints` still names `OWNER/REPO` or `plugins.updater.pubkey` is still the
-placeholder key, and it stops when the tag is not `v` plus the `pyproject.toml` version.
+Before building, the workflow checks the updater configuration: `plugins.updater.endpoints` must
+name the repository the tag was pushed to, `plugins.updater.pubkey` must not be the placeholder key
+that was once committed here, and the `TAURI_SIGNING_PRIVATE_KEY` secret must be set. Each of those
+would otherwise produce installers that no installed app can update from.
+
+### Signing key
+
+Update packages must be signed, otherwise installed apps reject them. The key pair for this
+repository was generated with
+
+```sh
+cargo tauri signer generate -w _data/release/sptmod-updater.key -p ''    # empty password
+```
+
+and its public half is committed in `plugins.updater.pubkey`. The private half stays in
+`_data/release/sptmod-updater.key`, which is untracked — keep a copy offline. Without that key no
+future release can be signed for the apps already installed, and they can never update again.
 
 ### One-time setup before the first release
 
-Update packages must be signed, otherwise installed apps reject them:
-
-```sh
-cargo tauri signer generate -w ~/.tauri/sptmod.key    # empty password
-```
-
-- Keep `~/.tauri/sptmod.key` offline and **never commit it**. Without that key no future release can
-  be signed for the apps already installed, and they can never update again.
-- Paste the content of `~/.tauri/sptmod.key.pub` into `plugins.updater.pubkey` in
-  `src-tauri/tauri.conf.json`, replacing the placeholder key committed here.
-- Replace `OWNER/REPO` in `plugins.updater.endpoints` with the GitHub repository.
-- Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (the content of the key file) and
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty).
+- Create the GitHub repository named by `plugins.updater.endpoints` in `src-tauri/tauri.conf.json`
+  and add it as the `origin` remote.
+- Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (the whole content of
+  `_data/release/sptmod-updater.key`) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty).

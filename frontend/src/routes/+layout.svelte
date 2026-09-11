@@ -19,6 +19,7 @@
 	} from '$lib/theme';
 	import { checkForUpdate, installUpdate } from '$lib/updater';
 	import { runCheck, startupNotice } from '$lib/updatestate';
+	import { cached } from '$lib/viewcache';
 	import { isWindowMaximized, toggleMaximizeWindow } from '$lib/window';
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
@@ -83,15 +84,19 @@
 		updateNotice = startupNotice(state);
 	}
 
-	// The notice is a courtesy: when the release list cannot be fetched the
-	// shell stays quiet and the Settings page reports the failure instead.
+	// The one fetch of an app run: the release source is asked here, the views
+	// opened afterwards read what it answered from the cache. The notice is a
+	// courtesy: when the release list cannot be fetched the shell stays quiet
+	// and the Settings page reports the failure instead.
 	async function checkSptReleases(gameDir: string): Promise<void> {
 		if (checkedGameDir === gameDir) {
 			return;
 		}
 		checkedGameDir = gameDir;
 		try {
-			const list = await listSptReleases(gameDir);
+			const list = await cached(gameDir, 'list_spt_releases', [], () =>
+				listSptReleases(gameDir, true)
+			).refresh();
 			latestSpt = list.latest;
 			sptNotice = noticeFor(list, loadDismissedRelease());
 		} catch {

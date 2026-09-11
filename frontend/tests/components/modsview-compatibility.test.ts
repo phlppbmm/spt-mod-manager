@@ -164,7 +164,7 @@ describe('the versions the Compatibility pill offers', () => {
 		const popover = await openCompatibility(user);
 
 		expect(optionLabels(popover)).toEqual(['SPT 4.1.0', 'SPT 4.1.5', 'SPT 4.1.3', 'All versions']);
-		expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR }]);
+		expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR, refresh: false }]);
 	});
 
 	it('leaves out a release the manager cannot install', async () => {
@@ -311,7 +311,7 @@ describe('a version the game directory cannot install', () => {
 
 		await screen.findByLabelText('Select Alpha');
 		await vi.waitFor(() => {
-			expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR }]);
+			expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR, refresh: false }]);
 		});
 
 		expect(judgedVersions()).toEqual(['4.1.5']);
@@ -363,7 +363,7 @@ describe('loading the release list', () => {
 		const first = mount();
 		await screen.findByLabelText('Select Alpha');
 		await vi.waitFor(() => {
-			expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR }]);
+			expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR, refresh: false }]);
 		});
 
 		first.unmount();

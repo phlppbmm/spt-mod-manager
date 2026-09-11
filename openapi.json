@@ -4628,12 +4628,17 @@
         "type": "object"
       },
       "ListSptReleasesRequest": {
-        "description": "Parameters of ``list_spt_releases``.",
+        "description": "Parameters of ``list_spt_releases``.\n\n``refresh`` fetches a fresh listing from the release source instead of\nserving the stored one.",
         "properties": {
           "path": {
             "format": "path",
             "title": "Path",
             "type": "string"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5970,6 +5975,16 @@
           "latest": {
             "default": "",
             "title": "Latest",
+            "type": "string"
+          },
+          "source_ok": {
+            "default": true,
+            "title": "Source Ok",
+            "type": "boolean"
+          },
+          "notice": {
+            "default": "",
+            "title": "Notice",
             "type": "string"
           }
         },

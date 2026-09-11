@@ -111,6 +111,8 @@ class SptReleaseSource:
     Every published release joins the list the client reads; ``offer`` puts an
     archive behind the download link of one, ``announce`` publishes a release
     whose archive was withdrawn, and ``unavailable`` lets the list itself fail.
+    ``list_calls`` counts how often the list was read, so a stored listing can
+    be told from a fetched one.
     """
 
     def __init__(self, router: respx.MockRouter, url: str) -> None:
@@ -177,9 +179,20 @@ class SptReleaseSource:
             )
         )
 
-    def unavailable(self, status_code: int = 503) -> None:
-        """Let the release list answer with ``status_code`` instead of releases."""
-        self._list.mock(return_value=httpx.Response(status_code))
+    def unavailable(
+        self, status_code: int = 503, *, headers: dict[str, str] | None = None
+    ) -> None:
+        """Let the release list answer with ``status_code`` instead of releases.
+
+        ``headers`` carries what the answer says beyond its status, which is
+        how a refusal over the spent request budget is published.
+        """
+        self._list.mock(return_value=httpx.Response(status_code, headers=headers))
+
+    @property
+    def list_calls(self) -> int:
+        """Return how often the release list itself was read."""
+        return self._list.call_count
 
     def _add(self, release: JsonDict) -> None:
         self._releases.append(release)

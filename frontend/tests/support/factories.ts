@@ -131,6 +131,8 @@ export function sptReleaseList(overrides: Partial<SptReleaseList> = {}): SptRele
 		client_build: '41000',
 		releases: [],
 		latest: '4.1.0',
+		source_ok: true,
+		notice: '',
 		...overrides
 	};
 }

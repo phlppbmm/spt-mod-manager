@@ -137,9 +137,14 @@ class StopResult(CoreModel):
 
 
 class ListSptReleasesRequest(CoreModel):
-    """Parameters of ``list_spt_releases``."""
+    """Parameters of ``list_spt_releases``.
+
+    ``refresh`` fetches a fresh listing from the release source instead of
+    serving the stored one.
+    """
 
     path: Path
+    refresh: bool = False
 
 
 class SptReleaseInfo(CoreModel):
@@ -162,6 +167,8 @@ class SptReleaseList(CoreModel):
     client_build: str = ""
     releases: list[SptReleaseInfo] = []
     latest: str = ""
+    source_ok: bool = True
+    notice: str = ""
 
 
 class CheckSptCompatibilityRequest(CoreModel):

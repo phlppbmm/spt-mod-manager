@@ -167,6 +167,15 @@ class SptReleaseUnavailableError(SptmodError):
     """
 
 
+class SptReleaseRateLimitedError(SptReleaseUnavailableError):
+    """The release source refused the request because its hourly limit is used up.
+
+    A special case of :class:`SptReleaseUnavailableError`, so every handler of
+    an unreadable release list keeps working; it exists so the message can say
+    that waiting is all it takes.
+    """
+
+
 class SptReleaseWriteError(SptmodError):
     """The files of an SPT release could not be written into the game directory."""
 

@@ -8,12 +8,13 @@ parsing for every ``SptRelease`` attribute including tag/name pattern
 matching, asset selection, and date fallback; skipping of drafts,
 pre-releases, and unparseable entries; newest-first ordering; error mapping
 for network failures, error statuses, non-JSON bodies, and a JSON body that
-is not a list, for a failure of any single source; and the context-manager
-close contract.
+is not a list, for a failure of any single source; the refusal over the hourly limit for
+anonymous requests, told apart from every other refusal; and the
+context-manager close contract.
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -23,9 +24,10 @@ import respx
 from fixture_types import JsonDict
 from fixtures_forge import recorded_requests
 from github_json import asset_json, release_json, release_without_asset_json
-from sptmod.core.errors import SptReleaseUnavailableError
+from sptmod.core.errors import SptReleaseRateLimitedError, SptReleaseUnavailableError
 from sptmod.core.sptrelease.client import (
     DEFAULT_RELEASES_URLS,
+    RATE_LIMIT_TIME_FORMAT,
     UNKNOWN_DATE,
     SptRelease,
     SptReleaseClient,
@@ -525,6 +527,135 @@ def test_a_single_failing_source_lets_the_whole_call_fail(
         client.releases()
 
     assert fragment in str(exc_info.value)
+
+
+# --------------------------------------------------------------------------
+# The hourly limit for anonymous requests.
+# --------------------------------------------------------------------------
+
+# The moment the request budget of the hour is refilled, half an hour from
+# now, and one that went by an hour ago; both are relative to the run, because
+# whether a reset lies ahead is exactly what decides the wording.
+RESET_EPOCH = int(datetime.now(tz=UTC).timestamp()) + 1800
+PASSED_EPOCH = int(datetime.now(tz=UTC).timestamp()) - 3600
+
+
+def limited(status_code: int, headers: dict[str, str]) -> dict[str, Any]:
+    """Return the respx keywords for a refusal carrying ``headers``."""
+    return {"return_value": httpx.Response(status_code, headers=headers)}
+
+
+def local_time(epoch: int) -> str:
+    """Return how the moment ``epoch`` names reads in the local time zone."""
+    return datetime.fromtimestamp(epoch, tz=UTC).astimezone().strftime(RATE_LIMIT_TIME_FORMAT)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers"),
+    [
+        pytest.param(
+            403,
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(RESET_EPOCH)},
+            id="forbidden-with-exhausted-budget",
+        ),
+        pytest.param(
+            429,
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(RESET_EPOCH)},
+            id="too-many-requests-with-exhausted-budget",
+        ),
+    ],
+)
+def test_an_exhausted_hourly_limit_is_reported_as_one_and_names_the_time_it_lifts(
+    fake_router: respx.MockRouter, status_code: int, headers: dict[str, str]
+) -> None:
+    """A refusal marked as the spent request budget raises SptReleaseRateLimitedError naming the time.
+
+    The source answers 403 or 429 with ``X-RateLimit-Remaining: 0`` and the
+    unix time the window ends; the message says that the hourly limit for
+    anonymous requests is spent, that the installation is fine and from when
+    it works again, because that is a wait, not a broken setup, and a player
+    who reads it can tell the two apart.
+    """
+    fake_router.get(FAKE_RELEASES_URL).mock(**limited(status_code, headers))
+
+    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseRateLimitedError) as exc_info:
+        client.releases()
+
+    message = str(exc_info.value)
+    assert "hourly limit for anonymous requests" in message
+    assert "Your installation is fine" in message
+    assert f"works again from about {local_time(RESET_EPOCH)}" in message
+
+
+def test_a_retry_after_header_alone_marks_the_refusal_as_the_hourly_limit(
+    fake_router: respx.MockRouter,
+) -> None:
+    """A 403 carrying only ``Retry-After`` raises SptReleaseRateLimitedError naming that moment.
+
+    GitHub answers secondary limits with a number of seconds instead of the
+    budget headers; the wait is the same one, so it is reported the same way,
+    with the time counted from now.
+    """
+    fake_router.get(FAKE_RELEASES_URL).mock(**limited(403, {"Retry-After": "600"}))
+
+    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseRateLimitedError) as exc_info:
+        client.releases()
+
+    lifts = (datetime.now().astimezone() + timedelta(seconds=600)).strftime(RATE_LIMIT_TIME_FORMAT)
+    assert f"works again from about {lifts}" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param(
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "soon"},
+            id="unreadable-reset",
+        ),
+        pytest.param({"X-RateLimit-Remaining": "0"}, id="no-reset"),
+        pytest.param(
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(PASSED_EPOCH)},
+            id="reset-already-gone-by",
+        ),
+        pytest.param({"Retry-After": "in a while"}, id="unreadable-retry-after"),
+    ],
+)
+def test_an_exhausted_hourly_limit_without_a_readable_moment_says_to_try_again_shortly(
+    fake_router: respx.MockRouter, headers: dict[str, str]
+) -> None:
+    """A limit refusal whose moment cannot be read or has gone by reports the limit without a time.
+
+    The reset is unreadable, missing, already in the past -- a clock running
+    off or an answer out of a cache -- or no number of seconds at all; the
+    message keeps saying that this is the hourly limit and asks for a retry in
+    a few minutes, because neither a riddle nor a time that has been and gone
+    tells a player anything.
+    """
+    fake_router.get(FAKE_RELEASES_URL).mock(**limited(403, headers))
+
+    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseRateLimitedError) as exc_info:
+        client.releases()
+
+    message = str(exc_info.value)
+    assert "hourly limit for anonymous requests" in message
+    assert "Try again in a few minutes." in message
+
+
+def test_a_refusal_without_any_limit_marking_stays_a_plain_unavailable_source(
+    fake_router: respx.MockRouter,
+) -> None:
+    """A 403 carrying neither budget nor retry header keeps the wording of an unreadable source.
+
+    Nothing says the budget is spent -- requests the source refuses for any
+    other reason must not be dressed up as a wait that will pass on its own.
+    """
+    fake_router.get(FAKE_RELEASES_URL).mock(**limited(403, {"X-RateLimit-Remaining": "7"}))
+
+    with SptReleaseClient(FAKE_RELEASES_URL) as client, pytest.raises(SptReleaseUnavailableError) as exc_info:
+        client.releases()
+
+    assert not isinstance(exc_info.value, SptReleaseRateLimitedError)
+    assert "not available right now (HTTP 403)" in str(exc_info.value)
 
 
 # --------------------------------------------------------------------------

@@ -5,8 +5,11 @@ client build, the confirmation, its ``--yes`` bypass and the refusals a "no"
 and a missing answer produce, the refusal of a
 version change in the wrong direction, the exit codes of an unpublished
 release, a mismatching game build and a missing version change to undo, the
-hint printed after a successful change, both forms of going back, and an
-update to a release only the current release repository publishes.
+hint printed after a successful change, both forms of going back, an
+update to a release only the current release repository publishes, and how
+the commands stand to a release source that cannot be read: the list keeps
+its installed facts, ``--refresh`` fetches again, and a version change is
+refused while no list can judge it.
 """
 
 import re
@@ -149,19 +152,173 @@ def test_list_calls_an_unreadable_version_and_build_unknown(
     assert _rows(output)[1:] == [[OLDER, BUILD, "2025-01-02 03:04", "newer", "yes"]]
 
 
-def test_list_reports_an_unreachable_release_source(
+def test_list_still_shows_the_installed_facts_when_the_release_source_fails(
     spt_game_dir: Path,
     spt_release_source: SptReleaseSource,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``spt list`` exits 17 and says so when the release list cannot be read."""
+    """``spt list`` prints the table, the installed build and why the list is empty.
+
+    The source answers with an error and nothing was downloaded before; the
+    command still succeeds, because the installed version and the game build
+    are read from the game folder and are what a player came to see, and the
+    failure is said in words rather than swallowed.
+    """
     spt_release_source.unavailable(503)
     monkeypatch.chdir(spt_game_dir)
 
-    exit_code, _, errors = _invoke(["spt", "list"])
+    exit_code, output, _ = _invoke(["spt", "list"])
+
+    assert exit_code == 0
+    assert f"SPT releases (installed: {INSTALLED})" in _text(output)
+    assert f"installed Escape from Tarkov build: {BUILD}" in _text(output)
+    assert "The SPT release list is not available" in _text(output)
+
+
+def test_list_serves_the_stored_release_list_until_a_refresh_is_asked_for(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt list`` reads the source once; ``--refresh`` reads it again.
+
+    A release published after the first run shows up only once the refresh is
+    asked for, because every run would otherwise spend from the sixty
+    anonymous requests an hour the source allows.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.chdir(spt_game_dir)
+    _invoke(["spt", "list"])
+    _offer(spt_release_source, make_spt_release, NEWEST)
+
+    stored_code, stored, _ = _invoke(["spt", "list"])
+    refreshed_code, refreshed, _ = _invoke(["spt", "list", "--refresh"])
+
+    assert (stored_code, refreshed_code) == (0, 0)
+    assert [row[0] for row in _rows(stored)[1:]] == [NEW]
+    assert [row[0] for row in _rows(refreshed)[1:]] == [NEWEST, NEW]
+    assert spt_release_source.list_calls == 2
+
+
+def test_list_shows_the_stored_release_list_when_a_refresh_fails(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt list --refresh`` keeps the stored releases and says they are from earlier.
+
+    The refusal names the hourly limit for anonymous requests, so the player
+    reads that the shown list is the one downloaded before and that the
+    source will answer again later.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.chdir(spt_game_dir)
+    _invoke(["spt", "list"])
+    spt_release_source.unavailable(
+        403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1767225600"}
+    )
+
+    exit_code, output, _ = _invoke(["spt", "list", "--refresh"])
+
+    assert exit_code == 0
+    assert [row[0] for row in _rows(output)[1:]] == [NEW]
+    assert "hourly limit for anonymous requests" in _text(output)
+    assert "downloaded on" in _text(output)
+
+
+def test_update_refuses_while_there_is_no_release_list_at_all(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt update`` exits 18 when nothing can say whether the version exists.
+
+    The source fails and nothing was downloaded before, so no release can be
+    resolved; the change is refused loudly instead of being attempted against
+    an empty list.
+    """
+    spt_release_source.unavailable(503)
+    monkeypatch.chdir(spt_game_dir)
+
+    exit_code, _, errors = _invoke(["spt", "update", NEW, "--yes"])
 
     assert exit_code == RELEASE_UNAVAILABLE
     assert _text(errors).startswith("error: The SPT release list is not available")
+
+
+def test_update_refuses_when_the_series_has_no_published_release(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt update`` says so when the source answered but published nothing usable.
+
+    The source is readable and publishes only another SPT series, so the list
+    is empty without anything having failed; the refusal names that instead
+    of an empty reason, because there is no failure to report here.
+    """
+    _offer(spt_release_source, make_spt_release, "4.2.0")
+    monkeypatch.chdir(spt_game_dir)
+
+    exit_code, _, errors = _invoke(["spt", "update", NEW, "--yes"])
+
+    assert exit_code == RELEASE_UNAVAILABLE
+    assert _text(errors).startswith(
+        "error: There are no SPT releases this installation can change to."
+    )
+
+
+def test_update_to_a_version_the_stored_listing_lacks_names_the_failed_source(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt update`` reports the unreadable source for a version the stored listing does not hold.
+
+    The stored listing holds 4.1.1 only, so the wanted 4.1.2 is looked for at
+    the source, which refuses; the refusal names that failure and the day the
+    listing was downloaded rather than claiming 4.1.2 does not exist, and the
+    presence of a stored listing does not turn the change away by itself.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.chdir(spt_game_dir)
+    _invoke(["spt", "list"])
+    spt_release_source.unavailable(503)
+
+    exit_code, _, errors = _invoke(["spt", "update", NEWEST, "--yes"])
+
+    assert exit_code == RELEASE_UNAVAILABLE
+    assert "not available right now" in _text(errors)
+    assert "downloaded on" in _text(errors)
+
+
+def test_update_uses_the_stored_release_list_while_the_source_fails(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spt update`` changes the version from the stored list without reading the source.
+
+    The release was listed before the source started failing, so its download
+    link is known from the stored list; the change goes through and asks the
+    source nothing, which is what keeps a version change possible once the
+    request budget of the hour is spent.
+    """
+    _offer(spt_release_source, make_spt_release, NEW)
+    monkeypatch.chdir(spt_game_dir)
+    _invoke(["spt", "list"])
+    spt_release_source.unavailable(503)
+
+    exit_code, output, _ = _invoke(["spt", "update", NEW, "--yes"])
+
+    assert exit_code == 0
+    assert f"SPT is now {NEW}" in _text(output)
+    assert spt_release_source.list_calls == 1
 
 
 # --- spt update ----------------------------------------------------------

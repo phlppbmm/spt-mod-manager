@@ -428,10 +428,16 @@ const wrapperCases: Array<{
 		payload: { path: '/game' }
 	},
 	{
-		id: 'listSptReleases forwards path',
+		id: 'listSptReleases forwards path and keeps the stored list by default',
 		call: () => listSptReleases('/game'),
 		command: 'list_spt_releases',
-		payload: { path: '/game' }
+		payload: { path: '/game', refresh: false }
+	},
+	{
+		id: 'listSptReleases asks for a fresh list when told to',
+		call: () => listSptReleases('/game', true),
+		command: 'list_spt_releases',
+		payload: { path: '/game', refresh: true }
 	},
 	{
 		id: 'checkSptCompatibility forwards path and target version',

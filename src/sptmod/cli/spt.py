@@ -12,7 +12,12 @@ from sptmod.cli.base import console, spt_app
 from sptmod.cli.base import handled as _handled
 from sptmod.cli.base import report_progress as _report_progress
 from sptmod.core import services
+from sptmod.core.errors import SptReleaseUnavailableError
 from sptmod.core.sptrelease.apply import compare_versions
+
+# What a version change is refused with when the release source answered and
+# published nothing this installation could change to.
+NO_RELEASES = "There are no SPT releases this installation can change to."
 
 
 def _spt_table(releases: services.SptReleaseList) -> Table:
@@ -84,9 +89,17 @@ def _spt_releases(wanted: str, newer: bool) -> services.SptReleaseList:
     """Return the release list, refusing ``wanted`` in the wrong direction.
 
     While the installed version cannot be read there is nothing to compare
-    against, so both directions are allowed.
+    against, so both directions are allowed. Only an empty list refuses the
+    change -- there is nothing to resolve the wanted version against then --
+    and it refuses with why the list is empty: the source failure when there
+    was one, and otherwise that this installation has nothing to change to. A
+    listing that was downloaded earlier is a list like any other and changes
+    nothing here; a release missing from it is looked for at the source by
+    :func:`services.apply_spt_release` itself.
     """
     releases = services.list_spt_releases(Path.cwd())
+    if not releases.releases:
+        raise SptReleaseUnavailableError(releases.notice or NO_RELEASES)
     if not releases.current_version:
         return releases
     order = compare_versions(wanted, releases.current_version)
@@ -158,15 +171,25 @@ def _change_spt_version(
 
 
 @spt_app.command("list")
-def spt_list() -> None:
+def spt_list(
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="Fetch the release list again instead of using the stored one.",
+        ),
+    ] = False,
+) -> None:
     """List the SPT versions the game directory can change to."""
     with _handled():
-        releases = services.list_spt_releases(Path.cwd())
+        releases = services.list_spt_releases(Path.cwd(), refresh=refresh)
         console.print(_spt_table(releases))
         console.print(
             f"installed Escape from Tarkov build: {releases.client_build or 'unknown'}",
             markup=False,
         )
+        if not releases.source_ok:
+            console.print(releases.notice, markup=False)
 
 
 @spt_app.command("update")

@@ -90,6 +90,7 @@ src/sptmod/
     sptrelease/
       __init__.py       package docstring only
       client.py         the ONLY module allowed httpx for the SPT release source
+      cache.py          the stored release listing (one JSON file per set of sources)
       apply.py          pure path/version logic of a release (include set, stale set,
                         required client build, version comparison)
   watch.py              process entry for detached game watcher
@@ -1112,7 +1113,16 @@ followed), so a listing costs two of the 60 requests per hour per IP. The result
 version — the first source listed wins a collision, because the current repository is authoritative for any version
 it republishes, even when the archived entry for that version is the one carrying an asset — and sorted by
 publication date, newest first. A failure of
-*any* source raises `SptReleaseUnavailableError`, so a short but plausible-looking list can never reach the caller.
+*any* source makes `SptReleaseClient.releases()` raise `SptReleaseUnavailableError`, so a short but
+plausible-looking list can never reach the caller; what the *service* does with that failure is described under
+"The stored release listing" below. A refusal that carries GitHub's rate-limit signal — `X-RateLimit-Remaining: 0`
+with `X-RateLimit-Reset` as a unix epoch, or `Retry-After` in seconds, on a 403 or a 429 — raises the subclass
+`SptReleaseRateLimitedError` instead, whose message names the hourly limit for anonymous requests, says that the
+installation is fine and that this only needs waiting, and gives the local time it works again when the answer
+carries one. Subclassing keeps every existing handler, exit code 18 and the `SPT_RELEASE_UNAVAILABLE` error code
+working, so the distinction lives in the wording, which is the only place a player can act on it; a 403 without
+those headers keeps the plain "not available right now (HTTP 403)" wording. The `Retry-After` parsing is a local
+one — `forge/client.py` has its own, and the one-httpx-module-per-service rule outranks sharing four lines.
 `SPTMOD_SPT_RELEASE_URL` replaces both defaults with one endpoint for mirrors and tests. Drafts, pre-releases and
 entries without a readable `x.y.z` tag are dropped; a leading `v` on old tags is stripped. The required Escape from
 Tarkov build is parsed from the release name (`SPT 4.1.2 (40743)`); when a name carries no build,
@@ -1122,6 +1132,37 @@ inconsistent across versions. Two sources were rejected. The Forge's `/spt/versi
 page, but it mirrors the release metadata rather than hosting the releases; the download URLs, sizes and publication
 dates come from the GitHub release APIs, so those are read directly. The installer feed `release.json` describes only
 the newest release.
+
+**The stored release listing.** `core/sptrelease/cache.py` keeps the last listing as one JSON file in the user's
+cache directory (`platformdirs.user_cache_path("sptmod")/spt-releases/<key>.json`, so `XDG_CACHE_HOME` relocates it
+like every other cache), named by a hash of the configured source URLs: a mirror named by `SPTMOD_SPT_RELEASE_URL`
+neither reads nor overwrites what the default sources answered. There is **no expiry**. `list_spt_releases` serves
+the stored listing and asks the sources nothing; only `refresh=True` fetches, and a successful fetch replaces the
+stored copy. That is what makes one app run cost one fetch: the shell asks for the refresh at startup, every view
+opened afterwards is served from the frontend view cache or, failing that, from this file, and the "Check for new
+versions" button in Settings is the one way to fetch again inside a run. The sources allow sixty anonymous requests
+an hour per IP and a listing costs two of them, so an app that refetched per view exhausted that budget in ordinary
+use — the 403 this produced is the bug this design answers. The file is disposable: missing, unreadable, damaged,
+half-written or stored under a directory that cannot be created all count as *nothing stored* and never raise, and a
+write that fails changes nothing but the next call fetching again. The stored copy is written beside its place and
+moved over it, so an ended process leaves the previous one whole. It carries the moment it was downloaded, which is
+what the notice of a failed refresh names.
+
+**A failing source never fails the list.** `list_spt_releases` reads `current_version` and `client_build` from the
+game directory *first* and reports them whatever the network does — they are local facts, and a blank panel over a
+failed request was the second half of the same bug. When the sources cannot be read it answers `source_ok=False`
+with a plain-language `notice` (the same pattern as `checked`/`notice` on `SptCompatibilityReport`): with a stored
+listing the releases stay on show and the notice adds the date they were downloaded on; without one the list is
+empty and the notice is the failure message itself. A *version change* is never taken on an empty list:
+`apply_spt_release` resolves against the same stored-or-fetched listing and raises `SptReleaseUnavailableError`
+carrying that notice instead of "There is no published SPT x", and the CLI refuses before it even asks for
+confirmation — over an *empty* list, not over `source_ok`, so a listing downloaded earlier is worked with like any
+other; an empty list that nothing failed for (the installed series has no published release) is refused with
+`cli/spt.py:NO_RELEASES` instead of an empty reason. And a version the *stored* listing does not know is looked for at the source once before it is called
+unpublished, so a release published after the listing was downloaded installs without anyone knowing to refresh
+first; if that look-up fails too, the raised message is the source failure plus the date of the listing, never
+"there is no such version". "There is no published SPT x" is therefore only ever said after the source itself was
+asked.
 
 **Almost no release keeps its asset** — an asset survives only on the newest patch of a line at the time its
 repository stopped publishing that line (verified: 4 of the 86 merged releases have one; the 4.1 line has two,
@@ -1201,7 +1242,9 @@ version for the wanted SPT version at all, and refuses over the ones that have n
 to fetch is the caller's job afterwards: the Settings page invalidates its cached views and points at the Updates tab,
 the CLI prints the hint to run `sptmod update --check`.
 
-**CLI:** `sptmod spt list` (table Version | EFT build | Released | State | Download, plus the installed EFT build),
+**CLI:** `sptmod spt list` (table Version | EFT build | Released | State | Download, plus the installed EFT build;
+it serves the stored listing, `--refresh` fetches a new one, and a source that refused is printed under the table in
+words while the table, the installed version and the installed build stay on show),
 `sptmod spt update <version>` and `sptmod spt downgrade [version]`, the latter without an argument being the undo.
 Both changing commands confirm first unless `--yes`/`-y` is given, and the confirmation refuses on closed stdin, so
 `--yes` is required for non-interactive use. `update` refuses a version that is not newer and `downgrade` one that is
@@ -1222,14 +1265,24 @@ A refused write of mod files (install, update, profile cleanup) is `ModFileWrite
 CLI exit 21), which names the file it stopped at, what the system said, and that the previous files are one snapshot
 back.
 
-**RPC:** `list_spt_releases`, `check_spt_compatibility`, `apply_spt_release` (declares `operation_id`, reports
+**RPC:** `list_spt_releases` (request field `refresh`, response fields `source_ok` and `notice` beside the
+releases), `check_spt_compatibility`, `apply_spt_release` (declares `operation_id`, reports
 download/extract/copy progress via the existing `InstallStep` steps) and `revert_spt_update`. New error codes
 `SPT_RELEASE_UNAVAILABLE` (503 in prose), `CLIENT_BUILD_MISMATCH` (409) and `SPT_MODS_INCOMPATIBLE`, whose
 `error_details()` carries `spt_version` and `mods` so the frontend can name them; "nothing to undo" reuses `GIT_ERROR`.
 
-**UI:** the Settings page gains an "SPT version" section (installed version, installed EFT build, the releases of the
-line with their required build, date and state, per row an Update / "Go back to this version" button disabled with a
-reason when there is no download, and "Undo the last SPT change"). The confirmation dialog names the safety snapshot
+**UI:** the Settings page gains an "SPT version" section (installed version, installed EFT build, a "Check for new
+versions" button that is the only refetch inside an app run, the releases of the line with their required build,
+date and state, per row an Update / "Go back to this version" button disabled with a reason when there is no
+download, and "Undo the last SPT change"). The installed version and the EFT build are rendered from the response
+whatever `source_ok` says, because they are read from the game folder and not from the network, and a response with
+`source_ok=false` shows its `notice` as a warning above the table instead of blanking the panel; `sptError` stays
+reserved for a call that genuinely failed. The page reads `list_spt_releases` through `frontend/src/lib/viewcache.ts`
+like the mods view already did, so opening Settings twice in one run costs no call; the refresh button asks with
+`refresh: true` and replaces the cached view. `viewcache.ts` shares the request itself, not only its result: a view
+asking for a key another view is already fetching waits for that request, so a Settings page mounting before the
+shell's startup fetch has resolved does not double it. `invalidate(gameDir)` drops the requests on their way too,
+so the reload after a version change cannot be served with an answer from before it. The confirmation dialog names the safety snapshot
 in plain language, warns that mods built for the other version may stop working, and carries the mod verdict for the
 picked release: the incompatible mods by name in a scrolling list rather than as a bare count, the skipped ones as a
 milder secondary note that gates nothing. While mods are incompatible, Continue stays disabled behind an unticked
@@ -1242,10 +1295,12 @@ coverage gate. The app shell
 (`src/routes/+layout.svelte`) shows a dismissible startup banner when the newest release of the line is above the
 installed version; the dismissal is stored in `localStorage` under `sptmod.dismissedSptRelease` as the version
 string, so a later release shows the banner again. A failing release list keeps the shell quiet — only the Settings
-page reports it.
+page reports it. The shell's startup check is the one call that passes `refresh: true`, and it stores its answer in
+the view cache, which is what makes the mods view and Settings share that single fetch.
 
-**Known limitations:** the release list is fetched fresh on every use (one request per CLI invocation, one per app
-start and one per Settings visit) against a 60/h anonymous budget — there is no cache yet. The libarchive fallback
+**Known limitations:** the release list is refreshed only at app start and on the Settings refresh button, so a
+release published while the app is open shows up after a refresh or a restart — a deliberate trade against the 60/h
+anonymous budget. The libarchive fallback
 needs the system library (`libarchive` on Arch, `libarchive13` on Debian/Ubuntu); on Windows it would need a shipped
 DLL. The `ProductVersion` layout of a real `EscapeFromTarkov.exe` was derived from the official installer's source,
 not read from a live install — the first live run should confirm it.
@@ -1706,11 +1761,16 @@ cd src-tauri && cargo llvm-cov       # Rust coverage - reported only, no enforce
   `src-tauri/tests/rpc_e2e_ignored.rs` (real CLI, `#[ignore]`).
 - SPT release tests: `tests/test_sptrelease_client.py` (respx mocks shaped by
   `tests/github_json.py`: assets present/absent, `v`-prefixed tags, names without a
-  build, error statuses, malformed bodies), `tests/test_services_spt_releases.py`,
+  build, error statuses, malformed bodies, the rate-limit refusal with and without a readable reset, and a 403
+  without those headers keeping its wording), `tests/test_services_spt_releases.py` (beside the list itself: the
+  stored listing sparing the sources a second read, `refresh=True` replacing it, a failed refresh keeping it with a
+  notice, a first-ever failure leaving the installed version and the build on show, a listing stored per set of
+  source URLs, and a damaged or unwritable store behaving as none),
   `_apply.py`, `_refusals.py` and `_revert.py` (list/apply/undo, include and
   exclude set, stale deletion, build check, re-apply without a commit),
   `tests/test_cli_spt.py` (`sptmod spt
-  list|update|downgrade`, confirmation, direction refusal, exit codes),
+  list|update|downgrade`, confirmation, direction refusal, exit codes, `--refresh`, and the refusal of a version
+  change while no listing can judge it),
   `tests/test_services_spt_compatibility.py` (the three `check_spt_compatibility`
   verdicts — a mod with a version for the wanted release, one with none, one the
   mod list cannot judge — and the `apply_spt_release` guard that refuses over
@@ -1731,13 +1791,13 @@ cd src-tauri && cargo llvm-cov       # Rust coverage - reported only, no enforce
 | Variable | Effect |
 |---|---|
 | `SPTMOD_FORGE_URL` | Forge API base URL (mirrors/testing) |
-| `SPTMOD_SPT_RELEASE_URL` | SPT release list endpoint (mirrors/testing) |
+| `SPTMOD_SPT_RELEASE_URL` | SPT release list endpoint (mirrors/testing); keys its own stored listing |
 | `SPTMOD_CLI` | path to `sptmod` binary (Tauri RPC driver); wins over the bundled sidecar |
 | `SPTMOD_DOWNLOAD_CACHE_MAX_GB` | cap for the download cache (default 20, fractional allowed, non-finite/invalid/≤0 falls back) |
 | `SPTMOD_PROCESS_SCAN` | `off` switches both scans of the process table for SPT off; inherited by children |
 | `SPTMOD_SMOKE_GAME_DIR` | Rust e2e test only; override game directory path for `src-tauri/tests/rpc_e2e_ignored.rs` |
 | `XDG_CONFIG_HOME` | relocates the catalog cache (platformdirs) |
-| `XDG_CACHE_HOME` | relocates the staging dir and download cache (platformdirs) |
+| `XDG_CACHE_HOME` | relocates the staging dir, the download and thumbnail caches and the stored SPT release listing (platformdirs) |
 
 ## Known limitations / open points
 

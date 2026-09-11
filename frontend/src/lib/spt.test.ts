@@ -41,6 +41,8 @@ function makeList(overrides: Partial<SptReleaseList> = {}): SptReleaseList {
 		client_build: '38000',
 		releases: [],
 		latest: '4.1.3',
+		source_ok: true,
+		notice: '',
 		...overrides
 	};
 }

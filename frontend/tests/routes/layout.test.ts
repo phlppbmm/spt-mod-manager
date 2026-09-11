@@ -235,7 +235,7 @@ describe('the SPT notice', () => {
 		expect(
 			await screen.findByText('SPT 4.2.0 is out. You are on 4.1.0.')
 		).toBeInTheDocument();
-		expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR }]);
+		expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR, refresh: true }]);
 	});
 
 	it('stays quiet while the installed release is the newest one', async () => {

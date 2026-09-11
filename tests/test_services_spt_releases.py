@@ -3,15 +3,19 @@
 Covers ``list_spt_releases``: the series filter and the version arithmetic it
 rests on, the order of the listed releases, the installed and newer flags, the
 page, date, download and size of every release, an unreadable installed
-version, the client build, a handed release client, an unreachable source and
-the releases of both default sources reaching an installation that came from
-the archived one.
+version, the client build, a handed release client, the releases of both
+default sources reaching an installation that came from the archived one, and
+how the list degrades: the stored listing that spares the sources a request,
+the refresh that replaces it, a source failure that leaves the installed
+facts and the stored listing standing, and a stored listing that is damaged,
+missing or impossible to write.
 """
 
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import respx
 
 from conftest import clean_repo_at
 from fixture_types import MakeSptRelease
@@ -22,6 +26,7 @@ from fixtures_spt import (
     NEWEST,
     OLDER,
     OTHER_SERIES,
+    SPT_RELEASE_URL_ENV,
     SptReleaseSource,
     offer,
     unversioned_game_dir,
@@ -29,8 +34,13 @@ from fixtures_spt import (
 )
 from pe_builder import write_server_exe
 from sptmod.core import services
-from sptmod.core.errors import NotAGameDirError, SptReleaseUnavailableError
-from sptmod.core.sptrelease.client import SptReleaseClient
+from sptmod.core.errors import NotAGameDirError
+from sptmod.core.sptrelease.client import DEFAULT_RELEASES_URLS, SptReleaseClient
+from sptmod.core.workspace import spt_release_cache_dir
+
+# A release source of its own, named through SPTMOD_SPT_RELEASE_URL, so what
+# it publishes can be told apart from what the default sources publish.
+MIRROR_URL = "https://spt-mirror.invalid/releases"
 
 # Every release the arithmetic table offers, so each installed version picks
 # its own series out of the same published set.
@@ -224,14 +234,227 @@ def test_list_uses_a_release_client_it_is_handed(
     assert [entry.version for entry in listed.releases] == [NEW]
 
 
-def test_list_reports_an_unreachable_release_source(
+def test_list_keeps_the_installed_facts_when_the_release_source_fails(
     spt_game_dir: Path, spt_release_source: SptReleaseSource
 ) -> None:
-    """list_spt_releases() raises SptReleaseUnavailableError when the source fails."""
+    """list_spt_releases() still reports the installed version and build when the source fails.
+
+    Nothing was ever downloaded and the source answers with an error, so the
+    list stays empty and says why; the installed version and the Escape from
+    Tarkov build come from the game directory and are reported anyway,
+    because a failing network says nothing about what is installed here.
+    """
     spt_release_source.unavailable(503)
 
-    with pytest.raises(SptReleaseUnavailableError, match="not available right now"):
-        services.list_spt_releases(spt_game_dir)
+    listed = services.list_spt_releases(spt_game_dir)
+
+    assert listed.current_version == INSTALLED
+    assert listed.client_build == BUILD
+    assert not listed.releases
+    assert listed.latest == ""
+    assert listed.source_ok is False
+    assert "not available right now" in listed.notice
+
+
+def test_list_says_when_the_source_refuses_over_its_hourly_limit(
+    spt_game_dir: Path, spt_release_source: SptReleaseSource
+) -> None:
+    """list_spt_releases() passes the limit message on instead of a bare error status.
+
+    The source answers 403 with the request budget marked as spent; the
+    notice names the hourly limit for anonymous requests, so a player reads
+    that this passes by itself rather than suspecting their installation.
+    """
+    spt_release_source.unavailable(
+        403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1767225600"}
+    )
+
+    listed = services.list_spt_releases(spt_game_dir)
+
+    assert listed.source_ok is False
+    assert "hourly limit for anonymous requests" in listed.notice
+    assert listed.current_version == INSTALLED
+
+
+def test_list_reads_the_source_once_and_serves_the_stored_listing_afterwards(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """list_spt_releases() asks the release source only for the first listing.
+
+    Two calls in a row return the same releases while the source was read
+    once, because the sources allow sixty anonymous requests an hour and
+    every view of the app would otherwise spend some of them.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+
+    first = services.list_spt_releases(spt_game_dir)
+    second = services.list_spt_releases(spt_game_dir)
+
+    assert [entry.version for entry in first.releases] == [NEW]
+    assert [entry.version for entry in second.releases] == [NEW]
+    assert second.source_ok is True
+    assert second.notice == ""
+    assert spt_release_source.list_calls == 1
+
+
+def test_list_reads_the_source_again_when_a_fresh_listing_is_asked_for(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """list_spt_releases(refresh=True) fetches again and replaces the stored listing.
+
+    A release is published after the first listing was stored: an ordinary
+    call keeps showing the stored one, the asked-for refresh brings the new
+    release in, and the call after it is served from the refreshed copy --
+    which is how the explicit refresh of the app reaches the player.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    services.list_spt_releases(spt_game_dir)
+    offer(spt_release_source, make_spt_release, NEWEST)
+
+    stored = services.list_spt_releases(spt_game_dir)
+    refreshed = services.list_spt_releases(spt_game_dir, refresh=True)
+    after = services.list_spt_releases(spt_game_dir)
+
+    assert [entry.version for entry in stored.releases] == [NEW]
+    assert [entry.version for entry in refreshed.releases] == [NEWEST, NEW]
+    assert [entry.version for entry in after.releases] == [NEWEST, NEW]
+    assert spt_release_source.list_calls == 2
+
+
+def test_list_serves_the_stored_listing_when_a_refresh_fails(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """A refresh the source refuses still returns the stored listing plus a notice.
+
+    The listing was downloaded before the source started failing; the
+    releases stay on show, marked as not current and dated in the notice,
+    because a list from earlier beats an empty panel once the request budget
+    of the hour is spent.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    services.list_spt_releases(spt_game_dir)
+    spt_release_source.unavailable(503)
+
+    listed = services.list_spt_releases(spt_game_dir, refresh=True)
+
+    assert [entry.version for entry in listed.releases] == [NEW]
+    assert listed.latest == NEW
+    assert listed.current_version == INSTALLED
+    assert listed.source_ok is False
+    assert "not available right now" in listed.notice
+    assert "downloaded on" in listed.notice
+
+
+def test_the_listing_of_a_named_source_is_kept_apart_from_the_default_ones(
+    spt_game_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listing stored for one set of sources is never served for another.
+
+    The default sources publish 4.1.1 and the mirror named by
+    SPTMOD_SPT_RELEASE_URL publishes 4.1.2; each is read from its own source
+    and reading the defaults again afterwards still answers with their own
+    releases, so pointing at a mirror neither reads nor overwrites what the
+    official sources said.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        defaults = [SptReleaseSource(router, url) for url in DEFAULT_RELEASES_URLS]
+        mirror = SptReleaseSource(router, MIRROR_URL)
+        defaults[0].announce(NEW)
+        mirror.announce(NEWEST)
+        monkeypatch.delenv(SPT_RELEASE_URL_ENV, raising=False)
+        from_defaults = services.list_spt_releases(spt_game_dir)
+        monkeypatch.setenv(SPT_RELEASE_URL_ENV, MIRROR_URL)
+        from_mirror = services.list_spt_releases(spt_game_dir)
+        monkeypatch.delenv(SPT_RELEASE_URL_ENV)
+        defaults_again = services.list_spt_releases(spt_game_dir)
+
+    assert [entry.version for entry in from_defaults.releases] == [NEW]
+    assert [entry.version for entry in from_mirror.releases] == [NEWEST]
+    assert [entry.version for entry in defaults_again.releases] == [NEW]
+    assert mirror.list_calls == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("not json at all", id="no-json"),
+        pytest.param("[]", id="not-an-object"),
+        pytest.param(
+            '{"fetched_at": "2026-01-01T00:00:00+00:00", "releases": "4.1.1"}',
+            id="releases-not-a-list",
+        ),
+        pytest.param(
+            '{"fetched_at": "2026-01-01T00:00:00+00:00", "releases": '
+            '["4.1.1", {"version": ""}, {"version": "4.1.1", "published_at": 7}]}',
+            id="unusable-entries",
+        ),
+        pytest.param(
+            '{"fetched_at": "whenever", "releases": '
+            '[{"version": "4.1.1", "published_at": "2026-01-01T00:00:00+00:00"}]}',
+            id="unreadable-date-of-download",
+        ),
+        pytest.param("", id="half-written"),
+    ],
+)
+def test_a_damaged_stored_listing_counts_as_none(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    content: str,
+) -> None:
+    """A stored listing that cannot be read is replaced by a fresh one instead of failing.
+
+    The stored copy is damaged in every way a file can be -- no JSON at all,
+    the wrong shape, unusable entries, an unreadable date of download, and
+    nothing written yet -- and the next call reads the source again and shows
+    what it says, because the copy is disposable and must never stand in the
+    way of the list.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    services.list_spt_releases(spt_game_dir)
+    for entry in spt_release_cache_dir().glob("*.json"):
+        entry.write_text(content, encoding="utf-8")
+    offer(spt_release_source, make_spt_release, NEWEST)
+
+    listed = services.list_spt_releases(spt_game_dir)
+
+    assert [entry.version for entry in listed.releases] == [NEWEST, NEW]
+    assert listed.source_ok is True
+    assert spt_release_source.list_calls == 2
+
+
+def test_a_listing_that_cannot_be_stored_does_not_fail_the_call(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A cache directory that cannot be created leaves the release list working.
+
+    A file sits where the stored listings belong, so neither writing nor
+    reading one can work; both calls answer from the source instead of
+    failing, because the stored copy is a saving and never a requirement.
+    """
+    cache_home = tmp_path / "cache"
+    (cache_home / "sptmod").mkdir(parents=True)
+    (cache_home / "sptmod" / "spt-releases").write_text("not a directory")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    offer(spt_release_source, make_spt_release, NEW)
+
+    first = services.list_spt_releases(spt_game_dir)
+    second = services.list_spt_releases(spt_game_dir)
+
+    assert [entry.version for entry in first.releases] == [NEW]
+    assert [entry.version for entry in second.releases] == [NEW]
+    assert second.source_ok is True
+    assert spt_release_source.list_calls == 2
 
 
 def test_list_rejects_a_directory_that_is_no_game_directory(tmp_path: Path) -> None:

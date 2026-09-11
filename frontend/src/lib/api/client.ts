@@ -426,9 +426,10 @@ export function stopGame(path: string): Promise<StopResult> {
 	return call<StopResult>('stop_game', { path } satisfies Schemas['StopGameRequest']);
 }
 
-export function listSptReleases(path: string): Promise<SptReleaseList> {
+export function listSptReleases(path: string, refresh = false): Promise<SptReleaseList> {
 	return call<SptReleaseList>('list_spt_releases', {
-		path
+		path,
+		refresh
 	} satisfies Schemas['ListSptReleasesRequest']);
 }
 

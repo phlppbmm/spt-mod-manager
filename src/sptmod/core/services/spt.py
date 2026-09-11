@@ -55,6 +55,7 @@ from sptmod.core.sptrelease.apply import (
     same_version_line,
     version_key,
 )
+from sptmod.core.sptrelease.cache import read_cached_releases, write_cached_releases
 from sptmod.core.sptrelease.client import SptRelease, SptReleaseClient
 from sptmod.core.workspace import game_lock, staging_dir
 
@@ -75,6 +76,9 @@ CATALOG_UNREADABLE_NOTICE: Final = (
     "The mod list on this computer could not be opened, so your installed "
     "mods could not be checked."
 )
+# The date and time a stored release listing is said to be from, written the
+# way every other date of this program is written.
+STORED_LIST_TIME_FORMAT: Final = "%Y-%m-%d %H:%M"
 
 
 @dataclass(frozen=True)
@@ -101,15 +105,21 @@ class SptReleaseList:
     """What :func:`list_spt_releases` found for a game directory.
 
     ``current_version`` is the installed SPT version and ``client_build`` the
-    Escape from Tarkov build of the game, both empty when they cannot be read.
-    ``releases`` holds the versions of the installed series, newest first, and
-    ``latest`` is the newest of them.
+    Escape from Tarkov build of the game, both read from the game directory
+    and empty only when they cannot be read there. ``releases`` holds the
+    versions of the installed series, newest first, and ``latest`` is the
+    newest of them. ``source_ok`` is false when the release source could not
+    be read on this call, and ``notice`` then says so in plain words -- naming
+    that the listing shown is the one downloaded earlier, or that there is
+    none to show.
     """
 
     current_version: str = ""
     client_build: str = ""
     releases: list[SptReleaseInfo] = field(default_factory=list[SptReleaseInfo])
     latest: str = ""
+    source_ok: bool = True
+    notice: str = ""
 
 
 @dataclass(frozen=True)
@@ -147,7 +157,7 @@ class SptCompatibilityReport:
 
 
 def list_spt_releases(
-    path: Path, *, client: SptReleaseClient | None = None
+    path: Path, *, refresh: bool = False, client: SptReleaseClient | None = None
 ) -> SptReleaseList:
     """List the published SPT releases the game directory at ``path`` can use.
 
@@ -156,22 +166,31 @@ def list_spt_releases(
     installed version cannot be read, every published release is listed.
     Nothing is downloaded or written.
 
+    The listing is read from the stored copy and the release source is only
+    asked when there is none, or when ``refresh`` says to fetch a fresh one:
+    the source allows sixty anonymous requests an hour, and a listing costs
+    one per source. A source that cannot be read never fails this call -- the
+    installed version and the build of the game are read from the game
+    directory and are reported either way, together with the stored listing
+    when there is one, ``source_ok`` false and a notice saying what happened.
+
     Args:
         path: The tracked game directory.
+        refresh: Fetch a fresh listing instead of serving the stored one.
         client: Release source client; a default one is built when omitted.
 
     Returns:
-        The installed version, the build of the game and the releases.
+        The installed version, the build of the game, the releases and how
+        the release source answered.
 
     Raises:
         NotAGameDirError: ``path`` is no SPT game directory.
-        SptReleaseUnavailableError: the release source cannot be read.
         GitError: git failed.
     """
     if client is not None:
-        return _release_list(path, client)
+        return _release_list(path, client, refresh)
     with SptReleaseClient() as owned:
-        return _release_list(path, owned)
+        return _release_list(path, owned, refresh)
 
 
 def check_spt_compatibility(
@@ -345,14 +364,17 @@ def revert_spt_update(path: Path) -> SptApplyResult:
     )
 
 
-def _release_list(path: Path, client: SptReleaseClient) -> SptReleaseList:
+def _release_list(
+    path: Path, client: SptReleaseClient, refresh: bool
+) -> SptReleaseList:
     """Read the installed state and pair it with the published releases."""
     layout = detect_layout(path)
     current = resolve_spt_version(layout, Repo(path)) or ""
+    published = _published_releases(client, refresh)
     releases = sorted(
         (
             _release_info(release, current)
-            for release in client.releases()
+            for release in published.releases
             if not current or same_version_line(release.version, current)
         ),
         key=lambda info: version_key(info.version),
@@ -363,6 +385,51 @@ def _release_list(path: Path, client: SptReleaseClient) -> SptReleaseList:
         client_build=read_client_build(layout.root / layout.client_exe),
         releases=releases,
         latest=releases[0].version if releases else "",
+        source_ok=not published.notice,
+        notice=published.notice,
+    )
+
+
+@dataclass(frozen=True)
+class _PublishedReleases:
+    """The releases a call got hold of and how it got them.
+
+    ``notice`` is empty while nothing went wrong; ``asked`` says whether the
+    release source itself answered, which is what tells a listing that is
+    merely old from one that is as current as it can be.
+    """
+
+    releases: Sequence[SptRelease]
+    notice: str
+    asked: bool
+
+
+def _published_releases(client: SptReleaseClient, refresh: bool) -> _PublishedReleases:
+    """Return the published releases and, when the source failed, what to say about it.
+
+    The stored copy answers unless a fresh listing was asked for or there is
+    none. A source that refuses leaves the stored copy standing, because a
+    listing downloaded earlier is worth more than an empty one.
+    """
+    stored = read_cached_releases(client.base_urls)
+    if stored is not None and not refresh:
+        return _PublishedReleases(stored.releases, "", asked=False)
+    try:
+        fetched = client.releases()
+    except SptReleaseUnavailableError as error:
+        if stored is None:
+            return _PublishedReleases((), str(error), asked=True)
+        notice = f"{error} {_stored_list_notice(stored.fetched_at)}"
+        return _PublishedReleases(stored.releases, notice, asked=True)
+    write_cached_releases(client.base_urls, fetched)
+    return _PublishedReleases(fetched, "", asked=True)
+
+
+def _stored_list_notice(fetched_at: datetime) -> str:
+    """Say that the listing on show is the one downloaded at ``fetched_at``."""
+    return (
+        "The SPT versions shown are the ones downloaded on "
+        f"{fetched_at.strftime(STORED_LIST_TIME_FORMAT)}."
     )
 
 
@@ -484,20 +551,24 @@ def _resolve_release(
 ) -> SptRelease:
     """Return the published release ``version`` a game at ``current`` can use.
 
+    A version the stored listing does not know is looked for at the source
+    once before it is called unpublished, so a release that appeared after
+    the listing was downloaded is installable without anyone having to ask
+    for a refresh first.
+
     Raises:
         SptReleaseUnavailableError: no such release is published, it belongs
             to another SPT series, or it publishes no download.
     """
-    release = next(
-        (
-            entry
-            for entry in client.releases()
-            if compare_versions(entry.version, version) == 0
-        ),
-        None,
-    )
+    published = _published_releases(client, refresh=False)
+    release = _named_release(published.releases, version)
+    if release is None and not published.asked:
+        published = _published_releases(client, refresh=True)
+        release = _named_release(published.releases, version)
     if release is None:
-        raise SptReleaseUnavailableError(f"There is no published SPT {version}.")
+        raise SptReleaseUnavailableError(
+            published.notice or f"There is no published SPT {version}."
+        )
     if current and not same_version_line(release.version, current):
         raise SptReleaseUnavailableError(
             f"SPT {release.version} is not part of the same SPT series as your "
@@ -510,6 +581,20 @@ def _resolve_release(
             f"official SPT installer from {INSTALLER_URL}."
         )
     return release
+
+
+def _named_release(
+    published: Sequence[SptRelease], version: str
+) -> SptRelease | None:
+    """Return the release ``version`` names among ``published``, or None for none."""
+    return next(
+        (
+            entry
+            for entry in published
+            if compare_versions(entry.version, version) == 0
+        ),
+        None,
+    )
 
 
 def _download(release: SptRelease, progress: Progress | None) -> Path:

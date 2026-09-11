@@ -4,13 +4,13 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final
 
 import httpx
 
-from sptmod.core.errors import SptReleaseUnavailableError
+from sptmod.core.errors import SptReleaseRateLimitedError, SptReleaseUnavailableError
 from sptmod.core.models import Json
 
 DEFAULT_RELEASES_URLS: Final = (
@@ -21,6 +21,8 @@ RELEASES_PER_PAGE: Final = 100
 DEFAULT_TIMEOUT: Final = 30.0
 UNKNOWN_DATE: Final = datetime.min.replace(tzinfo=UTC)
 ARCHIVE_SUFFIX: Final = ".7z"
+RATE_LIMIT_STATUS: Final = frozenset({403, 429})
+RATE_LIMIT_TIME_FORMAT: Final = "%H:%M"
 
 _TAG_PATTERN: Final = re.compile(r"^v?(\d+\.\d+\.\d+)$")
 _NAME_PATTERN: Final = re.compile(r"^SPT (\d+\.\d+\.\d+)(?: \((\d+)\))?$")
@@ -115,6 +117,50 @@ def _parse_release(data: Mapping[str, Json]) -> SptRelease | None:
     )
 
 
+def _rate_limit_message(response: httpx.Response) -> str | None:
+    """Return what to say about an exhausted hourly limit, or None when this answer is not one.
+
+    GitHub marks the limit either with ``X-RateLimit-Remaining: 0`` plus the
+    unix time the window ends, or with ``Retry-After`` in seconds; a refusal
+    carrying neither is some other kind of refusal. A moment that has already
+    passed -- a clock running off, an answer out of a proxy's cache -- is left
+    unsaid rather than promised, because a time in the past reads as an error
+    of this program.
+    """
+    if response.status_code not in RATE_LIMIT_STATUS:
+        return None
+    headers = response.headers
+    retry_after = headers.get("retry-after")
+    if headers.get("x-ratelimit-remaining") != "0" and retry_after is None:
+        return None
+    resumes = _epoch_time(headers.get("x-ratelimit-reset")) or _delay_time(retry_after)
+    again = (
+        f" It works again from about {resumes.strftime(RATE_LIMIT_TIME_FORMAT)}."
+        if resumes is not None and resumes > datetime.now().astimezone()
+        else " Try again in a few minutes."
+    )
+    return (
+        "The hourly limit for anonymous requests to the SPT release source is used up, so the list "
+        f"cannot be read right now. Your installation is fine -- this only needs waiting.{again}"
+    )
+
+
+def _epoch_time(value: str | None) -> datetime | None:
+    """Return the local time the unix timestamp ``value`` names, or None when it names none."""
+    try:
+        return datetime.fromtimestamp(int(value or ""), tz=UTC).astimezone()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _delay_time(seconds: str | None) -> datetime | None:
+    """Return the local time ``seconds`` from now, or None when that is no number of seconds."""
+    try:
+        return datetime.now().astimezone() + timedelta(seconds=int(seconds or ""))
+    except (ValueError, OverflowError):
+        return None
+
+
 class SptReleaseClient:
     """Read-only client for the published SPT releases.
 
@@ -190,6 +236,9 @@ class SptReleaseClient:
                 "The SPT release list cannot be reached. Check your internet connection and try again."
             ) from error
         if not response.is_success:
+            limited = _rate_limit_message(response)
+            if limited is not None:
+                raise SptReleaseRateLimitedError(limited)
             raise SptReleaseUnavailableError(
                 f"The SPT release list is not available right now (HTTP {response.status_code}). Try again later."
             )

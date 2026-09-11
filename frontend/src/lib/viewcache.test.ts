@@ -5,7 +5,9 @@ import { cached, invalidate } from './viewcache';
  * `viewcache.ts` keeps its store in a module-level `Map`, so each test uses
  * a unique game-dir path to stay isolated from state left behind by other
  * tests (mirrors the isolation approach used for other module-singleton
- * caches in this codebase).
+ * caches in this codebase). Loads that are still on their way are driven by
+ * promises the test resolves itself, so the sharing of one request between
+ * two views is observed rather than timed.
  */
 
 describe('cached', () => {
@@ -45,6 +47,45 @@ describe('cached', () => {
 
 		const after = cached(gameDir, 'listMods', [], async () => 'unused-value');
 		expect(after.value).toBe('second-value');
+	});
+
+	it('a second refresh while the first is still on its way shares that one load', async () => {
+		const gameDir = '/games/shared-inflight';
+		let loaderCalls = 0;
+		let release: (value: string) => void = () => {};
+		const loader = async (): Promise<string> => {
+			loaderCalls += 1;
+			return new Promise<string>((resolve) => {
+				release = resolve;
+			});
+		};
+
+		const first = cached(gameDir, 'listMods', [], loader).refresh();
+		const second = cached(gameDir, 'listMods', [], loader).refresh();
+		release('shared-value');
+
+		expect(await first).toBe('shared-value');
+		expect(await second).toBe('shared-value');
+		expect(loaderCalls).toBe(1);
+	});
+
+	it('a load that failed is not shared, so the next refresh tries again', async () => {
+		const gameDir = '/games/failed-inflight';
+		let loaderCalls = 0;
+		const loader = async (): Promise<string> => {
+			loaderCalls += 1;
+			if (loaderCalls === 1) {
+				throw new Error('source down');
+			}
+			return 'second-value';
+		};
+
+		await expect(cached(gameDir, 'listMods', [], loader).refresh()).rejects.toThrow(
+			'source down'
+		);
+
+		expect(await cached(gameDir, 'listMods', [], loader).refresh()).toBe('second-value');
+		expect(loaderCalls).toBe(2);
 	});
 
 	it.each([
@@ -97,6 +138,28 @@ describe('invalidate', () => {
 
 		const afterKept = cached(kept, 'listMods', [], async () => 'unused');
 		expect(afterKept.value).toBe('kept-value');
+	});
+
+	it('drops a load that is still on its way, so the next refresh starts its own', async () => {
+		const gameDir = '/games/invalidate-inflight';
+		let loaderCalls = 0;
+		const releases: ((value: string) => void)[] = [];
+		const loader = async (): Promise<string> => {
+			loaderCalls += 1;
+			return new Promise<string>((resolve) => {
+				releases.push(resolve);
+			});
+		};
+
+		const first = cached(gameDir, 'listMods', [], loader).refresh();
+		invalidate(gameDir);
+		const second = cached(gameDir, 'listMods', [], loader).refresh();
+		for (const resolve of releases) {
+			resolve('value');
+		}
+		await Promise.all([first, second]);
+
+		expect(loaderCalls).toBe(2);
 	});
 
 	it('is a no-op when invalidating a game dir that has no entries', () => {

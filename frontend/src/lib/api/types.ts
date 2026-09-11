@@ -2219,6 +2219,9 @@ export interface components {
         /**
          * ListSptReleasesRequest
          * @description Parameters of ``list_spt_releases``.
+         *
+         *     ``refresh`` fetches a fresh listing from the release source instead of
+         *     serving the stored one.
          */
         ListSptReleasesRequest: {
             /**
@@ -2226,6 +2229,11 @@ export interface components {
              * Format: path
              */
             path: string;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh: boolean;
         };
         /**
          * LocateDirectoryRequest
@@ -2938,6 +2946,16 @@ export interface components {
              * @default
              */
             latest: string;
+            /**
+             * Source Ok
+             * @default true
+             */
+            source_ok: boolean;
+            /**
+             * Notice
+             * @default
+             */
+            notice: string;
         };
         /**
          * StatusReport

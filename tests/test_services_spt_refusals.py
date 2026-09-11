@@ -1,8 +1,9 @@
 """Behaviour of ``apply_spt_release`` when it refuses, and of a copy that fails mid-write.
 
-Covers the refusals -- an unknown version, a release without a download, a
-release of another series, a build mismatch, an unreadable build, a running
-game, an unmanaged file, a download that does not arrive whole and a
+Covers the refusals -- an unknown version, a release list that cannot be
+read at all, a version the stored listing does not know yet, a release
+without a download, a release of another series, a build mismatch, an
+unreadable build, a running game, an unmanaged file, a download that does not arrive whole and a
 directory that is no game directory -- and the state a copy failing mid-write
 leaves behind for the next change.
 """
@@ -64,6 +65,88 @@ def test_apply_refuses_a_version_the_source_does_not_publish(
         services.apply_spt_release(spt_game_dir, "4.1.9")
 
     assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_refuses_the_change_while_no_release_list_can_be_read(
+    spt_game_dir: Path, spt_release_source: SptReleaseSource
+) -> None:
+    """apply_spt_release() names the unreadable source instead of the missing version.
+
+    The source fails and no listing was ever downloaded, so nothing can say
+    whether the wanted version exists; the change is refused with what went
+    wrong, because an empty list must never read as "there is no such
+    release" and lead to a wrong decision.
+    """
+    spt_release_source.unavailable(503)
+
+    with pytest.raises(SptReleaseUnavailableError, match="not available right now"):
+        services.apply_spt_release(spt_game_dir, NEW)
+
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_looks_at_the_source_for_a_version_the_stored_listing_lacks(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() finds a release published after the stored listing was downloaded.
+
+    The listing was stored while only 4.1.1 existed and 4.1.2 appeared
+    afterwards; the change to 4.1.2 goes through without anyone asking for a
+    refresh first, because a version missing from a listing of yesterday says
+    nothing about what is published today.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    services.list_spt_releases(spt_game_dir)
+    offer(spt_release_source, make_spt_release, NEWEST)
+
+    result = services.apply_spt_release(spt_game_dir, NEWEST)
+
+    assert result.version == NEWEST
+    assert release_subjects(spt_game_dir)[0] == f"spt: {NEWEST}"
+
+
+def test_apply_names_the_failed_source_when_the_stored_listing_lacks_the_version(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() reports the unreadable source, not a missing release.
+
+    The stored listing knows only 4.1.1 and the source refuses the look-up
+    for 4.1.2; the refusal names the source failure and the day the listing
+    was downloaded, because "there is no published SPT 4.1.2" would be a
+    statement nobody checked.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+    services.list_spt_releases(spt_game_dir)
+    spt_release_source.unavailable(503)
+
+    with pytest.raises(SptReleaseUnavailableError, match="downloaded on") as exc_info:
+        services.apply_spt_release(spt_game_dir, NEWEST)
+
+    assert "not available right now" in str(exc_info.value)
+    assert release_subjects(spt_game_dir) == ["chore: clean SPT 4.1.0"]
+
+
+def test_apply_asks_the_source_once_for_a_version_nothing_publishes(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_spt_release: MakeSptRelease,
+) -> None:
+    """apply_spt_release() does not read the source twice over a version it just fetched.
+
+    Nothing was stored, so the first look-up already asked the source; the
+    refusal comes from that answer instead of a second request, which is what
+    keeps a mistyped version from costing two of the sixty requests an hour.
+    """
+    offer(spt_release_source, make_spt_release, NEW)
+
+    with pytest.raises(SptReleaseUnavailableError, match="There is no published SPT"):
+        services.apply_spt_release(spt_game_dir, "4.1.9")
+
+    assert spt_release_source.list_calls == 1
 
 
 def test_apply_refuses_a_release_without_a_download_and_names_the_installer(

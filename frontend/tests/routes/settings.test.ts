@@ -282,6 +282,63 @@ describe('the SPT release list', () => {
 		expect(await screen.findByText('The release feed is down.')).toBeInTheDocument();
 	});
 
+	it('keeps the installed version and the game build on show when the source failed', async () => {
+		stubMount({
+			releases: sptReleaseList({
+				current_version: '4.1.0',
+				client_build: '41000',
+				releases: [],
+				latest: '',
+				source_ok: false,
+				notice: 'The hourly limit for anonymous requests is used up.'
+			})
+		});
+		render(Page);
+
+		expect(await screen.findByText('4.1.0', { selector: 'strong' })).toBeInTheDocument();
+		expect(screen.getByText('Escape from Tarkov build 41000')).toBeInTheDocument();
+		expect(
+			screen.getByText('The hourly limit for anonymous requests is used up.')
+		).toBeInTheDocument();
+	});
+
+	it('reuses the release list of this app run when the page is opened again', async () => {
+		stubMount({ releases });
+		const first = render(Page);
+		await screen.findByRole('link', { name: '4.2.0' });
+		first.unmount();
+
+		render(Page);
+
+		expect(await screen.findByRole('link', { name: '4.2.0' })).toBeInTheDocument();
+		expect(rpc.payloads('list_spt_releases')).toEqual([{ path: GAME_DIR, refresh: false }]);
+	});
+
+	it('fetches the release list again when the refresh button is used', async () => {
+		const user = userEvent.setup();
+		stubMount({ releases });
+		rpc.handle('list_spt_releases', (payload) =>
+			(payload as { refresh: boolean }).refresh
+				? sptReleaseList({
+						current_version: '4.1.0',
+						client_build: '41000',
+						latest: '4.3.0',
+						releases: [release({ version: '4.3.0' })]
+					})
+				: releases
+		);
+		render(Page);
+
+		await screen.findByRole('link', { name: '4.2.0' });
+		await user.click(screen.getByRole('button', { name: 'Check for new versions' }));
+
+		expect(await screen.findByRole('link', { name: '4.3.0' })).toBeInTheDocument();
+		expect(rpc.payloads('list_spt_releases')).toEqual([
+			{ path: GAME_DIR, refresh: false },
+			{ path: GAME_DIR, refresh: true }
+		]);
+	});
+
 	it('confirms an update before it applies the release', async () => {
 		const user = userEvent.setup();
 		stubMount({ releases });

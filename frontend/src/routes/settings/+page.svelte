@@ -69,7 +69,7 @@
 		type UpdateDeps,
 		type UpdateState
 	} from '$lib/updatestate';
-	import { invalidate } from '$lib/viewcache';
+	import { cached, invalidate } from '$lib/viewcache';
 
 	const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 		{ value: 'system', label: 'Use system setting' },
@@ -594,15 +594,28 @@
 		return releases === null ? '' : releases.current_version;
 	}
 
-	async function loadReleases(): Promise<void> {
+	/**
+	 * Show the SPT releases, asking the release source only when told to.
+	 * Without ``refresh`` the answer of this app run is reused, so opening the
+	 * page repeatedly costs the source nothing; the refresh button is the one
+	 * way to fetch again.
+	 */
+	async function loadReleases(refresh = false): Promise<void> {
 		const gameDir = path;
 		if (gameDir === null) {
+			return;
+		}
+		const view = cached(gameDir, 'list_spt_releases', [], () =>
+			listSptReleases(gameDir, refresh)
+		);
+		if (!refresh && view.value !== undefined) {
+			releases = view.value;
 			return;
 		}
 		releasesLoading = true;
 		sptError = '';
 		try {
-			releases = await listSptReleases(gameDir);
+			releases = await view.refresh();
 		} catch (cause) {
 			sptError = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -874,7 +887,19 @@
 								? 'not readable'
 								: releases.client_build}
 						</span>
+						<button
+							type="button"
+							class="btn-sm"
+							disabled={releasesLoading || sptBusy}
+							onclick={() => void loadReleases(true)}
+						>
+							{releasesLoading ? 'Checking…' : 'Check for new versions'}
+						</button>
 					</p>
+
+					{#if releases !== null && !releases.source_ok}
+						<p class="warn-text">{releases.notice}</p>
+					{/if}
 
 					{#if sptBusy}
 						<div class="status-progress">

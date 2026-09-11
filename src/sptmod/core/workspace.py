@@ -37,6 +37,7 @@ _APP_NAME: Final = "sptmod"
 _STAGING_DIR_NAME: Final = "staging"
 _DOWNLOAD_CACHE_DIR_NAME: Final = "downloads"
 _THUMBNAIL_CACHE_DIR_NAME: Final = "thumbnails"
+_SPT_RELEASE_CACHE_DIR_NAME: Final = "spt-releases"
 _STAGING_MAX_AGE_SECONDS: Final = 24 * 60 * 60
 _LOCK_TIMEOUT_SECONDS: Final = 300.0
 _LOCK_POLL_SECONDS: Final = 0.2
@@ -82,6 +83,20 @@ def thumbnail_cache_dir() -> Path:
     thumbnails = path / _THUMBNAIL_CACHE_DIR_NAME
     thumbnails.mkdir(parents=True, exist_ok=True)
     return thumbnails
+
+
+def spt_release_cache_dir() -> Path:
+    """Return the directory the downloaded list of SPT releases is kept in.
+
+    Lives next to the other caches in the user's cache directory and is
+    created on demand. Its content survives across runs so a rate-limited
+    release source still leaves something to show; nothing is swept, because
+    a listing is replaced rather than added to.
+    """
+    path = platformdirs.user_cache_path(_APP_NAME, appauthor=False)
+    releases = path / _SPT_RELEASE_CACHE_DIR_NAME
+    releases.mkdir(parents=True, exist_ok=True)
+    return releases
 
 
 def is_locked(game_dir: Path) -> bool:

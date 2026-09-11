@@ -2,7 +2,8 @@
 
 Covers ``install_local_source``: the newest build of the named mod lands in the
 game directory, a build installed earlier is taken out before the new one goes
-in -- whether or not the version changed -- a folder holding several mods
+in -- whether or not the version changed -- an install that fails after that
+removal puts the previous build back, a folder holding several mods
 installs the one that was asked for, a folder that has built nothing is refused
 in plain language, an installed mod records the folder it came from and is
 paired with a build of that folder even after a rename, and -- the property this
@@ -288,18 +289,62 @@ def _conflicting_mod(clean_repo: Repo, tmp_path: Path) -> None:
     services.install_from_archive(clean_repo.path, archive)
 
 
-def test_a_build_that_cannot_be_installed_leaves_the_mod_taken_out(
+def test_a_build_that_cannot_be_installed_puts_the_previous_build_back(
     clean_repo: Repo, local_source_store: Path, tmp_path: Path
 ) -> None:
     """Pins what a failed reinstall leaves behind.
 
-    The old build is taken out before the new one goes in, so an install that
-    fails afterwards -- here because the new build ships a file another mod
-    already owns -- leaves the mod removed rather than restoring the previous
-    build. The player gets the failure, keeps every file in the repository's
-    history, and installs again once the build is fixed; this test states that
-    outcome so a change to it is a deliberate one.
+    The old build has to be taken out before the new one goes in, so an install
+    that fails afterwards -- here because the new build ships a file another mod
+    already owns -- would leave the player with no mod at all although they only
+    asked to update one. The removal is therefore reverted: this asserts that
+    the previous build is active again, at its previous version and with its
+    files back on disk, because a failed attempt must cost the player nothing.
     """
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    write_build(
+        folder,
+        "MyMod-1.0.0.zip",
+        mod_name=_MOD_NAME,
+        version="1.0.0",
+        files={"SPT/user/mods/MyMod/mod.js": "first build"},
+        mtime=_OLD,
+    )
+    services.install_local_source(
+        clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+    )
+    _conflicting_mod(clean_repo, tmp_path)
+    write_build(
+        folder,
+        "MyMod-2.0.0.zip",
+        mod_name=_MOD_NAME,
+        version="2.0.0",
+        files={"BepInEx/plugins/Shared.dll": "other dll"},
+        mtime=_NEW,
+    )
+
+    with pytest.raises(ConflictError):
+        services.install_local_source(
+            clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+        )
+
+    restored = services.list_mods(clean_repo.path)
+    assert sorted(mod.name for mod in restored) == [_MOD_NAME, "Shared"]
+    assert [mod.version for mod in restored if mod.name == _MOD_NAME] == ["1.0.0"]
+    assert (clean_repo.path / "SPT/user/mods/MyMod/package.json").is_file()
+    assert (clean_repo.path / "SPT/user/mods/MyMod/mod.js").read_text(
+        encoding="utf-8"
+    ) == "first build"
+
+
+def test_the_restored_build_keeps_the_mod_of_the_folder_it_came_from(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """The restore commit carries only the mod name and its state, so everything
+    else about the mod has to come from the original install commit. If it carried
+    the full trailer set, or none, this fails: the mod would lose the folder it
+    came from and removing the folder would leave it behind, and the folder's
+    listing would no longer pair its build with the installed mod."""
     folder = _registered(clean_repo.path, tmp_path, local_source_store)
     write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0", mtime=_OLD)
     services.install_local_source(
@@ -320,6 +365,36 @@ def test_a_build_that_cannot_be_installed_leaves_the_mod_taken_out(
             clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
         )
 
+    listed = services.list_local_sources(clean_repo.path, store_path=local_source_store)
+    offered = listed[0].mods[0]
+    assert offered.mod is not None
+    assert offered.mod.source == str(folder.resolve())
+    assert [mod.name for mod in listed[0].installed] == [_MOD_NAME]
+
+
+def test_a_first_install_that_fails_reports_the_failure_and_restores_nothing(
+    clean_repo: Repo, local_source_store: Path, tmp_path: Path
+) -> None:
+    """Nothing was taken out because nothing was installed, so there is nothing to
+    put back. If the rollback ran anyway, this fails: reverting a commit that was
+    never made raises a different error than the conflict the player has to see,
+    and the game directory would be left holding something."""
+    folder = _registered(clean_repo.path, tmp_path, local_source_store)
+    _conflicting_mod(clean_repo, tmp_path)
+    write_build(
+        folder,
+        "MyMod-1.0.0.zip",
+        mod_name=_MOD_NAME,
+        version="1.0.0",
+        files={"BepInEx/plugins/Shared.dll": "other dll"},
+        mtime=_NEW,
+    )
+
+    with pytest.raises(ConflictError):
+        services.install_local_source(
+            clean_repo.path, folder, _MOD_NAME, store_path=local_source_store
+        )
+
     assert [mod.name for mod in services.list_mods(clean_repo.path)] == ["Shared"]
     assert not (clean_repo.path / "SPT/user/mods/MyMod/package.json").exists()
 
@@ -327,9 +402,9 @@ def test_a_build_that_cannot_be_installed_leaves_the_mod_taken_out(
 def test_the_folder_still_offers_the_mod_after_a_failed_reinstall(
     clean_repo: Repo, local_source_store: Path, tmp_path: Path
 ) -> None:
-    """The way back from the failure above is another install, so the folder has
-    to keep offering the mod: if the failure changed what the folder offers, the
-    player would be left with no way to put their mod back."""
+    """The way forward from the failure above is another install once the build is
+    fixed, so the folder has to keep offering the mod: if the failure changed what
+    the folder offers, the player would be left with no way to install it again."""
     folder = _registered(clean_repo.path, tmp_path, local_source_store)
     write_build(folder, "MyMod-1.0.0.zip", mod_name=_MOD_NAME, version="1.0.0", mtime=_OLD)
     services.install_local_source(

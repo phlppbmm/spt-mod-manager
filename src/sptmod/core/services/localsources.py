@@ -21,6 +21,7 @@ from sptmod.core.errors import (
     InvalidPathError,
     LocalSourceNotBuiltError,
     LocalSourceNotFoundError,
+    SptmodError,
 )
 from sptmod.core.game_dir import GameLayout, detect_layout
 from sptmod.core.localsources import (
@@ -32,16 +33,20 @@ from sptmod.core.localsources import (
 )
 from sptmod.core.models import (
     ACTIVE_STATES,
+    TRAILER_MOD,
+    TRAILER_MOD_STATE,
     Conflict,
     ModInfo,
+    ModState,
     Progress,
 )
 from sptmod.core.modmeta import InvalidMetadataError
+from sptmod.core.repo import Repo
 from sptmod.core.services.common import for_game_layout
 from sptmod.core.services.install_archive import install_from_archive, read_meta
-from sptmod.core.services.lifecycle import remove_mod
+from sptmod.core.services.lifecycle import RemoveResult, remove_mod
 from sptmod.core.services.state import list_mods
-from sptmod.core.workspace import staging_dir
+from sptmod.core.workspace import game_lock, staging_dir
 
 # The public surface of this module: the service functions behind the CLI and
 # the RPC adapter, their result types, and the constants consumers read.
@@ -205,7 +210,9 @@ def install_local_source(
     Where the mod is currently active, it is taken out first and the new build
     installed after it: what the folder offers now replaces what is installed,
     whether or not the version, the name, the file names or the file count
-    changed. The mod is recorded as coming from this folder, so removing the
+    changed. An install that then fails puts the previous build back, so a
+    build that cannot be installed costs the player nothing but the attempt.
+    The mod is recorded as coming from this folder, so removing the
     folder later uninstalls it again. The
     installed mod is never linked to a Forge mod, so a later update never
     offers to overwrite a fork with the release it was forked from.
@@ -247,11 +254,17 @@ def install_local_source(
         )
     paired = _paired_mods(offered, list_mods(path), source.folder)
     installed = paired.get(build.name.casefold())
+    removal: RemoveResult | None = None
     if installed is not None:
-        remove_mod(path, installed.name)
-    result = install_from_archive(
-        path, build.archive, progress=progress, source=source_key(source.folder)
-    )
+        removal = remove_mod(path, installed.name)
+    try:
+        result = install_from_archive(
+            path, build.archive, progress=progress, source=source_key(source.folder)
+        )
+    except (SptmodError, OSError):
+        if removal is not None:
+            _restore_build(path, removal)
+        raise
     return LocalInstallResult(
         mod=result.mod,
         archive=build.archive,
@@ -259,6 +272,43 @@ def install_local_source(
         files=result.files,
         warnings=result.warnings,
     )
+
+
+def _restore_build(path: Path, removal: RemoveResult) -> None:
+    """Put the build ``removal`` took out back, by reverting its removal commit.
+
+    Reverting the removal is the only way back: the new build cannot be
+    installed on top of the old one -- every file both builds ship would raise
+    ``ConflictError``, and ``force=True`` would leave behind the files the new
+    build no longer ships -- so the old build has to be gone before the new one
+    goes in, which leaves undoing the removal afterwards as the only available
+    rollback.
+
+    Takes the lock for itself, the way :func:`install_local_source` calls
+    public functions that each lock: nesting ``game_lock`` self-deadlocks.
+
+    Deliberately does not call ``ensure_installable`` first. The tree was
+    installable moments ago and ``install_from_archive`` leaves it clean on
+    every failure path -- it checks conflicts before copying and rolls copied
+    files back when the commit fails -- so refusing to put the player's own mod
+    back because the game happened to start in between would be exactly the
+    harm this rollback exists to prevent.
+
+    The revert carries only ``Mod`` and ``Mod-State``, as ``disable_mod`` and
+    ``enable_mod`` do: ``services/common.current_mods`` takes a mod's
+    descriptive trailers from its youngest FULL mod commit -- still the
+    original install commit -- and only state, hash and date from its youngest
+    commit of any kind. Nothing calls ``_drop_runtime_data`` here either: the
+    files are coming back, not leaving.
+    """
+    with game_lock(path, f"restoring {removal.name}"):
+        Repo(path).revert(
+            removal.commit,
+            extra_trailers={
+                TRAILER_MOD: removal.name,
+                TRAILER_MOD_STATE: ModState.INSTALLED,
+            },
+        )
 
 
 def _now() -> str:

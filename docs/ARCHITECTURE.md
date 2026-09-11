@@ -825,6 +825,20 @@ the listing. A folder that offers nothing is the normal "nothing built yet"
 state; only installing fails. The cost of reading the truth from disk is that a
 listing extracts every archive of every registered folder.
 
+The rejected alternative was the file-name heuristic: group the archives by
+their stem with the trailing version stripped, so that `MyMod-1.0.0.zip` and
+`MyMod-1.1.0.zip` read as two builds of one mod. It is cheap -- no extraction at
+all, a listing costs one `readdir` instead of one extraction per archive -- and
+it was rejected anyway, because a build tool's file naming is a convention and
+not a contract. A renamed output file, a stem carrying a build number or a git
+hash, or two unrelated mods whose file names happen to share a stem would each
+silently split one mod into two offers or fuse two mods into one, and the offer
+would then stand under a name the install commit contradicts. The declared name
+is the same source that commit's `Mod:` trailer comes from, which is exactly
+what lets a listing pair an offered build with the installed mod while storing
+nothing; a heuristic that can disagree with the trailer buys its speed by
+giving that up.
+
 **No Forge linkage.** Nothing guesses a Forge identity from a mod name any
 more: `install_from_archive` writes only the IDs a caller hands it, and the
 Forge install path (`install_mod`) is the only caller that has any. A build
@@ -851,11 +865,43 @@ as `apply_mod_set` does -- nesting `game_lock` would self-deadlock. A mod that
 is disabled, removed or never installed needs no removal. The History shows the
 removal and the install as the two commits they are.
 
-There is no rollback between the two steps: an install that fails after the
-removal -- a conflict with another mod, a git failure -- leaves the mod removed
-instead of putting the previous build back. The files of that build are still in
-the repository's history, the folder keeps offering the mod, and installing
-again once the build is fixed is the way back.
+An install that fails after the removal -- a conflict with another mod, a git
+failure, an unreadable archive -- puts the previous build back, so a build that
+cannot be installed costs the player nothing but the attempt. The rollback is a
+revert of the removal commit, and that is the only mechanism available: the new
+build cannot simply be installed on top of the old one for the reason above, so
+the removal has to go first, which leaves undoing it as the way back. The
+restore takes the apply lock for itself, as every other step on this path does,
+and deliberately does not re-check installability first -- the tree was
+installable moments ago and `install_from_archive` leaves it clean on every
+failure path, so refusing to put the player's own mod back because the game
+happened to start in between would be exactly the harm the rollback exists to
+prevent. Its revert carries only `Mod` and `Mod-State: installed`, the way
+`disable_mod` and `enable_mod` mark theirs, because `current_mods` reads a mod's
+descriptive trailers from its youngest full mod commit -- still the original
+install -- and only state, hash and date from its youngest commit of any kind.
+The History then shows the removal followed by the restoring revert; the failed
+install left no commit at all. The folder keeps offering the mod either way, so
+installing again once the build is fixed is still the normal way forward.
+
+**In the mod list.** A mod installed from a local source needs no handling of its
+own to appear on the Mods page: it is one of the mods no cached catalog row
+matches, so the `_local_entries` synthesis of `services/catalog.py` picks it up
+like any adopted or hand-installed mod -- `local=True`, a name-derived negative
+id, the installed version and no `latest_version`, with the disabled ones handed
+in alongside the active ones. That mechanism is described with the catalog
+service above; the row it produces -- marked "Local", no Forge affordance, with
+Disable/Enable, Remove and Files unchanged -- under "Mods view behaviour" below.
+Neither passage is specific to local sources, and both hold for them because the
+install writes no Forge ids, which is also why `check_updates` reports such a mod
+as `skipped`.
+
+**Removing a folder.** `remove_local_source` uninstalls every mod that was
+installed from the folder before it drops the folder from the registry: nothing
+that came from a folder is left behind with no record of where it came from. The
+converse does not hold -- removing such a mod on its own is an ordinary
+`remove_mod` and never takes its folder off the list, because the folder still
+offers the mod and installing it again is one click away.
 
 **Service functions** (`services/localsources.py`, all with keyword-only
 `store_path`; `InvalidMetadataError` for an unreadable store is possible in
@@ -1577,10 +1623,12 @@ download the new version from the releases page."
   and a failing `close()` is swallowed so it cannot turn a successful check or
   install into an error.
 - `plugins.updater.endpoints` is
-  `https://github.com/OWNER/REPO/releases/latest/download/latest.json` and
-  `plugins.updater.pubkey` holds a PLACEHOLDER key. Both must be replaced before
-  the first real release (README "Release"); until then a check simply fails,
-  which the UI treats as any other failed check.
+  `https://github.com/phlppbmm/spt-mod-manager/releases/latest/download/latest.json`
+  — the repository `release.yml` publishes to, which is what its endpoint guard
+  compares against. `plugins.updater.pubkey` is no longer the throwaway
+  placeholder key that guard rejects. Whether the matching private key sits in
+  the `TAURI_SIGNING_PRIVATE_KEY` secret is not visible from the repository;
+  README "Release" describes the key pair.
 - `+layout.svelte` runs one check on mount and renders `startupNotice(state)` —
   a non-blocking line linking to `/settings#updates`, empty for every state but
   `available`, so a failed startup check is silent. The Updates section of
@@ -1619,9 +1667,13 @@ exercised yet.
 so parallel platforms would drop each other's entries), passes
 `-c src-tauri/tauri.bundle.conf.json` through tauri-action's `args` so the sidecar
 is bundled, and uploads installers and manifest into a draft release. Two guards run before anything is built: the job
-fails while `plugins.updater.endpoints` still contains `OWNER/REPO` or
-`plugins.updater.pubkey` is still the throwaway placeholder key, and it fails
-when the tag is not `v` plus the `pyproject.toml` version.
+fails when `plugins.updater.endpoints[0]` is not
+`https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json` —
+the configured endpoint is compared against the repository actually being
+released, so a fork or a rename that would keep updating from somewhere else is
+caught as well — or when `plugins.updater.pubkey` is still the throwaway
+placeholder key, and it fails when the tag is not `v` plus the `pyproject.toml`
+version.
 
 ## Frontend design system
 

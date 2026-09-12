@@ -3,6 +3,7 @@ when the Forge API is unreachable.
 """
 
 import sqlite3
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
@@ -245,6 +246,30 @@ def test_delta_sync_requests_updated_between_from_watermark_minus_overlap_and_so
     params = recorded_requests(route)[-1].url.params
     assert params["filter[updated_between]"].startswith("2025-06-09,")
     assert params["sort"] == "-updated_at"
+
+
+def test_delta_sync_asks_past_today_because_the_window_end_is_exclusive(
+    catalog: Catalog, client_factory: ClientFactory, respx_router: respx.MockRouter
+) -> None:
+    """Delta sync ends its window on tomorrow, so today's releases are inside it.
+
+    The API excludes the end date, so a window ending today answers with
+    nothing updated today and a mod published this morning stays invisible
+    until the next day however often the catalog is synced.
+    """
+    route = _mods_route_queue(respx_router, _full_sync_pages())
+    client = client_factory()
+    catalog.sync(client, full=True)
+
+    route.side_effect = None
+    route.return_value = httpx.Response(
+        200, json=page_envelope([], current_page=1, last_page=1, total=0, next_url=None)
+    )
+    catalog.sync(client, full=False)
+
+    window = recorded_requests(route)[-1].url.params["filter[updated_between]"]
+    end = date.fromisoformat(window.split(",")[1])
+    assert end > datetime.now(UTC).date()
 
 
 def test_delta_sync_updates_only_changed_rows_and_counts_correctly(

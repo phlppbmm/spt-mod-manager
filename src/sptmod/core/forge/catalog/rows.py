@@ -247,15 +247,19 @@ def highest(versions: Sequence[CatalogVersion]) -> CatalogVersion:
 def delta_filter(watermark: str) -> str | None:
     """Build the ``updated_between`` filter value for a delta sync.
 
-    The filter is date-granular, so the range starts ``SYNC_OVERLAP_DAYS``
-    before the watermark day and ends today. Returns None if the watermark
-    carries no parsable date.
+    The filter is date-granular and its end is exclusive: a range ending today
+    answers with nothing published today, so a mod released this morning would
+    stay invisible until tomorrow however often the catalog is synced. The
+    range therefore starts ``SYNC_OVERLAP_DAYS`` before the watermark day and
+    ends tomorrow, which the overlap mirrors on the other side. Returns None if
+    the watermark carries no parsable date.
     """
     try:
         start = date.fromisoformat(watermark[:10]) - timedelta(days=SYNC_OVERLAP_DAYS)
     except ValueError:
         return None
-    return f"{start.isoformat()},{datetime.now(UTC).date().isoformat()}"
+    end = datetime.now(UTC).date() + timedelta(days=1)
+    return f"{start.isoformat()},{end.isoformat()}"
 
 
 def percent(current_page: int, last_page: int) -> int:

@@ -15,7 +15,8 @@
  * instance, and that instance is shared by the tests of this file.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -378,6 +379,41 @@ describe('which rows fetch their image', () => {
 });
 
 /**
+ * Animation frames the test runs itself, so the table's growth from the rows in
+ * view to the whole list advances only when the test says so.
+ */
+function manualFrames(): { run: () => void } {
+	let queue: FrameRequestCallback[] = [];
+	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+		queue.push(callback);
+		return queue.length;
+	});
+	vi.stubGlobal('cancelAnimationFrame', () => {});
+	return {
+		run: () => {
+			const due = queue;
+			queue = [];
+			for (const callback of due) {
+				callback(0);
+			}
+		}
+	};
+}
+
+/** The rows currently in the DOM. */
+function renderedRows(): NodeListOf<Element> {
+	return document.querySelectorAll('[id^="modrow-"]');
+}
+
+/** Gives each entry a download count matching its position, so a sort by downloads reorders them. */
+function downloadsInOrder(entries: CatalogEntry[]): CatalogEntry[] {
+	return entries.map((entry, position) => ({
+		...entry,
+		mod: { ...entry.mod, downloads: position }
+	}));
+}
+
+/**
  * Gives every element a 440px viewport and 44px rows, a scroll position that
  * sticks, and a position on screen that moves as the page scrolls -- happy-dom
  * lays nothing out, forgets a scrollTop as soon as it is set and reports every
@@ -408,7 +444,7 @@ function fakeLayout(): { scrollTo: (top: number) => void } {
  * then only the rows in view and the overscan around them may be rendered.
  */
 describe('which rows are rendered', () => {
-	it('renders only the rows in view plus the overscan, while counting every result', async () => {
+	it('ends with every row rendered, so scrolling mounts nothing', async () => {
 		fakeLayout();
 		serveThumbnails();
 		stubView(manyEntries(3000, 400));
@@ -417,10 +453,45 @@ describe('which rows are rendered', () => {
 		await screen.findByText('400 results');
 
 		await waitFor(() => {
-			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(20);
+			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(400);
 		});
-		expect(document.getElementById('modrow-3000')).not.toBeNull();
-		expect(document.getElementById('modrow-3399')).toBeNull();
+		vi.restoreAllMocks();
+	});
+
+	it('renders the rows at a new scroll position at once while the list is still growing', async () => {
+		const frames = manualFrames();
+		const layout = fakeLayout();
+		serveThumbnails();
+		stubView(manyEntries(6000, 400));
+		mount();
+		await screen.findByText('400 results');
+		await tick();
+		expect(renderedRows()).toHaveLength(20);
+
+		layout.scrollTo(300 * 44);
+		frames.run();
+		await tick();
+
+		expect(document.getElementById('modrow-6300')).not.toBeNull();
+		expect(renderedRows().length).toBeLessThan(400);
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+	});
+
+	it('starts again from the rows in view when a sort changes the list', async () => {
+		fakeLayout();
+		serveThumbnails();
+		stubView(downloadsInOrder(manyEntries(3500, 400)));
+		mount();
+		await screen.findByText('400 results');
+		await waitFor(() => {
+			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(400);
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Downloads/ }));
+		await tick();
+
+		expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(20);
 		vi.restoreAllMocks();
 	});
 
@@ -442,28 +513,25 @@ describe('which rows are rendered', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('hands the tab stop to a rendered row once the focused row scrolls out', async () => {
-		const layout = fakeLayout();
+	it('hands the tab stop to a rendered row when a sort moves the focused row out of view', async () => {
+		fakeLayout();
 		serveThumbnails();
-		stubView(manyEntries(5000, 400));
+		stubView(downloadsInOrder(manyEntries(5000, 400)));
 		mount();
 		await screen.findByText('400 results');
 		await waitFor(() => {
-			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(20);
+			expect(document.getElementById('modrow-5000')).not.toBeNull();
 		});
 		document.getElementById('modrow-5000')?.focus();
 		await waitFor(() => {
 			expect(document.activeElement?.id).toBe('modrow-5000');
 		});
-		await new Promise((settled) => setTimeout(settled, 0));
 
-		layout.scrollTo(200 * 44);
+		await fireEvent.click(screen.getByRole('button', { name: /Downloads/ }));
+		await tick();
 
-		await waitFor(() => {
-			expect(document.getElementById('modrow-5000')).toBeNull();
-		});
-		const tabStops = document.querySelectorAll('[id^="modrow-"][tabindex="0"]');
-		expect(tabStops).toHaveLength(1);
+		expect(document.getElementById('modrow-5000')).toBeNull();
+		expect(document.querySelectorAll('[id^="modrow-"][tabindex="0"]')).toHaveLength(1);
 		vi.restoreAllMocks();
 	});
 });

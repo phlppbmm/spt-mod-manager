@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { OVERSCAN, rowWindow, scrollTopFor, type ListGeometry } from './rowwindow';
+import {
+	GROWTH_CHUNK,
+	OVERSCAN,
+	grow,
+	isComplete,
+	rowWindow,
+	scrollTopFor,
+	union,
+	type ListGeometry
+} from './rowwindow';
 
 /**
  * A 1000-row list of 40px rows whose first row sits 100px into its scroll
@@ -55,5 +64,46 @@ describe('scrollTopFor', () => {
 
 	it('leaves the scroll position alone for a row already fully in view', () => {
 		expect(scrollTopFor(3, geometry())).toBe(0);
+	});
+});
+
+describe('union', () => {
+	it('spans both ranges', () => {
+		expect(union({ start: 10, end: 20 }, { start: 15, end: 40 })).toEqual({ start: 10, end: 40 });
+	});
+
+	it.each([
+		{ id: 'first-empty', a: { start: 5, end: 5 }, b: { start: 30, end: 40 }, expected: { start: 30, end: 40 } },
+		{ id: 'second-empty', a: { start: 30, end: 40 }, b: { start: 5, end: 5 }, expected: { start: 30, end: 40 } }
+	])('ignores an empty range ($id)', ({ a, b, expected }) => {
+		expect(union(a, b)).toEqual(expected);
+	});
+});
+
+describe('grow', () => {
+	it('widens the range by one chunk on each side around the visible rows', () => {
+		const grown = grow({ start: 0, end: 0 }, { start: 500, end: 530 }, 1000);
+
+		expect(grown).toEqual({ start: 500 - GROWTH_CHUNK, end: 530 + GROWTH_CHUNK });
+	});
+
+	it('takes in visible rows the range does not hold yet', () => {
+		const grown = grow({ start: 100, end: 200 }, { start: 600, end: 630 }, 1000);
+
+		expect(grown).toEqual({ start: 100 - GROWTH_CHUNK, end: 630 + GROWTH_CHUNK });
+	});
+
+	it('stays within the list at both ends', () => {
+		expect(grow({ start: 10, end: 990 }, { start: 0, end: 30 }, 1000)).toEqual({ start: 0, end: 1000 });
+	});
+});
+
+describe('isComplete', () => {
+	it.each([
+		{ id: 'whole-list', range: { start: 0, end: 1000 }, complete: true },
+		{ id: 'missing-the-top', range: { start: 1, end: 1000 }, complete: false },
+		{ id: 'missing-the-bottom', range: { start: 0, end: 999 }, complete: false }
+	])('says whether the range holds every row ($id)', ({ range, complete }) => {
+		expect(isComplete(range, 1000)).toBe(complete);
 	});
 });

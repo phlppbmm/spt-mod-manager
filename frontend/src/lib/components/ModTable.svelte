@@ -5,7 +5,15 @@
 	import { onIntents, takeIntents } from '$lib/intents';
 	import { rowState, type ModSort, type SortKey } from '$lib/modfilter';
 	import { focusAfterRows } from '$lib/rownav';
-	import { rowWindow, scrollTopFor, type ListGeometry, type RowWindow } from '$lib/rowwindow';
+	import {
+		grow,
+		isComplete,
+		rowWindow,
+		scrollTopFor,
+		union,
+		type ListGeometry,
+		type RowWindow
+	} from '$lib/rowwindow';
 	import { headerCheckbox, toggleAll, toggleSelection } from '$lib/selection';
 
 	interface Props {
@@ -59,8 +67,9 @@
 	let header = $derived(headerCheckbox(selected, ids));
 	let focusedId: number | null = $state(null);
 
-	// Only the rows in view are rendered. A full catalog is close to two thousand rows, and every
-	// sort or filter change used to move all of them through the DOM.
+	// A list change renders only the rows in view, so a sort or a filter stays fast on a catalog of
+	// close to two thousand rows; the rendered range then grows a chunk per frame until it holds
+	// every row, so scrolling afterwards is plain scrolling instead of mounting rows as it goes.
 	let listElement: HTMLElement | null = $state(null);
 	let topSpacer: HTMLElement | null = $state(null);
 	let scroller: HTMLElement | null = null;
@@ -69,6 +78,9 @@
 	let listTop = $state(0);
 	let measuredRowHeight = $state(0);
 	let busyIds = $state(new Set<number>());
+	let grown: RowWindow = $state({ start: 0, end: 0 });
+	let growthFrame = 0;
+	let scrollFrame = 0;
 
 	let rowHeight = $derived(
 		measuredRowHeight > 0 ? measuredRowHeight : viewport > 0 ? ESTIMATED_ROW_HEIGHT : 0
@@ -81,7 +93,8 @@
 		viewport
 	});
 	let span = $derived(rowWindow(geometry));
-	let rendered = $derived(renderedRows(rows, span, busyIds));
+	let range = $derived(union(grown, span));
+	let rendered = $derived(renderedRows(rows, range, busyIds));
 
 	// One row is always the tab stop, so Tab reaches the table even before a
 	// row was focused; the ring follows the real DOM focus. A focused row that
@@ -93,10 +106,10 @@
 			return null;
 		}
 		const index = ids.indexOf(candidate);
-		if (index >= span.start && index < span.end) {
+		if (index >= range.start && index < range.end) {
 			return candidate;
 		}
-		return span.start < ids.length ? ids[span.start] : null;
+		return range.start < ids.length ? ids[range.start] : null;
 	});
 
 	onMount(() => {
@@ -106,7 +119,7 @@
 		}
 		const target: HTMLElement | Window | null =
 			scroller === document.scrollingElement ? window : scroller;
-		target?.addEventListener('scroll', measure, { passive: true });
+		target?.addEventListener('scroll', onScroll, { passive: true });
 		const resize =
 			scroller !== null && typeof ResizeObserver !== 'undefined'
 				? new ResizeObserver(measure)
@@ -118,16 +131,52 @@
 		reveal();
 		const stopIntents = onIntents(reveal);
 		return () => {
-			target?.removeEventListener('scroll', measure);
+			target?.removeEventListener('scroll', onScroll);
 			resize?.disconnect();
 			stopIntents();
+			cancelAnimationFrame(growthFrame);
+			cancelAnimationFrame(scrollFrame);
 		};
 	});
 
 	$effect(() => {
 		void rows;
-		void tick().then(measure);
+		let superseded = false;
+		untrack(() => {
+			grown = { start: 0, end: 0 };
+		});
+		void tick().then(() => {
+			if (superseded) {
+				return;
+			}
+			measure();
+			growthFrame = requestAnimationFrame(growStep);
+		});
+		// A newer list, or the table going away, ends this growth before it can touch either.
+		return () => {
+			superseded = true;
+			cancelAnimationFrame(growthFrame);
+		};
 	});
+
+	function growStep(): void {
+		if (rowHeight <= 0 || viewport <= 0 || isComplete(range, rows.length)) {
+			return;
+		}
+		grown = grow(grown, span, rows.length);
+		growthFrame = requestAnimationFrame(growStep);
+	}
+
+	/** Measure at most once a frame, and not at all once every row is rendered. */
+	function onScroll(): void {
+		if (scrollFrame !== 0 || isComplete(range, rows.length)) {
+			return;
+		}
+		scrollFrame = requestAnimationFrame(() => {
+			scrollFrame = 0;
+			measure();
+		});
+	}
 
 	$effect(() => {
 		focusedId = focusAfterRows(ids, untrack(() => focusedId));
@@ -144,7 +193,7 @@
 	/** Scroll a row that is not rendered into the window first, then focus it. */
 	async function bringIntoView(id: number): Promise<void> {
 		const index = ids.indexOf(id);
-		if (scroller !== null && index >= 0 && (index < span.start || index >= span.end)) {
+		if (scroller !== null && index >= 0 && (index < range.start || index >= range.end)) {
 			scroller.scrollTop = scrollTopFor(index, geometry);
 			measure();
 			await tick();
@@ -279,7 +328,7 @@
 			<div role="columnheader">State</div>
 			<div role="columnheader"></div>
 		</div>
-		<div bind:this={topSpacer} class="spacer" style:height="{span.start * rowHeight}px"></div>
+		<div bind:this={topSpacer} class="spacer" style:height="{range.start * rowHeight}px"></div>
 		{#each rendered as item (item.entry.mod.id)}
 			<div class="slot" class:offscreen={item.offscreen} role="presentation">
 				<ModRow
@@ -305,7 +354,7 @@
 				/>
 			</div>
 		{/each}
-		<div class="spacer" style:height="{(rows.length - span.end) * rowHeight}px"></div>
+		<div class="spacer" style:height="{(rows.length - range.end) * rowHeight}px"></div>
 		{#if rows.length === 0}
 			<p class="empty">
 				{loading ? 'Loading…' : 'No mods match the current filters.'}

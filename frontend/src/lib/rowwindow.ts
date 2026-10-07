@@ -57,3 +57,38 @@ export function scrollTopFor(index: number, geometry: ListGeometry): number {
 function clamp(value: number, count: number): number {
 	return Math.min(Math.max(value, 0), count);
 }
+
+/** Rows added on each side of the rendered range per step while it grows to the whole list. */
+export const GROWTH_CHUNK = 50;
+
+/** The smallest range holding both `a` and `b`; ranges here are always contiguous. */
+export function union(a: RowWindow, b: RowWindow): RowWindow {
+	if (a.end <= a.start) {
+		return b;
+	}
+	if (b.end <= b.start) {
+		return a;
+	}
+	return { start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) };
+}
+
+/**
+ * Widen the rendered `range` by `GROWTH_CHUNK` rows on each side, keeping the
+ * visible `window` inside it and staying within a list of `count` rows.
+ *
+ * Rendering only the rows in view keeps a sort or a filter fast; growing the
+ * rendered range a little per frame afterwards ends with every row rendered,
+ * so scrolling no longer mounts and destroys rows as it goes.
+ */
+export function grow(range: RowWindow, window: RowWindow, count: number): RowWindow {
+	const held = union(range, window);
+	return {
+		start: Math.max(0, held.start - GROWTH_CHUNK),
+		end: Math.min(count, held.end + GROWTH_CHUNK)
+	};
+}
+
+/** Whether `range` already holds every row of a list of `count` rows. */
+export function isComplete(range: RowWindow, count: number): boolean {
+	return range.start <= 0 && range.end >= count;
+}

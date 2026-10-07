@@ -24,7 +24,7 @@ export default mergeConfig(
 				// The measured coverage of the component suite, as a floor: a change
 				// that drops below it has stopped exercising something these tests
 				// reached. Raised only together with new tests, never rounded up.
-				thresholds: { statements: 95.08, branches: 78.51, functions: 95.31, lines: 94.04 }
+				thresholds: { statements: 95.09, branches: 78.59, functions: 95.34, lines: 94.06 }
 			}
 		}
 	})

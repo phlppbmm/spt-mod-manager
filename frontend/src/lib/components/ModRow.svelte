@@ -337,6 +337,7 @@
 	class:busy
 	id="modrow-{entry.mod.id}"
 	role="row"
+	aria-rowindex={index + 1}
 	tabindex={tabStop ? 0 : -1}
 	onfocus={() => onfocusrow(entry.mod.id)}
 	onkeydown={onRowKeydown}
@@ -380,9 +381,9 @@
 				</button>
 			{/if}
 			<span class="author">{entry.mod.author}</span>
-			{#if entry.mod.teaser}
-				<span class="teaser" title={entry.mod.teaser}>{entry.mod.teaser}</span>
-			{/if}
+			<!-- Always a line, empty when there is no teaser: the list renders only the rows in view and
+			     needs every row to be the same height. -->
+			<span class="teaser" title={entry.mod.teaser || undefined}>{entry.mod.teaser || '\u00a0'}</span>
 		</div>
 	</div>
 	{#if showInstalledColumns}

@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import ModRow from './ModRow.svelte';
 	import type { CatalogEntry, ModInfo } from '$lib/api/client';
 	import { onIntents, takeIntents } from '$lib/intents';
 	import { rowState, type ModSort, type SortKey } from '$lib/modfilter';
 	import { focusAfterRows } from '$lib/rownav';
+	import { rowWindow, scrollTopFor, type ListGeometry, type RowWindow } from '$lib/rowwindow';
 	import { headerCheckbox, toggleAll, toggleSelection } from '$lib/selection';
 
 	interface Props {
@@ -45,16 +46,87 @@
 		showInstalledColumns
 	}: Props = $props();
 
+	// Before a row has been measured, the stylesheet's minimum row height stands in for it.
+	const ESTIMATED_ROW_HEIGHT = 44;
+
+	interface RenderedRow {
+		entry: CatalogEntry;
+		index: number;
+		offscreen: boolean;
+	}
+
 	let ids = $derived(rows.map((entry) => entry.mod.id));
 	let header = $derived(headerCheckbox(selected, ids));
 	let focusedId: number | null = $state(null);
+
+	// Only the rows in view are rendered. A full catalog is close to two thousand rows, and every
+	// sort or filter change used to move all of them through the DOM.
+	let listElement: HTMLElement | null = $state(null);
+	let topSpacer: HTMLElement | null = $state(null);
+	let scroller: HTMLElement | null = null;
+	let scrollTop = $state(0);
+	let viewport = $state(0);
+	let listTop = $state(0);
+	let measuredRowHeight = $state(0);
+	let busyIds = $state(new Set<number>());
+
+	let rowHeight = $derived(
+		measuredRowHeight > 0 ? measuredRowHeight : viewport > 0 ? ESTIMATED_ROW_HEIGHT : 0
+	);
+	let geometry = $derived<ListGeometry>({
+		count: rows.length,
+		rowHeight,
+		scrollTop,
+		listTop,
+		viewport
+	});
+	let span = $derived(rowWindow(geometry));
+	let rendered = $derived(renderedRows(rows, span, busyIds));
+
 	// One row is always the tab stop, so Tab reaches the table even before a
-	// row was focused; the ring follows the real DOM focus.
-	let tabStopId = $derived(focusedId ?? (ids.length > 0 ? ids[0] : null));
+	// row was focused; the ring follows the real DOM focus. A focused row that
+	// scrolled out of the rendered window hands the tab stop to the first row
+	// still rendered.
+	let tabStopId = $derived.by(() => {
+		const candidate = focusedId ?? (ids.length > 0 ? ids[0] : null);
+		if (candidate === null) {
+			return null;
+		}
+		const index = ids.indexOf(candidate);
+		if (index >= span.start && index < span.end) {
+			return candidate;
+		}
+		return span.start < ids.length ? ids[span.start] : null;
+	});
 
 	onMount(() => {
+		const list = listElement;
+		if (list !== null) {
+			scroller = scrollParent(list);
+		}
+		const target: HTMLElement | Window | null =
+			scroller === document.scrollingElement ? window : scroller;
+		target?.addEventListener('scroll', measure, { passive: true });
+		const resize =
+			scroller !== null && typeof ResizeObserver !== 'undefined'
+				? new ResizeObserver(measure)
+				: null;
+		if (scroller !== null) {
+			resize?.observe(scroller);
+		}
+		measure();
 		reveal();
-		return onIntents(reveal);
+		const stopIntents = onIntents(reveal);
+		return () => {
+			target?.removeEventListener('scroll', measure);
+			resize?.disconnect();
+			stopIntents();
+		};
+	});
+
+	$effect(() => {
+		void rows;
+		void tick().then(measure);
 	});
 
 	$effect(() => {
@@ -62,13 +134,90 @@
 	});
 
 	$effect(() => {
-		if (focusedId === null) {
+		const id = focusedId;
+		if (id === null) {
 			return;
 		}
-		const row = document.getElementById(`modrow-${focusedId}`);
+		untrack(() => void bringIntoView(id));
+	});
+
+	/** Scroll a row that is not rendered into the window first, then focus it. */
+	async function bringIntoView(id: number): Promise<void> {
+		const index = ids.indexOf(id);
+		if (scroller !== null && index >= 0 && (index < span.start || index >= span.end)) {
+			scroller.scrollTop = scrollTopFor(index, geometry);
+			measure();
+			await tick();
+		}
+		const row = document.getElementById(`modrow-${id}`);
 		row?.focus();
 		row?.scrollIntoView({ block: 'nearest' });
-	});
+	}
+
+	function measure(): void {
+		const container = scroller;
+		const spacer = topSpacer;
+		if (container === null || spacer === null) {
+			return;
+		}
+		scrollTop = container.scrollTop;
+		viewport = container.clientHeight;
+		const spacerTop = spacer.getBoundingClientRect().top;
+		const containerTop =
+			container === document.scrollingElement ? 0 : container.getBoundingClientRect().top;
+		listTop = spacerTop - containerTop + container.scrollTop;
+		const row = listElement?.querySelector<HTMLElement>('.slot:not(.offscreen) > [role="row"]');
+		if (row !== null && row !== undefined && row.offsetHeight > 0) {
+			measuredRowHeight = row.offsetHeight;
+		}
+	}
+
+	/** The closest ancestor that scrolls, or the document when none does. */
+	function scrollParent(node: HTMLElement): HTMLElement | null {
+		for (let element = node.parentElement; element !== null; element = element.parentElement) {
+			const { overflowY } = getComputedStyle(element);
+			if (overflowY === 'auto' || overflowY === 'scroll') {
+				return element;
+			}
+		}
+		return document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null;
+	}
+
+	/**
+	 * The rows of the window, plus every busy row outside it: a row holds its own
+	 * install progress, and unmounting it while it works would show it idle when
+	 * it scrolls back.
+	 */
+	function renderedRows(
+		all: readonly CatalogEntry[],
+		window: RowWindow,
+		busy: ReadonlySet<number>
+	): RenderedRow[] {
+		const items: RenderedRow[] = [];
+		for (let index = window.start; index < window.end; index += 1) {
+			items.push({ entry: all[index], index, offscreen: false });
+		}
+		if (busy.size === 0) {
+			return items;
+		}
+		all.forEach((entry, index) => {
+			if ((index < window.start || index >= window.end) && busy.has(entry.mod.id)) {
+				items.push({ entry, index, offscreen: true });
+			}
+		});
+		return items.sort((a, b) => a.index - b.index);
+	}
+
+	function trackBusy(modId: number, isBusy: boolean): void {
+		const next = new Set(busyIds);
+		if (isBusy) {
+			next.add(modId);
+		} else {
+			next.delete(modId);
+		}
+		busyIds = next;
+		onbusy(modId, isBusy);
+	}
 
 	function reveal(): void {
 		for (const intent of takeIntents(['reveal-mod'])) {
@@ -85,7 +234,14 @@
 </script>
 
 <div class="table">
-	<div class="panel list" class:lean={!showInstalledColumns} role="grid" aria-label="Mods">
+	<div
+		bind:this={listElement}
+		class="panel list"
+		class:lean={!showInstalledColumns}
+		role="grid"
+		aria-label="Mods"
+		aria-rowcount={rows.length + 1}
+	>
 		<div class="panel-head head" role="row">
 			<div class="pick" role="columnheader">
 				<input
@@ -123,29 +279,33 @@
 			<div role="columnheader">State</div>
 			<div role="columnheader"></div>
 		</div>
-		{#each rows as entry, position (entry.mod.id)}
-			<ModRow
-				{path}
-				index={position + 1}
-				{entry}
-				modState={rowState(entry, disabledNames)}
-				installed={installedByForgeId.get(String(entry.mod.id)) ??
-					installedByName.get(entry.mod.name.toLowerCase()) ??
-					null}
-				{locked}
-				favorite={favoriteIds.has(entry.mod.id)}
-				selected={selected.has(entry.mod.id)}
-				{ids}
-				{focusedId}
-				{tabStopId}
-				onfocusrow={(id) => (focusedId = id)}
-				onselect={() => onselect(toggleSelection(selected, entry.mod.id))}
-				{onfavorite}
-				{onchanged}
-				{onbusy}
-				{showInstalledColumns}
-			/>
+		<div bind:this={topSpacer} class="spacer" style:height="{span.start * rowHeight}px"></div>
+		{#each rendered as item (item.entry.mod.id)}
+			<div class="slot" class:offscreen={item.offscreen} role="presentation">
+				<ModRow
+					{path}
+					index={item.index + 1}
+					entry={item.entry}
+					modState={rowState(item.entry, disabledNames)}
+					installed={installedByForgeId.get(String(item.entry.mod.id)) ??
+						installedByName.get(item.entry.mod.name.toLowerCase()) ??
+						null}
+					{locked}
+					favorite={favoriteIds.has(item.entry.mod.id)}
+					selected={selected.has(item.entry.mod.id)}
+					{ids}
+					{focusedId}
+					{tabStopId}
+					onfocusrow={(id) => (focusedId = id)}
+					onselect={() => onselect(toggleSelection(selected, item.entry.mod.id))}
+					{onfavorite}
+					{onchanged}
+					onbusy={trackBusy}
+					{showInstalledColumns}
+				/>
+			</div>
 		{/each}
+		<div class="spacer" style:height="{(rows.length - span.end) * rowHeight}px"></div>
 		{#if rows.length === 0}
 			<p class="empty">
 				{loading ? 'Loading…' : 'No mods match the current filters.'}
@@ -158,6 +318,25 @@
 <style>
 	.table {
 		container: mods / inline-size;
+	}
+
+	.list {
+		position: relative;
+	}
+
+	.slot {
+		display: contents;
+	}
+
+	/* A busy row outside the window stays mounted so its progress survives, but takes no space. */
+	.slot.offscreen {
+		display: block;
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		visibility: hidden;
 	}
 
 	/* `lean` is the layout without the Installed and Type columns. */

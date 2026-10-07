@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CatalogEntry } from '$lib/api/client';
 import { clearFilter } from '$lib/filterstate';
-import { takeIntents } from '$lib/intents';
+import { requestIntent, takeIntents } from '$lib/intents';
 import { setSubNav } from '$lib/shellstate';
 import { invalidate } from '$lib/viewcache';
 
@@ -374,5 +374,96 @@ describe('which rows fetch their image', () => {
 			expect(thumbnailOf('Mod 460')).toHaveAttribute('src', dataUrlOf(460));
 		});
 		expect(requestedIds().slice(60)).toEqual([460]);
+	});
+});
+
+/**
+ * Gives every element a 440px viewport and 44px rows, a scroll position that
+ * sticks, and a position on screen that moves as the page scrolls -- happy-dom
+ * lays nothing out, forgets a scrollTop as soon as it is set and reports every
+ * element at the top of the screen. Returns a way to scroll as a user would.
+ */
+function fakeLayout(): { scrollTo: (top: number) => void } {
+	let scrolled = 0;
+	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(440);
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(44);
+	vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+		() => new DOMRect(0, -scrolled, 0, 0)
+	);
+	vi.spyOn(Element.prototype, 'scrollTop', 'get').mockImplementation(() => scrolled);
+	vi.spyOn(Element.prototype, 'scrollTop', 'set').mockImplementation((top: number) => {
+		scrolled = top;
+	});
+	return {
+		scrollTo: (top: number) => {
+			scrolled = top;
+			window.dispatchEvent(new Event('scroll'));
+		}
+	};
+}
+
+/**
+ * happy-dom lays nothing out, so the table renders every row there. Giving the
+ * document a viewport and the rows a height is what a real window has, and
+ * then only the rows in view and the overscan around them may be rendered.
+ */
+describe('which rows are rendered', () => {
+	it('renders only the rows in view plus the overscan, while counting every result', async () => {
+		fakeLayout();
+		serveThumbnails();
+		stubView(manyEntries(3000, 400));
+		mount();
+
+		await screen.findByText('400 results');
+
+		await waitFor(() => {
+			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(20);
+		});
+		expect(document.getElementById('modrow-3000')).not.toBeNull();
+		expect(document.getElementById('modrow-3399')).toBeNull();
+		vi.restoreAllMocks();
+	});
+
+	it('scrolls a revealed mod outside the rendered rows into them and focuses it', async () => {
+		fakeLayout();
+		serveThumbnails();
+		stubView(manyEntries(4000, 400));
+		mount();
+		await screen.findByText('400 results');
+		await waitFor(() => {
+			expect(document.getElementById('modrow-4300')).toBeNull();
+		});
+
+		requestIntent({ kind: 'reveal-mod', modId: 4300 });
+
+		await waitFor(() => {
+			expect(document.activeElement?.id).toBe('modrow-4300');
+		});
+		vi.restoreAllMocks();
+	});
+
+	it('hands the tab stop to a rendered row once the focused row scrolls out', async () => {
+		const layout = fakeLayout();
+		serveThumbnails();
+		stubView(manyEntries(5000, 400));
+		mount();
+		await screen.findByText('400 results');
+		await waitFor(() => {
+			expect(document.querySelectorAll('[id^="modrow-"]')).toHaveLength(20);
+		});
+		document.getElementById('modrow-5000')?.focus();
+		await waitFor(() => {
+			expect(document.activeElement?.id).toBe('modrow-5000');
+		});
+		await new Promise((settled) => setTimeout(settled, 0));
+
+		layout.scrollTo(200 * 44);
+
+		await waitFor(() => {
+			expect(document.getElementById('modrow-5000')).toBeNull();
+		});
+		const tabStops = document.querySelectorAll('[id^="modrow-"][tabindex="0"]');
+		expect(tabStops).toHaveLength(1);
+		vi.restoreAllMocks();
 	});
 });

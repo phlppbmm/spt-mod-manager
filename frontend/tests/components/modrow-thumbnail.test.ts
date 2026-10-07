@@ -332,6 +332,26 @@ describe('which rows fetch their image', () => {
 		});
 	});
 
+	it('keeps the observers it has when a sort moves every row', async () => {
+		vi.stubGlobal('IntersectionObserver', FakeObserver);
+		serveThumbnails();
+		const entries = manyEntries(2000, 120).map((entry, position) => ({
+			...entry,
+			mod: { ...entry.mod, downloads: position }
+		}));
+		stubView(entries);
+		mount();
+
+		await screen.findByText('120 results');
+		const watching = FakeObserver.instances.length;
+		expect(watching).toBe(60);
+
+		await userEvent.click(screen.getByRole('button', { name: /Downloads/ }));
+		await userEvent.click(screen.getByRole('button', { name: /Downloads/ }));
+
+		expect(FakeObserver.instances).toHaveLength(watching);
+	});
+
 	it('fetches the image of a gated row as soon as the observer reports it visible', async () => {
 		vi.stubGlobal('IntersectionObserver', FakeObserver);
 		serveThumbnails();

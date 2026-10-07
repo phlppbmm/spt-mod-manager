@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Dialog from './Dialog.svelte';
 	import StatusBadge from './StatusBadge.svelte';
 	import {
@@ -106,9 +107,15 @@
 		entry.latest_version?.spt_version_constraint || installed?.spt_range || '—'
 	);
 
+	// A row is watched only until it has been on screen once, and its position decides only whether
+	// it starts out on screen: a sort hands nearly every row a new index, and reacting to that rebuilt
+	// an observer per row on each sort -- close to two seconds for a full catalog.
 	$effect(() => {
 		const element = rowElement;
-		if (index <= EAGER_ROWS || typeof IntersectionObserver === 'undefined') {
+		if (onScreen) {
+			return;
+		}
+		if (untrack(() => index) <= EAGER_ROWS || typeof IntersectionObserver === 'undefined') {
 			onScreen = true;
 			return;
 		}

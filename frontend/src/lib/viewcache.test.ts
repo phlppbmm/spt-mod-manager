@@ -69,6 +69,60 @@ describe('cached', () => {
 		expect(loaderCalls).toBe(1);
 	});
 
+	it('a forced refresh does not join a plain load already on its way', async () => {
+		const gameDir = '/games/forced-not-shared';
+		let releasePlain: (value: string) => void = () => {};
+		const plain = async (): Promise<string> =>
+			new Promise<string>((resolve) => {
+				releasePlain = resolve;
+			});
+		const fresh = async (): Promise<string> => 'fresh-value';
+
+		const plainLoad = cached(gameDir, 'listReleases', [], plain).refresh();
+		const forcedLoad = cached(gameDir, 'listReleases', [], fresh).refresh({ force: true });
+		releasePlain('cached-value');
+
+		expect(await forcedLoad).toBe('fresh-value');
+		expect(await plainLoad).toBe('cached-value');
+	});
+
+	it('an older load finishing last does not overwrite what a newer one stored', async () => {
+		const gameDir = '/games/older-finishes-last';
+		let releasePlain: (value: string) => void = () => {};
+		const plain = async (): Promise<string> =>
+			new Promise<string>((resolve) => {
+				releasePlain = resolve;
+			});
+
+		const plainLoad = cached(gameDir, 'listReleases', [], plain).refresh();
+		await cached(gameDir, 'listReleases', [], async () => 'fresh-value').refresh({ force: true });
+		releasePlain('stale-value');
+		await plainLoad;
+
+		expect(cached(gameDir, 'listReleases', [], plain).value).toBe('fresh-value');
+	});
+
+	it('a plain refresh started after a forced one joins the forced load', async () => {
+		const gameDir = '/games/plain-joins-forced';
+		let forcedCalls = 0;
+		let releaseForced: (value: string) => void = () => {};
+		const forced = async (): Promise<string> => {
+			forcedCalls += 1;
+			return new Promise<string>((resolve) => {
+				releaseForced = resolve;
+			});
+		};
+		const plain = async (): Promise<string> => 'plain-value';
+
+		const forcedLoad = cached(gameDir, 'listReleases', [], forced).refresh({ force: true });
+		const plainLoad = cached(gameDir, 'listReleases', [], plain).refresh();
+		releaseForced('fresh-value');
+
+		expect(await forcedLoad).toBe('fresh-value');
+		expect(await plainLoad).toBe('fresh-value');
+		expect(forcedCalls).toBe(1);
+	});
+
 	it('a load that failed is not shared, so the next refresh tries again', async () => {
 		const gameDir = '/games/failed-inflight';
 		let loaderCalls = 0;

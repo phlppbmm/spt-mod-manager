@@ -96,7 +96,7 @@
 		try {
 			const list = await cached(gameDir, 'list_spt_releases', [], () =>
 				listSptReleases(gameDir, true)
-			).refresh();
+			).refresh({ force: true });
 			latestSpt = list.latest;
 			sptNotice = noticeFor(list, loadDismissedRelease());
 		} catch {

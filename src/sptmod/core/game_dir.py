@@ -667,7 +667,9 @@ def game_processes() -> list[GameProcess]:
         try:
             name = process.name()
             kind = game_process_kind(name) or _command_kind(process.cmdline())
-            if kind is None:
+            # An exited process its parent has not collected yet keeps its name
+            # but runs nothing, so it does not hold the game directory.
+            if kind is None or process.status() == psutil.STATUS_ZOMBIE:
                 continue
             found.append(
                 GameProcess(

@@ -10,6 +10,7 @@ git-repo-aware version chain (``read_core_json_version``, ``read_pe_file_version
 """
 
 import shutil
+import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
@@ -265,6 +266,30 @@ def test_running_game_processes_reports_a_real_process_named_like_the_server(
         ensure_game_not_running()
 
 
+def test_a_server_that_exited_but_was_not_reaped_does_not_count_as_running(
+    tmp_path: Path,
+    spawn_process: SpawnProcess,
+) -> None:
+    """A server process that has exited but whose parent has not collected it
+    yet stays in the process table as a zombie under its old name. It runs
+    nothing, so it must not block an operation with "the game is running".
+    The stub exits at once and is reaped only on teardown, so it is a zombie
+    for the length of the test.
+    """
+    true = shutil.which("true")
+    assert true is not None
+    exited_server = tmp_path / "SPT.Server.Linux"
+    shutil.copy(true, exited_server)
+    zombie = psutil.Process(spawn_process([str(exited_server)]).pid)
+    deadline = time.monotonic() + 2
+    while zombie.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert zombie.status() == psutil.STATUS_ZOMBIE
+
+    assert running_game_processes() == []
+    ensure_game_not_running()
+
+
 # --- game_process_kind -------------------------------------------------------
 
 
@@ -331,6 +356,10 @@ class _FakeProcess:
     def create_time(self) -> float:
         """Return the configured creation timestamp."""
         return self._created
+
+    def status(self) -> str:
+        """Report a live process; the scan skips only exited, uncollected ones."""
+        return psutil.STATUS_RUNNING
 
 
 def test_game_processes_reports_server_and_client_with_pid_and_started_at(

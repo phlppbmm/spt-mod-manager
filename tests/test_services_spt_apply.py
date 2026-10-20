@@ -567,3 +567,91 @@ def test_installed_program_files_of_an_empty_directory_is_empty(tmp_path: Path) 
     layout = GameLayout(root=tmp_path, runtime_dir_name="SPT_Runtime")
 
     assert installed_program_files(layout) == []
+
+
+# --- executable bits of the program files -----------------------------------
+
+# Leading bytes of a native Linux binary or shared library.
+ELF_HEADER = b"\x7fELF\x02\x01\x01\x00"
+
+
+def _offer_release_with(
+    source: SptReleaseSource, make_archive: MakeArchive, extra: dict[str, str | bytes]
+) -> None:
+    """Publish ``NEW`` as a zip of the usual release members plus ``extra``.
+
+    zipfile restores no mode on extraction, so every member arrives without an
+    executable bit -- the state a release packed without unix modes is in.
+    """
+    archive = make_archive({**spt_release_members(NEW, BUILD), **extra}, "zip")
+    source.offer(archive, version=NEW)
+
+
+def _is_executable(path: Path) -> bool:
+    """Return whether everyone who may read ``path`` may also execute it."""
+    return path.stat().st_mode & 0o111 == 0o111
+
+
+def test_apply_keeps_replaced_program_files_executable(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_archive: MakeArchive,
+) -> None:
+    """apply_spt_release() leaves a replaced file executable when it was executable.
+
+    The installation holds an executable ``SPT_Runtime/SPT.Server.Linux`` and
+    ``SPT_Runtime/libargon2_sharp_core.so``, committed that way. The release
+    replaces both with content that carries neither the bit nor ELF magic, so
+    only the mode of the replaced file can tell. Afterwards both are executable
+    with the new content, and the working tree is clean, so the commit recorded
+    the executable mode too: an update that took the bit away left a server that
+    no longer started.
+    """
+    names = ("SPT_Runtime/SPT.Server.Linux", "SPT_Runtime/libargon2_sharp_core.so")
+    for name in names:
+        installed = spt_game_dir / name
+        installed.write_text(f"{name} of {INSTALLED}", encoding="utf-8")
+        installed.chmod(0o755)
+    repo = Repo(spt_game_dir)
+    repo.commit("chore: linux server", paths=[Path(name) for name in names])
+    _offer_release_with(spt_release_source, make_archive, {name: f"{name} of {NEW}" for name in names})
+
+    services.apply_spt_release(spt_game_dir, NEW)
+
+    for name in names:
+        assert (spt_game_dir / name).read_text(encoding="utf-8") == f"{name} of {NEW}"
+        assert _is_executable(spt_game_dir / name)
+    assert repo.is_clean()
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "executable"),
+    [
+        pytest.param("SPT_Runtime/SPT.Launcher.Linux", ELF_HEADER + b"launcher", True, id="elf-binary"),
+        pytest.param("SPT_Runtime/libnew.so", ELF_HEADER + b"library", True, id="elf-shared-library"),
+        pytest.param("SPT_Runtime/start.sh", "#!/bin/sh\nexec ./SPT.Server.Linux\n", True, id="shebang-script"),
+        pytest.param("SPT_Runtime/notes.txt", "plain text", False, id="plain-data"),
+    ],
+)
+def test_apply_makes_new_programs_executable_by_their_content(
+    spt_game_dir: Path,
+    spt_release_source: SptReleaseSource,
+    make_archive: MakeArchive,
+    name: str,
+    content: str | bytes,
+    executable: bool,
+) -> None:
+    """apply_spt_release() makes a file the release adds executable when it is a program.
+
+    The release brings ``name`` for the first time, without an executable bit.
+    It comes out executable exactly when its content is an ELF binary or shared
+    library or a shebang script, and the working tree is clean afterwards, so
+    the commit recorded that mode: the first release with a Linux server must
+    start without the player fixing permissions by hand, while data stays data.
+    """
+    _offer_release_with(spt_release_source, make_archive, {name: content})
+
+    services.apply_spt_release(spt_game_dir, NEW)
+
+    assert _is_executable(spt_game_dir / name) is executable
+    assert Repo(spt_game_dir).is_clean()

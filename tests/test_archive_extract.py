@@ -4,7 +4,8 @@ Covers the zip and 7z roundtrip, rejection of an unknown suffix, path
 traversal inside a zip and a 7z, encrypted zip/7z archives, the
 rar-without-backend error path, a real rar roundtrip against sample
 archives from the rarfile 4.5 test suite (tests/data/), and the BCJ2-filtered
-7z fallback to libarchive (roundtrip, path traversal, missing binding).
+7z fallback to libarchive (roundtrip, executable bits, path traversal, missing
+binding).
 Whichever of the two rar cases applies depends on whether this machine
 actually has a rar backend, via rar_backend_available().
 """
@@ -423,6 +424,25 @@ def test_extract_bcj2_7z_falls_back_to_libarchive_and_reads_correctly(tmp_path: 
     assert plugin_dll.startswith(b"MZ\x90\x00spt client stub\n")
     assert (dest / "BepInEx" / "core").is_dir()
     assert (dest / "BepInEx" / "plugins" / "spt").is_dir()
+
+
+def test_extract_bcj2_7z_keeps_the_executable_bit_the_archive_records(tmp_path: Path) -> None:
+    """The libarchive fallback restores the executable bits each member carries.
+
+    bcj2-exec.7z holds ``SPT_Runtime/SPT.Server.Linux`` stored as 0755 and
+    ``SPT_Runtime/config.json`` stored as 0644, the shape of the real SPT
+    release. After extraction the server is executable by everyone who may read
+    it and the config is executable by nobody: the published releases go
+    through this fallback, and a server that lost its bit here no longer starts.
+    """
+    archive = Path(__file__).parent / "data" / "bcj2-exec.7z"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    extract(archive, dest)
+
+    assert (dest / "SPT_Runtime/SPT.Server.Linux").stat().st_mode & 0o111 == 0o111
+    assert (dest / "SPT_Runtime/config.json").stat().st_mode & 0o111 == 0
 
 
 def test_extract_bcj2_7z_traversal_member_is_rejected_and_writes_nothing(tmp_path: Path) -> None:

@@ -6,7 +6,6 @@ back to the version before is one step. Player profiles, mod settings and
 installed mods are never touched: they lie outside the program set.
 """
 
-import shutil
 import tempfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -39,6 +38,7 @@ from sptmod.core.repo import Repo
 from sptmod.core.services.common import (
     GAME_FILES_SNAPSHOT,
     InstallStep,
+    copy_game_file,
     mod_prefixes,
     open_catalog,
     prefixed_progress,
@@ -690,7 +690,7 @@ def _write_files(
             reached = entry.target
             destination = root / entry.target
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(entry.source, destination)
+            copy_game_file(entry.source, destination)
     except OSError as error:
         raise SptReleaseWriteError(
             f"The game files could not be written: {error.strerror}. The "

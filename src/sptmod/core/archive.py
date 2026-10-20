@@ -1,6 +1,7 @@
 """Archive handling: extraction and normalization to the game-dir layout."""
 
 import re
+import stat
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -224,6 +225,9 @@ def _extract_7z_libarchive(archive_path: Path, dest_temp: Path) -> None:
                 with target.open("wb") as handle:
                     for block in entry.get_blocks():
                         handle.write(block)
+                # The entry's mode is the only record of which files run;
+                # carry its executable bits over.
+                target.chmod(stat.S_IMODE(target.stat().st_mode) | (entry.mode & 0o111))
     except (libarchive.ArchiveError, OSError) as exc:
         raise ArchiveError(
             f"cannot read 7z archive {archive_path.name}: {exc}"

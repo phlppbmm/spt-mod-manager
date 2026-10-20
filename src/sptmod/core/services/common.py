@@ -8,6 +8,7 @@ re-export it.
 
 import shutil
 import sqlite3
+import stat
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -237,6 +238,32 @@ def prune_empty(root: Path, directory: Path, boundary: tuple[Path, ...]) -> None
         current = current.parent
 
 
+# Leading bytes of the files Linux runs or maps as program code: a native
+# binary or shared library (ELF) and a script naming its interpreter (shebang).
+_PROGRAM_MAGIC: Final[tuple[bytes, ...]] = (b"\x7fELF", b"#!")
+_EXECUTE_BITS: Final = 0o111
+
+
+def copy_game_file(source: Path, destination: Path) -> None:
+    """Copy ``source`` to ``destination``, keeping it executable when it has to run.
+
+    The copy takes the mode ``source`` was extracted with, which carries no
+    executable bit whenever the archive stored none or its extractor restores
+    none (zip never does). So the file also comes out executable when the file
+    it replaces was executable, or when its content is an ELF binary or shared
+    library or a shebang script: content says reliably what Linux runs, a name
+    such as ``SPT.Server.Linux`` or ``*.so`` does not. Execute permission goes
+    to whoever may read the file.
+    """
+    was_executable = destination.is_file() and bool(destination.stat().st_mode & _EXECUTE_BITS)
+    shutil.copy2(source, destination)
+    with source.open("rb") as handle:
+        is_program = handle.read(len(_PROGRAM_MAGIC[0])).startswith(_PROGRAM_MAGIC)
+    if was_executable or is_program:
+        mode = stat.S_IMODE(destination.stat().st_mode)
+        destination.chmod(mode | (mode & 0o444) >> 2)
+
+
 def write_mod_files(
     root: Path, layout: ArchiveLayout, removed: Sequence[Path] = ()
 ) -> None:
@@ -258,7 +285,7 @@ def write_mod_files(
                 reached = mapping.target / source.relative_to(mapping.source)
                 destination = root / reached
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, destination)
+                copy_game_file(source, destination)
     except OSError as error:
         raise ModFileWriteError(
             f"The mod files could not be written: {error.strerror}. The change "

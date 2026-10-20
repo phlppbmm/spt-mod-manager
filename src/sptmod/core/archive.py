@@ -38,6 +38,11 @@ LIBARCHIVE_INSTALL_HINT: Final = (
     "(package 'libarchive' on Arch, 'libarchive13' on Debian/Ubuntu)"
 )
 
+LIBARCHIVE_BINDING_HINT: Final = (
+    "this sptmod installation is missing its 'libarchive-c' dependency: reinstall "
+    "sptmod (from a development checkout: 'uv tool install --editable . --force')"
+)
+
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _MAX_LISTED_ENTRIES: Final = 30
 # Directory names the SPT installer puts in front of "user/mods"; any other
@@ -195,6 +200,13 @@ def _extract_7z_libarchive(archive_path: Path, dest_temp: Path) -> None:
         # import stays here: without that library sptmod still reads every
         # other archive.
         import libarchive
+    except ModuleNotFoundError as exc:
+        # The Python package itself is absent: an installation made before it
+        # became a dependency. Pointing at the system library would send the
+        # player after a package they already have.
+        raise ArchiveError(
+            f"cannot read 7z archive {archive_path.name}: {LIBARCHIVE_BINDING_HINT}"
+        ) from exc
     except (ImportError, OSError, AttributeError) as exc:
         raise ArchiveError(
             f"cannot read 7z archive {archive_path.name}: {LIBARCHIVE_INSTALL_HINT}"

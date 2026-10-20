@@ -19,7 +19,13 @@ import pytest
 import rarfile
 
 from fixture_types import MakeArchive
-from sptmod.core.archive import LIBARCHIVE_INSTALL_HINT, RAR_INSTALL_HINT, extract, rar_backend_available
+from sptmod.core.archive import (
+    LIBARCHIVE_BINDING_HINT,
+    LIBARCHIVE_INSTALL_HINT,
+    RAR_INSTALL_HINT,
+    extract,
+    rar_backend_available,
+)
 from sptmod.core.errors import ArchiveError
 
 
@@ -467,17 +473,39 @@ def test_extract_bcj2_7z_raises_archive_error_when_a_target_file_is_blocked(
     assert "bcj2-mod.7z" in str(excinfo.value)
 
 
-def test_extract_bcj2_7z_without_the_libarchive_binding_raises_a_helpful_error(
+def test_extract_bcj2_7z_without_the_libarchive_package_names_the_installation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the ``libarchive`` bindings cannot be imported (missing package,
-    or its shared library failing to load), extract() must raise ArchiveError
-    naming the install hint instead of letting the raw ImportError escape.
-    Setting the module to ``None`` in ``sys.modules`` is the standard way to
-    make Python raise ImportError on the next ``import`` of it, without
-    needing the package to actually be absent from this environment.
+    """When the ``libarchive`` Python package is absent, extract() must say that
+    sptmod's installation lacks a dependency -- not send the player after the
+    system library, which they may well have. Setting the module to ``None`` in
+    ``sys.modules`` makes the next ``import`` of it fail as an absent module
+    would, without the package having to be missing from this environment.
     """
     monkeypatch.setitem(sys.modules, "libarchive", None)
+    archive = Path(__file__).parent / "data" / "bcj2-mod.7z"
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(ArchiveError) as excinfo:
+        extract(archive, dest)
+
+    assert LIBARCHIVE_BINDING_HINT in str(excinfo.value)
+    assert LIBARCHIVE_INSTALL_HINT not in str(excinfo.value)
+
+
+def test_extract_bcj2_7z_without_the_libarchive_system_library_names_the_system_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the package is present but its system library cannot be loaded,
+    extract() must name the system package to install. The binding reads the
+    library path from ``LIBARCHIVE``; pointing that at a file that does not
+    exist makes loading fail as a missing library does, and dropping the
+    already imported binding makes the next import load it afresh.
+    """
+    for name in [module for module in sys.modules if module.partition(".")[0] == "libarchive"]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setenv("LIBARCHIVE", str(tmp_path / "missing" / "libarchive.so"))
     archive = Path(__file__).parent / "data" / "bcj2-mod.7z"
     dest = tmp_path / "dest"
     dest.mkdir()

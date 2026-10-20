@@ -247,11 +247,14 @@ describe('updating every outdated mod', () => {
 			operation_id: payload.operation_id,
 			step: 'download',
 			percent: 60,
-			message: 'Downloading'
+			message: 'gamma.zip: 92.8 MB of 154.7 MB, 5.3 MB/s'
 		});
 		await vi.waitFor(() => {
 			expect(screen.getByRole('progressbar')).toHaveAttribute('value', '60');
 		});
+		expect(
+			screen.getByText(/Updating gamma-trailer \(1 of 1\)\s*— gamma\.zip: 92\.8 MB of 154\.7 MB, 5\.3 MB\/s/)
+		).toBeInTheDocument();
 
 		finish({ name: 'gamma-trailer', version: '2.0.0', commit: 'c0ffee' });
 		expect(await screen.findByText('Updated 1 mod.')).toBeInTheDocument();

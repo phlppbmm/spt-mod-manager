@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 from collections.abc import Mapping
 from email.message import Message
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,11 @@ TEMP_SUFFIX: Final = ".part"
 CACHE_HIT_MESSAGE: Final = "Using the downloaded file"
 
 _PARTIAL_CONTENT: Final = 206
+_MEBIBYTE: Final = 1024 * 1024
+# The rate is the average since the download started, over at least this many
+# seconds: the first chunks arrive within milliseconds and would otherwise
+# report a rate many times the real one.
+_RATE_FLOOR_SECONDS: Final = 1.0
 
 
 def _plain_name(candidate: str | None) -> str | None:
@@ -99,16 +105,31 @@ def _pump(
         file holds once the body is through, continuing at ``downloaded``.
     """
     name = _file_name(url, response.headers.get("Content-Disposition"))
+    started = time.monotonic()
+    resumed = downloaded
     for chunk in response.chunks:
         sink.write(chunk)
         downloaded += len(chunk)
         if progress is not None:
+            elapsed = max(time.monotonic() - started, _RATE_FLOOR_SECONDS)
+            rate = (downloaded - resumed) / elapsed
             progress(
                 DOWNLOAD_STEP,
                 _percent(downloaded, total),
-                f"{name}: {downloaded} bytes",
+                f"{name}: {_transferred(downloaded, total)}, {_megabytes(rate)}/s",
             )
     return name, downloaded
+
+
+def _transferred(downloaded: int, total: int | None) -> str:
+    """Say how much of the download is through, and of how much when that is known."""
+    if total is None:
+        return _megabytes(downloaded)
+    return f"{_megabytes(downloaded)} of {_megabytes(total)}"
+
+
+def _megabytes(count: float) -> str:
+    return f"{count / _MEBIBYTE:.1f} MB"
 
 
 def _verify(name: str, downloaded: int, expected_length: int | None) -> None:

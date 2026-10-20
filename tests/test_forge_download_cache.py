@@ -113,6 +113,34 @@ def test_first_call_downloads_and_second_call_hits_the_cache(client_factory: Cli
 # --- resume ----------------------------------------------------------------
 
 
+def test_download_progress_reports_size_total_and_rate_in_megabytes(
+    client_factory: ClientFactory, cache_dir: Path
+) -> None:
+    """Each download progress message says how much has arrived, of how much,
+    and how fast, so a long download visibly moves even where the percentage
+    barely does. A 2 MiB body with a known length must end on
+    ``2.0 MB of 2.0 MB`` followed by a rate in MB/s.
+    """
+    body = b"x" * (2 * 1024 * 1024)
+    with respx.mock() as router:
+        router.get(DOWNLOAD_URL).mock(
+            return_value=httpx.Response(200, content=body, headers={"Content-Length": str(len(body))})
+        )
+        progress = RecordingProgress()
+        download_cached(
+            client_factory(),
+            DOWNLOAD_URL,
+            key="2mib",
+            progress=progress,
+            expected_length=len(body),
+            cache_dir=cache_dir,
+        )
+
+    last_message = progress.calls[-1][2]
+    assert last_message.startswith("mod-archive.zip: 2.0 MB of 2.0 MB, ")
+    assert last_message.endswith(" MB/s")
+
+
 def test_resume_continues_from_the_leftover_offset_on_a_206_response(
     client_factory: ClientFactory, cache_dir: Path
 ) -> None:

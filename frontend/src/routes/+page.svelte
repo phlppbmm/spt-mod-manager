@@ -42,6 +42,12 @@
 	let updateName = $state('');
 	let updateIndex = $state(0);
 	let updateTotal = $state(0);
+	// The bar's label carries what the step in progress reports -- megabytes and rate while
+	// downloading -- so a long update visibly moves even where its percentage barely does.
+	let updateLabel = $derived.by(() => {
+		const label = `Updating ${updateName} (${updateIndex} of ${updateTotal})`;
+		return updateProgress === null ? label : `${label} — ${updateProgress.message}`;
+	});
 	let rowsBusy = $state(false);
 	let gameStatus: LaunchStatus | null = $state(null);
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -298,7 +304,7 @@
 		{:else if updatingAll}
 			<div class="page-status status-progress">
 				<progress max="100" value={updateProgress?.percent ?? 0}></progress>
-				<span>Updating {updateName} ({updateIndex} of {updateTotal})</span>
+				<span>{updateLabel}</span>
 			</div>
 		{:else if syncNote !== ''}
 			<p
